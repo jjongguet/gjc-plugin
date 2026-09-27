@@ -1,6 +1,6 @@
 # jev-advisor
 
-GJC (gajae-code) plugin: decision-model advisories for subagent `task`
+GJC ([gajae-code](https://github.com/Yeachan-Heo/gajae-code)) plugin: decision-model advisories for subagent `task`
 delegation — the Kev/Jev idea from gajae-code#5842, re-implemented as a
 user-owned plugin so the upstream data-scope decision stays untouched.
 

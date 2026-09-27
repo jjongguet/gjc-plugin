@@ -55,3 +55,7 @@ Architecture, configuration reference, and the offline test suite:
 4. Add a row to the table above.
 
 Plugins are user-owned: gajae-code's upstream data-scope decisions (issue #5842) are unaffected — task text leaves the machine only when a provider and API key are explicitly configured.
+
+## Related
+
+- [gajae-code](https://github.com/Yeachan-Heo/gajae-code) — the coding agent these plugins extend
