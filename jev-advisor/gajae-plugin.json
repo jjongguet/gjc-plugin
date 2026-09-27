@@ -1,0 +1,21 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "jev-advisor",
+  "version": "0.3.0",
+  "hooks": [
+    {
+      "name": "jev-task-advisor",
+      "event": "tool_call",
+      "target": "task",
+      "phase": "before",
+      "path": "hooks/jev-advisor.ts"
+    }
+  ],
+  "tools": [
+    {
+      "name": "jev_advise",
+      "path": "tools/jev-advise.ts",
+      "description": "Ask the configured decision model for a subagent delegation tier recommendation"
+    }
+  ]
+}
