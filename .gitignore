@@ -6,3 +6,4 @@ keys.local.ts
 */.env
 */.env.*
 **/.gjc/
+AGENTS.md
