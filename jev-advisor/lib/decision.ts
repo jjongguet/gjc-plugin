@@ -194,6 +194,16 @@ export const PROVIDERS: Record<
 
 const ALLOWED_ORIGINS = new Set(["https://openrouter.ai", "https://api.typesafe.ai"]);
 
+/**
+ * OpenRouter identifies the calling app via these headers; without them plugin
+ * calls land in the account's anonymous "Unknown" app bucket on the dashboard.
+ * Sent only to the OpenRouter origin, never to other targets.
+ */
+const ATTRIBUTION_HEADERS: Record<string, string> = {
+	"http-referer": "https://github.com/jjongguet/gjc-plugin",
+	"x-title": "jev-advisor",
+};
+
 /** Loopback hosts where plaintext HTTP still never leaves the machine. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
@@ -411,12 +421,14 @@ export async function askDecisionModel(
 	const timeoutSignal = AbortSignal.timeout(cfg.timeoutMs);
 	const composedSignal =
 		signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+	const headers =
+		new URL(url).origin === "https://openrouter.ai" ? { ...wire.headers, ...ATTRIBUTION_HEADERS } : wire.headers;
 	const response = await fetchImpl(url, {
 		method: "POST",
 		// The origin gate covers exactly this URL; redirects would re-send the
 		// assignment body off-origin, so refuse them instead of following.
 		redirect: "error",
-		headers: wire.headers,
+		headers,
 		body: wire.body,
 		signal: composedSignal,
 	});

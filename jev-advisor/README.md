@@ -69,6 +69,9 @@ Notes:
 - `typesafe-jev` / `ollaya` — the TypeSafe `systemone` wire format
   (`state` + typed `questions`). A local server is the zero-cost, private
   path (`ollaya run laya`).
+- OpenRouter-bound calls carry `HTTP-Referer`/`X-Title` so advisories show up
+  under a `jev-advisor` app on the OpenRouter dashboard instead of the
+  anonymous "Unknown" bucket; other targets never receive these headers.
 
 ## Configuration
 
