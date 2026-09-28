@@ -1,5 +1,6 @@
 // Hook adapter — legacy plugin hook running in the gjc host realm.
-// Contract (verified against gjc v0.17.7 source): a plugin hook WITHOUT
+// Contract (verified against the installed gjc v0.18.0 binary and a live
+// ctx trace): a plugin hook WITHOUT
 // declared capabilities/networkDestinations/filesystemRoots loads as a legacy
 // extension hook — sdk/session.ts:1039-1052 registers api.on("tool_call", …)
 // and calls handler(event, ctx) only for the manifest target tool. The event
@@ -8,10 +9,14 @@
 // task call; any other value — including undefined — continues.
 //
 // Declaring capabilities would flip the hook to a "function hook", which
-// v0.17.7 quarantines in every session (no capability-enforcing isolate
-// runtime exists yet), so network egress is instead restricted by the core's
+// v0.18.0 refuses to execute in the host realm ("requires an isolated
+// runtime") — hooks then never dispatch, so legacy is the only loadable
+// form. Network egress is instead restricted by the core's
 // endpoint origin allowlist (isAllowedEndpoint) — the same gate that guards
 // the jev_advise tool.
+//
+// The legacy ctx carries a full ui surface (notify, setStatus, setWidget,
+// …, hasUI: true in interactive sessions).
 //
 // Fail-open on purpose: gjc treats hook errors as fail-closed, and an advisor
 // that blocks delegation on its own failure is worse than no advisor.
@@ -37,12 +42,20 @@ export default function register(api: {
 			const ui = (ctx as {
 				ui?: {
 					notify?: (message: string, type?: "info" | "warning" | "error") => void;
-					setStatus?: (key: string, text: string | undefined) => void;
+				setStatus?: (key: string, text: string | undefined) => void;
+				setWidget?: (key: string, content: string[]) => void;
 				};
 			} | undefined)?.ui;
 			const summary = formatSummary(decision);
 			try {
 				ui?.setStatus?.("jev-advisor", `tier=${decision.tier} conf=${decision.confidence.toFixed(2)}`);
+			} catch {}
+			// Persistent above-editor advisory: the only terminal surface that
+			// stays in the operator's eyeline for the rest of the session
+			// (ui.notify dims into the transcript; ui.setStatus lives at the
+			// bottom edge). Mode-independent — shadow invisibility is the bug.
+			try {
+				ui?.setWidget?.("jev-advisor", [summary]);
 			} catch {}
 			// Enforce blocks only when the caller under-provisioned a tier AND
 			// the recommendation clears the confidence gate — never on provider
