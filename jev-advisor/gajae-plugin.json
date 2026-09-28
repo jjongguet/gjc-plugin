@@ -22,7 +22,7 @@
     {
       "name": "jev_advise",
       "path": "tools/jev-advise.ts",
-      "description": "Ask the configured decision model for a subagent delegation tier recommendation"
+      "description": "Ask the configured decision model for a subagent delegation tier recommendation, or pass report=\"calibration\" for local evidence-memory statistics (offline, no key)"
     }
   ]
 }

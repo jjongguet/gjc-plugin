@@ -22,7 +22,8 @@
  *                          vocabulary, not just advice wording
  */
 
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 export const TIERS = ["fast", "balanced", "strong"] as const;
@@ -46,6 +47,9 @@ export const DEFAULTS = {
 	minIntervalMs: 15000,
 	minConfidence: 0.6,
 	maxAssignmentChars: 4000,
+	memoryMaxKeys: 200,
+	memoryMaxEvents: 10,
+	memoryHeadChars: 120,
 } as const;
 
 /**
@@ -58,6 +62,14 @@ export const DEFAULTS = {
  */
 export function pluginEnvFile(): string {
 	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", ".env");
+}
+/**
+ * The evidence-memory store: `~/.gjc/agent/jev-advisor/state.json`, sibling of
+ * the `.env` file (outside the installed tree, survives upgrades). Holds
+ * bounded per-assignment delegation history; never leaves the machine.
+ */
+export function pluginStateFile(): string {
+	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", "state.json");
 }
 
 function loadPluginEnv(): Env {
@@ -235,6 +247,13 @@ export interface AdvisorConfig {
 	timeoutMs: number;
 	minIntervalMs: number;
 	minConfidence: number;
+	/** Evidence-memory kill switch (JEV_ADVISOR_MEMORY=off). Default on. */
+	memoryEnabled: boolean;
+	/** Evidence-memory store file (JEV_ADVISOR_STATE override; test isolation). */
+	stateFile: string;
+	memoryMaxKeys: number;
+	memoryMaxEvents: number;
+	memoryHeadChars: number;
 }
 
 type Env = Record<string, string | undefined>;
@@ -242,6 +261,12 @@ type Env = Record<string, string | undefined>;
 function positiveNumber(raw: string | undefined, fallback: number): number {
 	const parsed = Number(raw);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Like positiveNumber but 0 is meaningful (e.g. HEAD_CHARS=0 → fingerprints only). */
+function nonNegativeNumber(raw: string | undefined, fallback: number): number {
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 /**
@@ -301,6 +326,9 @@ export function readConfig(
 	const intervalRaw = Number(merged.JEV_ADVISOR_MIN_INTERVAL_MS);
 	// 0 is meaningful for the gate too: it disables tier-gating in enforce mode.
 	const confidenceRaw = Number(merged.JEV_ADVISOR_MIN_CONFIDENCE);
+	const memoryRaw = String(merged.JEV_ADVISOR_MEMORY ?? "")
+		.trim()
+		.toLowerCase();
 	return {
 		provider,
 		mode,
@@ -310,6 +338,11 @@ export function readConfig(
 		timeoutMs: positiveNumber(merged.JEV_ADVISOR_TIMEOUT_MS, DEFAULTS.timeoutMs),
 		minIntervalMs: Number.isFinite(intervalRaw) && intervalRaw >= 0 ? intervalRaw : DEFAULTS.minIntervalMs,
 		minConfidence: Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : DEFAULTS.minConfidence,
+		memoryEnabled: memoryRaw !== "" ? memoryRaw !== "off" && memoryRaw !== "0" && memoryRaw !== "false" && memoryRaw !== "no" : true,
+		stateFile: trim(merged.JEV_ADVISOR_STATE) || pluginStateFile(),
+		memoryMaxKeys: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_MAX_KEYS, DEFAULTS.memoryMaxKeys),
+		memoryMaxEvents: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_MAX_EVENTS, DEFAULTS.memoryMaxEvents),
+		memoryHeadChars: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_HEAD_CHARS, DEFAULTS.memoryHeadChars),
 	};
 }
 
@@ -317,6 +350,292 @@ export function isConfigured(cfg: AdvisorConfig): boolean {
 	if (cfg.provider === "off" || !cfg.endpoint) return false;
 	if (PROVIDERS[cfg.provider]?.keyless) return true;
 	return Boolean(cfg.apiKey) && Boolean(PROVIDERS[cfg.provider] || cfg.endpoint);
+}
+
+// -----------------------------------------------------------------------------
+// Evidence memory — bounded local delegation history.
+//
+// GUARDRAIL: no module-level mutable state anywhere in this file or the
+// adapters. Each generated surface (two hooks + one tool) inlines its OWN copy
+// of this core, so in-memory state cannot be shared across surfaces — the
+// disk store below is the ONLY cross-surface channel. A future memo/cache
+// here would silently diverge across the three copies and pass single-surface
+// tests. Last-writer-wins across surfaces is accepted for advisory evidence.
+// -----------------------------------------------------------------------------
+
+/** One delegation event. `pre` = advisory asked; `post` = outcome observed. */
+export interface MemoryEvent {
+	kind: "pre" | "post";
+	t: number;
+	/** pre: tiers explicitly requested by the caller, if any. */
+	requested?: string[];
+	/** Recommendation (pre) or re-tier advice (post); present only when the provider answered. */
+	tier?: string;
+	conf?: number;
+	/** pre: already joined by a post event (G5 pairing). */
+	joined?: boolean;
+	/** post: the delegation errored. */
+	error?: boolean;
+	/** post: total subagent time (sum of finite positive durations) — NOT wall clock. */
+	durationMs?: number;
+	/** post: `t` of the joined pre event. */
+	preT?: number;
+}
+
+export interface MemoryRecord {
+	/** Ring buffer, oldest first, capped at memoryMaxEvents. */
+	events: MemoryEvent[];
+	updatedAt: number;
+	/** Bounded assignment head (memoryHeadChars; empty when HEAD_CHARS=0). */
+	head?: string;
+}
+
+export interface MemoryState {
+	version: 1;
+	keys: Record<string, MemoryRecord>;
+}
+
+function freshState(): MemoryState {
+	return { version: 1, keys: {} };
+}
+
+/**
+ * Deterministic assignment fingerprint: sha256 (first 16 hex chars) of the
+ * trimmed, whitespace-collapsed text. Coverage: the input is exactly the
+ * `extractAssignment` output (already capped at maxAssignmentChars = first
+ * 4000 chars), so identical delegations collide and small edits deliberately
+ * do not — identical-delegation semantics is the point (no fuzzy matching).
+ */
+export function fingerprint(text: string): string {
+	const normalized = String(text ?? "").trim().replace(/\s+/g, " ");
+	return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
+}
+
+/** Missing or corrupt store → fresh empty state (fail-open). */
+export function loadState(file: string): MemoryState {
+	try {
+		const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
+		if (
+			parsed &&
+			typeof parsed === "object" &&
+			(parsed as MemoryState).version === 1 &&
+			typeof (parsed as MemoryState).keys === "object" &&
+			(parsed as MemoryState).keys !== null
+		) {
+			return parsed as MemoryState;
+		}
+	} catch {}
+	return freshState();
+}
+
+/**
+ * Enforce caps and persist atomically: write a uniquely-suffixed tmp file
+ * (pid + time — the three inlined surfaces must not share a tmp inode) with
+ * mode 0o600, then rename (the mode survives rename). No .tmp residue on
+ * success. Throws on IO failure; callers wrap in try/catch (fail-open).
+ */
+export function saveState(file: string, state: MemoryState, limits: { memoryMaxKeys: number; memoryMaxEvents: number }): void {
+	for (const key of Object.keys(state.keys)) {
+		const record = state.keys[key];
+		if (!record || !Array.isArray(record.events)) {
+			delete state.keys[key];
+			continue;
+		}
+		if (record.events.length > limits.memoryMaxEvents) {
+			record.events = record.events.slice(record.events.length - limits.memoryMaxEvents);
+		}
+	}
+	const keys = Object.keys(state.keys);
+	if (keys.length > limits.memoryMaxKeys) {
+		// Deterministic eviction: oldest updatedAt first, then key ascending.
+		const ranked = keys.sort((a, b) => {
+			const ra = state.keys[a].updatedAt ?? 0;
+			const rb = state.keys[b].updatedAt ?? 0;
+			return ra !== rb ? ra - rb : a < b ? -1 : a > b ? 1 : 0;
+		});
+		const excess = keys.length - limits.memoryMaxKeys;
+		for (const key of ranked.slice(0, excess)) delete state.keys[key];
+	}
+	const tmp = `${file}.${(globalThis as { process?: { pid?: number } }).process?.pid ?? 0}.${Date.now()}.tmp`;
+	writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+	try {
+		renameSync(tmp, file);
+	} catch (error) {
+		try {
+			unlinkSync(tmp);
+		} catch {}
+		throw error;
+	}
+}
+
+/** Append an event to a fingerprint's ring; refresh head and updatedAt. Mutates `state`. */
+export function recordEvent(
+	state: MemoryState,
+	fp: string,
+	head: string,
+	event: MemoryEvent,
+	limits: { memoryMaxEvents: number },
+): void {
+	const record = (state.keys[fp] ??= { events: [], updatedAt: 0 });
+	record.events.push(event);
+	if (record.events.length > limits.memoryMaxEvents) {
+		record.events = record.events.slice(record.events.length - limits.memoryMaxEvents);
+	}
+	if (head) record.head = head;
+	record.updatedAt = event.t;
+}
+
+/** Enrich the most recent pre of a fingerprint with the decision that answered it. Mutates `state`. */
+export function enrichLastPre(state: MemoryState, fp: string, tier: string, conf: number): void {
+	const events = state.keys[fp]?.events;
+	if (!events) return;
+	for (let i = events.length - 1; i >= 0; i--) {
+		if (events[i].kind === "pre" && events[i].tier === undefined) {
+			events[i].tier = tier;
+			events[i].conf = conf;
+			return;
+		}
+	}
+}
+
+/** Enrich the most recent post of a fingerprint with the re-tier decision. Mutates `state`. */
+export function enrichLastPost(state: MemoryState, fp: string, tier: string, conf: number): void {
+	const events = state.keys[fp]?.events;
+	if (!events) return;
+	for (let i = events.length - 1; i >= 0; i--) {
+		if (events[i].kind === "post" && events[i].tier === undefined) {
+			events[i].tier = tier;
+			events[i].conf = conf;
+			return;
+		}
+	}
+}
+
+/**
+ * G5 pairing: a post joins the most recent prior same-fingerprint pre that
+ * carries a recommendation and is not already joined. Unmatched posts and
+ * recommendation-less pres count in calibration totals only. Mutates both.
+ */
+export function joinPostToPre(state: MemoryState, fp: string, post: MemoryEvent): void {
+	const events = state.keys[fp]?.events;
+	if (!events) return;
+	for (let i = events.length - 1; i >= 0; i--) {
+		const candidate = events[i];
+		if (candidate.kind !== "pre" || candidate.joined || candidate.tier === undefined) continue;
+		if (candidate.t > post.t) continue;
+		candidate.joined = true;
+		post.preT = candidate.t;
+		return;
+	}
+}
+
+/** Bounded assignment head; empty string when HEAD_CHARS=0 (fingerprints only). */
+export function memoryHead(text: string, cfg: { memoryHeadChars: number }): string {
+	return cfg.memoryHeadChars > 0 ? text.slice(0, cfg.memoryHeadChars) : "";
+}
+
+/** Number of recorded outcomes for a fingerprint (drives the `· n prior` suffix). */
+export function priorPostCount(record: MemoryRecord | undefined): number {
+	if (!record || !Array.isArray(record.events)) return 0;
+	return record.events.filter(event => event.kind === "post").length;
+}
+
+/**
+ * Prepend a bounded evidence block (hard cap 200 chars) so the decision model
+ * grounds its tier recommendation in observed prior outcomes of the IDENTICAL
+ * assignment. Prepended (not appended) so it survives the systemone wire
+ * format's 1900-char state slice. Pass-through when there is no evidence.
+ */
+export function withEvidence(text: string, record: MemoryRecord | undefined): string {
+	const posts = (record?.events ?? []).filter(event => event.kind === "post");
+	if (posts.length === 0) return text;
+	const outcomes = posts
+		.map(post => {
+			const duration = typeof post.durationMs === "number" && Number.isFinite(post.durationMs) && post.durationMs > 0
+				? ` ${Math.round(post.durationMs / 1000)}s`
+				: "";
+			return `${post.tier ?? "?"}→${post.error ? "error" : "ok"}${duration}`;
+		})
+		.join(", ");
+	const lastReTier = [...posts].reverse().find(post => post.tier !== undefined);
+	const block =
+		`prior outcomes (n=${posts.length}): [${outcomes}]` +
+		(lastReTier ? ` last re-tier: ${lastReTier.tier}(${(lastReTier.conf ?? 0).toFixed(2)})` : "");
+	return `${block.slice(0, 200)}\n${text}`;
+}
+
+export interface CalibrationSummary {
+	delegations: number;
+	pairs: {
+		total: number;
+		withRequestedTier: number;
+		agreed: number;
+		agreementRate: number | null;
+		byTier: Record<string, { count: number; errors: number; avgDurationMs: number | null }>;
+	};
+	reTier: Record<string, number>;
+	totalsOnly: { unmatchedPosts: number; recommendationlessPres: number };
+}
+
+/** Pure function over the store: predicted-tier-vs-outcome statistics for `jev_advise report="calibration"`. */
+export function calibrationSummary(state: MemoryState): { json: CalibrationSummary; text: string } {
+	const summary: CalibrationSummary = {
+		delegations: 0,
+		pairs: { total: 0, withRequestedTier: 0, agreed: 0, agreementRate: null, byTier: {} },
+		reTier: {},
+		totalsOnly: { unmatchedPosts: 0, recommendationlessPres: 0 },
+	};
+	for (const record of Object.values(state.keys)) {
+		for (const event of record.events ?? []) {
+			if (event.kind !== "pre") continue;
+			summary.delegations += 1;
+			const post = (record.events ?? []).find(candidate => candidate.kind === "post" && candidate.preT === event.t);
+			if (event.tier === undefined || !post) {
+				if (event.tier === undefined) summary.totalsOnly.recommendationlessPres += 1;
+				continue;
+			}
+			summary.pairs.total += 1;
+			if (event.requested?.length) {
+				summary.pairs.withRequestedTier += 1;
+				if (event.requested.includes(event.tier)) summary.pairs.agreed += 1;
+			}
+			const tier = summary.pairs.byTier[event.tier] ?? (summary.pairs.byTier[event.tier] = { count: 0, errors: 0, avgDurationMs: null });
+			tier.count += 1;
+			if (post.error) tier.errors += 1;
+			if (typeof post.durationMs === "number" && Number.isFinite(post.durationMs) && post.durationMs > 0) {
+				tier.avgDurationMs = (tier.avgDurationMs ?? 0) + post.durationMs;
+			}
+		}
+		for (const event of record.events ?? []) {
+			if (event.kind !== "post") continue;
+			if (event.tier !== undefined) summary.reTier[event.tier] = (summary.reTier[event.tier] ?? 0) + 1;
+			if (event.preT === undefined) summary.totalsOnly.unmatchedPosts += 1;
+		}
+	}
+	for (const tier of Object.values(summary.pairs.byTier)) {
+		if (tier.avgDurationMs !== null) tier.avgDurationMs = Math.round(tier.avgDurationMs / tier.count);
+	}
+	summary.pairs.agreementRate = summary.pairs.withRequestedTier > 0 ? summary.pairs.agreed / summary.pairs.withRequestedTier : null;
+	const lines = [
+		`jev-advisor calibration (local store)`,
+		`delegations recorded: ${summary.delegations}`,
+		`matched pairs: ${summary.pairs.total}` +
+			(summary.pairs.agreementRate !== null
+				? `, requested-vs-recommended agreement: ${summary.pairs.agreed}/${summary.pairs.withRequestedTier} (${Math.round(summary.pairs.agreementRate * 100)}%)`
+				: ""),
+	];
+	for (const [tier, stats] of Object.entries(summary.pairs.byTier)) {
+		lines.push(
+			`  ${tier}: ${stats.count} run${stats.count === 1 ? "" : "s"}, ${stats.errors} error${stats.errors === 1 ? "" : "s"}` +
+				(stats.avgDurationMs !== null ? `, avg total subagent time ${Math.round(stats.avgDurationMs / 1000)}s` : ""),
+		);
+	}
+	const reTierEntries = Object.entries(summary.reTier);
+	if (reTierEntries.length) lines.push(`re-tier advice: ${reTierEntries.map(([tier, n]) => `${tier}×${n}`).join(", ")}`);
+	lines.push(
+		`totals only: ${summary.totalsOnly.unmatchedPosts} unmatched outcome${summary.totalsOnly.unmatchedPosts === 1 ? "" : "s"}, ${summary.totalsOnly.recommendationlessPres} advisory call${summary.totalsOnly.recommendationlessPres === 1 ? "" : "calls"} without a recommendation`,
+	);
+	return { json: summary, text: lines.join("\n") };
 }
 
 export interface AssignmentExtraction {

@@ -33,11 +33,48 @@ export default function register(api: {
 			if (!isConfigured(cfg)) return undefined;
 			const extraction = extractAssignment(call.input);
 			if (!extraction) return undefined;
+			// G3: record the pre event BEFORE the rate-limit gate so rapid
+			// repeat delegations still leave evidence. Recording is gated on
+			// isConfigured ONLY — never on the rate limit or provider outcome.
+			// Memory failures are swallowed: state IO must never break a call.
+			let state: MemoryState | null = null;
+			let fp = "";
+			if (cfg.memoryEnabled) {
+				try {
+					state = loadState(cfg.stateFile);
+					fp = fingerprint(extraction.text);
+					recordEvent(
+						state,
+						fp,
+						memoryHead(extraction.text, cfg),
+						{ kind: "pre", t: Date.now(), requested: extraction.requestedTiers },
+						cfg,
+					);
+					saveState(cfg.stateFile, state, cfg);
+				} catch {
+					state = null;
+				}
+			}
+			const nPrior = priorPostCount(state?.keys[fp]);
 			const now = Date.now();
 			if (cfg.minIntervalMs > 0 && now - lastAdvisoryAt < cfg.minIntervalMs) return undefined;
 			const signal = (ctx as { signal?: AbortSignal } | undefined)?.signal;
-			const decision = await askDecisionModel(cfg, extraction.text, (input, init) => fetch(input, init), signal);
+			// Evidence rides the provider call that would happen anyway — no
+			// extra calls, no new network paths.
+			const decision = await askDecisionModel(
+				cfg,
+				withEvidence(extraction.text, state?.keys[fp]),
+				(input, init) => fetch(input, init),
+				signal,
+			);
 			lastAdvisoryAt = Date.now();
+			// Enrich the recorded pre with the recommendation that answered it.
+			if (state && decision) {
+				try {
+					enrichLastPre(state, fp, decision.tier, decision.confidence);
+					saveState(cfg.stateFile, state, cfg);
+				} catch {}
+			}
 			if (!decision) return undefined; // provider/parse failure → fail-open
 			const ui = (ctx as {
 				ui?: {
@@ -46,9 +83,10 @@ export default function register(api: {
 				setWidget?: (key: string, content: string[]) => void;
 				};
 			} | undefined)?.ui;
-			const summary = formatSummary(decision);
+			const priorSuffix = nPrior > 0 ? ` · ${nPrior} prior` : "";
+			const summary = formatSummary(decision) + priorSuffix;
 			try {
-				ui?.setStatus?.("jev-advisor", `tier=${decision.tier} conf=${decision.confidence.toFixed(2)}`);
+				ui?.setStatus?.("jev-advisor", `tier=${decision.tier} conf=${decision.confidence.toFixed(2)}${priorSuffix}`);
 			} catch {}
 			// Persistent above-editor advisory: the only terminal surface that
 			// stays in the operator's eyeline for the rest of the session

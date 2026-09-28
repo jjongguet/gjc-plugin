@@ -22,14 +22,47 @@ export default function jevAdvise(pi: {
 		label: "JEV Advise",
 		description:
 			"Ask the configured decision model (OpenRouter, Typesafe Jev, or a local Ollaya server) whether a subagent assignment " +
-			"warrants fast/balanced/strong effort. Read-only advisory.",
+			'warrants fast/balanced/strong effort — or pass report="calibration" for the local predicted-vs-outcome statistics ' +
+			"from the evidence memory (offline, no key needed). Read-only advisory.",
 		parameters: pi.typebox.Type.Object({
-			assignment: pi.typebox.Type.String({ description: "Task assignment text to evaluate" }),
+			assignment: pi.typebox.Type.Optional(
+				pi.typebox.Type.String({ description: "Task assignment text to evaluate" }),
+			),
 			role: pi.typebox.Type.Optional(
 				pi.typebox.Type.String({ description: "Intended subagent role, e.g. executor, planner, architect" }),
 			),
+			report: pi.typebox.Type.Optional(
+				pi.typebox.Type.String({
+					description: 'Local report to render instead of an advisory; only "calibration" is valid',
+				}),
+			),
 		}),
-		async execute(_toolCallId: string, params: { assignment: string; role?: string }) {
+		async execute(_toolCallId: string, params: { assignment?: string; role?: string; report?: string }) {
+			if (params.report === "calibration") {
+				// Pure local read of the evidence store — works unconfigured and
+				// with JEV_ADVISOR_PROVIDER=off; never touches the network.
+				try {
+					const { text } = calibrationSummary(loadState(readConfig().stateFile));
+					return { content: [{ type: "text", text }] };
+				} catch {
+					return { content: [{ type: "text", text: "jev_advise: calibration report unavailable (state read failed)." }] };
+				}
+			}
+			if (params.report !== undefined && params.report !== "") {
+				return {
+					content: [{ type: "text", text: 'jev_advise: unknown report. The only valid value is report="calibration".' }],
+				};
+			}
+			if (!params.assignment || !params.assignment.trim()) {
+				return {
+					content: [
+						{
+							type: "text",
+							text: 'jev_advise: provide an assignment to evaluate, or report="calibration" for the local statistics.',
+						},
+					],
+				};
+			}
 			const cfg = readConfig();
 			if (!isConfigured(cfg)) {
 				return {

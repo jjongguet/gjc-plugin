@@ -34,6 +34,31 @@ export default function register(api: {
 			if (!result || result.type !== "tool_result" || result.toolName !== "task") return undefined;
 			const cfg = readConfig();
 			if (!isConfigured(cfg)) return undefined;
+			const extraction = extractAssignment(result.input);
+			if (!extraction) return undefined; // unrecognized call shape → nothing to review
+			// G4: record the post event (error flag, total subagent time) and
+			// resolve G5 pairing BEFORE the rate-limit gate — outcomes are
+			// recorded even when the re-tier advisory is rate-limited out.
+			// Memory failures are swallowed; the handler always returns undefined.
+			let state: MemoryState | null = null;
+			let fp = "";
+			if (cfg.memoryEnabled) {
+				try {
+					state = loadState(cfg.stateFile);
+					fp = fingerprint(extraction.text);
+					const post: MemoryEvent = {
+						kind: "post",
+						t: Date.now(),
+						error: result.isError === true,
+						durationMs: totalSubagentMs(result.details),
+					};
+					joinPostToPre(state, fp, post);
+					recordEvent(state, fp, memoryHead(extraction.text, cfg), post, cfg);
+					saveState(cfg.stateFile, state, cfg);
+				} catch {
+					state = null;
+				}
+			}
 			const question = summarizeOutcome(result);
 			if (!question) return undefined;
 			const now = Date.now();
@@ -41,6 +66,13 @@ export default function register(api: {
 			const signal = (ctx as { signal?: AbortSignal } | undefined)?.signal;
 			const decision = await askDecisionModel(cfg, question, (input, init) => fetch(input, init), signal);
 			lastAdvisoryAt = Date.now();
+			// Enrich the recorded post with the re-tier advice that answered it.
+			if (state && decision) {
+				try {
+					enrichLastPost(state, fp, decision.tier, decision.confidence);
+					saveState(cfg.stateFile, state, cfg);
+				} catch {}
+			}
 			if (!decision) return undefined; // provider/parse failure → fail-open
 			const ui = (ctx as {
 				ui?: {
@@ -87,6 +119,17 @@ function entryDurationMs(entry: unknown): number {
 	return Number.NaN;
 }
 
+
+/** Total subagent time: sum of finite positive subagent durations — effort, not wall clock. */
+function totalSubagentMs(details: unknown): number | undefined {
+	const record = isRecord(details) ? details : {};
+	const subagents = Array.isArray(record.subagents) ? record.subagents : [];
+	const total = subagents
+		.map(entryDurationMs)
+		.filter(n => Number.isFinite(n) && n > 0)
+		.reduce((sum, n) => sum + n, 0);
+	return total > 0 ? total : undefined;
+}
 /** First ~400 chars of text from a tool-result content block (string or parts array). */
 function contentHead(content: unknown): string {
 	let text = "";
