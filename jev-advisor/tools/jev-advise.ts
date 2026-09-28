@@ -637,7 +637,7 @@ export function calibrationSummary(state: MemoryState): { json: CalibrationSumma
 	const reTierEntries = Object.entries(summary.reTier);
 	if (reTierEntries.length) lines.push(`re-tier advice: ${reTierEntries.map(([tier, n]) => `${tier}×${n}`).join(", ")}`);
 	lines.push(
-		`totals only: ${summary.totalsOnly.unmatchedPosts} unmatched outcome${summary.totalsOnly.unmatchedPosts === 1 ? "" : "s"}, ${summary.totalsOnly.recommendationlessPres} advisory call${summary.totalsOnly.recommendationlessPres === 1 ? "" : "calls"} without a recommendation`,
+		`totals only: ${summary.totalsOnly.unmatchedPosts} unmatched outcome${summary.totalsOnly.unmatchedPosts === 1 ? "" : "s"}, ${summary.totalsOnly.recommendationlessPres} advisory call${summary.totalsOnly.recommendationlessPres === 1 ? "" : "s"} without a recommendation`,
 	);
 	return { json: summary, text: lines.join("\n") };
 }
