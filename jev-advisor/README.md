@@ -9,6 +9,11 @@ user-owned plugin so the upstream data-scope decision stays untouched.
   `shadow` (default) → status line; `hint` → non-blocking notify;
   `enforce` → blocks only when a task requested a WEAKER tier than
   recommended and the confidence clears `JEV_ADVISOR_MIN_CONFIDENCE`.
+- **Hook** (`tool_result` / `task` / after): outcome review — feeds the
+  completed delegation's assignment plus its outcome (statuses, durations,
+  error flag, result head) to the same decision model and surfaces a re-tier
+  recommendation for the next identical delegation. Observe-only: it never
+  rewrites the tool result, and there is nothing to block post-hoc.
 - **Tool** `jev_advise`: explicit ask for an assignment/role pair.
 
 Fail-open by construction: the hook swallows every error and returns
@@ -16,9 +21,9 @@ Fail-open by construction: the hook swallows every error and returns
 fail-closed). With no key registered it makes zero network calls and zero
 writes; force it inert any time with `JEV_ADVISOR_PROVIDER=off`.
 
-The hook is a **legacy plugin hook** (no `capabilities` declared — gjc v0.17.7
-quarantines function hooks because no capability-enforcing isolate runtime
-exists yet). Network egress is therefore restricted in code:
+The hook is a **legacy plugin hook** (no `capabilities` declared — gjc v0.18.0
+refuses to execute function hooks in the host realm: they require an isolate
+runtime the host does not provide). Network egress is restricted in code:
 `isAllowedEndpoint` only allows `https://openrouter.ai` and
 `https://api.typesafe.ai`, plus loopback HTTP for local servers — for hook
 AND tool alike.
@@ -30,9 +35,11 @@ lib/decision.ts        single source of truth: config parsing, PROVIDERS registr
                        REQUEST_STYLES (wire formats), decision parsing, summary format
 src/hook.adapter.ts    hook adapter: legacy host-realm hook (api.on tool_call) + fail-open wrapper
 src/tool.adapter.ts    tool adapter: typebox parameters + global fetch injection
-scripts/build.mjs      inlines the three files above into the surface files
+src/result.adapter.ts  outcome-review adapter (api.on tool_result) — observe-only re-tier
+scripts/build.mjs      inlines the four files above into the surface files
 hooks/jev-advisor.ts   generated surface (do not edit by hand)
 tools/jev-advise.ts    generated surface (do not edit by hand)
+hooks/jev-advisor-result.ts  generated surface (do not edit by hand)
 ```
 
 **Why generated surfaces:** the gjc installer copies only manifest-declared
@@ -145,7 +152,7 @@ Deliberately NOT built (no current requirement): gjc plugin settings-schema
 plumbing (env config serves both hook and tool with one parser), multi-model
 ensembles, local Kev supervisor (upstream owns that design).
 
-## Platform constraints (gjc 0.17.7)
+## Platform constraints (gjc 0.18.0)
 
 - Installer copies manifest-declared files only → shared code must be inlined (see Architecture).
 - Hook `networkDestinations` must be full HTTPS origins — bare hostnames are rejected.

@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "jev-advisor",
-  "version": "0.3.0",
+  "version": "0.0.2",
   "hooks": [
     {
       "name": "jev-task-advisor",
@@ -9,6 +9,13 @@
       "target": "task",
       "phase": "before",
       "path": "hooks/jev-advisor.ts"
+    },
+    {
+      "name": "jev-task-outcome-advisor",
+      "event": "tool_result",
+      "target": "task",
+      "phase": "after",
+      "path": "hooks/jev-advisor-result.ts"
     }
   ],
   "tools": [

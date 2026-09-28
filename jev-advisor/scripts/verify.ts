@@ -122,7 +122,7 @@ const systemoneMissingConf = await askDecisionModel({ ...readConfig({ JEV_ADVISO
 check("systemone: missing confidence → no decision (never fabricated 0.5)", systemoneMissingConf === null, systemoneMissingConf);
 
 // --- shipped-artifact tripwires ------------------------------------------------
-const surfaces = ["hooks/jev-advisor.ts", "tools/jev-advise.ts"];
+const surfaces = ["hooks/jev-advisor.ts", "tools/jev-advise.ts", "hooks/jev-advisor-result.ts"];
 for (const s of surfaces) {
 	const text = await Bun.file(new URL(`../${s}`, import.meta.url)).text();
 	check(`artifact ${s}: no real-looking key committed`, !/sk-or-v1-[A-Za-z0-9_-]{12,}/.test(text.replace(/sk-or-v1-test|sk-or-v1-\.\.\./g, "")));

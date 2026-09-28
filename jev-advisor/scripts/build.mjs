@@ -19,6 +19,7 @@ const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".
 const surfaces = [
 	{ core: "lib/decision.ts", adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
 	{ core: "lib/decision.ts", adapter: "src/tool.adapter.ts", out: "tools/jev-advise.ts" },
+	{ core: "lib/decision.ts", adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
 ];
 
 const banner = [

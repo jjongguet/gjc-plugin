@@ -9,7 +9,7 @@ Each subdirectory carrying a `gajae-plugin.json` is an independently installable
 
 ## Install
 
-Requires [gajae-code](https://github.com/Yeachan-Heo/gajae-code) **≥ 0.17.7** (legacy hook contract) and `git` on PATH — URL installs clone through it.
+Requires [gajae-code](https://github.com/Yeachan-Heo/gajae-code) **≥ 0.18.0** (legacy hook contract) and `git` on PATH — URL installs clone through it.
 
 ```sh
 gjc plugin install https://github.com/jjongguet/gjc-plugin --user
@@ -33,7 +33,7 @@ Verify:
 gjc plugin list && gjc plugin doctor
 ```
 
-Pin a version by appending a git ref to the URL (`…/gjc-plugin#v0.3.0`). If an upgrade ever fails because its recorded source no longer exists, uninstall and install again — `~/.gjc/agent/jev-advisor/.env` survives both.
+Pin a version by appending a git ref to the URL (`…/gjc-plugin#v0.0.2`). If an upgrade ever fails because its recorded source no longer exists, uninstall and install again — `~/.gjc/agent/jev-advisor/.env` survives both.
 
 ## Develop
 
