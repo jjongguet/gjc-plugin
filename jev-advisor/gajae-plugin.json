@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "jev-advisor",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "hooks": [
     {
       "name": "jev-task-advisor",
