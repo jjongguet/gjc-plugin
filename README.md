@@ -5,7 +5,7 @@ Each subdirectory carrying a `gajae-plugin.json` is an independently installable
 
 | Plugin | Purpose |
 | --- | --- |
-| [`jev-advisor`](jev-advisor/) | Decision-model advisories for subagent `task` delegation — recommends a `fast` / `balanced` / `strong` tier via TypeSafe Jev on OpenRouter, a generic chat model, or a local server. Shadow by default. |
+| [`jev-advisor`](jev-advisor/) | Decision-model advisories for subagent `task` delegation — recommends a `fast` / `balanced` / `strong` tier via TypeSafe Jev on OpenRouter, a generic chat model, or a local server, and remembers delegation outcomes locally so recommendations and a calibration report are grounded in evidence. Shadow by default. |
 
 ## Install
 
@@ -15,7 +15,15 @@ Requires [gajae-code](https://github.com/Yeachan-Heo/gajae-code) **≥ 0.18.0** 
 gjc plugin install https://github.com/jjongguet/gjc-plugin --user
 ```
 
-The installer discovers the plugin root itself, and the runtime surfaces are committed, so there is nothing to build.
+Pin a version by appending a git ref (`…/gjc-plugin#v0.0.3`). The installer discovers the plugin root itself, and the runtime surfaces are committed, so there is nothing to build.
+
+Verify the install:
+
+```sh
+gjc plugin list && gjc plugin doctor
+```
+
+## Configure
 
 Register an API key — one file, the single configuration channel, survives upgrades:
 
@@ -25,15 +33,58 @@ printf 'OPENROUTER_API_KEY=sk-or-v1-...\n' >> ~/.gjc/agent/jev-advisor/.env
 chmod 600 ~/.gjc/agent/jev-advisor/.env
 ```
 
-`OPENROUTER_API_KEY` is the same variable `gjc` itself reads for its OpenRouter provider; `JEV_ADVISOR_API_KEY` takes priority for a plugin-only key. Exported env vars always win over the file. To run without any key — nothing leaves the machine — set `JEV_ADVISOR_PROVIDER=ollaya` (local decision server).
+`OPENROUTER_API_KEY` is the same variable `gjc` itself reads for its OpenRouter provider; `JEV_ADVISOR_API_KEY` takes priority for a plugin-only key. Exported env vars always win over the file. To run without any key — nothing leaves the machine — set `JEV_ADVISOR_PROVIDER=ollaya` (local decision server), or `off` to disable the advisor entirely. Every other knob lives in the same file or env; the full table is in [jev-advisor/README.md](jev-advisor/README.md#configuration).
 
-Verify:
+## Manage
 
-```sh
-gjc plugin list && gjc plugin doctor
+| You want to | Run |
+| --- | --- |
+| Check health | `gjc plugin list && gjc plugin doctor` |
+| Upgrade to latest | `gjc plugin upgrade jev-advisor --user` |
+| Pin / downgrade to a version | `gjc plugin uninstall jev-advisor --user && gjc plugin install https://github.com/jjongguet/gjc-plugin#v0.0.3 --user` (install refuses over an existing copy; data survives both steps) |
+| Disable temporarily | put `JEV_ADVISOR_PROVIDER=off` in the `.env` (or export it) |
+| Turn off local memory only | put `JEV_ADVISOR_MEMORY=off` in the `.env` |
+| Uninstall | `gjc plugin uninstall jev-advisor --user` |
+| Purge all data | `rm -rf ~/.gjc/agent/jev-advisor` |
+
+Notes:
+
+- If an upgrade ever fails because its recorded source no longer exists (e.g. the checkout moved), uninstall and install again from the URL — both keep your data.
+- Uninstall keeps, purge deletes. What lives where:
+
+| Path | Contents | Survives uninstall | Survives upgrade |
+| --- | --- | --- | --- |
+| `~/.gjc/agent/gjc-plugins/jev-advisor/` | installed plugin code | no (removed) | no (replaced wholesale) |
+| `~/.gjc/agent/jev-advisor/.env` | your key + config | yes | yes |
+| `~/.gjc/agent/jev-advisor/state.json` | local evidence memory (bounded, `0600`) | yes | yes |
+
+## Evidence memory & calibration
+
+Once a provider is configured, the advisor keeps a bounded local record per delegation (`~/.gjc/agent/jev-advisor/state.json`, ≤ 200 assignments × 10 events, assignment heads capped at 120 chars). Pre-call advisories include the prior outcomes of the *identical* assignment; the status line shows `· n prior` when there are n. Ask for the predicted-vs-outcome statistics any time — offline, no key needed:
+
+```
+jev_advise report="calibration"
 ```
 
-Pin a version by appending a git ref to the URL (`…/gjc-plugin#v0.0.2`). If an upgrade ever fails because its recorded source no longer exists, uninstall and install again — `~/.gjc/agent/jev-advisor/.env` survives both.
+Turn the memory off with `JEV_ADVISOR_MEMORY=off`; store only fingerprints (no assignment text) with `JEV_ADVISOR_MEMORY_HEAD_CHARS=0`.
+
+## Privacy & data flow
+
+- **Nothing leaves the machine until a key exists** (or you select the local `ollaya` provider). A fresh install performs zero network calls and zero writes.
+- Once configured, task assignment text (role, task ids/descriptions/assignments/tiers, shared context; capped) is transmitted to the configured provider on advisory calls. Default provider `jev` sends it to OpenRouter. Use `JEV_ADVISOR_PROVIDER=off` for sensitive material.
+- The evidence memory never leaves the machine. It starts writing only once a provider is configured, stores bounded assignment heads (reducible to fingerprints only), never stores keys, and is file-mode `0600`.
+- Egress is allowlisted in code: HTTPS `openrouter.ai` / `api.typesafe.ai` plus loopback HTTP for local servers; every other destination is refused before any request is sent. Attribution headers (`HTTP-Referer`, `X-Title`) go to OpenRouter only.
+
+## Troubleshoot
+
+| Symptom | Cause → fix |
+| --- | --- |
+| No advisories at all | Fresh install is inert until a key exists — see Configure. Or the 15 s per-surface rate limit is suppressing repeats; it counts per surface, not per session. |
+| Advisories appear but nothing blocks | `shadow` is the default — status line only. `hint` notifies; `enforce` blocks only weaker-than-recommended tiers at confidence ≥ `JEV_ADVISOR_MIN_CONFIDENCE`. |
+| `provider returned HTTP 401` | Bad or expired key — fix the `.env` entry. |
+| `report="calibration"` says no data | Memory starts empty and only hooks feed it (manual `jev_advise` asks are not recorded); run a real `task` delegation first. |
+| `state.json` looks corrupt | Delete it — the store auto-resets to empty and rebuilds from new events. |
+| Upgrade fails on missing recorded source | Uninstall + install from the URL again (see Manage); `.env` and `state.json` survive. |
 
 ## Develop
 

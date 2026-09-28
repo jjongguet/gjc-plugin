@@ -17,7 +17,15 @@ Advisory only by default. The plugin has two surfaces:
      (default 0.6); unspecified tiers and low-confidence advice never block —
      the caller can re-issue with the recommended tier.
 2. **`jev_advise` tool**: explicit ask. Pass `assignment` (the task text) and optionally
-   `role`; returns `{tier, confidence, rationale}` JSON.
+   `role`; returns `{tier, confidence, rationale}` JSON. Or pass `report="calibration"`
+   for the local predicted-vs-outcome statistics (offline, no key needed; manual asks
+   are not recorded — only real delegations feed the evidence memory).
+
+Evidence memory: once a provider is configured, each delegation's fingerprint and
+outcome are stored locally (`~/.gjc/agent/jev-advisor/state.json`, bounded, never
+leaves the machine), pre-call advisories carry the prior outcomes of the identical
+assignment, and the advisor's status/widget line shows a `· n prior` suffix — it
+means the identical assignment has n prior recorded outcomes.
 
 ## Configuration (environment)
 
@@ -31,6 +39,9 @@ Advisory only by default. The plugin has two surfaces:
 | `JEV_ADVISOR_TIMEOUT_MS` | `8000` | decision request timeout |
 | `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | rate limit between advisory calls |
 | `JEV_ADVISOR_ENDPOINT` | per provider | override endpoint (code-enforced allowlist: HTTPS origins `openrouter.ai`, `api.typesafe.ai`, plus loopback HTTP for local servers; everything else is refused, no request leaves the machine) |
+| `JEV_ADVISOR_MEMORY` | `on` | evidence-memory kill switch (`off` = no local recording, no evidence injection) |
+| `JEV_ADVISOR_STATE` | `~/.gjc/agent/jev-advisor/state.json` | store path override |
+| `JEV_ADVISOR_MEMORY_HEAD_CHARS` | `120` | assignment-head chars stored locally; `0` → fingerprints only |
 
 ## Usage policy
 
@@ -47,4 +58,6 @@ Advisory only by default. The plugin has two surfaces:
   the keyless local `ollaya` provider.
 - With no key registered (fresh install, no env vars, no
   `~/.gjc/agent/jev-advisor/.env`) the plugin performs zero network calls and
-  zero writes.
+  zero writes. Local evidence-memory writes begin only once a provider is
+  configured; the store never leaves the machine and is bounded (see
+  Evidence memory above).
