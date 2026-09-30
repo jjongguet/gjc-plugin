@@ -1,0 +1,11 @@
+{
+  "name": "gjc-plugin",
+  "version": "0.0.3",
+  "private": true,
+  "type": "module",
+  "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
+  "scripts": {
+    "build": "cd jev-advisor && bun scripts/build.mjs",
+    "test": "cd jev-advisor && bun scripts/verify.ts"
+  }
+}

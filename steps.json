@@ -1,0 +1,25 @@
+{
+  "workflow": "gjc-plugin-ops",
+  "missing_threshold": { "warn_days": 3, "urgent_days": 7 },
+  "steps": [
+    {
+      "id": "record",
+      "title": "버전 기록 — 릴리스 태그 시점에 루트 package.json 버전·최신 태그 갱신(대시보드 로컬 메타 원천)",
+      "kind": "mac",
+      "depends_on": []
+    },
+    {
+      "id": "verify",
+      "title": "검증 — workspace-standard 검증기 실행(green 확인)",
+      "kind": "server",
+      "depends_on": ["record"],
+      "manual_cmd": "node ../workspace-standard/validator/cli.mjs validate --root ."
+    },
+    {
+      "id": "review",
+      "title": "판정 — 대시보드 로컬 메타·검증 결과 확인 후 게이트 판정(Supabase 미연결 — 봉투 열람 없음)",
+      "kind": "human",
+      "depends_on": ["verify"]
+    }
+  ]
+}

@@ -7,3 +7,4 @@ keys.local.ts
 */.env.*
 **/.gjc/
 AGENTS.md
+!*/.env.example

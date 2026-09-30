@@ -1,0 +1,5 @@
+{
+  "name": "gjc-plugin",
+  "description": "Plugin distribution index for gajae-code. Each plugin carries its own gajae-plugin.json in its subdirectory — that manifest remains the version source of truth (bumped only at tagged releases).",
+  "plugins": ["jev-advisor/gajae-plugin.json"]
+}
