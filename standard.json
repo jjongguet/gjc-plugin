@@ -1,7 +1,11 @@
 {
-  "standard_version": "1.0.1",
-  "profiles": ["plugin-ts"],
-  "roots": { "plugin-ts": "." },
+  "standard_version": "1.0.2",
+  "profiles": [
+    "plugin-ts"
+  ],
+  "roots": {
+    "plugin-ts": "."
+  },
   "ledger_tables": [],
   "missing_threshold": null
 }
