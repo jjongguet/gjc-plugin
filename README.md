@@ -112,7 +112,7 @@ Plugins are user-owned: gajae-code's upstream data-scope decisions (issue #5842)
 The repo is onboarded to the workspace standard (`standard.json`, v1.0.1, profile `plugin-ts`, root `.`). Root `gjc-plugin.json` is a distribution index; each plugin's `gajae-plugin.json` remains the version source of truth.
 
 - **Dashboard** (`dashboard/`) — a local operations view. Until its Supabase is connected (deferred — Addendum 1), it renders **local meta only**: the root package version and the latest git tag, read statically at build time. The envelope area states the disconnected status; there is no push-envelope.
-- **Validator hook** — `dashboard/package.json` `vercel-build` runs `node ../../workspace-standard/validator/cli.mjs validate --root ..` before `next build`; a non-green validation fails the build. Run it locally with `npm run vercel-build` inside `dashboard/`.
+- **Validator** — local-only: run `npm run validate` inside `dashboard/` (`node ../../workspace-standard/validator/cli.mjs validate --root ..`). It is not wired into `vercel-build` — the canonical `workspace-standard` repo does not exist on hosting build servers; the hosted build is `vercel-build` (`next build`) alone.
 - **Manual workflow** (`steps.json`) — three human-executed steps: record (mac: bump version + tag at release), verify (server: validator green), review (human). Nothing runs on a timer.
 
 `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `DASHBOARD_TOKEN` are listed in `dashboard/.env.example` and intentionally left unset until the Supabase connection ships.

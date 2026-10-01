@@ -9,7 +9,8 @@
     "start": "next start",
     "lint": "next lint",
     "test": "echo \"(레포 단위 테스트를 여기에)\" && exit 0",
-    "vercel-build": "node ../../workspace-standard/validator/cli.mjs validate --root .. && next build"
+    "vercel-build": "next build",
+    "validate": "node ../../workspace-standard/validator/cli.mjs validate --root .."
   },
   "dependencies": {
     "next": "^16.3.6",
