@@ -1,0 +1,9 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "verification-receipts",
+  "version": "0.0.2",
+  "tools": [
+    { "name": "verification_run", "path": "tools/verification-run.ts", "description": "Run explicit Node JS tests with selected-input freshness, private receipts and independent outcome journaling under ~/.gjc-plugin; automatic warning-only Jev adequacy." },
+    { "name": "verification_status", "path": "tools/verification-status.ts", "description": "Read a private repository receipt, recompute its bound selected-input freshness without rerunning tests, and journal the lookup; automatic warning-only Jev adequacy." }
+  ]
+}

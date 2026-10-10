@@ -1,0 +1,11 @@
+{
+ "id":"local-message",
+ "expectedBehavior":"A non-sensitive message appears after applying locally.",
+ "steps":[
+  {"action":"goto","url":"http://127.0.0.1:3000/"},
+  {"action":"assert","selector":"#heading","kind":"text","match":"exact","expected":"Local fixture"},
+  {"action":"fill","selector":"#message","value":"fixture message"},
+  {"action":"click","selector":"#apply"},
+  {"action":"assert","selector":"#result","kind":"text","match":"exact","expected":"Applied: fixture message"}
+ ]
+}

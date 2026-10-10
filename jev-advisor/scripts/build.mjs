@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const resultsCore = await readFile(path.join(pluginRoot, "../shared/lib/results.ts"), "utf8");
 
 const surfaces = [
 	{ core: "lib/decision.ts", adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
@@ -33,12 +34,13 @@ const keysBlock =
 	"\n// Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /\n// OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).\n";
 
 for (const surface of surfaces) {
-	const core = await readFile(path.join(pluginRoot, surface.core), "utf8");
-	const adapter = await readFile(path.join(pluginRoot, surface.adapter), "utf8");
+	const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
+	const core = stripLocalImports(await readFile(path.join(pluginRoot, surface.core), "utf8"));
+	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
 	const header = banner.replace("{ADAPTER}", surface.adapter);
 	await writeFile(
 		path.join(pluginRoot, surface.out),
-		`${header}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`,
+		`${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`,
 		"utf8",
 	);
 	console.log(`built ${surface.out} (keyless)`);

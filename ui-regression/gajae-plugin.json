@@ -1,0 +1,9 @@
+{
+ "kind":"gajae-code-plugin",
+ "name":"ui-regression",
+ "version":"0.0.2",
+ "tools":[
+  {"name":"ui_regression_run","path":"tools/ui-regression-run.ts","description":"Execute one bounded local Aside scenario with non-vacuous DOM assertions, private receipts and independent outcome journaling under ~/.gjc-plugin."},
+  {"name":"ui_regression_status","path":"tools/ui-regression-status.ts","description":"Inspect historical UI evidence and current source freshness, then journal the lookup; no browser reobservation or deployed-build proof."}
+ ]
+}

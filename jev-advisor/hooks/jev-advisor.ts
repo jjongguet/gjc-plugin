@@ -2,78 +2,608 @@
 // Core: lib/decision.ts + adapter: src/hook.adapter.ts
 // Rebuild with: bun scripts/build.mjs
 
+import { constants as resultsConstants, promises as resultsFs } from 'node:fs';
+import type { Stats as ResultsStats } from 'node:fs';
+import type { FileHandle as ResultsFileHandle } from 'node:fs/promises';
+import { homedir as resultsHomedir } from 'node:os';
+import { dirname as resultsDirname, join as resultsJoin, parse as resultsParse, resolve as resultsResolve, sep as resultsSep } from 'node:path';
+import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypto';
+import { performance as resultsClock } from 'node:perf_hooks';
+
+export type PluginOutcome = {
+  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal';
+  repositoryDigest?: string | null;
+  receiptId?: string | null;
+  toolCallDigest?: string;
+  durationMs?: number;
+  freshness?: 'fresh' | 'stale' | 'changed_during_run' | 'unavailable';
+  stateOverrideIgnored?: boolean;
+  execution?: { status: string; reason: string; counts?: Record<string, number> | null; assertions?: { step: number; id: string; kind: string; status: string }[]; cleanup?: string };
+  assessment?: { status: string; reason: string; answers?: { coverage_alignment: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> }; boundary_evidence: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> } } };
+  advice?: { status: string; tier?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
+  taskAdvice?: { index:number; status:string; tier?:string; confidence?:number; basis?:string; reason?:string }[];
+  evidenceObservations?: {completed:number;failed:number;cancelled:number;stored:number;unavailable:number};
+  receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
+  evidenceStorage?: { status: string; reason?: string };
+};
+type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression';
+type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
+type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
+const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression'];
+const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal'];
+const resultsHex = /^[a-f0-9]{64}$/;
+const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
+const resultsCountKeys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'];
+const resultsExecutionReasons = [
+  'not_run', 'invalid_or_unavailable_input', 'receipt_unavailable', 'invalid_file_count', 'invalid_root', 'invalid_test_path',
+  'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'invalid_timeout',
+  'cancelled', 'process_groups_unavailable', 'node_unavailable', 'invalid_node_version', 'unsupported_node_version',
+  'cleanup_unresolved', 'cleanup_unconfirmed', 'timeout', 'output_limit', 'spawn_unavailable', 'missing_summary',
+  'invalid_summary_frame', 'runner_crash', 'native_failure', 'no_actual_passes', 'native_success', 'runner_setup_failed',
+  'complete', 'origin_drift', 'missing_target', 'ambiguous_target', 'hidden_target', 'assertion_failed', 'unsupported_control',
+  'runtime_error', 'missing_observations', 'output_overflow', 'malformed_observations', 'runner_exit', 'partial_observations',
+  'missing_account', 'unsafe_lock', 'busy', 'lock_unavailable', 'runner_signal', 'missing_cli', 'runner_unavailable',
+];
+const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
+const resultsAdviceReasons = ['invalid_task', 'unsupported_input', 'input_too_large', 'batch_limit', 'disabled', 'unconfigured', 'invalid_endpoint', 'rate_limited', 'budget_exceeded', 'already_pending', 'timeout', 'aborted', 'provider_error', 'invalid_response'];
+const resultsReceiptReasons = ['stored', 'invalid_metadata', 'store_busy', 'store_corrupt', 'store_full', 'store_unavailable', 'no_receipt', 'not_requested'];
+const resultsEvidenceReasons = ['locked', 'corrupt', 'unsupported_version', 'oversized', 'unsafe_path', 'io_error', 'invalid_input'];
+
+function resultsFail(reason: string): never { throw new Error(reason); }
+function resultsObject(value: unknown, keys: readonly string[], required: readonly string[] = []): Record<string, unknown> {
+  if (value === null || typeof value !== 'object' || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) resultsFail('invalid_metadata');
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).some(key => typeof key !== 'string' || !keys.includes(key))) resultsFail('invalid_metadata');
+  const projected: Record<string, unknown> = {};
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if (!('value' in descriptor) || !descriptor.enumerable) resultsFail('invalid_metadata');
+    if (descriptor.value !== undefined) projected[key] = descriptor.value;
+  }
+  if (required.some(key => !Object.hasOwn(projected, key))) resultsFail('invalid_metadata');
+  return projected;
+}
+function resultsEnum(value: unknown, choices: readonly string[]): string {
+  if (typeof value !== 'string' || !choices.includes(value)) resultsFail('invalid_metadata');
+  return value;
+}
+function resultsInteger(value: unknown, max = Number.MAX_SAFE_INTEGER): number {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0 || value > max) resultsFail('invalid_metadata');
+  return value;
+}
+function resultsBoolean(value: unknown): boolean { if (typeof value !== 'boolean') resultsFail('invalid_metadata'); return value; }
+function resultsProbability(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) resultsFail('invalid_metadata');
+  return value;
+}
+function resultsPattern(value: unknown, pattern: RegExp): string { if (typeof value !== 'string' || !pattern.test(value)) resultsFail('invalid_metadata'); return value; }
+function resultsArray(value: unknown, max: number): unknown[] {
+  if (!Array.isArray(value) || Object.getPrototypeOf(value) !== Array.prototype || value.length > max) resultsFail('invalid_metadata');
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (Reflect.ownKeys(descriptors).length !== value.length + 1) resultsFail('invalid_metadata');
+  const output: unknown[] = [];
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = descriptors[String(index)];
+    if (!descriptor || !('value' in descriptor) || !descriptor.enumerable) resultsFail('invalid_metadata');
+    output.push(descriptor.value);
+  }
+  return output;
+}
+function resultsChoice(value: unknown, labels: readonly string[]): Record<string, unknown> {
+  const raw = resultsObject(value, ['type', 'choice', 'confidence', 'probabilities'], ['type', 'choice']);
+  const output: Record<string, unknown> = { type: resultsEnum(raw.type, ['choice']), choice: resultsEnum(raw.choice, labels) };
+  if (raw.confidence !== undefined) output.confidence = resultsProbability(raw.confidence);
+  if (raw.probabilities !== undefined) {
+    const probabilities = resultsObject(raw.probabilities, labels);
+    output.probabilities = Object.fromEntries(Object.entries(probabilities).map(([label, probability]) => [label, resultsProbability(probability)]));
+  }
+  return output;
+}
+function resultsAdvice(value:unknown):Record<string,unknown> {
+  const a = resultsObject(value, ['status', 'tier', 'confidence', 'confidenceKind', 'probabilities', 'reason'], ['status']);
+  const advice: Record<string, unknown> = { status: resultsEnum(a.status, ['decision', 'no_decision']) };
+  if (a.tier !== undefined) advice.tier = resultsEnum(a.tier, ['fast', 'balanced', 'strong']);
+  if (a.confidence !== undefined) advice.confidence = resultsProbability(a.confidence);
+  if (a.confidenceKind !== undefined) advice.confidenceKind = resultsEnum(a.confidenceKind, ['provider_choice', 'self_reported']);
+  if (a.probabilities !== undefined) {
+    const probabilities = resultsObject(a.probabilities, ['fast', 'balanced', 'strong'], ['fast', 'balanced', 'strong']);
+    advice.probabilities = Object.fromEntries(Object.entries(probabilities).map(([tier, probability]) => [tier, resultsProbability(probability)]));
+  }
+  if (a.reason !== undefined) advice.reason = resultsEnum(a.reason, resultsAdviceReasons);
+  return advice;
+}
+function resultsProject(value: unknown): Record<string, unknown> {
+  const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage'], ['operation']);
+  const output: Record<string, unknown> = { operation: resultsEnum(raw.operation, resultsOperations) };
+  for (const key of ['repositoryDigest', 'receiptId']) if (raw[key] !== undefined) output[key] = raw[key] === null ? null : resultsPattern(raw[key], key === 'receiptId' ? resultsId : resultsHex);
+  if (raw.toolCallDigest !== undefined) output.toolCallDigest = resultsPattern(raw.toolCallDigest, resultsHex);
+  if (raw.durationMs !== undefined) output.durationMs = resultsInteger(raw.durationMs);
+  if (raw.freshness !== undefined) output.freshness = resultsEnum(raw.freshness, ['fresh', 'stale', 'changed_during_run', 'unavailable']);
+  if (raw.stateOverrideIgnored !== undefined) output.stateOverrideIgnored = resultsBoolean(raw.stateOverrideIgnored);
+  if (raw.execution !== undefined) {
+    const ex = resultsObject(raw.execution, ['status', 'reason', 'counts', 'assertions', 'cleanup'], ['status', 'reason']);
+    const execution: Record<string, unknown> = { status: resultsEnum(ex.status, ['passed', 'failed', 'no_tests', 'incomplete', 'not_run', 'unavailable']), reason: resultsEnum(ex.reason, resultsExecutionReasons) };
+    if (ex.counts !== undefined) {
+      const counts = ex.counts === null ? null : resultsObject(ex.counts, resultsCountKeys, resultsCountKeys);
+      execution.counts = counts === null ? null : Object.fromEntries(resultsCountKeys.map(key => [key, resultsInteger(counts[key], 10000)]));
+    }
+    if (ex.cleanup !== undefined) execution.cleanup = resultsEnum(ex.cleanup, ['confirmed', 'unconfirmed']);
+    if (ex.assertions !== undefined) {
+      const seen = new Set<number>();
+      execution.assertions = resultsArray(ex.assertions, 20).map(value => {
+        const assertion = resultsObject(value, ['step', 'id', 'kind', 'status'], ['step', 'id', 'kind', 'status']);
+        const step = resultsInteger(assertion.step, 19);
+        if (seen.has(step) || assertion.id !== 'step-' + step) resultsFail('invalid_metadata');
+        seen.add(step);
+        return { step, id: 'step-' + step, kind: resultsEnum(assertion.kind, ['visible', 'text_exact', 'text_substring']), status: resultsEnum(assertion.status, ['passed', 'failed']) };
+      });
+    }
+    output.execution = execution;
+  }
+  if (raw.assessment !== undefined) {
+    const a = resultsObject(raw.assessment, ['status', 'reason', 'answers'], ['status', 'reason']);
+    const assessment: Record<string, unknown> = { status: resultsEnum(a.status, ['scored', 'unscored', 'unknown', 'unavailable', 'invalid_input', 'invalid_response']), reason: resultsEnum(a.reason, resultsAssessmentReasons) };
+    if (a.answers !== undefined) {
+      const answers = resultsObject(a.answers, ['coverage_alignment', 'boundary_evidence'], ['coverage_alignment', 'boundary_evidence']);
+      assessment.answers = { coverage_alignment: resultsChoice(answers.coverage_alignment, ['aligned', 'gap', 'none', 'unknown']), boundary_evidence: resultsChoice(answers.boundary_evidence, ['present', 'missing', 'none', 'unknown']) };
+    }
+    output.assessment = assessment;
+  }
+  if (raw.advice !== undefined) output.advice = resultsAdvice(raw.advice);
+  if (raw.taskAdvice !== undefined) {
+    const seen = new Set<number>();
+    output.taskAdvice = resultsArray(raw.taskAdvice,32).map(value=>{
+      const task=resultsObject(value,['index','status','tier','confidence','basis','reason'],['index','status']);
+      const index=resultsInteger(task.index,31);if(seen.has(index))resultsFail('invalid_metadata');seen.add(index);
+      // The compact batch field keeps all32 full-precision decisions within the 4KiB record budget.
+      const {index:rawIndex,basis,...advice}=task;
+      const {confidenceKind,...projected}=resultsAdvice({...advice,...(basis!==undefined?{confidenceKind:basis}:{})});
+      return {index,...projected,...(confidenceKind!==undefined?{basis:confidenceKind}:{})};
+    });
+  }
+  if (raw.evidenceObservations !== undefined) {
+    const keys=['completed','failed','cancelled','stored','unavailable'];
+    const counts=resultsObject(raw.evidenceObservations,keys,keys);
+    output.evidenceObservations=Object.fromEntries(keys.map(key=>[key,resultsInteger(counts[key])]));
+  }
+  if (raw.receiptStorage !== undefined) {
+    const s = resultsObject(raw.receiptStorage, ['persisted', 'reason', 'count', 'bytes', 'nearCapacity'], ['persisted', 'reason']);
+    const storage: Record<string, unknown> = { persisted: resultsBoolean(s.persisted), reason: resultsEnum(s.reason, resultsReceiptReasons) };
+    for (const key of ['count', 'bytes']) if (s[key] !== undefined) storage[key] = resultsInteger(s[key]);
+    if (s.nearCapacity !== undefined) storage.nearCapacity = resultsBoolean(s.nearCapacity);
+    output.receiptStorage = storage;
+  }
+  if (raw.evidenceStorage !== undefined) {
+    const s = resultsObject(raw.evidenceStorage, ['status', 'reason'], ['status']);
+    const storage: Record<string, unknown> = { status: resultsEnum(s.status, ['ok', 'missing', 'unavailable', 'disabled', 'not_requested']) };
+    if (s.reason !== undefined) storage.reason = resultsEnum(s.reason, resultsEvidenceReasons);
+    output.evidenceStorage = storage;
+  }
+  return output;
+}
+
+export function pluginResultsRoot(): string {
+  // Bun can cache os.homedir across HOME changes; honor the process-owned home for isolated consumers.
+  const home = process.env.HOME || resultsHomedir();
+  return resultsJoin(home, '.gjc-plugin');
+}
+type ResultsDirectory = { path: string; info: ResultsStats };
+function resultsSame(a: ResultsStats, b: ResultsStats): boolean { return a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.mode === b.mode; }
+function resultsPrivateFile(info: ResultsStats): void {
+  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o600 || info.nlink !== 1) resultsFail('unsafe_path');
+}
+async function resultsCheckFile(file: string, expected: ResultsStats): Promise<ResultsStats> {
+  const current = await resultsFs.lstat(file);
+  resultsPrivateFile(current);
+  if (!resultsSame(expected, current)) resultsFail('unsafe_path');
+  return current;
+}
+function resultsPrivateBoundary(dir: string): string {
+  const absolute = resultsResolve(dir);
+  const parts = absolute.slice(resultsParse(absolute).root.length).split(resultsSep);
+  const index = parts.indexOf('.gjc-plugin');
+  return index < 0 ? absolute : resultsJoin(resultsParse(absolute).root, ...parts.slice(0, index + 1));
+}
+async function resultsCheckDirectories(entries: ResultsDirectory[]): Promise<void> {
+  for (const entry of entries) {
+    const now = await resultsFs.lstat(entry.path);
+    if (!now.isDirectory() || now.isSymbolicLink() || !resultsSame(entry.info, now)) resultsFail('unsafe_path');
+  }
+}
+async function resultsDirectories(dir: string, create: boolean, boundary = resultsPrivateBoundary(dir)): Promise<ResultsDirectory[]> {
+  if (typeof dir !== 'string' || dir.includes('\0') || dir.split(resultsSep).includes('..')) resultsFail('unsafe_path');
+  const absolute = resultsResolve(dir);
+  boundary = resultsResolve(boundary);
+  if (absolute !== boundary && !absolute.startsWith(boundary + resultsSep)) resultsFail('unsafe_path');
+  const root = resultsParse(absolute).root;
+  const paths = [root];
+  let current = root;
+  for (const part of absolute.slice(root.length).split(resultsSep).filter(Boolean)) { current = resultsJoin(current, part); paths.push(current); }
+  const entries: ResultsDirectory[] = [];
+  for (const path of paths) {
+    const privatePath = path === boundary || path.startsWith(boundary + resultsSep);
+    let info: ResultsStats;
+    try { info = await resultsFs.lstat(path); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || !create || !privatePath) throw error;
+      await resultsCheckDirectories(entries);
+      try { await resultsFs.mkdir(path, { mode: 0o700 }); }
+      catch (mkdirError) { if ((mkdirError as NodeJS.ErrnoException).code !== 'EEXIST') throw mkdirError; }
+      info = await resultsFs.lstat(path);
+      // A concurrent creator is subject to the same ownership/mode checks, never repaired.
+    }
+    if (!info.isDirectory() || info.isSymbolicLink() || (privatePath && (info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o700))) resultsFail('unsafe_path');
+    const handle = await resultsFs.open(path, resultsConstants.O_RDONLY | resultsConstants.O_DIRECTORY | resultsConstants.O_NOFOLLOW);
+    try { if (!resultsSame(info, await handle.stat())) resultsFail('unsafe_path'); }
+    finally { await handle.close(); }
+    entries.push({ path, info });
+  }
+  await resultsCheckDirectories(entries);
+  return entries;
+}
+export async function ensurePrivateResultDirectory(dir: string, create = true): Promise<void> { await resultsDirectories(dir, create); }
+async function resultsOpenChecked(file: string, flags: number, directories: ResultsDirectory[]): Promise<ResultsFileHandle> {
+  await resultsCheckDirectories(directories);
+  const before = await resultsFs.lstat(file);
+  resultsPrivateFile(before);
+  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW);
+  try {
+    const opened = await handle.stat();
+    resultsPrivateFile(opened);
+    if (!resultsSame(before, opened)) resultsFail('unsafe_path');
+    await resultsCheckFile(file, opened);
+    await resultsCheckDirectories(directories);
+    return handle;
+  } catch (error) { await handle.close(); throw error; }
+}
+export async function readPrivateResultFile(file: string, maxBytes: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 16 * 1024 * 1024) resultsFail('resource_limit');
+  const directories = await resultsDirectories(resultsDirname(file), false);
+  const handle = await resultsOpenChecked(file, resultsConstants.O_RDONLY, directories);
+  try {
+    const before = await handle.stat();
+    resultsPrivateFile(before);
+    if (before.size > maxBytes) resultsFail('resource_limit');
+    const buffer = Buffer.alloc(before.size + 1);
+    let offset = 0;
+    while (offset < buffer.length) {
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    const after = await handle.stat();
+    resultsPrivateFile(after);
+    if (!resultsSame(before, after) || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || offset !== before.size) resultsFail('unsafe_path');
+    const current = await resultsCheckFile(file, after);
+    if (after.size !== current.size || after.mtimeMs !== current.mtimeMs || after.ctimeMs !== current.ctimeMs) resultsFail('unsafe_path');
+    await resultsCheckDirectories(directories);
+    return buffer.subarray(0, offset);
+  } finally { await handle.close(); }
+}
+async function resultsSyncDirectory(path: string, directories: ResultsDirectory[]): Promise<void> {
+  await resultsCheckDirectories(directories);
+  const handle = await resultsFs.open(path, resultsConstants.O_RDONLY | resultsConstants.O_DIRECTORY | resultsConstants.O_NOFOLLOW);
+  try {
+    const expected = directories.find(entry => entry.path === path);
+    if (!expected || !resultsSame(expected.info, await handle.stat())) resultsFail('unsafe_path');
+    await handle.sync();
+  } finally { await handle.close(); }
+  await resultsCheckDirectories(directories);
+}
+async function resultsCreate(file: string, body: string, directories: ResultsDirectory[]): Promise<ResultsStats> {
+  await resultsCheckDirectories(directories);
+  const handle = await resultsFs.open(file, resultsConstants.O_WRONLY | resultsConstants.O_CREAT | resultsConstants.O_EXCL | resultsConstants.O_NOFOLLOW, 0o600);
+  try {
+    const info = await handle.stat(); resultsPrivateFile(info);
+    await resultsCheckFile(file, info);
+    await resultsCheckDirectories(directories);
+    await handle.writeFile(body); await handle.sync();
+    const after = await handle.stat(); resultsPrivateFile(after);
+    if (!resultsSame(info, after) || after.size !== Buffer.byteLength(body)) resultsFail('unsafe_path');
+    await resultsCheckFile(file, after);
+    await resultsCheckDirectories(directories);
+    return after;
+  } finally { await handle.close(); }
+}
+type ResultsSegment = { name: string; bytes: number; digest: string };
+type ResultsInventory = { schemaVersion: 1; plugin: ResultsPlugin; owner: string; next: number; segments: ResultsSegment[] };
+function resultsDigest(body: string | Buffer): string { return resultsHash('sha256').update(body).digest('hex'); }
+function resultsInventory(value: unknown, plugin: ResultsPlugin, maxSegments: number, maxSegmentBytes: number): ResultsInventory {
+  const raw = resultsObject(value, ['schemaVersion', 'plugin', 'owner', 'next', 'segments'], ['schemaVersion', 'plugin', 'owner', 'next', 'segments']);
+  if (raw.schemaVersion !== 1 || raw.plugin !== plugin) resultsFail('store_corrupt');
+  const owner = resultsPattern(raw.owner, resultsId);
+  const next = resultsInteger(raw.next);
+  const segments = resultsArray(raw.segments, maxSegments).map(value => {
+    const s = resultsObject(value, ['name', 'bytes', 'digest'], ['name', 'bytes', 'digest']);
+    if (typeof s.name !== 'string') resultsFail('store_corrupt');
+    return { name: s.name, bytes: resultsInteger(s.bytes, maxSegmentBytes), digest: resultsPattern(s.digest, resultsHex) };
+  });
+  if (!segments.length || next < segments.length || segments.some((s, i) => s.name !== `${owner}-${next - segments.length + i}.jsonl` || s.bytes === 0)) resultsFail('store_corrupt');
+  return { schemaVersion: 1, plugin, owner, next, segments };
+}
+function resultsValidateSegment(body: Buffer, plugin: ResultsPlugin, maxRecordBytes: number): void {
+  const text = body.toString('utf8');
+  if (!text.endsWith('\n')) resultsFail('store_corrupt');
+  for (const line of text.slice(0, -1).split('\n')) {
+    if (Buffer.byteLength(line + '\n') > maxRecordBytes) resultsFail('store_corrupt');
+    const raw = JSON.parse(line);
+    const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
+    if (record.schemaVersion !== 1 || record.plugin !== plugin) resultsFail('store_corrupt');
+    resultsPattern(record.id, resultsId);
+    if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
+    const { schemaVersion, plugin: storedPlugin, id, observedAt, ...outcome } = record;
+    const canonical = { schemaVersion, plugin: storedPlugin, id, observedAt, ...resultsProject(outcome) };
+    if (JSON.stringify(canonical) !== line) resultsFail('store_corrupt');
+  }
+}
+function resultsFailure(error: unknown): ResultsAppend {
+  const reason = error instanceof Error ? error.message : '';
+  return { persisted: false, reason: ['unsafe_path', 'resource_limit', 'store_corrupt', 'store_busy'].includes(reason) ? reason : 'store_unavailable' };
+}
+
+/** Append metadata only. A partial publication is deliberately not repaired or adopted. */
+export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: PluginOutcome, deps: ResultsDependencies = {}): Promise<ResultsAppend> {
+  let projected: Record<string, unknown>;
+  try { resultsEnum(plugin, resultsPlugins); projected = resultsProject(outcome); }
+  catch { return { persisted: false, reason: 'invalid_metadata' }; }
+  const maxRecordBytes = deps.maxRecordBytes ?? 4096;
+  const maxSegmentBytes = deps.maxSegmentBytes ?? 1024 * 1024;
+  const maxSegments = deps.maxSegments ?? 8;
+  const lockTimeoutMs = deps.lockTimeoutMs ?? 100;
+  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100) return { persisted: false, reason: 'invalid_limits' };
+  const id = resultsUUID();
+  const body = JSON.stringify({ schemaVersion: 1, plugin, id, observedAt: new Date().toISOString(), ...projected }) + '\n';
+  const size = Buffer.byteLength(body);
+  if (size > maxRecordBytes || size > maxSegmentBytes) return { persisted: false, reason: 'record_too_large' };
+  const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
+  const dir = resultsJoin(base, plugin, 'journal', 'v1');
+  const lockPath = resultsJoin(dir, '.append.lock');
+  let directories: ResultsDirectory[] = [];
+  let lock: ResultsFileHandle | undefined;
+  let lockInfo: ResultsStats | undefined;
+  let result: ResultsAppend = { persisted: false, reason: 'store_unavailable' };
+  try {
+    directories = await resultsDirectories(dir, true, base);
+    const deadline = resultsClock.now() + lockTimeoutMs;
+    while (!lock) {
+      await resultsCheckDirectories(directories);
+      try { lock = await resultsFs.open(lockPath, resultsConstants.O_WRONLY | resultsConstants.O_CREAT | resultsConstants.O_EXCL | resultsConstants.O_NOFOLLOW, 0o600); }
+      catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        try { const busy = await resultsOpenChecked(lockPath, resultsConstants.O_RDONLY, directories); await busy.close(); }
+        catch (checkError) { if ((checkError as NodeJS.ErrnoException).code !== 'ENOENT') throw checkError; }
+        if (resultsClock.now() >= deadline) resultsFail('store_busy');
+        await new Promise(resolve => setTimeout(resolve, Math.min(5, Math.max(0, deadline - resultsClock.now()))));
+      }
+    }
+    lockInfo = await lock.stat(); resultsPrivateFile(lockInfo);
+    await resultsCheckFile(lockPath, lockInfo);
+    await resultsCheckDirectories(directories);
+    await lock.sync();
+    const names: string[] = [];
+    const listing = await resultsFs.opendir(dir);
+    for await (const entry of listing) {
+      names.push(entry.name);
+      if (names.length > maxSegments + 2) resultsFail('store_corrupt');
+    }
+    const markerPath = resultsJoin(dir, 'inventory.json');
+    let inventory: ResultsInventory;
+    let activeBody = Buffer.alloc(0);
+    let markerInfo: ResultsStats | undefined;
+    if (names.length === 1 && names[0] === '.append.lock') {
+      inventory = { schemaVersion: 1, plugin, owner: resultsUUID(), next: 0, segments: [] };
+    } else {
+      if (!names.includes('inventory.json')) resultsFail('store_corrupt');
+      try { inventory = resultsInventory(JSON.parse((await readPrivateResultFile(markerPath, 8192)).toString('utf8')), plugin, maxSegments, maxSegmentBytes); }
+      catch (error) { if (error instanceof Error && error.message === 'unsafe_path') throw error; resultsFail('store_corrupt'); }
+      markerInfo = await resultsFs.lstat(markerPath);
+      const expected = new Set(['.append.lock', 'inventory.json', ...inventory.segments.map(segment => segment.name)]);
+      if (names.length !== expected.size || names.some(name => !expected.has(name))) resultsFail('store_corrupt');
+      for (const segment of inventory.segments) {
+        const bytes = await readPrivateResultFile(resultsJoin(dir, segment.name), maxSegmentBytes);
+        if (bytes.length !== segment.bytes || resultsDigest(bytes) !== segment.digest) resultsFail('store_corrupt');
+        try { resultsValidateSegment(bytes, plugin, maxRecordBytes); } catch { resultsFail('store_corrupt'); }
+        activeBody = bytes;
+      }
+    }
+    const retired: { segment: ResultsSegment; info: ResultsStats }[] = [];
+    const active = inventory.segments.at(-1);
+    if (active && active.bytes + size <= maxSegmentBytes) {
+      const path = resultsJoin(dir, active.name);
+      const handle = await resultsOpenChecked(path, resultsConstants.O_WRONLY | resultsConstants.O_APPEND, directories);
+      try {
+        if ((await handle.stat()).size !== active.bytes) resultsFail('store_corrupt');
+        await handle.writeFile(body); await handle.sync();
+        const after = await handle.stat(); resultsPrivateFile(after);
+        if (after.size !== active.bytes + size) resultsFail('unsafe_path');
+        await resultsCheckFile(path, after);
+      } finally { await handle.close(); }
+      active.bytes += size;
+      active.digest = resultsDigest(Buffer.concat([activeBody, Buffer.from(body)]));
+      if (resultsDigest(await readPrivateResultFile(path, maxSegmentBytes)) !== active.digest) resultsFail('store_corrupt');
+    } else {
+      if (!Number.isSafeInteger(inventory.next + 1)) resultsFail('resource_limit');
+      const name = `${inventory.owner}-${inventory.next++}.jsonl`;
+      await resultsCreate(resultsJoin(dir, name), body, directories);
+      inventory.segments.push({ name, bytes: size, digest: resultsDigest(body) });
+      while (inventory.segments.length > maxSegments) {
+        const segment = inventory.segments.shift()!;
+        const info = await resultsFs.lstat(resultsJoin(dir, segment.name)); resultsPrivateFile(info);
+        retired.push({ segment, info });
+      }
+    }
+    // Fixed pending name makes interrupted publication detectable; never clean up/adopt it.
+    const pending = resultsJoin(dir, '.inventory.pending');
+    const pendingInfo = await resultsCreate(pending, JSON.stringify(inventory), directories);
+    await resultsSyncDirectory(dir, directories);
+    if (markerInfo) {
+      const current = await resultsCheckFile(markerPath, markerInfo);
+      if (markerInfo.size !== current.size || markerInfo.mtimeMs !== current.mtimeMs || markerInfo.ctimeMs !== current.ctimeMs) resultsFail('store_corrupt');
+    } else {
+      try { await resultsFs.lstat(markerPath); resultsFail('store_corrupt'); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    await resultsCheckDirectories(directories);
+    await resultsCheckFile(pending, pendingInfo);
+    await resultsFs.rename(pending, markerPath);
+    await resultsCheckFile(markerPath, pendingInfo);
+    await resultsSyncDirectory(dir, directories);
+    // Only the previously validated, marker-bound closed segments can retire.
+    for (const { segment, info } of retired) {
+      const path = resultsJoin(dir, segment.name);
+      await resultsCheckDirectories(directories);
+      if (resultsDigest(await readPrivateResultFile(path, maxSegmentBytes)) !== segment.digest) resultsFail('store_corrupt');
+      const current = await resultsCheckFile(path, info);
+      if (info.size !== current.size || info.mtimeMs !== current.mtimeMs || info.ctimeMs !== current.ctimeMs) resultsFail('store_corrupt');
+      await resultsFs.unlink(path);
+    }
+    await resultsSyncDirectory(dir, directories);
+    // Persist the newly created hierarchy, not just its final directory entry.
+    for (const entry of directories.filter(entry => entry.path === base || entry.path.startsWith(base + resultsSep)).reverse()) await resultsSyncDirectory(resultsDirname(entry.path), directories);
+    result = { persisted: true, reason: 'stored', id, rotated: retired.length, retainedSegments: inventory.segments.length };
+  } catch (error) { result = resultsFailure(error); }
+  finally {
+    if (lock) {
+      try {
+        await resultsCheckDirectories(directories);
+        const current = await resultsFs.lstat(lockPath); resultsPrivateFile(current);
+        if (!lockInfo || !resultsSame(lockInfo, current) || !resultsSame(lockInfo, await lock.stat())) resultsFail('unsafe_path');
+        await resultsFs.unlink(lockPath);
+        await resultsSyncDirectory(dir, directories);
+      } catch (error) { result = resultsFailure(error); }
+      try { await lock.close(); } catch { result = { persisted: false, reason: 'store_unavailable' }; }
+    }
+  }
+  return result;
+}
 /**
- * jev-advisor core — single source of truth.
- *
- * This file is NOT installed as-is: the gjc plugin installer copies only the
- * manifest-declared surface files (compiler.ts builds `files` from the
- * manifest; installer.ts copies exactly that set). `scripts/build.mjs`
- * inlines this core into the generated surfaces:
- *
- *   hooks/jev-advisor.ts = banner + THIS FILE + src/hook.adapter.ts
- *   tools/jev-advise.ts  = banner + THIS FILE + src/tool.adapter.ts
- *
- * Edit here (or in the adapters), then rebuild. Never edit the generated
- * surface files directly — the next build overwrites them.
- *
- * Extension points:
- *   - PROVIDERS            add a provider entry (+ its HTTPS origin to
- *                          ALLOWED_ORIGINS — the code-enforced egress
- *                          allowlist, the single gate for hook AND tool)
- *   - REQUEST_STYLES       add a non-OpenAI-compatible wire format
- *   - DEFAULTS / readConfig  new tunables in exactly one place
- *   - TIERS                gjc task tiers; changing this changes the contract
- *                          vocabulary, not just advice wording
+ * jev-advisor shared source. scripts/build.mjs inlines this file into the
+ * generated hook and tool surfaces; edit this source, never the generated files.
  */
 
-import { readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import {
+	closeSync,
+	constants as fsConstants,
+	fchmodSync,
+	fstatSync,
+	fsyncSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeSync,
+} from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
+import { performance } from "node:perf_hooks";
+
 export const TIERS = ["fast", "balanced", "strong"] as const;
-
-/** Weak→strong ordering; a tier not in TIERS ranks as balanced. */
-export function tierRank(tier: string): number {
-	const index = TIERS.indexOf(String(tier ?? "").trim().toLowerCase() as Tier);
-	return index === -1 ? 1 : index;
-}
 export type Tier = (typeof TIERS)[number];
+export type ConfidenceKind = "provider_choice" | "self_reported";
 
-export interface Decision {
-	tier: Tier | string;
-	confidence: number;
-	rationale?: string;
-}
+export type NoDecisionReason =
+	| "invalid_task"
+	| "unsupported_input"
+	| "input_too_large"
+	| "batch_limit"
+	| "disabled"
+	| "unconfigured"
+	| "invalid_endpoint"
+	| "rate_limited"
+	| "budget_exceeded"
+	| "already_pending"
+	| "timeout"
+	| "aborted"
+	| "provider_error"
+	| "invalid_response";
+
+export type Advice =
+	| {
+			status: "decision";
+			tier: Tier;
+			confidence: number;
+			probabilities?: Record<Tier, number>;
+			confidenceKind: ConfidenceKind;
+			rationale?: string;
+	  }
+	| { status: "no_decision"; reason: NoDecisionReason; httpStatus?: number };
 
 export const DEFAULTS = {
 	model: "typesafe/jev-1.13",
 	timeoutMs: 8000,
 	minIntervalMs: 15000,
 	minConfidence: 0.6,
-	maxAssignmentChars: 4000,
 	memoryMaxKeys: 200,
 	memoryMaxEvents: 10,
-	memoryHeadChars: 120,
 } as const;
 
-/**
- * The single key/config file: `~/.gjc/agent/jev-advisor/.env` (KEY=VALUE
- * lines). It lives OUTSIDE the installed plugin directory because gjc's
- * installer replaces the installed tree wholesale on every install/upgrade
- * ("the installed tree equals the validated set" — installer.ts), which would
- * wipe anything placed next to the surfaces. Process env still wins over the
- * file. There is no other registration channel by design.
- */
+export const MAX_TASKS_PER_INVOCATION = 32;
+export const MAX_PROVIDER_REQUESTS_PER_INVOCATION = 4;
+export const INVOCATION_BUDGET_MS = 8000;
+export const MAX_RESPONSE_BYTES = 64 * 1024;
+export const MAX_STORE_BYTES = 2 * 1024 * 1024;
+const MAX_GROUPS = 200;
+const MAX_TASKS_PER_GROUP = 10;
+const MAX_RETAINED_RECORDS = 2000;
+const MAX_LOCK_WAIT_MS = 100;
+const MAX_ID_CHARS = 512;
+
+export interface TaskInput {
+	index: number;
+	callerId: string | null;
+	requestedTier: Tier | null;
+	fingerprint: string;
+	prompt: string;
+	complete: boolean;
+}
+
+export interface Extraction {
+	tasks: TaskInput[];
+	rejected: { index: number; reason: NoDecisionReason }[];
+	omittedCount: number;
+}
+
+export interface DecisionConfig {
+	provider: string;
+	mode: AdvisorMode;
+	endpoint: string;
+	apiKey: string;
+	model: string;
+	timeoutMs: number;
+	minIntervalMs: number;
+	minConfidence: number;
+	memoryEnabled: boolean;
+	stateFile: string;
+	stateOverrideIgnored: boolean;
+	memoryMaxKeys: number;
+	memoryMaxEvents: number;
+}
+export type AdvisorConfig = DecisionConfig;
+export type AdvisorMode = "shadow" | "hint" | "enforce";
+type Env = Record<string, string | undefined>;
+
+export function tierRank(tier: string): number {
+	const index = TIERS.indexOf(String(tier ?? "").trim().toLowerCase() as Tier);
+	return index < 0 ? 1 : index;
+}
+
 export function pluginEnvFile(): string {
 	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", ".env");
 }
-/**
- * The evidence-memory store: `~/.gjc/agent/jev-advisor/state.json`, sibling of
- * the `.env` file (outside the installed tree, survives upgrades). Holds
- * bounded per-assignment delegation history; never leaves the machine.
- */
+
+/** Result-state base; the v2 store is derived without reading or migrating legacy data. */
 export function pluginStateFile(): string {
-	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", "state.json");
+	return path.join(pluginResultsRoot(), "jev-advisor", "state.json");
+}
+
+export function version2StateFile(base: string): string {
+	const resolved = path.resolve(base);
+	const extension = path.extname(resolved);
+	return extension
+		? `${resolved.slice(0, -extension.length)}.v2${extension}`
+		: `${resolved}.v2`;
 }
 
 function loadPluginEnv(): Env {
@@ -84,7 +614,6 @@ function loadPluginEnv(): Env {
 	}
 }
 
-/** Wire formats for decision calls. `"openai-chat"` covers OpenRouter and Typesafe Jev. */
 const REQUEST_STYLES = {
 	"openai-chat": {
 		request(cfg: { model: string; apiKey: string }, assignment: string) {
@@ -93,55 +622,24 @@ const REQUEST_STYLES = {
 					"content-type": "application/json",
 					authorization: `Bearer ${cfg.apiKey}`,
 				},
-			body: JSON.stringify({
-				model: cfg.model,
-				temperature: 0,
-				// Reasoning tokens count against max_tokens and are NOT returned by
-				// OpenAI-family models, so a small budget can yield content:null
-				// with finish_reason "length". 2048 leaves room for reasoning.
-				max_tokens: 2048,
-				messages: [
+				body: JSON.stringify({
+					model: cfg.model,
+					temperature: 0,
+					max_tokens: 2048,
+					messages: [
 						{
 							role: "system",
 							content:
-								"You are a delegation-effort advisor for a coding agent. " +
-								"Given a subagent task assignment, decide how much model effort it warrants. " +
-								'Reply with ONLY minified JSON: {"tier":"fast"|"balanced"|"strong","confidence":<0..1>,"rationale":"<max 120 chars>"}. ' +
-								"fast = mechanical or small measured edits; balanced = default implementation work; " +
-								"strong = multi-file reasoning, architecture decisions, or high blast radius.",
+								"You are a delegation-effort advisor for a coding agent. Given one complete subagent task assignment, decide how much model effort it warrants. " +
+								'Reply with ONLY JSON: {"tier":"fast"|"balanced"|"strong","confidence":<number from 0 to 1>,"rationale":"<max 120 chars>"}. ' +
+								"fast = mechanical or small measured edits; balanced = default implementation work; strong = multi-file reasoning, architecture decisions, or high blast radius.",
 						},
 						{ role: "user", content: assignment },
 					],
 				}),
 			};
 		},
-		parse(data: unknown): string {
-			const first = (data as { choices?: Array<{ message?: Record<string, unknown>; error?: { message?: unknown } }> })?.choices?.[0];
-			// Choice-level errors ride inside HTTP 200 responses (OpenRouter
-			// normalization): surface as no-decision rather than empty completion.
-			if (first?.error) return "";
-			const message = first?.message;
-			const content = message?.content;
-			const text =
-				typeof content === "string"
-					? content
-					: Array.isArray(content)
-						? content
-								.map(part => (typeof (part as { text?: unknown })?.text === "string" ? (part as { text: string }).text : ""))
-								.join("")
-						: "";
-			if (text.trim()) return text;
-			// Reasoning-model fallback: some providers return the final answer only
-			// inside `reasoning` when the completion budget is exhausted.
-			return typeof message?.reasoning === "string" ? message.reasoning : "";
-		},
 	},
-	/**
-	 * TypeSafe "systemone" wire format — the documented shape of
-	 * api.typesafe.ai/v1/systemone, of OpenRouter's /api/alpha/decisions, and of
-	 * Ollaya's drop-in local server (ollaya.dev): one `state` plus typed
-	 * `questions`; answers come back calibrated per question.
-	 */
 	systemone: {
 		request(cfg: { model: string; apiKey: string }, assignment: string) {
 			const headers: Record<string, string> = { "content-type": "application/json" };
@@ -150,11 +648,7 @@ const REQUEST_STYLES = {
 				headers,
 				body: JSON.stringify({
 					model: cfg.model,
-					// Ollaya's normative contract fails with 422 STATE_TRUNCATED when
-					// state exceeds the model context (laya:en ≈ 2000 chars); 1900 keeps
-					// every systemone target inside budget. The head of an assignment
-					// (role + first tasks) carries the signal for a classifier.
-					state: assignment.slice(0, 1900),
+					state: assignment,
 					questions: {
 						tier: {
 							type: "choice",
@@ -169,68 +663,30 @@ const REQUEST_STYLES = {
 				}),
 			};
 		},
-		parse(data: unknown): string {
-			const answer = ((data as { answers?: Record<string, unknown> })?.answers?.tier ?? {}) as {
-				choice?: unknown;
-				confidence?: unknown;
-			};
-			if (typeof answer.choice !== "string") return "";
-			// A missing/non-finite confidence is an abnormal response: treat it as
-			// no-decision instead of fabricating a plausible middle value.
-			if (typeof answer.confidence !== "number" || !Number.isFinite(answer.confidence)) return "";
-			// Reuse parseDecision's tier/confidence validation downstream.
-			return JSON.stringify({ tier: answer.choice, confidence: answer.confidence });
-		},
 	},
 } as const;
 
-/**
- * Provider registry. Origins here must also be listed in ALLOWED_ORIGINS —
- * the code-enforced egress allowlist below (gjc v0.17.7 function hooks would
- * be quarantined, so there is no platform sandbox allowlist to lean on).
- */
 export const PROVIDERS: Record<
 	string,
 	{ endpoint: string; style: keyof typeof REQUEST_STYLES; keyless?: boolean; model?: string }
 > = {
-	// TypeSafe Jev on OpenRouter, via the decisions API (a decisions model is
-	// rejected by chat/completions with HTTP 400). Wire format is the TypeSafe
-	// systemone shape. ~$0.042/M input tokens, $0/M output — ~$0.000015/call.
 	jev: { endpoint: "https://openrouter.ai/api/alpha/decisions", style: "systemone", model: "typesafe/jev-1.13" },
-	// Generic OpenRouter chat models (any /api/v1/chat/completions model id).
 	openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions", style: "openai-chat", model: "openai/gpt-5-mini" },
-	// TypeSafe's hosted systemone API directly.
-	// TypeSafe's hosted systemone API directly (bare model ids, not the
-	// OpenRouter typesafe/ namespace).
 	"typesafe-jev": { endpoint: "https://api.typesafe.ai/v1/systemone", style: "systemone", model: "jev-latest" },
-	// Local Ollaya server (ollaya.dev): TypeSafe-compatible /v1/systemone on
-	// loopback, no key, millisecond open decision models (default: laya).
 	ollaya: { endpoint: "http://127.0.0.1:11435/v1/systemone", style: "systemone", keyless: true, model: "laya" },
 };
 
 const ALLOWED_ORIGINS = new Set(["https://openrouter.ai", "https://api.typesafe.ai"]);
-
-/**
- * OpenRouter identifies the calling app via these headers; without them plugin
- * calls land in the account's anonymous "Unknown" app bucket on the dashboard.
- * Sent only to the OpenRouter origin, never to other targets.
- */
 const ATTRIBUTION_HEADERS: Record<string, string> = {
 	"http-referer": "https://github.com/jjongguet/gjc-plugin",
 	"x-title": "jev-advisor",
 };
-
-/** Loopback hosts where plaintext HTTP still never leaves the machine. */
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
-/**
- * Single egress gate: every fetch URL must be an allowlisted HTTPS origin, or
- * a loopback HTTP origin — local runtimes such as Ollama/Ollaya serve plain
- * HTTP on 127.0.0.1, from which data cannot leave the machine.
- */
 export function isAllowedEndpoint(endpoint: string): boolean {
 	try {
 		const url = new URL(endpoint);
+		if (url.username || url.password) return false;
 		if (url.protocol === "https:") return ALLOWED_ORIGINS.has(url.origin);
 		if (url.protocol === "http:")
 			return LOOPBACK_HOSTS.has(url.hostname) && url.username === "" && url.password === "";
@@ -240,44 +696,23 @@ export function isAllowedEndpoint(endpoint: string): boolean {
 	}
 }
 
-export type AdvisorMode = "shadow" | "hint" | "enforce";
-
-export interface AdvisorConfig {
-	provider: string;
-	mode: AdvisorMode;
-	endpoint: string;
-	apiKey: string;
-	model: string;
-	timeoutMs: number;
-	minIntervalMs: number;
-	minConfidence: number;
-	/** Evidence-memory kill switch (JEV_ADVISOR_MEMORY=off). Default on. */
-	memoryEnabled: boolean;
-	/** Evidence-memory store file (JEV_ADVISOR_STATE override; test isolation). */
-	stateFile: string;
-	memoryMaxKeys: number;
-	memoryMaxEvents: number;
-	memoryHeadChars: number;
+export function providerPromptLimit(cfg: Pick<AdvisorConfig, "provider">): 1900 | 4000 {
+	return cfg.provider === "ollaya" ? 1900 : 4000;
 }
 
-type Env = Record<string, string | undefined>;
+function nonNegativeInteger(raw: string | undefined, fallback: number, cap: number): number {
+	if (raw === undefined || raw.trim() === "") return fallback;
+	const parsed = Number(raw);
+	return Number.isFinite(parsed) && Number.isInteger(parsed) && parsed >= 0
+		? Math.min(parsed, cap)
+		: fallback;
+}
 
 function positiveNumber(raw: string | undefined, fallback: number): number {
 	const parsed = Number(raw);
 	return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Like positiveNumber but 0 is meaningful (e.g. HEAD_CHARS=0 → fingerprints only). */
-function nonNegativeNumber(raw: string | undefined, fallback: number): number {
-	const parsed = Number(raw);
-	return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
-/**
- * Parse a `.env`-style file body (`KEY=VALUE` lines, `#` comments, optional
- * matching quotes). Exported so adapters can load plugin-local files without
- * the core (and therefore the sandboxed hook) importing node:fs.
- */
 export function parseEnvFile(text: string): Env {
 	const out: Env = {};
 	for (const rawLine of String(text ?? "").split("\n")) {
@@ -294,7 +729,6 @@ export function parseEnvFile(text: string): Env {
 		) {
 			value = value.slice(1, -1);
 		} else {
-			// Unquoted: drop an inline trailing comment ("KEY=value # note").
 			const hash = value.indexOf(" #");
 			if (hash !== -1) value = value.slice(0, hash).trim();
 		}
@@ -307,46 +741,30 @@ export function readConfig(
 	env: Env = (globalThis as { process?: { env: Env } }).process?.env ?? {},
 	fileEnv: Env = loadPluginEnv(),
 ): AdvisorConfig {
-	// Precedence: process env wins over the single ~/.gjc/agent/jev-advisor/.env file.
 	const merged: Env = { ...fileEnv };
 	for (const [key, value] of Object.entries(env)) if (value !== undefined) merged[key] = value;
-	// Provider defaults to "jev" — TypeSafe Jev via OpenRouter's decisions API,
-	// the canonical decision model (inert until a key exists — env or the .env
-	// file). "ollaya" is keyless (local server). JEV_ADVISOR_PROVIDER=off
-	// forces it inert.
-	const provider = String(merged.JEV_ADVISOR_PROVIDER ?? "jev")
-		.trim()
-		.toLowerCase();
-	const modeRaw = String(merged.JEV_ADVISOR_MODE ?? "shadow")
-		.trim()
-		.toLowerCase();
-	const mode: AdvisorMode = modeRaw === "hint" || modeRaw === "enforce" ? (modeRaw as AdvisorMode) : "shadow";
-	// Blank overrides (empty export / blank .env line) fall through to the next
-	// source instead of sticking and silently defeating the fallback chain.
-	const trim = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-	const endpoint = trim(merged.JEV_ADVISOR_ENDPOINT) || trim(PROVIDERS[provider]?.endpoint);
-	const apiKey = trim(merged.JEV_ADVISOR_API_KEY) || trim(merged.OPENROUTER_API_KEY);
-	// 0 is meaningful for the interval: it disables rate limiting entirely.
+	const provider = String(merged.JEV_ADVISOR_PROVIDER ?? "jev").trim().toLowerCase();
+	const modeRaw = String(merged.JEV_ADVISOR_MODE ?? "shadow").trim().toLowerCase();
+	const mode: AdvisorMode = modeRaw === "hint" || modeRaw === "enforce" ? modeRaw : "shadow";
+	const trim = (value: unknown) => (typeof value === "string" ? value.trim() : "");
 	const intervalRaw = Number(merged.JEV_ADVISOR_MIN_INTERVAL_MS);
-	// 0 is meaningful for the gate too: it disables tier-gating in enforce mode.
 	const confidenceRaw = Number(merged.JEV_ADVISOR_MIN_CONFIDENCE);
-	const memoryRaw = String(merged.JEV_ADVISOR_MEMORY ?? "")
-		.trim()
-		.toLowerCase();
+	const memoryRaw = String(merged.JEV_ADVISOR_MEMORY ?? "").trim().toLowerCase();
 	return {
 		provider,
 		mode,
-		endpoint,
-		apiKey,
+		endpoint: trim(merged.JEV_ADVISOR_ENDPOINT) || trim(PROVIDERS[provider]?.endpoint),
+		apiKey: trim(merged.JEV_ADVISOR_API_KEY) || trim(merged.OPENROUTER_API_KEY),
 		model: trim(merged.JEV_ADVISOR_MODEL) || trim(PROVIDERS[provider]?.model) || DEFAULTS.model,
-		timeoutMs: positiveNumber(merged.JEV_ADVISOR_TIMEOUT_MS, DEFAULTS.timeoutMs),
+		timeoutMs: Math.min(positiveNumber(merged.JEV_ADVISOR_TIMEOUT_MS, DEFAULTS.timeoutMs), INVOCATION_BUDGET_MS),
 		minIntervalMs: Number.isFinite(intervalRaw) && intervalRaw >= 0 ? intervalRaw : DEFAULTS.minIntervalMs,
 		minConfidence: Number.isFinite(confidenceRaw) ? Math.max(0, Math.min(1, confidenceRaw)) : DEFAULTS.minConfidence,
-		memoryEnabled: memoryRaw !== "" ? memoryRaw !== "off" && memoryRaw !== "0" && memoryRaw !== "false" && memoryRaw !== "no" : true,
-		stateFile: trim(merged.JEV_ADVISOR_STATE) || pluginStateFile(),
-		memoryMaxKeys: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_MAX_KEYS, DEFAULTS.memoryMaxKeys),
-		memoryMaxEvents: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_MAX_EVENTS, DEFAULTS.memoryMaxEvents),
-		memoryHeadChars: nonNegativeNumber(merged.JEV_ADVISOR_MEMORY_HEAD_CHARS, DEFAULTS.memoryHeadChars),
+		memoryEnabled:
+			memoryRaw === "" || !(memoryRaw === "off" || memoryRaw === "0" || memoryRaw === "false" || memoryRaw === "no"),
+		stateFile: pluginStateFile(),
+		stateOverrideIgnored: Boolean(trim(merged.JEV_ADVISOR_STATE)),
+		memoryMaxKeys: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_KEYS, DEFAULTS.memoryMaxKeys, MAX_GROUPS),
+		memoryMaxEvents: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_EVENTS, DEFAULTS.memoryMaxEvents, MAX_TASKS_PER_GROUP),
 	};
 }
 
@@ -356,543 +774,1762 @@ export function isConfigured(cfg: AdvisorConfig): boolean {
 	return Boolean(cfg.apiKey) && Boolean(PROVIDERS[cfg.provider] || cfg.endpoint);
 }
 
-// -----------------------------------------------------------------------------
-// Evidence memory — bounded local delegation history.
-//
-// GUARDRAIL: no module-level mutable state anywhere in this file or the
-// adapters. Each generated surface (two hooks + one tool) inlines its OWN copy
-// of this core, so in-memory state cannot be shared across surfaces — the
-// disk store below is the ONLY cross-surface channel. A future memo/cache
-// here would silently diverge across the three copies and pass single-surface
-// tests. Last-writer-wins across surfaces is accepted for advisory evidence.
-// -----------------------------------------------------------------------------
-
-/** One delegation event. `pre` = advisory asked; `post` = outcome observed. */
-export interface MemoryEvent {
-	kind: "pre" | "post";
-	t: number;
-	/** pre: tiers explicitly requested by the caller, if any. */
-	requested?: string[];
-	/** Recommendation (pre) or re-tier advice (post); present only when the provider answered. */
-	tier?: string;
-	conf?: number;
-	/** pre: already joined by a post event (G5 pairing). */
-	joined?: boolean;
-	/** post: the delegation errored. */
-	error?: boolean;
-	/** post: total subagent time (sum of finite positive durations) — NOT wall clock. */
-	durationMs?: number;
-	/** post: `t` of the joined pre event. */
-	preT?: number;
+function normalizeField(value: string): string {
+	return value.replace(/\r\n?/g, "\n").trim();
 }
 
-export interface MemoryRecord {
-	/** Ring buffer, oldest first, capped at memoryMaxEvents. */
-	events: MemoryEvent[];
-	updatedAt: number;
-	/** Bounded assignment head (memoryHeadChars; empty when HEAD_CHARS=0). */
-	head?: string;
+function validTier(value: unknown): Tier | null {
+	if (typeof value !== "string") return null;
+	const tier = value.trim().toLowerCase();
+	return TIERS.includes(tier as Tier) ? (tier as Tier) : null;
 }
 
-export interface MemoryState {
-	version: 1;
-	keys: Record<string, MemoryRecord>;
+function boundedIdentity(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const normalized = value.trim();
+	if (!normalized || normalized.length > MAX_ID_CHARS || /[\u0000-\u001f\u007f]/.test(normalized)) return null;
+	return normalized;
 }
 
-function freshState(): MemoryState {
-	return { version: 1, keys: {} };
-}
-
-/**
- * Deterministic assignment fingerprint: sha256 (first 16 hex chars) of the
- * trimmed, whitespace-collapsed text. Coverage: the input is exactly the
- * `extractAssignment` output (already capped at maxAssignmentChars = first
- * 4000 chars), so identical delegations collide and small edits deliberately
- * do not — identical-delegation semantics is the point (no fuzzy matching).
- */
 export function fingerprint(text: string): string {
-	const normalized = String(text ?? "").trim().replace(/\s+/g, " ");
-	return createHash("sha256").update(normalized).digest("hex").slice(0, 16);
-}
-
-/** Missing or corrupt store → fresh empty state (fail-open). */
-export function loadState(file: string): MemoryState {
-	try {
-		const parsed: unknown = JSON.parse(readFileSync(file, "utf8"));
-		if (
-			parsed &&
-			typeof parsed === "object" &&
-			(parsed as MemoryState).version === 1 &&
-			typeof (parsed as MemoryState).keys === "object" &&
-			(parsed as MemoryState).keys !== null
-		) {
-			return parsed as MemoryState;
-		}
-	} catch {}
-	return freshState();
+	return createHash("sha256").update(text).digest("hex");
 }
 
 /**
- * Enforce caps and persist atomically: write a uniquely-suffixed tmp file
- * (pid + time — the three inlined surfaces must not share a tmp inode) with
- * mode 0o600, then rename (the mode survives rename). No .tmp residue on
- * success. Throws on IO failure; callers wrap in try/catch (fail-open).
+ * Normalize a supported task batch without aggregating children or truncating
+ * provider input. Rejected and omitted entries remain explicit coverage data.
  */
-export function saveState(file: string, state: MemoryState, limits: { memoryMaxKeys: number; memoryMaxEvents: number }): void {
-	for (const key of Object.keys(state.keys)) {
-		const record = state.keys[key];
-		if (!record || !Array.isArray(record.events)) {
-			delete state.keys[key];
+export function extractTasks(input: unknown, maxPromptChars: 1900 | 4000): Extraction {
+	const rejected: Extraction["rejected"] = [];
+	if (!isRecord(input) || !Array.isArray(input.tasks)) {
+		return { tasks: [], rejected: [{ index: -1, reason: "unsupported_input" }], omittedCount: 0 };
+	}
+	const original = input.tasks as unknown[];
+	const boundedCount = Math.min(original.length, MAX_TASKS_PER_INVOCATION);
+	const omittedCount = Math.max(0, original.length - boundedCount);
+	const agentRaw = Object.prototype.hasOwnProperty.call(input, "agent") ? input.agent : input.role;
+	const sharedRaw = input.context;
+	const sharedMalformed =
+		(Object.prototype.hasOwnProperty.call(input, "agent") && typeof input.agent !== "string") ||
+		(Object.prototype.hasOwnProperty.call(input, "role") && typeof input.role !== "string") ||
+		(Object.prototype.hasOwnProperty.call(input, "context") && typeof sharedRaw !== "string");
+	const role = typeof agentRaw === "string" ? normalizeField(agentRaw) : "";
+	const sharedContext = typeof sharedRaw === "string" ? normalizeField(sharedRaw) : "";
+	const tasks: TaskInput[] = [];
+	for (let index = 0; index < boundedCount; index++) {
+		const raw = original[index];
+		if (!isRecord(raw) || sharedMalformed) {
+			rejected.push({ index, reason: "invalid_task" });
 			continue;
 		}
-		if (record.events.length > limits.memoryMaxEvents) {
-			record.events = record.events.slice(record.events.length - limits.memoryMaxEvents);
+		const badDescription = Object.prototype.hasOwnProperty.call(raw, "description") && typeof raw.description !== "string";
+		const badAssignment = Object.prototype.hasOwnProperty.call(raw, "assignment") && typeof raw.assignment !== "string";
+		if (badDescription || badAssignment) {
+			rejected.push({ index, reason: "invalid_task" });
+			continue;
+		}
+		const description = typeof raw.description === "string" ? normalizeField(raw.description) : "";
+		const assignment = typeof raw.assignment === "string" ? normalizeField(raw.assignment) : "";
+		if (!description && !assignment) {
+			rejected.push({ index, reason: "invalid_task" });
+			continue;
+		}
+		const canonical = JSON.stringify({ role, description, assignment, sharedContext });
+		const promptParts: string[] = [];
+		if (role) promptParts.push(`role:\n${role}`);
+		if (sharedContext) promptParts.push(`shared context:\n${sharedContext}`);
+		if (description) promptParts.push(`task description:\n${description}`);
+		if (assignment) promptParts.push(`task assignment:\n${assignment}`);
+		const prompt = promptParts.join("\n\n");
+		const callerId = boundedIdentity(raw.id);
+		tasks.push({
+			index,
+			callerId,
+			requestedTier: validTier(raw.tier),
+			fingerprint: fingerprint(canonical),
+			prompt,
+			complete: prompt.length <= maxPromptChars,
+		});
+	}
+	return { tasks, rejected, omittedCount };
+}
+
+export interface TaskRef {
+	sessionId: string;
+	toolCallId: string;
+	taskIndex: number;
+}
+export interface JobRef {
+	sessionId: string;
+	jobId: string;
+}
+export type TerminalStatus = "completed" | "failed" | "cancelled";
+
+export function taskRefKey(ref: TaskRef): string | null {
+	const sessionId = boundedIdentity(ref?.sessionId);
+	const toolCallId = boundedIdentity(ref?.toolCallId);
+	if (!sessionId || !toolCallId || !Number.isInteger(ref.taskIndex) || ref.taskIndex < 0 || ref.taskIndex >= MAX_TASKS_PER_INVOCATION) {
+		return null;
+	}
+	return JSON.stringify([sessionId, toolCallId, ref.taskIndex]);
+}
+
+export function jobRefKey(ref: JobRef): string | null {
+	const sessionId = boundedIdentity(ref?.sessionId);
+	const jobId = boundedIdentity(ref?.jobId);
+	return sessionId && jobId ? JSON.stringify([sessionId, jobId]) : null;
+}
+
+export interface StoredDecision {
+	status: "decision";
+	tier: Tier;
+	confidence: number;
+	probabilities?: Record<Tier, number>;
+	confidenceKind: ConfidenceKind;
+}
+export type StoredAdvice = StoredDecision | Extract<Advice, { status: "no_decision" }>;
+export type LaunchDisposition = "not_observed" | "observed" | "blocked";
+export interface TaskRecord {
+	ref: TaskRef;
+	fingerprint: string;
+	callerId: string | null;
+	requestedTier: Tier | null;
+	requestToken: string;
+	advice: StoredAdvice | null;
+	createdAt: number;
+	updatedAt: number;
+	launchDisposition: LaunchDisposition;
+	jobKey: string | null;
+	conflicts: string[];
+}
+export interface TaskGroup {
+	updatedAt: number;
+	tasks: Record<string, TaskRecord>;
+}
+export interface JobRecord {
+	ref: JobRef;
+	childId?: string;
+	status: TerminalStatus;
+	statusObservations: TerminalStatus[];
+	durationMs?: number;
+	durationObservations: number[];
+	requestedModel?: string;
+	requestedModelObservations: string[];
+	effectiveModel?: string;
+	effectiveModelObservations: string[];
+	allocatedChildIds: string[];
+	actualTier: null;
+	observedAt: number;
+	taskKey: string | null;
+	conflicts: string[];
+}
+export interface EvidenceV2 {
+	version: 2;
+	groups: Record<string, TaskGroup>;
+	jobs: Record<string, JobRecord>;
+}
+export interface StoreLimits {
+	memoryMaxKeys: number;
+	memoryMaxEvents: number;
+}
+export type StoreUnavailableReason =
+	| "locked"
+	| "corrupt"
+	| "unsupported_version"
+	| "oversized"
+	| "unsafe_path"
+	| "io_error";
+export type StoreResult<T> =
+	| { status: "ok"; value: T }
+	| { status: "unavailable"; reason: StoreUnavailableReason };
+export type StoreReadResult =
+	| { status: "ok"; value: EvidenceV2 }
+	| { status: "missing" }
+	| { status: "unavailable"; reason: StoreUnavailableReason };
+
+export function storeLimits(cfg: Pick<AdvisorConfig, "memoryMaxKeys" | "memoryMaxEvents">): StoreLimits {
+	const keys = Number.isInteger(cfg.memoryMaxKeys) && cfg.memoryMaxKeys >= 0 ? Math.min(cfg.memoryMaxKeys, MAX_GROUPS) : DEFAULTS.memoryMaxKeys;
+	const events = Number.isInteger(cfg.memoryMaxEvents) && cfg.memoryMaxEvents >= 0 ? Math.min(cfg.memoryMaxEvents, MAX_TASKS_PER_GROUP) : DEFAULTS.memoryMaxEvents;
+	return { memoryMaxKeys: keys, memoryMaxEvents: events };
+}
+
+export function emptyEvidenceV2(): EvidenceV2 {
+	return { version: 2, groups: {}, jobs: {} };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasOnlyKeys(record: Record<string, unknown>, allowed: string[]): boolean {
+	return Object.keys(record).every(key => allowed.includes(key));
+}
+
+function validTime(value: unknown): value is number {
+	return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function validProbabilityRecord(value: unknown): value is Record<Tier, number> {
+	if (!isRecord(value) || Object.keys(value).length !== TIERS.length || !TIERS.every(tier => Object.prototype.hasOwnProperty.call(value, tier))) return false;
+	const values = TIERS.map(tier => value[tier]);
+	if (!values.every(number => typeof number === "number" && Number.isFinite(number) && number >= 0 && number <= 1)) return false;
+	const sum = (values as number[]).reduce((a, b) => a + b, 0);
+	return Math.abs(sum - 1) <= 0.001;
+}
+
+function validateStoredAdvice(value: unknown): value is StoredAdvice {
+	if (!isRecord(value)) return false;
+	if (value.status === "no_decision") {
+		const allowed = ["status", "reason", "httpStatus"];
+		return hasOnlyKeys(value, allowed) && typeof value.reason === "string" && isNoDecisionReason(value.reason) &&
+			(value.httpStatus === undefined || (typeof value.httpStatus === "number" && Number.isInteger(value.httpStatus) && value.httpStatus >= 100 && value.httpStatus <= 599));
+	}
+	if (value.status !== "decision" || !validTier(value.tier) || typeof value.confidence !== "number" ||
+		!Number.isFinite(value.confidence) || value.confidence < 0 || value.confidence > 1 ||
+		(value.confidenceKind !== "provider_choice" && value.confidenceKind !== "self_reported")) return false;
+		if (!hasOnlyKeys(value, ["status", "tier", "confidence", "probabilities", "confidenceKind"])) return false;
+	return value.probabilities === undefined || validProbabilityRecord(value.probabilities);
+}
+
+function isNoDecisionReason(value: string): value is NoDecisionReason {
+	return [
+		"invalid_task", "unsupported_input", "input_too_large", "batch_limit", "disabled", "unconfigured",
+		"invalid_endpoint", "rate_limited", "budget_exceeded", "already_pending", "timeout", "aborted",
+		"provider_error", "invalid_response",
+	].includes(value);
+}
+
+function validTaskRef(value: unknown): value is TaskRef {
+	if (!isRecord(value) || !hasOnlyKeys(value, ["sessionId", "toolCallId", "taskIndex"])) return false;
+	return boundedIdentity(value.sessionId) !== null && boundedIdentity(value.toolCallId) !== null &&
+		Number.isInteger(value.taskIndex) && Number(value.taskIndex) >= 0 && Number(value.taskIndex) < MAX_TASKS_PER_INVOCATION;
+}
+
+function validJobRef(value: unknown): value is JobRef {
+	return isRecord(value) && hasOnlyKeys(value, ["sessionId", "jobId"]) &&
+		boundedIdentity(value.sessionId) !== null && boundedIdentity(value.jobId) !== null;
+}
+
+function validStringArray(value: unknown, maxCount: number, maxLength: number): value is string[] {
+	return Array.isArray(value) && value.length <= maxCount && value.every(item => typeof item === "string" && item.length <= maxLength && item.trim() === item);
+}
+
+const CONFLICT_FLAGS = new Set([
+	"identity_input_conflict",
+	"launch_mapping_evicted",
+	"multiple_job_associations",
+	"multiple_task_associations",
+	"status_conflict",
+	"duration_conflict",
+	"requested_model_conflict",
+	"effective_model_conflict",
+	"child_id_conflict",
+	"stale_job_mapping",
+]);
+
+function validConflictArray(value: unknown): value is string[] {
+	return validStringArray(value, 8, 64) && value.every(flag => CONFLICT_FLAGS.has(flag));
+}
+
+function validJobKeyForSession(value: unknown, sessionId: string): value is string {
+	if (typeof value !== "string") return false;
+	try {
+		const tuple: unknown = JSON.parse(value);
+		return Array.isArray(tuple) && tuple.length === 2 && tuple[0] === sessionId &&
+			boundedIdentity(tuple[1]) !== null && jobRefKey({ sessionId, jobId: tuple[1] as string }) === value;
+	} catch {
+		return false;
+	}
+}
+
+function validateStore(value: unknown): value is EvidenceV2 {
+	if (!isRecord(value) || value.version !== 2 || !hasOnlyKeys(value, ["version", "groups", "jobs"]) || !isRecord(value.groups) || !isRecord(value.jobs)) return false;
+	const seenTasks = new Set<string>();
+	for (const [fingerprintKey, rawGroup] of Object.entries(value.groups)) {
+		if (!/^[0-9a-f]{64}$/.test(fingerprintKey) || !isRecord(rawGroup) || !hasOnlyKeys(rawGroup, ["updatedAt", "tasks"]) ||
+			!validTime(rawGroup.updatedAt) || !isRecord(rawGroup.tasks)) return false;
+		for (const [key, rawTask] of Object.entries(rawGroup.tasks)) {
+			if (!isRecord(rawTask) || !hasOnlyKeys(rawTask, ["ref", "fingerprint", "callerId", "requestedTier", "requestToken", "advice", "createdAt", "updatedAt", "launchDisposition", "jobKey", "conflicts"])) return false;
+			if (!validTaskRef(rawTask.ref) || taskRefKey(rawTask.ref) !== key || rawTask.fingerprint !== fingerprintKey ||
+				(rawTask.callerId !== null && boundedIdentity(rawTask.callerId) === null) ||
+				(rawTask.requestedTier !== null && !validTier(rawTask.requestedTier)) ||
+				typeof rawTask.requestToken !== "string" || !/^[0-9a-f-]{36}$/i.test(rawTask.requestToken) ||
+				(rawTask.advice !== null && !validateStoredAdvice(rawTask.advice)) || !validTime(rawTask.createdAt) || !validTime(rawTask.updatedAt) ||
+				!(["not_observed", "observed", "blocked"] as unknown[]).includes(rawTask.launchDisposition) ||
+				(rawTask.jobKey !== null && !validJobKeyForSession(rawTask.jobKey, rawTask.ref.sessionId)) || !validConflictArray(rawTask.conflicts)) return false;
+			if (seenTasks.has(key)) return false;
+			seenTasks.add(key);
 		}
 	}
-	const keys = Object.keys(state.keys);
-	if (keys.length > limits.memoryMaxKeys) {
-		// Deterministic eviction: oldest updatedAt first, then key ascending.
-		const ranked = keys.sort((a, b) => {
-			const ra = state.keys[a].updatedAt ?? 0;
-			const rb = state.keys[b].updatedAt ?? 0;
-			return ra !== rb ? ra - rb : a < b ? -1 : a > b ? 1 : 0;
-		});
-		const excess = keys.length - limits.memoryMaxKeys;
-		for (const key of ranked.slice(0, excess)) delete state.keys[key];
+	for (const [key, rawJob] of Object.entries(value.jobs)) {
+		if (!isRecord(rawJob) || !hasOnlyKeys(rawJob, ["ref", "childId", "status", "statusObservations", "durationMs", "durationObservations", "requestedModel", "requestedModelObservations", "effectiveModel", "effectiveModelObservations", "allocatedChildIds", "actualTier", "observedAt", "taskKey", "conflicts"])) return false;
+		if (!validJobRef(rawJob.ref) || jobRefKey(rawJob.ref) !== key ||
+			!(["completed", "failed", "cancelled"] as unknown[]).includes(rawJob.status) ||
+			!Array.isArray(rawJob.statusObservations) || rawJob.statusObservations.length < 1 || rawJob.statusObservations.length > 3 ||
+			!rawJob.statusObservations.every(status => ["completed", "failed", "cancelled"].includes(String(status))) ||
+			(rawJob.durationMs !== undefined && !(typeof rawJob.durationMs === "number" && Number.isFinite(rawJob.durationMs) && rawJob.durationMs > 0)) ||
+			!Array.isArray(rawJob.durationObservations) || rawJob.durationObservations.length > 4 ||
+			!rawJob.durationObservations.every(duration => typeof duration === "number" && Number.isFinite(duration) && duration > 0) ||
+			(rawJob.requestedModel !== undefined && (typeof rawJob.requestedModel !== "string" || rawJob.requestedModel.length > 128)) ||
+			(rawJob.effectiveModel !== undefined && (typeof rawJob.effectiveModel !== "string" || rawJob.effectiveModel.length > 128)) ||
+			!validStringArray(rawJob.requestedModelObservations, 4, 128) || !validStringArray(rawJob.effectiveModelObservations, 4, 128) ||
+			!validStringArray(rawJob.allocatedChildIds, 4, MAX_ID_CHARS) || rawJob.actualTier !== null || !validTime(rawJob.observedAt) ||
+			(rawJob.childId !== undefined && boundedIdentity(rawJob.childId) === null) ||
+			(rawJob.taskKey !== null && typeof rawJob.taskKey !== "string") || !validConflictArray(rawJob.conflicts)) return false;
 	}
-	const tmp = `${file}.${(globalThis as { process?: { pid?: number } }).process?.pid ?? 0}.${Date.now()}.tmp`;
-	writeFileSync(tmp, JSON.stringify(state), { mode: 0o600 });
+	const tasksByKey = new Map<string, TaskRecord>();
+	for (const group of Object.values(value.groups)) {
+		for (const [key, task] of Object.entries(group.tasks)) tasksByKey.set(key, task);
+	}
+	for (const [jobKey, job] of Object.entries(value.jobs)) {
+		if (job.taskKey === null) continue;
+		const task = tasksByKey.get(job.taskKey);
+		if (!task || task.ref.sessionId !== job.ref.sessionId || task.jobKey !== jobKey) return false;
+	}
+	return true;
+}
+
+function normalizeLimits(limits: StoreLimits): { groups: number; perGroup: number; total: number } {
+	const groups = Number.isInteger(limits.memoryMaxKeys) && limits.memoryMaxKeys >= 0 ? Math.min(limits.memoryMaxKeys, MAX_GROUPS) : DEFAULTS.memoryMaxKeys;
+	const perGroup = Number.isInteger(limits.memoryMaxEvents) && limits.memoryMaxEvents >= 0 ? Math.min(limits.memoryMaxEvents, MAX_TASKS_PER_GROUP) : DEFAULTS.memoryMaxEvents;
+	return { groups, perGroup, total: Math.min(groups * perGroup, MAX_RETAINED_RECORDS) };
+}
+
+function appendConflict(conflicts: string[], flag: string): void {
+	if (!conflicts.includes(flag) && conflicts.length < 8) conflicts.push(flag);
+}
+
+function clearTaskAssociations(state: EvidenceV2, removedKey: string): void {
+	for (const job of Object.values(state.jobs)) {
+		if (job.taskKey === removedKey) {
+			job.taskKey = null;
+			appendConflict(job.conflicts, "launch_mapping_evicted");
+		}
+	}
+}
+
+function deleteTask(state: EvidenceV2, groupKey: string, key: string): void {
+	const group = state.groups[groupKey];
+	if (!group || !group.tasks[key]) return;
+	delete group.tasks[key];
+	clearTaskAssociations(state, key);
+	if (Object.keys(group.tasks).length === 0) delete state.groups[groupKey];
+}
+
+function encodedBytes(state: EvidenceV2): number {
+	return Buffer.byteLength(JSON.stringify(state), "utf8");
+}
+
+function capStore(state: EvidenceV2, limits: StoreLimits): boolean {
+	const cap = normalizeLimits(limits);
+	for (const [groupKey, group] of Object.entries(state.groups)) {
+		const taskEntries = Object.entries(group.tasks);
+		taskEntries.sort(([keyA, a], [keyB, b]) => a.createdAt !== b.createdAt ? a.createdAt - b.createdAt : keyA.localeCompare(keyB));
+		for (const [key] of taskEntries.slice(0, Math.max(0, taskEntries.length - cap.perGroup))) deleteTask(state, groupKey, key);
+	}
+	let groupKeys = Object.keys(state.groups);
+	groupKeys.sort((a, b) => state.groups[a].updatedAt !== state.groups[b].updatedAt ? state.groups[a].updatedAt - state.groups[b].updatedAt : a.localeCompare(b));
+	for (const key of groupKeys.slice(0, Math.max(0, groupKeys.length - cap.groups))) {
+		for (const taskKey of Object.keys(state.groups[key]?.tasks ?? {})) clearTaskAssociations(state, taskKey);
+		delete state.groups[key];
+	}
+	const allTasks = () => Object.entries(state.groups).flatMap(([groupKey, group]) => Object.entries(group.tasks).map(([key, task]) => ({ groupKey, key, time: task.createdAt })));
+	let tasks = allTasks();
+	tasks.sort((a, b) => a.time !== b.time ? a.time - b.time : a.key.localeCompare(b.key));
+	for (const entry of tasks.slice(0, Math.max(0, tasks.length - cap.total))) deleteTask(state, entry.groupKey, entry.key);
+	const jobLimit = cap.total;
+	const jobs = Object.entries(state.jobs).sort(([keyA, a], [keyB, b]) => a.observedAt !== b.observedAt ? a.observedAt - b.observedAt : keyA.localeCompare(keyB));
+	for (const [key] of jobs.slice(0, Math.max(0, jobs.length - jobLimit))) delete state.jobs[key];
+	while (encodedBytes(state) > MAX_STORE_BYTES) {
+		const candidates: Array<{ kind: "task" | "job"; groupKey?: string; key: string; time: number }> = [];
+		for (const [groupKey, group] of Object.entries(state.groups)) {
+			for (const [key, task] of Object.entries(group.tasks)) candidates.push({ kind: "task", groupKey, key, time: task.createdAt });
+		}
+		for (const [key, job] of Object.entries(state.jobs)) candidates.push({ kind: "job", key, time: job.observedAt });
+		if (!candidates.length) return false;
+		candidates.sort((a, b) => a.time !== b.time ? a.time - b.time : a.key.localeCompare(b.key) || a.kind.localeCompare(b.kind));
+		const oldest = candidates[0];
+		if (oldest.kind === "task") deleteTask(state, oldest.groupKey!, oldest.key);
+		else delete state.jobs[oldest.key];
+	}
+	return true;
+}
+
+function statePath(file: string): { file: string; directory: string; lock: string } | null {
+	if (typeof file !== "string" || !file.trim()) return null;
+	const resolved = path.resolve(file);
+	const basename = path.basename(resolved);
+	if (!basename || basename === "." || basename === "..") return null;
+	return { file: resolved, directory: path.dirname(resolved), lock: `${resolved}.lock` };
+}
+
+function isMissingError(error: unknown): boolean {
+	return isRecord(error) && error.code === "ENOENT";
+}
+
+type StateDirectoryIdentity = { path: string; dev: number; ino: number };
+
+function verifyStateDirectory(directory: string, create: boolean, expected?: StateDirectoryIdentity[]): StateDirectoryIdentity[] {
+	const absolute = path.resolve(directory);
+	let current = path.parse(absolute).root;
+	let pluginOwned = false;
+	const identities: StateDirectoryIdentity[] = [];
+	for (const part of absolute.slice(current.length).split(path.sep).filter(Boolean)) {
+		current = path.join(current, part);
+		pluginOwned ||= part === ".gjc-plugin";
+		let created = false;
+		try { lstatSync(current); } catch (error) {
+			if (!create || !isMissingError(error)) throw error;
+			mkdirSync(current, { mode: 0o700 });
+			created = true;
+		}
+		const info = lstatSync(current);
+		if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("unsafe_path");
+		if ((created || pluginOwned || current === absolute) && (info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o700)) throw new Error("unsafe_path");
+		const fd = openSync(current, fsConstants.O_RDONLY | fsConstants.O_DIRECTORY | fsConstants.O_NOFOLLOW);
+		try {
+			const opened = fstatSync(fd);
+			if (opened.dev !== info.dev || opened.ino !== info.ino) throw new Error("unsafe_path");
+		} finally { closeSync(fd); }
+		identities.push({ path: current, dev: info.dev, ino: info.ino });
+	}
+	if (expected && (identities.length !== expected.length || identities.some((identity, index) => identity.path !== expected[index].path || identity.dev !== expected[index].dev || identity.ino !== expected[index].ino))) throw new Error("unsafe_path");
+	return identities;
+}
+
+function readStoreFile(file: string): StoreReadResult {
+	let fd: number | undefined;
 	try {
+		const info = lstatSync(file);
+		if (info.isSymbolicLink() || !info.isFile() || info.nlink !== 1 || info.uid !== process.getuid?.()) return { status: "unavailable", reason: "unsafe_path" };
+		if ((info.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
+		if (info.size > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		const noFollow = fsConstants.O_NOFOLLOW ?? 0;
+		fd = openSync(file, fsConstants.O_RDONLY | noFollow);
+		const opened = fstatSync(fd);
+		if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino || opened.nlink !== 1 || opened.uid !== process.getuid?.() || (opened.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
+		if (opened.size > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		const text = readFileSync(fd, "utf8");
+		if (Buffer.byteLength(text, "utf8") > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(text);
+		} catch {
+			return { status: "unavailable", reason: "corrupt" };
+		}
+		if (isRecord(parsed) && parsed.version !== 2) return { status: "unavailable", reason: "unsupported_version" };
+		if (!validateStore(parsed)) return { status: "unavailable", reason: "corrupt" };
+		return { status: "ok", value: parsed };
+	} catch (error) {
+		if (isMissingError(error)) return { status: "missing" };
+		return { status: "unavailable", reason: "io_error" };
+	} finally {
+		if (fd !== undefined) {
+			try { closeSync(fd); } catch {}
+		}
+	}
+}
+
+export function readEvidenceV2(file: string): StoreReadResult {
+	const paths = statePath(file);
+	if (!paths) return { status: "unavailable", reason: "unsafe_path" };
+	let directoryIdentity: StateDirectoryIdentity[];
+	try { directoryIdentity = verifyStateDirectory(paths.directory, false); } catch (error) {
+		return isMissingError(error) ? { status: "missing" } : { status: "unavailable", reason: "unsafe_path" };
+	}
+	const result = readStoreFile(paths.file);
+	try { verifyStateDirectory(paths.directory, false, directoryIdentity); } catch { return { status: "unavailable", reason: "unsafe_path" }; }
+	return result;
+}
+
+function releaseOwnedLock(lockFile: string, lockFd: number, token: string, directoryIdentity: StateDirectoryIdentity[]): void {
+	try {
+		verifyStateDirectory(path.dirname(lockFile), false, directoryIdentity);
+		const original = fstatSync(lockFd);
+		const current = lstatSync(lockFile);
+		if (!current.isFile() || current.isSymbolicLink() || current.nlink !== 1 || current.uid !== process.getuid?.() || (current.mode & 0o7777) !== 0o600 || current.dev !== original.dev || current.ino !== original.ino) return;
+		const checkFd = openSync(lockFile, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0));
+		try {
+			const opened = fstatSync(checkFd);
+			if (opened.dev !== original.dev || opened.ino !== original.ino || opened.nlink !== 1) return;
+			if (readFileSync(checkFd, "utf8") === token) {
+				verifyStateDirectory(path.dirname(lockFile), false, directoryIdentity);
+				const latest = lstatSync(lockFile);
+				if (latest.dev === original.dev && latest.ino === original.ino && latest.nlink === 1) unlinkSync(lockFile);
+			}
+		} finally {
+			closeSync(checkFd);
+		}
+	} catch {}
+}
+
+function writeStateAtomically(file: string, state: EvidenceV2, directoryIdentity: StateDirectoryIdentity[]): void {
+	const tmp = `${file}.${randomUUID()}.tmp`;
+	let fd: number | undefined;
+	let temporaryIdentity: { dev: number; ino: number } | undefined;
+	try {
+		verifyStateDirectory(path.dirname(file), false, directoryIdentity);
+		fd = openSync(tmp, "wx", 0o600);
+		const created = fstatSync(fd);
+		temporaryIdentity = { dev: created.dev, ino: created.ino };
+		verifyStateDirectory(path.dirname(file), false, directoryIdentity);
+		fchmodSync(fd, 0o600);
+		writeSync(fd, JSON.stringify(state), undefined, "utf8");
+		fsyncSync(fd);
+		closeSync(fd);
+		fd = undefined;
+		verifyStateDirectory(path.dirname(file), false, directoryIdentity);
+		const existing = readStoreFile(file);
+		if (existing.status === "unavailable") throw new Error("unsafe state target");
+		verifyStateDirectory(path.dirname(file), false, directoryIdentity);
+		const currentTemporary = lstatSync(tmp);
+		if (!currentTemporary.isFile() || currentTemporary.isSymbolicLink() || currentTemporary.dev !== temporaryIdentity.dev || currentTemporary.ino !== temporaryIdentity.ino || currentTemporary.nlink !== 1 || currentTemporary.uid !== process.getuid?.() || (currentTemporary.mode & 0o7777) !== 0o600) throw new Error("unsafe_path");
 		renameSync(tmp, file);
 	} catch (error) {
+		if (fd !== undefined) {
+			try { closeSync(fd); } catch {}
+		}
 		try {
-			unlinkSync(tmp);
+			verifyStateDirectory(path.dirname(file), false, directoryIdentity);
+			const currentTemporary = lstatSync(tmp);
+			if (temporaryIdentity && currentTemporary.isFile() && !currentTemporary.isSymbolicLink() && currentTemporary.dev === temporaryIdentity.dev && currentTemporary.ino === temporaryIdentity.ino && currentTemporary.nlink === 1) unlinkSync(tmp);
 		} catch {}
 		throw error;
 	}
 }
 
-/** Append an event to a fingerprint's ring; refresh head and updatedAt. Mutates `state`. */
-export function recordEvent(
-	state: MemoryState,
-	fp: string,
-	head: string,
-	event: MemoryEvent,
-	limits: { memoryMaxEvents: number },
-): void {
-	const record = (state.keys[fp] ??= { events: [], updatedAt: 0 });
-	record.events.push(event);
-	if (record.events.length > limits.memoryMaxEvents) {
-		record.events = record.events.slice(record.events.length - limits.memoryMaxEvents);
-	}
-	if (head) record.head = head;
-	record.updatedAt = event.t;
-}
-
-/** Enrich the most recent pre of a fingerprint with the decision that answered it. Mutates `state`. */
-export function enrichLastPre(state: MemoryState, fp: string, tier: string, conf: number): void {
-	const events = state.keys[fp]?.events;
-	if (!events) return;
-	for (let i = events.length - 1; i >= 0; i--) {
-		if (events[i].kind === "pre" && events[i].tier === undefined) {
-			events[i].tier = tier;
-			events[i].conf = conf;
-			return;
-		}
-	}
-}
-
-/** Enrich the most recent post of a fingerprint with the re-tier decision. Mutates `state`. */
-export function enrichLastPost(state: MemoryState, fp: string, tier: string, conf: number): void {
-	const events = state.keys[fp]?.events;
-	if (!events) return;
-	for (let i = events.length - 1; i >= 0; i--) {
-		if (events[i].kind === "post" && events[i].tier === undefined) {
-			events[i].tier = tier;
-			events[i].conf = conf;
-			return;
-		}
-	}
-}
-
 /**
- * G5 pairing: a post joins the most recent prior same-fingerprint pre that
- * carries a recommendation and is not already joined. Unmatched posts and
- * recommendation-less pres count in calibration totals only. Mutates both.
+ * Fresh synchronous store transaction. The only await is bounded lock retry;
+ * mutation callbacks must be synchronous and no snapshot escapes the lock.
  */
-export function joinPostToPre(state: MemoryState, fp: string, post: MemoryEvent): void {
-	const events = state.keys[fp]?.events;
-	if (!events) return;
-	for (let i = events.length - 1; i >= 0; i--) {
-		const candidate = events[i];
-		if (candidate.kind !== "pre" || candidate.joined || candidate.tier === undefined) continue;
-		if (candidate.t > post.t) continue;
-		candidate.joined = true;
-		post.preT = candidate.t;
+export async function transaction<T>(
+	file: string,
+	limits: StoreLimits,
+	mutate: (latest: EvidenceV2) => T,
+): Promise<StoreResult<T>> {
+	const paths = statePath(file);
+	if (!paths) return { status: "unavailable", reason: "unsafe_path" };
+	const lockToken = randomUUID();
+	const waitStarted = performance.now();
+	let lockFd: number | undefined;
+	let ownedDev = 0;
+	let ownedIno = 0;
+	let directoryIdentity: StateDirectoryIdentity[] | undefined;
+	try {
+		try {
+			directoryIdentity = verifyStateDirectory(paths.directory, true);
+		} catch {
+			return { status: "unavailable", reason: "unsafe_path" };
+		}
+		while (lockFd === undefined) {
+			try { verifyStateDirectory(paths.directory, false, directoryIdentity); } catch { return { status: "unavailable", reason: "unsafe_path" }; }
+			try {
+				lockFd = openSync(paths.lock, "wx", 0o600);
+				const owner = fstatSync(lockFd);
+				ownedDev = owner.dev;
+				ownedIno = owner.ino;
+				verifyStateDirectory(paths.directory, false, directoryIdentity);
+				fchmodSync(lockFd, 0o600);
+				writeSync(lockFd, lockToken, undefined, "utf8");
+				fsyncSync(lockFd);
+			} catch (error) {
+				if (lockFd !== undefined) {
+					let createdByThisTransaction = false;
+					try {
+						const owner = fstatSync(lockFd);
+						createdByThisTransaction = owner.dev === ownedDev && owner.ino === ownedIno;
+					} catch {}
+					try { closeSync(lockFd); } catch {}
+					lockFd = undefined;
+					if (createdByThisTransaction) {
+						try {
+							verifyStateDirectory(paths.directory, false, directoryIdentity);
+							const currentLock = lstatSync(paths.lock);
+						if (currentLock.isFile() && !currentLock.isSymbolicLink() && currentLock.nlink === 1 && currentLock.dev === ownedDev && currentLock.ino === ownedIno) unlinkSync(paths.lock);
+						} catch {}
+					}
+				}
+				if (!isRecord(error) || error.code !== "EEXIST") return { status: "unavailable", reason: "io_error" };
+				try {
+					verifyStateDirectory(paths.directory, false, directoryIdentity);
+					const lockInfo = lstatSync(paths.lock);
+					if (lockInfo.isSymbolicLink() || !lockInfo.isFile() || lockInfo.nlink !== 1 || lockInfo.uid !== process.getuid?.() || (lockInfo.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
+				} catch {
+					return { status: "unavailable", reason: "io_error" };
+				}
+				if (performance.now() - waitStarted >= MAX_LOCK_WAIT_MS) return { status: "unavailable", reason: "locked" };
+				await new Promise<void>(resolve => setTimeout(resolve, 5));
+			}
+		}
+		try { verifyStateDirectory(paths.directory, false, directoryIdentity); } catch { return { status: "unavailable", reason: "unsafe_path" }; }
+		const current = readStoreFile(paths.file);
+		try { verifyStateDirectory(paths.directory, false, directoryIdentity); } catch { return { status: "unavailable", reason: "unsafe_path" }; }
+		if (current.status === "unavailable") return current;
+		const latest = current.status === "missing" ? emptyEvidenceV2() : current.value;
+		let value: T;
+		try {
+			value = mutate(latest);
+			if (isRecord(value) && typeof value.then === "function") return { status: "unavailable", reason: "io_error" };
+		} catch {
+			return { status: "unavailable", reason: "io_error" };
+		}
+		if (!capStore(latest, limits)) return { status: "unavailable", reason: "oversized" };
+		if (encodedBytes(latest) > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		try {
+			verifyStateDirectory(paths.directory, false, directoryIdentity);
+			writeStateAtomically(paths.file, latest, directoryIdentity);
+		} catch {
+			return { status: "unavailable", reason: "io_error" };
+		}
+		return { status: "ok", value };
+	} finally {
+		if (lockFd !== undefined) {
+			try {
+				const stat = fstatSync(lockFd);
+				if (directoryIdentity && stat.dev === ownedDev && stat.ino === ownedIno) releaseOwnedLock(paths.lock, lockFd, lockToken, directoryIdentity);
+			} catch {}
+			try { closeSync(lockFd); } catch {}
+		}
+	}
+}
+
+export function taskRefFor(sessionId: string, toolCallId: string, task: Pick<TaskInput, "index">): TaskRef | null {
+	const ref = { sessionId, toolCallId, taskIndex: task.index };
+	return taskRefKey(ref) ? ref : null;
+}
+
+export interface TaskPreparation {
+	index: number;
+	state: "created" | "reused" | "conflict";
+	token: string | null;
+	advice: StoredAdvice | null;
+}
+
+function findTask(state: EvidenceV2, key: string): { groupKey: string; task: TaskRecord } | null {
+	for (const [groupKey, group] of Object.entries(state.groups)) {
+		const task = group.tasks[key];
+		if (task) return { groupKey, task };
+	}
+	return null;
+}
+
+function storedAdvice(advice: Advice): StoredAdvice {
+	if (advice.status === "no_decision") return { ...advice };
+	const result: StoredDecision = {
+		status: "decision",
+		tier: advice.tier,
+		confidence: advice.confidence,
+		confidenceKind: advice.confidenceKind,
+	};
+	if (advice.probabilities) result.probabilities = { ...advice.probabilities };
+	return result;
+}
+
+export async function prepareTaskRecords(
+	file: string,
+	limits: StoreLimits,
+	sessionId: string,
+	toolCallId: string,
+	tasks: TaskInput[],
+	now = Date.now(),
+): Promise<StoreResult<TaskPreparation[]>> {
+	const baseRef = { sessionId, toolCallId, taskIndex: 0 };
+	if (!taskRefKey(baseRef)) return { status: "unavailable", reason: "unsafe_path" };
+	return transaction(file, limits, state => {
+		const prepared: TaskPreparation[] = [];
+		for (const task of tasks) {
+			const ref: TaskRef = { sessionId, toolCallId, taskIndex: task.index };
+			const key = taskRefKey(ref);
+			if (!key) {
+				prepared.push({ index: task.index, state: "conflict", token: null, advice: null });
+				continue;
+			}
+			const existing = findTask(state, key);
+			if (existing) {
+				if (existing.task.fingerprint !== task.fingerprint ||
+					existing.task.requestedTier !== task.requestedTier || existing.task.callerId !== task.callerId ||
+					existing.task.conflicts.includes("identity_input_conflict")) {
+					appendConflict(existing.task.conflicts, "identity_input_conflict");
+					existing.task.updatedAt = now;
+					state.groups[existing.groupKey].updatedAt = now;
+					prepared.push({ index: task.index, state: "conflict", token: null, advice: null });
+				} else if (!task.complete) {
+					existing.task.requestToken = randomUUID();
+					existing.task.advice = { status: "no_decision", reason: "input_too_large" };
+					existing.task.updatedAt = now;
+					state.groups[existing.groupKey].updatedAt = now;
+					prepared.push({ index: task.index, state: "reused", token: existing.task.requestToken, advice: existing.task.advice });
+				} else {
+					prepared.push({ index: task.index, state: "reused", token: existing.task.requestToken, advice: existing.task.advice });
+				}
+				continue;
+			}
+			const token = randomUUID();
+			const advice: StoredAdvice | null = task.complete ? null : { status: "no_decision", reason: "input_too_large" };
+			const record: TaskRecord = {
+				ref,
+				fingerprint: task.fingerprint,
+				callerId: task.callerId,
+				requestedTier: task.requestedTier,
+				requestToken: token,
+				advice,
+				createdAt: now,
+				updatedAt: now,
+				launchDisposition: "not_observed",
+				jobKey: null,
+				conflicts: [],
+			};
+			const group = (state.groups[task.fingerprint] ??= { updatedAt: now, tasks: {} });
+			group.tasks[key] = record;
+			group.updatedAt = now;
+			prepared.push({ index: task.index, state: "created", token, advice });
+		}
+		return prepared;
+	});
+}
+
+export async function updateTaskAdvice(
+	file: string,
+	limits: StoreLimits,
+	ref: TaskRef,
+	token: string,
+	advice: Advice,
+	now = Date.now(),
+): Promise<StoreResult<boolean>> {
+	const key = taskRefKey(ref);
+	if (!key) return { status: "unavailable", reason: "unsafe_path" };
+	return transaction(file, limits, state => {
+		const found = findTask(state, key);
+		if (!found || found.task.requestToken !== token || found.task.conflicts.includes("identity_input_conflict")) return false;
+		found.task.advice = storedAdvice(advice);
+		found.task.updatedAt = now;
+		state.groups[found.groupKey].updatedAt = now;
+		return true;
+	});
+}
+
+export async function markInvocationBlocked(
+	file: string,
+	limits: StoreLimits,
+	sessionId: string,
+	toolCallId: string,
+	now = Date.now(),
+): Promise<StoreResult<number>> {
+	return transaction(file, limits, state => {
+		let count = 0;
+		for (const group of Object.values(state.groups)) {
+			for (const task of Object.values(group.tasks)) {
+				if (task.ref.sessionId !== sessionId || task.ref.toolCallId !== toolCallId) continue;
+				task.launchDisposition = "blocked";
+				task.updatedAt = now;
+				group.updatedAt = now;
+				count++;
+			}
+		}
+		return count;
+	});
+}
+
+function associateTaskWithJob(state: EvidenceV2, task: TaskRecord, taskKey: string, ref: JobRef): void {
+	const key = jobRefKey(ref);
+	if (!key) return;
+	const job = state.jobs[key];
+	if (job?.conflicts.includes("launch_mapping_evicted")) {
+		appendConflict(task.conflicts, "stale_job_mapping");
 		return;
 	}
+	if (task.jobKey && task.jobKey !== key) {
+		appendConflict(task.conflicts, "multiple_job_associations");
+		return;
+	}
+	task.jobKey = key;
+	if (job) {
+		if (job.taskKey && job.taskKey !== taskKey) appendConflict(job.conflicts, "multiple_task_associations");
+		else job.taskKey = taskKey;
+	}
 }
 
-/** Bounded assignment head; empty string when HEAD_CHARS=0 (fingerprints only). */
-export function memoryHead(text: string, cfg: { memoryHeadChars: number }): string {
-	return cfg.memoryHeadChars > 0 ? text.slice(0, cfg.memoryHeadChars) : "";
+export async function observeTaskLaunch(
+	file: string,
+	limits: StoreLimits,
+	sessionId: string,
+	toolCallId: string,
+	invocationObserved: boolean,
+	singletonTaskIndex: number | null,
+	job: JobRef | null,
+	now = Date.now(),
+): Promise<StoreResult<number>> {
+	return transaction(file, limits, state => {
+		let count = 0;
+		for (const [groupKey, group] of Object.entries(state.groups)) {
+			for (const [key, task] of Object.entries(group.tasks)) {
+				if (task.ref.sessionId !== sessionId || task.ref.toolCallId !== toolCallId) continue;
+				if (task.launchDisposition === "blocked") continue;
+				if (task.launchDisposition === "observed") {
+					if (singletonTaskIndex === task.ref.taskIndex && job) associateTaskWithJob(state, task, key, job);
+					continue;
+				}
+				if (invocationObserved) {
+					task.launchDisposition = "observed";
+					if (singletonTaskIndex === task.ref.taskIndex && job) associateTaskWithJob(state, task, key, job);
+				} else {
+					task.launchDisposition = "not_observed";
+				}
+				task.updatedAt = now;
+				group.updatedAt = now;
+				count++;
+			}
+		}
+		return count;
+	});
 }
 
-/** Number of recorded outcomes for a fingerprint (drives the `· n prior` suffix). */
-export function priorPostCount(record: MemoryRecord | undefined): number {
-	if (!record || !Array.isArray(record.events)) return 0;
-	return record.events.filter(event => event.kind === "post").length;
+export interface TerminalObservation {
+	status: TerminalStatus;
+	childId?: string;
+	durationMs?: number;
+	requestedModel?: string;
+	effectiveModel?: string;
 }
 
-/**
- * Prepend a bounded evidence block (hard cap 200 chars) so the decision model
- * grounds its tier recommendation in observed prior outcomes of the IDENTICAL
- * assignment. Prepended (not appended) so it survives the systemone wire
- * format's 1900-char state slice. Pass-through when there is no evidence.
- */
-export function withEvidence(text: string, record: MemoryRecord | undefined): string {
-	const posts = (record?.events ?? []).filter(event => event.kind === "post");
-	if (posts.length === 0) return text;
-	const outcomes = posts
-		.map(post => {
-			const duration = typeof post.durationMs === "number" && Number.isFinite(post.durationMs) && post.durationMs > 0
-				? ` ${Math.round(post.durationMs / 1000)}s`
-				: "";
-			return `${post.tier ?? "?"}→${post.error ? "error" : "ok"}${duration}`;
-		})
-		.join(", ");
-	const lastReTier = [...posts].reverse().find(post => post.tier !== undefined);
-	const block =
-		`prior outcomes (n=${posts.length}): [${outcomes}]` +
-		(lastReTier ? ` last re-tier: ${lastReTier.tier}(${(lastReTier.conf ?? 0).toFixed(2)})` : "");
-	return `${block.slice(0, 200)}\n${text}`;
+function addDistinct<T>(values: T[], value: T, limit: number): void {
+	if (!values.includes(value) && values.length < limit) values.push(value);
+}
+
+function boundedModel(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const model = value.trim();
+	if (!model || model.length > 128 || /[\u0000-\u001f\u007f]/.test(model)) return undefined;
+	return model;
+}
+
+function findMappedTasks(state: EvidenceV2, key: string): string[] {
+	const matches: string[] = [];
+	for (const group of Object.values(state.groups)) {
+		for (const [taskKey, task] of Object.entries(group.tasks)) if (task.jobKey === key) matches.push(taskKey);
+	}
+	return matches;
+}
+
+function applyTerminal(state: EvidenceV2, ref: JobRef, observation: TerminalObservation, now: number): void {
+	const key = jobRefKey(ref)!;
+	let job = state.jobs[key];
+	if (!job) {
+		const firstDuration = typeof observation.durationMs === "number" && Number.isFinite(observation.durationMs) && observation.durationMs > 0
+			? observation.durationMs : undefined;
+		const requestedModel = boundedModel(observation.requestedModel);
+		const effectiveModel = boundedModel(observation.effectiveModel);
+		job = {
+			ref,
+			...(observation.childId && boundedIdentity(observation.childId) ? { childId: boundedIdentity(observation.childId)! } : {}),
+			status: observation.status,
+			statusObservations: [observation.status],
+			...(firstDuration === undefined ? {} : { durationMs: firstDuration }),
+			durationObservations: firstDuration === undefined ? [] : [firstDuration],
+			...(requestedModel ? { requestedModel } : {}),
+			requestedModelObservations: requestedModel ? [requestedModel] : [],
+			...(effectiveModel ? { effectiveModel } : {}),
+			effectiveModelObservations: effectiveModel ? [effectiveModel] : [],
+			allocatedChildIds: observation.childId && boundedIdentity(observation.childId) ? [boundedIdentity(observation.childId)!] : [],
+			actualTier: null,
+			observedAt: now,
+			taskKey: null,
+			conflicts: [],
+		};
+		const mappings = findMappedTasks(state, key);
+		if (mappings.length === 1) job.taskKey = mappings[0];
+		else if (mappings.length > 1) appendConflict(job.conflicts, "multiple_task_associations");
+		state.jobs[key] = job;
+		return;
+	}
+	addDistinct(job.statusObservations, observation.status, 3);
+	if (job.statusObservations.length > 1) appendConflict(job.conflicts, "status_conflict");
+	const duration = observation.durationMs;
+	if (typeof duration === "number" && Number.isFinite(duration) && duration > 0) {
+		addDistinct(job.durationObservations, duration, 4);
+		if (job.durationObservations.length > 1) appendConflict(job.conflicts, "duration_conflict");
+		if (job.durationMs === undefined) job.durationMs = duration;
+	}
+	const requestedModel = boundedModel(observation.requestedModel);
+	if (requestedModel) {
+		addDistinct(job.requestedModelObservations, requestedModel, 4);
+		if (job.requestedModelObservations.length > 1) appendConflict(job.conflicts, "requested_model_conflict");
+		if (job.requestedModel === undefined) job.requestedModel = requestedModel;
+	}
+	const effectiveModel = boundedModel(observation.effectiveModel);
+	if (effectiveModel) {
+		addDistinct(job.effectiveModelObservations, effectiveModel, 4);
+		if (job.effectiveModelObservations.length > 1) appendConflict(job.conflicts, "effective_model_conflict");
+		if (job.effectiveModel === undefined) job.effectiveModel = effectiveModel;
+	}
+	const childId = boundedIdentity(observation.childId);
+	if (childId) {
+		addDistinct(job.allocatedChildIds, childId, 4);
+		if (job.allocatedChildIds.length > 1) appendConflict(job.conflicts, "child_id_conflict");
+		if (job.childId === undefined) job.childId = childId;
+	}
+	const mappings = findMappedTasks(state, key);
+	if (mappings.length > 1) appendConflict(job.conflicts, "multiple_task_associations");
+	else if (mappings.length === 1) {
+		const mapped = mappings[0];
+		if (job.taskKey && job.taskKey !== mapped) appendConflict(job.conflicts, "multiple_task_associations");
+		else if (!job.conflicts.includes("launch_mapping_evicted")) job.taskKey = mapped;
+	}
+}
+
+export async function observeTerminalJob(
+	file: string,
+	limits: StoreLimits,
+	ref: JobRef,
+	observation: TerminalObservation,
+	now = Date.now(),
+): Promise<StoreResult<void>> {
+	if (!jobRefKey(ref) || !["completed", "failed", "cancelled"].includes(observation.status)) {
+		return { status: "unavailable", reason: "unsafe_path" };
+	}
+	return transaction(file, limits, state => {
+		applyTerminal(state, ref, observation, now);
+	});
 }
 
 export interface CalibrationSummary {
-	delegations: number;
-	pairs: {
-		total: number;
-		withRequestedTier: number;
-		agreed: number;
-		agreementRate: number | null;
-		byTier: Record<string, { count: number; errors: number; avgDurationMs: number | null }>;
+	window: "retained_v2_metadata";
+	retainedGroups: number;
+	retainedTaskRecords: number;
+	conflictedTaskRecords: number;
+	advice: { decisions: number; noDecisions: Record<string, number> };
+	launch: { observed: number; blocked: number; notObserved: number };
+	agreement: { agree: number; denominator: number; rate: number | null };
+	terminalJobs: {
+		count: number;
+		joined: number;
+		unjoined: number;
+		conflicted: number;
+		byStatus: Record<TerminalStatus, number>;
+		byRecommendation: Record<string, { jobs: number; byStatus: Record<TerminalStatus, number>; durationMs: { sum: number; measured: number; average: number | null } }>;
+		effectiveModel: { known: number; unknown: number };
+		requestedModel: { known: number; unknown: number };
+		durationMs: { sum: number; measured: number; average: number | null };
+		actualTier: null;
+		quality: null;
 	};
-	reTier: Record<string, number>;
-	totalsOnly: { unmatchedPosts: number; recommendationlessPres: number };
+	coverage: { unknownIdentityObservationsNotRetained: true; unobservedTerminalsOutsideCoverage: true };
 }
 
-/** Pure function over the store: predicted-tier-vs-outcome statistics for `jev_advise report="calibration"`. */
-export function calibrationSummary(state: MemoryState): { json: CalibrationSummary; text: string } {
+function emptyStatusCounts(): Record<TerminalStatus, number> {
+	return { completed: 0, failed: 0, cancelled: 0 };
+}
+
+function emptyTierStats() {
+	return { jobs: 0, byStatus: emptyStatusCounts(), durationMs: { sum: 0, measured: 0, average: null as number | null } };
+}
+
+export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummary; text: string } {
+	const taskRecords = Object.values(state.groups).flatMap(group => Object.entries(group.tasks).map(([key, task]) => ({ key, task })));
+	const byTaskKey = new Map(taskRecords.map(entry => [entry.key, entry.task]));
+	const invocationLaunches = new Map<string, LaunchDisposition>();
 	const summary: CalibrationSummary = {
-		delegations: 0,
-		pairs: { total: 0, withRequestedTier: 0, agreed: 0, agreementRate: null, byTier: {} },
-		reTier: {},
-		totalsOnly: { unmatchedPosts: 0, recommendationlessPres: 0 },
+		window: "retained_v2_metadata",
+		retainedGroups: Object.keys(state.groups).length,
+		retainedTaskRecords: taskRecords.length,
+		conflictedTaskRecords: taskRecords.filter(entry => entry.task.conflicts.length > 0).length,
+		advice: { decisions: 0, noDecisions: {} },
+		launch: { observed: 0, blocked: 0, notObserved: 0 },
+		agreement: { agree: 0, denominator: 0, rate: null },
+		terminalJobs: {
+			count: Object.keys(state.jobs).length,
+			joined: 0,
+			unjoined: 0,
+			conflicted: 0,
+			byStatus: emptyStatusCounts(),
+			byRecommendation: {},
+			effectiveModel: { known: 0, unknown: 0 },
+			requestedModel: { known: 0, unknown: 0 },
+			durationMs: { sum: 0, measured: 0, average: null },
+			actualTier: null,
+			quality: null,
+		},
+		coverage: { unknownIdentityObservationsNotRetained: true, unobservedTerminalsOutsideCoverage: true },
 	};
-	for (const record of Object.values(state.keys)) {
-		for (const event of record.events ?? []) {
-			if (event.kind !== "pre") continue;
-			summary.delegations += 1;
-			const post = (record.events ?? []).find(candidate => candidate.kind === "post" && candidate.preT === event.t);
-			if (event.tier === undefined || !post) {
-				if (event.tier === undefined) summary.totalsOnly.recommendationlessPres += 1;
-				continue;
+	for (const { task } of taskRecords) {
+		if (task.advice?.status === "decision") {
+			summary.advice.decisions++;
+			if (task.requestedTier !== null && task.conflicts.length === 0) {
+				summary.agreement.denominator++;
+				if (task.requestedTier === task.advice.tier) summary.agreement.agree++;
 			}
-			summary.pairs.total += 1;
-			if (event.requested?.length) {
-				summary.pairs.withRequestedTier += 1;
-				if (event.requested.includes(event.tier)) summary.pairs.agreed += 1;
-			}
-			const tier = summary.pairs.byTier[event.tier] ?? (summary.pairs.byTier[event.tier] = { count: 0, errors: 0, avgDurationMs: null });
-			tier.count += 1;
-			if (post.error) tier.errors += 1;
-			if (typeof post.durationMs === "number" && Number.isFinite(post.durationMs) && post.durationMs > 0) {
-				tier.avgDurationMs = (tier.avgDurationMs ?? 0) + post.durationMs;
-			}
+		} else if (task.advice?.status === "no_decision") {
+			const reason = task.advice.reason;
+			summary.advice.noDecisions[reason] = (summary.advice.noDecisions[reason] ?? 0) + 1;
 		}
-		for (const event of record.events ?? []) {
-			if (event.kind !== "post") continue;
-			if (event.tier !== undefined) summary.reTier[event.tier] = (summary.reTier[event.tier] ?? 0) + 1;
-			if (event.preT === undefined) summary.totalsOnly.unmatchedPosts += 1;
+		const invocationKey = JSON.stringify([task.ref.sessionId, task.ref.toolCallId]);
+		const prior = invocationLaunches.get(invocationKey);
+		if (prior !== "blocked" && (task.launchDisposition === "blocked" || prior === undefined || task.launchDisposition === "observed")) {
+			invocationLaunches.set(invocationKey, task.launchDisposition);
 		}
 	}
-	for (const tier of Object.values(summary.pairs.byTier)) {
-		if (tier.avgDurationMs !== null) tier.avgDurationMs = Math.round(tier.avgDurationMs / tier.count);
+	for (const disposition of invocationLaunches.values()) {
+		if (disposition === "observed") summary.launch.observed++;
+		else if (disposition === "blocked") summary.launch.blocked++;
+		else summary.launch.notObserved++;
 	}
-	summary.pairs.agreementRate = summary.pairs.withRequestedTier > 0 ? summary.pairs.agreed / summary.pairs.withRequestedTier : null;
-	const lines = [
-		`jev-advisor calibration (local store)`,
-		`delegations recorded: ${summary.delegations}`,
-		`matched pairs: ${summary.pairs.total}` +
-			(summary.pairs.agreementRate !== null
-				? `, requested-vs-recommended agreement: ${summary.pairs.agreed}/${summary.pairs.withRequestedTier} (${Math.round(summary.pairs.agreementRate * 100)}%)`
-				: ""),
+	summary.agreement.rate = summary.agreement.denominator ? summary.agreement.agree / summary.agreement.denominator : null;
+	for (const job of Object.values(state.jobs)) {
+		const task = job.taskKey ? byTaskKey.get(job.taskKey) : undefined;
+		const joined = task !== undefined && task.jobKey === jobRefKey(job.ref) &&
+			!job.conflicts.includes("multiple_task_associations") && !job.conflicts.includes("launch_mapping_evicted") &&
+			task.conflicts.length === 0;
+		if (joined) summary.terminalJobs.joined++;
+		else summary.terminalJobs.unjoined++;
+		if (job.conflicts.length) summary.terminalJobs.conflicted++;
+		const statusConflict = job.conflicts.includes("status_conflict");
+		if (!statusConflict) summary.terminalJobs.byStatus[job.status]++;
+		const effectiveConflict = job.conflicts.includes("effective_model_conflict");
+		if (job.effectiveModel && !effectiveConflict) summary.terminalJobs.effectiveModel.known++;
+		else summary.terminalJobs.effectiveModel.unknown++;
+		const requestedConflict = job.conflicts.includes("requested_model_conflict");
+		if (job.requestedModel && !requestedConflict) summary.terminalJobs.requestedModel.known++;
+		else summary.terminalJobs.requestedModel.unknown++;
+		const durationConflict = job.conflicts.includes("duration_conflict");
+		if (!durationConflict && job.durationMs !== undefined) {
+			summary.terminalJobs.durationMs.sum += job.durationMs;
+			summary.terminalJobs.durationMs.measured++;
+		}
+		if (!joined || !task?.advice || task.advice.status !== "decision") continue;
+		const tier = task.advice.tier;
+		const stats = (summary.terminalJobs.byRecommendation[tier] ??= emptyTierStats());
+		stats.jobs++;
+		if (!statusConflict) stats.byStatus[job.status]++;
+		if (!durationConflict && job.durationMs !== undefined) {
+			stats.durationMs.sum += job.durationMs;
+			stats.durationMs.measured++;
+		}
+	}
+	const totalDuration = summary.terminalJobs.durationMs;
+	if (totalDuration.measured) totalDuration.average = totalDuration.sum / totalDuration.measured;
+	for (const stats of Object.values(summary.terminalJobs.byRecommendation)) {
+		if (stats.durationMs.measured) stats.durationMs.average = stats.durationMs.sum / stats.durationMs.measured;
+	}
+	const textLines = [
+		"jev-advisor retained v2 coverage report (metadata only; not quality or correctness).",
+		`retained task records: ${summary.retainedTaskRecords} across ${summary.retainedGroups} semantic groups; conflicted task records: ${summary.conflictedTaskRecords}; decisions: ${summary.advice.decisions}; no-decisions: ${JSON.stringify(summary.advice.noDecisions)}.`,
+		`task-call launch invocations: ${summary.launch.observed} observed, ${summary.launch.blocked} blocked, ${summary.launch.notObserved} not observed; observations do not attribute batch children or establish terminal outcomes.`,
+		`requested/recommended agreement: ${summary.agreement.agree}/${summary.agreement.denominator}${summary.agreement.rate === null ? " (no comparable records)" : ` (${Math.round(summary.agreement.rate * 100)}%; not correctness)`}.`,
+		`terminal jobs: ${summary.terminalJobs.count}, joined by exact session+job mapping: ${summary.terminalJobs.joined}, unjoined: ${summary.terminalJobs.unjoined}, conflicted: ${summary.terminalJobs.conflicted}; status counts exclude conflicts: ${JSON.stringify(summary.terminalJobs.byStatus)}.`,
+		`duration: ${totalDuration.measured ? `${totalDuration.sum} ms across ${totalDuration.measured} measured jobs; average ${totalDuration.average} ms` : "unknown (no positive non-conflicted measurements)"}; effective model known/unknown ${summary.terminalJobs.effectiveModel.known}/${summary.terminalJobs.effectiveModel.unknown}; requested model known/unknown ${summary.terminalJobs.requestedModel.known}/${summary.terminalJobs.requestedModel.unknown}.`,
+		"Actual tier and task quality are unknown. Missing-identity observations are not retained, and unobserved terminals are outside coverage. This report describes only the bounded retained window.",
 	];
-	for (const [tier, stats] of Object.entries(summary.pairs.byTier)) {
-		lines.push(
-			`  ${tier}: ${stats.count} run${stats.count === 1 ? "" : "s"}, ${stats.errors} error${stats.errors === 1 ? "" : "s"}` +
-				(stats.avgDurationMs !== null ? `, avg total subagent time ${Math.round(stats.avgDurationMs / 1000)}s` : ""),
-		);
+	for (const [tier, stats] of Object.entries(summary.terminalJobs.byRecommendation)) {
+		const duration = stats.durationMs.measured
+			? `${stats.durationMs.sum} ms across ${stats.durationMs.measured} measured jobs; average ${stats.durationMs.average} ms`
+			: "duration unknown";
+		textLines.push(`${tier} recommendation (exactly joined): ${stats.jobs} jobs, statuses ${JSON.stringify(stats.byStatus)}, ${duration}.`);
 	}
-	const reTierEntries = Object.entries(summary.reTier);
-	if (reTierEntries.length) lines.push(`re-tier advice: ${reTierEntries.map(([tier, n]) => `${tier}×${n}`).join(", ")}`);
-	lines.push(
-		`totals only: ${summary.totalsOnly.unmatchedPosts} unmatched outcome${summary.totalsOnly.unmatchedPosts === 1 ? "" : "s"}, ${summary.totalsOnly.recommendationlessPres} advisory call${summary.totalsOnly.recommendationlessPres === 1 ? "" : "s"} without a recommendation`,
-	);
-	return { json: summary, text: lines.join("\n") };
+	const text = textLines.join("\n");
+	return { json: summary, text };
 }
 
-export interface AssignmentExtraction {
-	text: string;
-	/** Per-task tiers explicitly requested by the caller ("fast"|"balanced"|"strong"). */
-	requestedTiers: string[];
-}
-
-/**
- * Flatten a `task` tool payload into advisory text. The v0.17.7 task schema
- * nests the actual work under `tasks[]` ({id, description, assignment, tier});
- * the top level only carries `agent`, `context`, `spawnPlan`, `schema`. Tiers
- * are returned separately so enforce mode can compare requested vs recommended
- * instead of blocking on confidence alone.
- */
-export function extractAssignment(input: unknown, maxChars = DEFAULTS.maxAssignmentChars): AssignmentExtraction | null {
-	if (!input || typeof input !== "object") return null;
-	const record = input as Record<string, unknown>;
-	const parts: string[] = [];
-	const requestedTiers: string[] = [];
-	const role = typeof record.agent === "string" ? record.agent.trim() : "";
-	if (role) parts.push(`role: ${role}`);
-	const sharedContext = typeof record.context === "string" ? record.context.trim() : "";
-	const tasks = Array.isArray(record.tasks) ? record.tasks : [];
-	let included = 0;
-	let skipped = 0;
-	for (const entry of tasks) {
-		if (!entry || typeof entry !== "object") {
-			skipped += 1;
-			continue;
-		}
-		const task = entry as Record<string, unknown>;
-		const id = typeof task.id === "string" && task.id.trim() ? task.id.trim() : "";
-		const description = typeof task.description === "string" ? task.description.trim() : "";
-		const assignment = typeof task.assignment === "string" ? task.assignment.trim() : "";
-		const tier = typeof task.tier === "string" ? task.tier.trim().toLowerCase() : "";
-		if (TIERS.includes(tier as Tier)) requestedTiers.push(tier);
-		if (!id && !description && !assignment) {
-			skipped += 1;
-			continue;
-		}
-		included += 1;
-		const head = `#${id || `task${included}`}${tier ? ` [requested tier: ${tier}]` : ""}`;
-		const label = description ? `${head} ${description}` : head;
-		parts.push(assignment ? `${label}\n${assignment}` : label);
-	}
-	if (skipped > 0) parts.push(`(${skipped} unparseable task entr${skipped === 1 ? "y" : "ies"} skipped)`);
-	if (sharedContext) parts.push(`shared context: ${sharedContext}`);
-	if (parts.length === 0) {
-		// Unexpected payload shape: bounded flat fallback so the advisor sees
-		// something honest about the call instead of silently advising on air.
-		const flat = Object.entries(record)
-			.filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean")
-			.map(([k, v]) => `${k}: ${String(v)}`)
-			.join(" | ");
-		if (!flat) return null;
-		parts.push(flat);
-	}
-	const joined = parts.join("\n\n").slice(0, maxChars);
-	return joined.trim() ? { text: joined, requestedTiers } : null;
-}
-
-export function parseDecision(raw: string): Decision | null {
+export function readSessionId(ctx: unknown): string | null {
+	if (!isRecord(ctx) || !isRecord(ctx.sessionManager) || typeof ctx.sessionManager.getSessionId !== "function") return null;
 	try {
-		let text = String(raw ?? "").trim();
-		const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-		if (fence) text = fence[1].trim();
-		const start = text.indexOf("{");
-		const end = text.lastIndexOf("}");
-		if (start === -1 || end === -1 || end <= start) return null;
-		const parsed = JSON.parse(text.slice(start, end + 1)) as Record<string, unknown>;
-		const tier = String(parsed.tier ?? "")
-			.trim()
-			.toLowerCase();
-		if (!TIERS.includes(tier as Tier)) return null;
-		const confidence = Math.max(0, Math.min(1, Number(parsed.confidence)));
-		if (!Number.isFinite(confidence)) return null;
-		const rationale = typeof parsed.rationale === "string" ? parsed.rationale.slice(0, 200) : undefined;
-		return { tier, confidence, rationale };
+		return boundedIdentity(ctx.sessionManager.getSessionId.call(ctx.sessionManager));
 	} catch {
 		return null;
 	}
 }
 
-export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
-
-/** Single decision code path for every surface: only the fetch implementation differs. */
-export async function askDecisionModel(
-	cfg: AdvisorConfig,
-	assignment: string,
-	fetchImpl: FetchLike | undefined,
-	signal?: AbortSignal,
-): Promise<Decision | null> {
-	if (typeof fetchImpl !== "function") return null;
-	const provider = PROVIDERS[cfg.provider] ?? (cfg.endpoint ? { endpoint: cfg.endpoint, style: "openai-chat" as const } : undefined);
-	if (!provider) return null;
-	// Egress gate — the endpoint origin must be allowlisted, no exceptions.
-	const url = cfg.endpoint || provider.endpoint;
-	if (!isAllowedEndpoint(url)) return null;
-	const style = REQUEST_STYLES[provider.style];
-	const wire = style.request({ model: cfg.model, apiKey: cfg.apiKey }, assignment);
-	const timeoutSignal = AbortSignal.timeout(cfg.timeoutMs);
-	const composedSignal =
-		signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-	const headers =
-		new URL(url).origin === "https://openrouter.ai" ? { ...wire.headers, ...ATTRIBUTION_HEADERS } : wire.headers;
-	const response = await fetchImpl(url, {
-		method: "POST",
-		// The origin gate covers exactly this URL; redirects would re-send the
-		// assignment body off-origin, so refuse them instead of following.
-		redirect: "error",
-		headers,
-		body: wire.body,
-		signal: composedSignal,
-	});
-	// Transport-level failure: surface the HTTP status so operators can tell a
-	// bad key (401) from a provider outage (5xx). Parse-level failures still
-	// return null ("no decision") to keep the advisor silent-but-open.
-	if (!response?.ok) throw new Error(`provider returned HTTP ${response?.status ?? "unknown"}`);
-	return parseDecision(style.parse(await response.json()));
+export function noDecision(reason: NoDecisionReason, httpStatus?: number): Advice {
+	return httpStatus === undefined ? { status: "no_decision", reason } : { status: "no_decision", reason, httpStatus };
 }
 
-export function formatSummary(decision: Decision): string {
-	const rationale = decision.rationale ? ` — ${decision.rationale}` : "";
-	return `jev-advisor: tier=${decision.tier} confidence=${decision.confidence.toFixed(2)}${rationale}`;
+function parseProbabilityMap(value: unknown): Record<Tier, number> | null {
+	if (!isRecord(value) || Object.keys(value).length !== TIERS.length || !TIERS.every(tier => Object.prototype.hasOwnProperty.call(value, tier))) return null;
+	const probabilities = {} as Record<Tier, number>;
+	for (const tier of TIERS) {
+		const probability = value[tier];
+		if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) return null;
+		probabilities[tier] = probability;
+	}
+	const sum = TIERS.reduce((total, tier) => total + probabilities[tier], 0);
+	return Math.abs(sum - 1) <= 0.001 ? probabilities : null;
+}
+
+/** Strict JSON parser. It accepts a whole JSON document or one complete JSON fence, never a partial object. */
+export function parseDecision(raw: string, confidenceKind: ConfidenceKind = "self_reported"): Advice {
+	try {
+		let text = String(raw ?? "").trim();
+		const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+		if (fence) text = fence[1].trim();
+		if (!text.startsWith("{") || !text.endsWith("}")) return noDecision("invalid_response");
+		const parsed: unknown = JSON.parse(text);
+		if (!isRecord(parsed) || !hasOnlyKeys(parsed, ["tier", "confidence", "probabilities", "rationale"])) return noDecision("invalid_response");
+		const tier = validTier(parsed.tier);
+		if (!tier || typeof parsed.confidence !== "number" || !Number.isFinite(parsed.confidence) || parsed.confidence < 0 || parsed.confidence > 1) {
+			return noDecision("invalid_response");
+		}
+		let probabilities: Record<Tier, number> | undefined;
+		if (Object.prototype.hasOwnProperty.call(parsed, "probabilities")) {
+			const candidate = parseProbabilityMap(parsed.probabilities);
+			if (!candidate) return noDecision("invalid_response");
+			probabilities = candidate;
+		}
+		if (Object.prototype.hasOwnProperty.call(parsed, "rationale") && typeof parsed.rationale !== "string") return noDecision("invalid_response");
+		const rationale = typeof parsed.rationale === "string" ? parsed.rationale.slice(0, 120) : undefined;
+		return {
+			status: "decision",
+			tier,
+			confidence: parsed.confidence,
+			...(probabilities ? { probabilities } : {}),
+			confidenceKind,
+			...(rationale ? { rationale } : {}),
+		};
+	} catch {
+		return noDecision("invalid_response");
+	}
+}
+
+export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
+
+function extractChatFinal(data: unknown): string | null {
+	if (!isRecord(data) || !Array.isArray(data.choices)) return null;
+	const first = data.choices[0];
+	if (!isRecord(first) || first.error !== undefined) return null;
+	const message = isRecord(first.message) ? first.message : null;
+	if (!message) return null;
+	const content = message.content;
+	if (typeof content === "string") return content.trim() ? content : null;
+	if (Array.isArray(content)) {
+		const chunks = content.map(part => isRecord(part) && typeof part.text === "string" ? part.text : "");
+		const joined = chunks.join("");
+		return joined.trim() ? joined : null;
+	}
+	return null;
+}
+
+function extractSystemoneFinal(data: unknown): string | null {
+	if (!isRecord(data) || !isRecord(data.answers) || !isRecord(data.answers.tier)) return null;
+	const answer = data.answers.tier;
+	if (typeof answer.choice !== "string" || typeof answer.confidence !== "number") return null;
+	const payload: Record<string, unknown> = { tier: answer.choice, confidence: answer.confidence };
+	if (Object.prototype.hasOwnProperty.call(answer, "probabilities")) payload.probabilities = answer.probabilities;
+	if (Object.prototype.hasOwnProperty.call(answer, "rationale")) payload.rationale = answer.rationale;
+	return JSON.stringify(payload);
+}
+
+async function readBoundedResponse(response: Response): Promise<string | null> {
+	const length = response.headers?.get?.("content-length");
+	if (length && Number.isFinite(Number(length)) && Number(length) > MAX_RESPONSE_BYTES) return null;
+	if (!response.body || typeof response.body.getReader !== "function") return null;
+	const reader = response.body.getReader();
+	const chunks: Uint8Array[] = [];
+	let size = 0;
+	try {
+		while (true) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			if (!value) continue;
+			size += value.byteLength;
+			if (size > MAX_RESPONSE_BYTES) {
+				try { await reader.cancel(); } catch {}
+				return null;
+			}
+			chunks.push(value);
+		}
+	} finally {
+		try { reader.releaseLock(); } catch {}
+	}
+	const bytes = new Uint8Array(size);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return new TextDecoder().decode(bytes);
+}
+
+function timeoutDecision(signal: AbortSignal | undefined, timeoutSignal: AbortSignal): Advice {
+	if (signal?.aborted) return noDecision("aborted");
+	if (timeoutSignal.aborted) return noDecision("timeout");
+	return noDecision("provider_error");
+}
+
+export async function askDecisionModel(
+	cfg: AdvisorConfig,
+	task: TaskInput,
+	fetchImpl: FetchLike | undefined,
+	signal?: AbortSignal,
+	timeoutLimitMs = cfg.timeoutMs,
+): Promise<Advice> {
+	if (!task.complete) return noDecision("input_too_large");
+	if (typeof fetchImpl !== "function") return noDecision("provider_error");
+	if (cfg.provider === "off") return noDecision("disabled");
+	if (!isConfigured(cfg)) return noDecision("unconfigured");
+	const provider = PROVIDERS[cfg.provider] ?? (cfg.endpoint ? { endpoint: cfg.endpoint, style: "openai-chat" as const } : undefined);
+	if (!provider) return noDecision("unconfigured");
+	const url = cfg.endpoint || provider.endpoint;
+	if (!isAllowedEndpoint(url)) return noDecision("invalid_endpoint");
+	const style = REQUEST_STYLES[provider.style];
+	const timeoutMs = Math.max(1, Math.min(INVOCATION_BUDGET_MS, cfg.timeoutMs, timeoutLimitMs));
+	const timeoutSignal = AbortSignal.timeout(timeoutMs);
+	if (signal?.aborted) return noDecision("aborted");
+	const composedSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+	const wire = style.request({ model: cfg.model, apiKey: cfg.apiKey }, task.prompt);
+	const headers = new URL(url).origin === "https://openrouter.ai" ? { ...wire.headers, ...ATTRIBUTION_HEADERS } : wire.headers;
+	try {
+		const response = await fetchImpl(url, {
+			method: "POST",
+			redirect: "error",
+			headers,
+			body: wire.body,
+			signal: composedSignal,
+		});
+		if (!response?.ok) return noDecision("provider_error", Number.isInteger(response?.status) ? response.status : undefined);
+		const text = await readBoundedResponse(response);
+		if (text === null) return noDecision("invalid_response");
+		let data: unknown;
+		try { data = JSON.parse(text); } catch { return noDecision("invalid_response"); }
+		const final = provider.style === "systemone" ? extractSystemoneFinal(data) : extractChatFinal(data);
+		if (!final) return noDecision("invalid_response");
+		return parseDecision(final, provider.style === "systemone" ? "provider_choice" : "self_reported");
+	} catch {
+		return timeoutDecision(signal, timeoutSignal);
+	}
+}
+
+export function formatSummary(advice: Advice): string {
+	if (advice.status === "no_decision") return `jev-advisor: no decision (${advice.reason})`;
+	return `jev-advisor: tier=${advice.tier} confidence=${advice.confidence.toFixed(2)}`;
 }
 
 export const ENFORCE_GUIDANCE =
 	"Re-issue this task call with the recommended tier, or set JEV_ADVISOR_MODE=hint for non-blocking advisories.";
 
+/**
+ * Widget lifecycle registry — in-process, metadata-only UI bookkeeping.
+ * The two generated hook surfaces live in separate modules (build.mjs
+ * concatenates lib/decision.ts into each) but are imported into one host
+ * realm, so a namespaced globalThis slot is genuinely shared. The slot must
+ * be resolved inside function bodies: a module-level binding would be
+ * per-generated-file and would not be shared across the two surfaces.
+ */
+export const WIDGET_LIFECYCLE_SLOT = "gjc.jev-advisor.widget-lifecycle";
+export const WIDGET_LIFECYCLE_VERSION = 1;
+/** Session entries kept at once; the oldest session is evicted past this. */
+export const WIDGET_LIFECYCLE_MAX_SESSIONS = 8;
+/**
+ * Job ids tracked per batch entry. MAX_TASKS_PER_INVOCATION (32) is the
+ * admission clamp on input.tasks.length, but historical/resumed jobs and
+ * foreign same-session terminals can push more distinct ids past the fold,
+ * so the map bound is deliberately 2x the admission clamp (64).
+ */
+export const WIDGET_LIFECYCLE_MAX_JOB_IDS = 64;
+
+export type WidgetJobStatus = "terminal" | "nonTerminal" | "unknown";
+
+export interface WidgetJobState {
+	status: WidgetJobStatus;
+	everNonTerminal: boolean;
+}
+
+export interface WidgetBatchState {
+	toolCallId: string;
+	/** Clamp(raw input.tasks.length, 1, 32); fallback tasks+rejected. */
+	taskCount: number;
+	awaitingAsync: boolean;
+	primaryJobId: string | null;
+	jobs: Record<string, WidgetJobState>;
+}
+
+interface WidgetLifecycleState {
+	version: number;
+	sessions: Record<string, WidgetBatchState>;
+}
+
+function lifecycleSlot(): { state: WidgetLifecycleState } | null {
+	const holder = globalThis as { [key: symbol]: unknown };
+	const key = Symbol.for(WIDGET_LIFECYCLE_SLOT);
+	return typeof holder[key] === "object" && holder[key] !== null
+		? (holder[key] as { state: WidgetLifecycleState })
+		: null;
+}
+
+function ensureLifecycleSlot(): { state: WidgetLifecycleState } {
+	const existing = lifecycleSlot();
+	if (existing) return existing;
+	const holder = globalThis as { [key: symbol]: unknown };
+	const key = Symbol.for(WIDGET_LIFECYCLE_SLOT);
+	const slot = { state: { version: WIDGET_LIFECYCLE_VERSION, sessions: {} } as WidgetLifecycleState };
+	holder[key] = slot;
+	return slot;
+}
+
+/** Fail-toward-keeping: a missing/mismatched-version/malformed slot reads as empty. */
+function lifecycleState(): WidgetLifecycleState {
+	const slot = lifecycleSlot();
+	if (!slot) return { version: WIDGET_LIFECYCLE_VERSION, sessions: {} };
+	const state = slot.state;
+	if (
+		typeof state !== "object" || state === null ||
+		state.version !== WIDGET_LIFECYCLE_VERSION ||
+		typeof state.sessions !== "object" || state.sessions === null
+	) {
+		return { version: WIDGET_LIFECYCLE_VERSION, sessions: {} };
+	}
+	return state;
+}
+
+function boundedJobId(value: unknown): string | null {
+	return boundedIdentity(value);
+}
+
+function clampTaskCount(raw: number): number {
+	return Math.min(Math.max(raw, 1), MAX_TASKS_PER_INVOCATION);
+}
+
+function evictOldestSessions(sessions: Record<string, WidgetBatchState>): void {
+	const ids = Object.keys(sessions);
+	if (ids.length <= WIDGET_LIFECYCLE_MAX_SESSIONS) return;
+	for (const id of ids.slice(0, ids.length - WIDGET_LIFECYCLE_MAX_SESSIONS)) delete sessions[id];
+}
+
+export function widgetSessionEntry(sessionId: unknown): WidgetBatchState | null {
+	const id = boundedIdentity(sessionId);
+	if (!id) return null;
+	return lifecycleState().sessions[id] ?? null;
+}
+
+export function widgetLifecycleResetForTests(): void {
+	const slot = lifecycleSlot();
+	if (slot) slot.state = { version: WIDGET_LIFECYCLE_VERSION, sessions: {} };
+}
+
+/**
+ * Record the batch the pre-hook just drew. Replaces any prior entry for the
+ * session (supersede); the new entry owns the widget from this point on.
+ */
+export function widgetRecordBatch(
+	sessionId: string,
+	toolCallId: string,
+	taskCount: number,
+): void {
+	const session = boundedIdentity(sessionId);
+	const call = boundedIdentity(toolCallId);
+	if (!session || !call) return;
+	const slot = ensureLifecycleSlot();
+	slot.state.sessions[session] = {
+		toolCallId: call,
+		taskCount: clampTaskCount(taskCount),
+		awaitingAsync: false,
+		primaryJobId: null,
+		jobs: {},
+	};
+	evictOldestSessions(slot.state.sessions);
+}
+
+/**
+ * Latest-observation-wins fold with no regression: a terminal sighting is
+ * never undone by a later non-terminal or unknown sighting; running/paused/
+ * queued set nonTerminal + everNonTerminal; unknown/absent statuses record
+ * `unknown` (blocks a clear, contributes nothing to the terminal count).
+ * Excess job ids past the map bound evict the oldest entries (bounded memory);
+ * a dropped ever-non-terminal id can weaken the closure check in extreme
+ * corners (advisory-only residual).
+ */
+export function widgetFoldSnapshot(
+	sessionId: unknown,
+	entries: { jobId: unknown; status: unknown }[],
+): void {
+	const session = boundedIdentity(sessionId);
+	if (!session) return;
+	const state = lifecycleState();
+	const batch = state.sessions[session];
+	if (!batch) return;
+	for (const item of entries) {
+		const jobId = boundedJobId(item.jobId);
+		if (!jobId) continue;
+		const existing = batch.jobs[jobId];
+		const status = typeof item.status === "string" ? item.status.trim().toLowerCase() : "";
+		if (status === "completed" || status === "failed" || status === "cancelled") {
+			batch.jobs[jobId] = { status: "terminal", everNonTerminal: existing?.everNonTerminal ?? false };
+		} else if (status === "running" || status === "paused" || status === "queued") {
+			if (existing?.status === "terminal") continue; // no regression
+			batch.jobs[jobId] = { status: "nonTerminal", everNonTerminal: true };
+		} else if (existing?.status === "terminal") {
+			continue; // unknown/absent never regresses a terminal id
+		} else {
+			batch.jobs[jobId] = {
+				status: "unknown",
+				everNonTerminal: existing?.everNonTerminal ?? false,
+			};
+		}
+	}
+	const ids = Object.keys(batch.jobs);
+	if (ids.length > WIDGET_LIFECYCLE_MAX_JOB_IDS) {
+		for (const id of ids.slice(0, ids.length - WIDGET_LIFECYCLE_MAX_JOB_IDS)) delete batch.jobs[id];
+	}
+}
+
+/** Mark the batch as waiting on an async envelope and pin the primary job. */
+export function widgetMarkAwaitingAsync(
+	sessionId: string,
+	toolCallId: string,
+	jobId: string,
+): void {
+	const session = boundedIdentity(sessionId);
+	const call = boundedIdentity(toolCallId);
+	const job = boundedJobId(jobId);
+	if (!session || !call || !job) return;
+	const batch = lifecycleState().sessions[session];
+	if (!batch || batch.toolCallId !== call) return;
+	batch.awaitingAsync = true;
+	batch.primaryJobId = job;
+}
+
+/** Drop a session entry without touching the widget (caller clears the UI). */
+export function widgetDropSession(sessionId: unknown): void {
+	const session = boundedIdentity(sessionId);
+	if (!session) return;
+	const state = lifecycleState();
+	delete state.sessions[session];
+}
+
+/**
+ * CLEAR predicate (Design 3). All of (a)-(f) must hold:
+ * (a) a registry entry exists for this session with awaitingAsync === true
+ *     (supersede resets awaitingAsync, so this also proves the entry's
+ *     toolCallId is still the one whose widget was drawn);
+ * (b) the snapshot lists at least 1 entry with a bounded jobId;
+ * (c) every listed entry resolves terminal (non-terminal or unknown blocks);
+ * (d) every ever-non-terminal id in the window is now terminal (closure);
+ * (e) count of terminal ids in the window >= taskCount;
+ * (f) primaryJobId === null OR the primary job is terminal.
+ */
+export function widgetShouldClear(
+	sessionId: unknown,
+	listedEntries: { jobId: unknown; status: unknown }[],
+): boolean {
+	// (a) registry entry for this session, awaiting async, same toolCallId
+	const session = boundedIdentity(sessionId);
+	if (!session) return false;
+	const batch = lifecycleState().sessions[session];
+	if (!batch || !batch.awaitingAsync) return false;
+	// (b) at least one listed entry with a bounded jobId
+	const normalized = listedEntries.map(item => ({
+		jobId: boundedJobId(item?.jobId),
+		status: typeof item?.status === "string" ? item.status.trim().toLowerCase() : "",
+	}));
+	const listed = normalized.filter(item => item.jobId !== null);
+	if (listed.length === 0) return false;
+	// (c) every listed entry resolves terminal — including entries whose jobId is
+	// not bounded (they cannot join the count, but a non-terminal one must not be
+	// skipped away to let an untracked running child slip past the clear)
+	for (const item of normalized) {
+		if (item.status !== "completed" && item.status !== "failed" && item.status !== "cancelled") return false;
+	}
+	// (d) closure: every ever-non-terminal id must now be terminal
+	for (const job of Object.values(batch.jobs)) {
+		if (job.everNonTerminal && job.status !== "terminal") return false;
+	}
+	// (e) terminal count reaches the raw task count
+	const terminalIds = new Set(
+		Object.entries(batch.jobs)
+			.filter(([, job]) => job.status === "terminal")
+			.map(([id]) => id),
+	);
+	if (terminalIds.size < batch.taskCount) return false;
+	// (f) primary job (first child) must be terminal
+	if (batch.primaryJobId !== null && !terminalIds.has(batch.primaryJobId)) return false;
+	return true;
+}
+
 // Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /
 // OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).
 
-// Hook adapter — legacy plugin hook running in the gjc host realm.
-// Contract (verified against the installed gjc v0.18.0 binary and a live
-// ctx trace): a plugin hook WITHOUT
-// declared capabilities/networkDestinations/filesystemRoots loads as a legacy
-// extension hook — sdk/session.ts:1039-1052 registers api.on("tool_call", …)
-// and calls handler(event, ctx) only for the manifest target tool. The event
-// is the ToolCallEvent { type, toolName, toolCallId, input }; the task tool's
-// params live under event.input. Returning { block: true, reason } blocks the
-// task call; any other value — including undefined — continues.
-//
-// Declaring capabilities would flip the hook to a "function hook", which
-// v0.18.0 refuses to execute in the host realm ("requires an isolated
-// runtime") — hooks then never dispatch, so legacy is the only loadable
-// form. Network egress is instead restricted by the core's
-// endpoint origin allowlist (isAllowedEndpoint) — the same gate that guards
-// the jev_advise tool.
-//
-// The legacy ctx carries a full ui surface (notify, setStatus, setWidget,
-// …, hasUI: true in interactive sessions).
-//
-// Fail-open on purpose: gjc treats hook errors as fail-closed, and an advisor
-// that blocks delegation on its own failure is worse than no advisor.
+// Before-task advisory hook. Provider calls are task-scoped, sequential and
+// bounded; persistent state is metadata-only and never supplies prompt evidence.
 
 export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
 }) {
-	let lastAdvisoryAt = 0;
+	let lastReservedAt: number | null = null;
 	api.on("tool_call", async (event, ctx) => {
+		let journalOutcomes: (() => Promise<void>) | undefined;
 		try {
-			const call = event as { type?: string; toolName?: string; input?: unknown } | undefined;
+			const call = isHookRecord(event) ? event : null;
 			if (!call || call.type !== "tool_call" || call.toolName !== "task") return undefined;
+			const invocationStartedAt = performance.now();
 			const cfg = readConfig();
-			if (!isConfigured(cfg)) return undefined;
-			const extraction = extractAssignment(call.input);
-			if (!extraction) return undefined;
-			// G3: record the pre event BEFORE the rate-limit gate so rapid
-			// repeat delegations still leave evidence. Recording is gated on
-			// isConfigured ONLY — never on the rate limit or provider outcome.
-			// Memory failures are swallowed: state IO must never break a call.
-			let state: MemoryState | null = null;
-			let fp = "";
-			if (cfg.memoryEnabled) {
-				try {
-					state = loadState(cfg.stateFile);
-					fp = fingerprint(extraction.text);
-					recordEvent(
-						state,
-						fp,
-						memoryHead(extraction.text, cfg),
-						{ kind: "pre", t: Date.now(), requested: extraction.requestedTiers },
-						cfg,
-					);
-					saveState(cfg.stateFile, state, cfg);
-				} catch {
-					state = null;
+			const limits = storeLimits(cfg);
+			const extraction = extractTasks(call.input, providerPromptLimit(cfg));
+			const callId = boundedEventId(call.toolCallId);
+			const sessionId = readSessionId(ctx);
+			const configured = isConfigured(cfg);
+			const persistent = cfg.memoryEnabled && configured && sessionId !== null && callId !== null;
+			let storageUnavailable: string | null = null;
+			const adviceByIndex = new Map<number, Advice>();
+			const ui = isHookRecord(ctx) && isHookRecord(ctx.ui) ? ctx.ui : undefined;
+			journalOutcomes = async () => {
+				const taskAdvice = [...adviceByIndex.entries()].filter(([index])=>Number.isInteger(index)&&index>=0&&index<32).map(([index,advice])=>({index,...(advice.status === 'decision' ? {status:advice.status,tier:advice.tier,confidence:advice.confidence,basis:advice.confidenceKind} : {status:advice.status,reason:advice.reason})}));
+					const stored = await appendPluginOutcome('jev-advisor', {
+						operation:'task_advice', durationMs:Math.round(performance.now()-invocationStartedAt),
+					...(callId ? {toolCallDigest:createHash('sha256').update(JSON.stringify([sessionId,callId])).digest('hex')} : {}),
+					stateOverrideIgnored:cfg.stateOverrideIgnored,taskAdvice,
+					...(!taskAdvice.length ? {advice:{status:'no_decision',reason:'unsupported_input'}} : {}),
+						evidenceStorage:{status:persistent ? storageUnavailable ? 'unavailable' : 'ok' : 'disabled', ...(storageUnavailable ? {reason:storageUnavailable} : {})},
+					});
+					if (!stored.persisted) notifyStorageUnavailable(ui, stored.reason, true);
+				if (cfg.stateOverrideIgnored) {
+					try { ui?.setStatus?.('jev-advisor','state_override_ignored: results use ~/.gjc-plugin.'); } catch {}
+				}
+			};
+			const preparations = new Map<number, TaskPreparation>();
+			if (cfg.memoryEnabled && configured && sessionId !== null && callId !== null && extraction.tasks.length > 0) {
+				const prepared = await prepareTaskRecords(
+					version2StateFile(cfg.stateFile),
+					limits,
+					sessionId,
+					callId,
+					extraction.tasks,
+				);
+				if (prepared.status === "ok") {
+					for (const item of prepared.value) preparations.set(item.index, item);
+				} else {
+					storageUnavailable = prepared.reason;
 				}
 			}
-			const nPrior = priorPostCount(state?.keys[fp]);
-			const now = Date.now();
-			if (cfg.minIntervalMs > 0 && now - lastAdvisoryAt < cfg.minIntervalMs) return undefined;
-			const signal = (ctx as { signal?: AbortSignal } | undefined)?.signal;
-			// Evidence rides the provider call that would happen anyway — no
-			// extra calls, no new network paths.
-			const decision = await askDecisionModel(
-				cfg,
-				withEvidence(extraction.text, state?.keys[fp]),
-				(input, init) => fetch(input, init),
-				signal,
-			);
-			lastAdvisoryAt = Date.now();
-			// Enrich the recorded pre with the recommendation that answered it.
-			if (state && decision) {
+			const needsAdvice: TaskInput[] = [];
+			for (const task of extraction.tasks) {
+				const prepared = preparations.get(task.index);
+				if (prepared?.state === "conflict") {
+					adviceByIndex.set(task.index, noDecision("invalid_task"));
+				} else if (prepared?.state === "reused") {
+					adviceByIndex.set(
+						task.index,
+						prepared.advice ?? noDecision("already_pending"),
+					);
+				} else if (!task.complete) {
+					adviceByIndex.set(task.index, noDecision("input_too_large"));
+				} else {
+					needsAdvice.push(task);
+				}
+			}
+
+			if (needsAdvice.length && !configured) {
+				const reason: NoDecisionReason = cfg.provider === "off" ? "disabled" : "unconfigured";
+				for (const task of needsAdvice) {
+					const advice = noDecision(reason);
+					adviceByIndex.set(task.index, advice);
+					const writeFailure = await persistAdvice(cfg, sessionId, callId, task, preparations.get(task.index), advice);
+					storageUnavailable ??= writeFailure;
+				}
+			} else if (needsAdvice.length && !isAllowedEndpoint(cfg.endpoint)) {
+				for (const task of needsAdvice) {
+					const advice = noDecision("invalid_endpoint");
+					adviceByIndex.set(task.index, advice);
+					const writeFailure = await persistAdvice(cfg, sessionId, callId, task, preparations.get(task.index), advice);
+					storageUnavailable ??= writeFailure;
+				}
+			} else if (needsAdvice.length) {
+				const admittedAt = performance.now();
+				if (cfg.minIntervalMs > 0 && lastReservedAt !== null && admittedAt - lastReservedAt < cfg.minIntervalMs) {
+					for (const task of needsAdvice) {
+						const advice = noDecision("rate_limited");
+						adviceByIndex.set(task.index, advice);
+						const writeFailure = await persistAdvice(cfg, sessionId, callId, task, preparations.get(task.index), advice);
+						storageUnavailable ??= writeFailure;
+					}
+				} else {
+					// Reserve before the first provider await, including failed calls.
+					lastReservedAt = admittedAt;
+					const deadline = invocationStartedAt + INVOCATION_BUDGET_MS;
+					const budgetSignal = AbortSignal.timeout(Math.max(1, deadline - admittedAt));
+					let requests = 0;
+					for (const task of needsAdvice) {
+						let advice: Advice;
+						const remaining = deadline - performance.now();
+						if (requests >= MAX_PROVIDER_REQUESTS_PER_INVOCATION) {
+						advice = noDecision("batch_limit");
+						} else if (remaining <= 0 || budgetSignal.aborted) {
+						advice = noDecision("budget_exceeded");
+					} else {
+						requests++;
+						const ctxSignal = isHookRecord(ctx) && isAbortSignal(ctx.signal) ? ctx.signal : undefined;
+						const signal = ctxSignal && typeof AbortSignal.any === "function"
+							? AbortSignal.any([ctxSignal, budgetSignal])
+							: budgetSignal;
+						advice = await askDecisionModel(
+							cfg,
+							task,
+							(input, init) => fetch(input, init),
+							signal,
+							Math.min(cfg.timeoutMs, remaining),
+						);
+					}
+					adviceByIndex.set(task.index, advice);
+					const writeFailure = await persistAdvice(cfg, sessionId, callId, task, preparations.get(task.index), advice);
+					storageUnavailable ??= writeFailure;
+				}
+				}
+			}
+
+			for (const rejected of extraction.rejected) adviceByIndex.set(rejected.index, noDecision(rejected.reason));
+			const summary = summarizeTasks(extraction, adviceByIndex);
+			if (storageUnavailable) summary.push(storageWarning(storageUnavailable));
+			if (summary.length) {
 				try {
-					enrichLastPre(state, fp, decision.tier, decision.confidence);
-					saveState(cfg.stateFile, state, cfg);
+					if (typeof ui?.setWidget === "function") ui.setWidget("jev-advisor", summary);
 				} catch {}
 			}
-			if (!decision) return undefined; // provider/parse failure → fail-open
-			const ui = (ctx as {
-				ui?: {
-					notify?: (message: string, type?: "info" | "warning" | "error") => void;
-				setStatus?: (key: string, text: string | undefined) => void;
-				setWidget?: (key: string, content: string[]) => void;
-				};
-			} | undefined)?.ui;
-			const priorSuffix = nPrior > 0 ? ` · ${nPrior} prior` : "";
-			const summary = formatSummary(decision) + priorSuffix;
-			try {
-				ui?.setStatus?.("jev-advisor", `tier=${decision.tier} conf=${decision.confidence.toFixed(2)}${priorSuffix}`);
-			} catch {}
-			// Persistent above-editor advisory: the only terminal surface that
-			// stays in the operator's eyeline for the rest of the session
-			// (ui.notify dims into the transcript; ui.setStatus lives at the
-			// bottom edge). Mode-independent — shadow invisibility is the bug.
-			try {
-				ui?.setWidget?.("jev-advisor", [summary]);
-			} catch {}
-			// Enforce blocks only when the caller under-provisioned a tier AND
-			// the recommendation clears the confidence gate — never on provider
-			// failure, already-compliant calls, or low-confidence advice.
-			const underprovisioned = extraction.requestedTiers.some(t => tierRank(t) < tierRank(decision.tier));
-			if (cfg.mode === "enforce" && decision.confidence >= cfg.minConfidence && underprovisioned) {
-				// An unspecified tier never blocks: the underprovisioned test needs an
-				// explicitly requested (weaker) tier to compare against.
-				const requested = [...new Set(extraction.requestedTiers)].join("/");
-				return {
-					block: true,
-					// Tier+confidence only: the model-authored rationale stays out of
-					// host-visible block reasons (prompt-injection ceiling).
-					reason: `jev-advisor: tier=${decision.tier} confidence=${decision.confidence.toFixed(2)}. Requested tier: ${requested}. ${ENFORCE_GUIDANCE}`,
-				};
+			// Record the batch this widget describes so the result hook can own
+			// its lifecycle — only when a widget was actually drawn; otherwise an
+			// empty summary would take ownership without redrawing and the
+			// previous batch's receipts would stop matching. taskCount is the raw
+			// bounded count (tasks attempted plus rejected entries); it is clamped
+			// to the same 32-task admission limit, which is half the 64-id bound
+			// of the per-batch job map.
+			if (summary.length && sessionId !== null && callId !== null) {
+				const rawCount = extraction.tasks.length + extraction.rejected.length + extraction.omittedCount;
+				widgetRecordBatch(sessionId, callId, rawCount);
 			}
-			if (cfg.mode !== "shadow") {
+			if (storageUnavailable) notifyStorageUnavailable(ui, storageUnavailable);
+
+			if (cfg.mode === "enforce") {
+				const qualifying = extraction.tasks.find(task => {
+					const advice = adviceByIndex.get(task.index);
+					return task.complete && task.requestedTier !== null && advice?.status === "decision" &&
+						advice.confidence >= cfg.minConfidence && tierRank(task.requestedTier) < tierRank(advice.tier);
+				});
+				if (qualifying) {
+					if (persistent) {
+						try {
+							const marked = await markInvocationBlocked(version2StateFile(cfg.stateFile), limits, sessionId!, callId!);
+							if (marked.status === "unavailable") storageUnavailable = marked.reason;
+						} catch {
+							storageUnavailable = "io_error";
+						}
+					}
+					if (storageUnavailable) {
+						try {
+							if (typeof ui?.setWidget === "function") {
+								ui.setWidget("jev-advisor", [...summary.filter(line => !line.startsWith("Evidence storage unavailable (")), storageWarning(storageUnavailable)]);
+							}
+						} catch {}
+						notifyStorageUnavailable(ui, storageUnavailable);
+					}
+					// The widget drawn above describes a call that is about to be
+					// blocked, so clear it and drop the registry entry before blocking.
+					try {
+						if (typeof ui?.setWidget === "function") ui.setWidget("jev-advisor", undefined);
+					} catch {}
+					if (sessionId !== null) widgetDropSession(sessionId);
+					const advice = adviceByIndex.get(qualifying.index) as Extract<Advice, { status: "decision" }>;
+					return {
+						block: true,
+						reason: `jev-advisor: task ${qualifying.index} recommends ${advice.tier} (confidence=${advice.confidence.toFixed(2)}; requested ${qualifying.requestedTier}). ${ENFORCE_GUIDANCE}`,
+					};
+				}
+			}
+			if (cfg.mode !== "shadow" && summary.length) {
+				// Single bounded metadata-only line: notify appends a permanent
+				// chat entry, so multi-line payloads are never emitted.
+				let topTier = "";
+				let topConfidence = 0;
+				for (const task of extraction.tasks) {
+					const a = adviceByIndex.get(task.index);
+					if (a?.status === "decision" && a.confidence > topConfidence) {
+						topConfidence = a.confidence;
+						topTier = a.tier;
+					}
+				}
+				const line = `jev-advisor: ${extraction.tasks.length} task(s) checked, ${topTier ? `top suggestion ${topTier} (confidence ${topConfidence.toFixed(2)})` : "no suggestion"}`.slice(0, 200);
 				try {
-					ui?.notify?.(summary, cfg.mode === "enforce" ? "warning" : "info");
+					if (typeof ui?.notify === "function") ui.notify(line, cfg.mode === "enforce" ? "warning" : "info");
 				} catch {}
 			}
 			return undefined;
 		} catch {
 			return undefined;
+		} finally {
+			if (journalOutcomes) {
+				try { await journalOutcomes(); } catch {
+					notifyStorageUnavailable(isHookRecord(ctx) ? ctx.ui : undefined, 'store_unavailable', true);
+				}
+			}
 		}
 	});
+}
+
+async function persistAdvice(
+	cfg: AdvisorConfig,
+	sessionId: string | null,
+	callId: string | null,
+	task: TaskInput,
+	prepared: TaskPreparation | undefined,
+	advice: Advice,
+): Promise<string | null> {
+	if (!cfg.memoryEnabled || !sessionId || !callId || prepared?.state !== "created" || !prepared.token) return null;
+	try {
+		const updated = await updateTaskAdvice(
+			version2StateFile(cfg.stateFile),
+			storeLimits(cfg),
+			{ sessionId, toolCallId: callId, taskIndex: task.index },
+			prepared.token,
+			advice,
+		);
+		return updated.status === "unavailable" ? updated.reason : null;
+	} catch {
+		return "io_error";
+	}
+}
+
+function storageWarning(reason: string): string {
+	return `Evidence storage unavailable (${reason}); advice is not persistently correlated.`;
+}
+
+function notifyStorageUnavailable(ui: Record<string, any> | undefined, reason: string, journal=false): void {
+	const warning = (journal ? `Outcome journal unavailable (${reason}); correlation storage is independent.` : storageWarning(reason)).slice(0, 180);
+	try {
+		if (typeof ui?.setStatus === "function") ui.setStatus("jev-advisor", warning);
+	} catch {}
+	try {
+		if (typeof ui?.notify === "function") ui.notify(warning, "warning");
+	} catch {}
+}
+
+function boundedEventId(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed && trimmed.length <= 512 && !/[\u0000-\u001f\u007f]/.test(trimmed) ? trimmed : null;
+}
+
+function isAbortSignal(value: unknown): value is AbortSignal {
+	return typeof value === "object" && value !== null && typeof (value as AbortSignal).aborted === "boolean";
+}
+
+function isHookRecord(value: unknown): value is Record<string, any> {
+	return typeof value === "object" && value !== null;
+}
+
+function summarizeTasks(
+	extraction: Extraction,
+	advice: Map<number, Advice>,
+): string[] {
+	const lines: string[] = [];
+	for (const task of extraction.tasks.slice(0, 20)) {
+		const result = advice.get(task.index) ?? noDecision("already_pending");
+		const label = task.callerId ? ` [${task.callerId.slice(0, 32)}]` : "";
+		const requested = task.requestedTier ? `requested=${task.requestedTier}` : "requested=unspecified";
+		const outcome = result.status === "decision"
+			? `recommended=${result.tier} confidence=${result.confidence.toFixed(2)}`
+			: `no decision (${result.reason})`;
+		lines.push(`task ${task.index}${label}: ${requested}; ${outcome}`.slice(0, 180));
+	}
+	for (const rejected of extraction.rejected.slice(0, Math.max(0, 20 - lines.length))) {
+		lines.push(`task ${rejected.index}: no decision (${rejected.reason})`);
+	}
+	if (extraction.omittedCount > 0) lines.push(`${extraction.omittedCount} additional tasks omitted (batch_limit)`);
+	const remaining = Math.max(0, extraction.tasks.length + extraction.rejected.length - lines.length);
+	if (remaining > 0) lines.push(`${remaining} task results omitted from this bounded summary`);
+	const bounded = lines.join("\n").slice(0, 2200);
+	return bounded ? [bounded] : [];
 }

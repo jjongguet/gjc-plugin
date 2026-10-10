@@ -1,102 +1,47 @@
-// Tool adapter — jev_advise runs as a normal in-process gjc tool, so it passes
-// global fetch to the shared decision core. Egress is gated by the core's
-// endpoint origin allowlist (isAllowedEndpoint), same as the hook.
-// Contract (gjc 0.17.7): default export receives `pi`; returns
-// { name, label, description, parameters: pi.typebox.Type.Object(...),
-//   async execute(toolCallId, params) → { content: [{ type: "text", text }] } }.
-//
-// Key resolution (hook and tool alike, one rule): process env first, then the
-// single file ~/.gjc/agent/jev-advisor/.env. No other channel exists.
+import { appendPluginOutcome } from '../../shared/lib/results';
 
+// Explicit task advice and an offline correlation report; both journal sanitized outcomes.
 export default function jevAdvise(pi: {
-	typebox: {
-		Type: {
-			Object: (fields: Record<string, unknown>) => unknown;
-			String: (options?: Record<string, unknown>) => unknown;
-			Optional: (schema: unknown) => unknown;
-		};
-	};
+ typebox: {Type: {Object:(fields:Record<string,unknown>)=>unknown;String:(options?:Record<string,unknown>)=>unknown;Optional:(schema:unknown)=>unknown}};
 }) {
-	return {
-		name: "jev_advise",
-		label: "JEV Advise",
-		description:
-			"Ask the configured decision model (OpenRouter, Typesafe Jev, or a local Ollaya server) whether a subagent assignment " +
-			'warrants fast/balanced/strong effort — or pass report="calibration" for the local predicted-vs-outcome statistics ' +
-			"from the evidence memory (offline, no key needed). Read-only advisory.",
-		parameters: pi.typebox.Type.Object({
-			assignment: pi.typebox.Type.Optional(
-				pi.typebox.Type.String({ description: "Task assignment text to evaluate" }),
-			),
-			role: pi.typebox.Type.Optional(
-				pi.typebox.Type.String({ description: "Intended subagent role, e.g. executor, planner, architect" }),
-			),
-			report: pi.typebox.Type.Optional(
-				pi.typebox.Type.String({
-					description: 'Local report to render instead of an advisory; only "calibration" is valid',
-				}),
-			),
-		}),
-		async execute(_toolCallId: string, params: { assignment?: string; role?: string; report?: string }) {
-			if (params.report === "calibration") {
-				// Pure local read of the evidence store — works unconfigured and
-				// with JEV_ADVISOR_PROVIDER=off; never touches the network.
-				try {
-					const { text } = calibrationSummary(loadState(readConfig().stateFile));
-					return { content: [{ type: "text", text }] };
-				} catch {
-					return { content: [{ type: "text", text: "jev_advise: calibration report unavailable (state read failed)." }] };
-				}
-			}
-			if (params.report !== undefined && params.report !== "") {
-				return {
-					content: [{ type: "text", text: 'jev_advise: unknown report. The only valid value is report="calibration".' }],
-				};
-			}
-			if (!params.assignment || !params.assignment.trim()) {
-				return {
-					content: [
-						{
-							type: "text",
-							text: 'jev_advise: provide an assignment to evaluate, or report="calibration" for the local statistics.',
-						},
-					],
-				};
-			}
-			const cfg = readConfig();
-			if (!isConfigured(cfg)) {
-				return {
-					content: [
-						{
-							type: "text",
-							text:
-								"jev-advisor is not configured. Put your key in the single env file — " +
-								"~/.gjc/agent/jev-advisor/.env — e.g. OPENROUTER_API_KEY=sk-or-v1-... " +
-								"(the same variable gjc reads for its OpenRouter provider) or " +
-								"JEV_ADVISOR_API_KEY (plugin-only, higher priority). Exported env vars " +
-								"override the file. A local decision server needs no key: " +
-								"JEV_ADVISOR_PROVIDER=ollaya. Disable with JEV_ADVISOR_PROVIDER=off. " +
-								"No task text leaves the machine until a key is present.",
-						},
-					],
-				};
-			}
-			const assignment = [params.role ? `role: ${params.role}` : null, params.assignment]
-				.filter(Boolean)
-				.join("\n")
-				.slice(0, DEFAULTS.maxAssignmentChars);
-			try {
-				const decision = await askDecisionModel(cfg, assignment, (input, init) => fetch(input, init), AbortSignal.timeout(cfg.timeoutMs));
-				if (!decision) {
-					return { content: [{ type: "text", text: "jev_advise: could not obtain a decision from the provider." }] };
-				}
-				return { content: [{ type: "text", text: JSON.stringify(decision, null, 2) }] };
-			} catch (error) {
-				return {
-					isError: true,
-					content: [{ type: "text", text: `jev_advise failed: ${error instanceof Error ? error.message : String(error)}` }],
-				};
-			}
-		},
-	};
+ return {
+  name:'jev_advise',label:'JEV Advise',
+  description:'Ask for bounded fast/balanced/strong advice, or report="calibration" for an offline descriptive correlation report. Every handled outcome is journaled privately under ~/.gjc-plugin; calibration never calls a provider or modifies correlation state. No quality or correctness is inferred.',
+  parameters:pi.typebox.Type.Object({
+   assignment:pi.typebox.Type.Optional(pi.typebox.Type.String({description:'One complete task assignment to evaluate'})),
+   role:pi.typebox.Type.Optional(pi.typebox.Type.String({description:'Intended subagent role'})),
+   report:pi.typebox.Type.Optional(pi.typebox.Type.String({description:'Offline correlation report; only "calibration" is valid. Appends a private outcome record.'})),
+  }),
+  async execute(_toolCallId:string,params:{assignment?:string;role?:string;report?:string}) {
+   const cfg=readConfig();
+   const operation=params?.report==='calibration'?'calibration':'advise';
+   const finish=async(value:string|Advice,evidenceStorage?:{status:string;reason?:string})=>{
+    const advice=typeof value==='string'?undefined:value.status==='decision'?{status:value.status,tier:value.tier,confidence:value.confidence,confidenceKind:value.confidenceKind,...(value.probabilities?{probabilities:value.probabilities}:{})}:{status:value.status,reason:value.reason};
+    let journalStorage;
+    try { journalStorage=await appendPluginOutcome('jev-advisor',{
+     operation,toolCallDigest:createHash('sha256').update(_toolCallId).digest('hex'),stateOverrideIgnored:cfg.stateOverrideIgnored,
+     ...(advice?{advice}:{}),...(evidenceStorage?{evidenceStorage}:{}),
+    }); } catch { journalStorage={persisted:false,reason:'store_unavailable'}; }
+    const persistence={journalStorage,stateOverrideIgnored:cfg.stateOverrideIgnored};
+    const text=typeof value==='string'?value+'\n'+JSON.stringify(persistence):JSON.stringify({...value,...persistence},null,2);
+    return {content:[{type:'text',text}]};
+   };
+   if(operation==='calibration') {
+    try {
+     const result=readEvidenceV2(version2StateFile(cfg.stateFile));
+     if(result.status==='unavailable') return finish(`jev_advise: retained v2 report unavailable (${result.reason}); correlation state was not changed.`,{status:result.status,reason:result.reason});
+     const state=result.status==='missing'?emptyEvidenceV2():result.value;
+     const {text}=calibrationSummary(state);
+     return finish((result.status==='missing'?'No v2 store exists yet. ':'')+text,{status:result.status});
+    } catch { return finish('jev_advise: retained v2 report unavailable (io_error); correlation state was not changed.',{status:'unavailable',reason:'io_error'}); }
+   }
+   if(params?.report!==undefined&&params.report!=='') return finish('jev_advise: unknown report. The only valid value is report="calibration".',{status:'unavailable',reason:'invalid_input'});
+   if(typeof params?.assignment!=='string'||!params.assignment.trim()||(params.role!==undefined&&typeof params.role!=='string')) return finish(noDecision('invalid_task'));
+   const extraction=extractTasks({agent:params.role??'',tasks:[{assignment:params.assignment}]},providerPromptLimit(cfg));
+   const task=extraction.tasks[0];
+   if(!task) return finish(noDecision('invalid_task'));
+   try { return finish(await askDecisionModel(cfg,task,(input,init)=>fetch(input,init))); }
+   catch { return finish(noDecision('provider_error')); }
+  },
+ };
 }

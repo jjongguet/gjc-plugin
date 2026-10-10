@@ -1,11 +1,18 @@
 {
   "name": "gjc-plugin",
-  "version": "0.0.3",
+  "version": "0.0.4",
   "private": true,
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
   "scripts": {
-    "build": "cd jev-advisor && bun scripts/build.mjs",
-    "test": "cd jev-advisor && bun scripts/verify.ts"
+    "build": "bun run build:advisor && bun run build:verification && bun run build:ui",
+    "test": "bun run test:shared && bun run test:advisor && bun run test:verification && bun run test:ui",
+    "build:advisor": "bun jev-advisor/scripts/build.mjs",
+    "test:advisor": "bun jev-advisor/scripts/verify.ts",
+    "build:verification": "bun verification-receipts/scripts/build.mjs",
+    "test:verification": "bun verification-receipts/scripts/verify.ts",
+    "build:ui": "bun ui-regression/scripts/build.mjs",
+    "test:ui": "bun ui-regression/scripts/verify.ts",
+    "test:shared": "bun test shared/tests/results.test.ts"
   }
 }

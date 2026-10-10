@@ -1,122 +1,94 @@
 # gjc-plugin
 
-Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`).
-Each subdirectory carrying a `gajae-plugin.json` is an independently installable plugin.
+Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Each subdirectory with a `gajae-plugin.json` is independently installable. Generated runtime surfaces embed their sources and do not require installed sibling packages.
 
 | Plugin | Purpose |
 | --- | --- |
-| [`jev-advisor`](jev-advisor/) | Decision-model advisories for subagent `task` delegation — recommends a `fast` / `balanced` / `strong` tier via TypeSafe Jev on OpenRouter, a generic chat model, or a local server, and remembers delegation outcomes locally so recommendations and a calibration report are grounded in evidence. Shadow by default. |
+| [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice, bounded delegation correlation and an offline descriptive report. Shadow by default; advice is not model routing or quality proof. |
+| [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts and source freshness. |
+| [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
 
-## Install
+## Install and configure
 
-Requires [gajae-code](https://github.com/Yeachan-Heo/gajae-code) **≥ 0.18.0** (legacy hook contract) and `git` on PATH — URL installs clone through it.
-
-```sh
-gjc plugin install https://github.com/jjongguet/gjc-plugin --user
-```
-
-Pin a version by appending a git ref (`…/gjc-plugin#v0.0.3`). The installer discovers the plugin root itself, and the runtime surfaces are committed, so there is nothing to build.
-
-Verify the install:
+Use a local plugin directory or a published source containing that plugin with GJC's plugin installer. From this checkout:
 
 ```sh
+gjc plugin install ./jev-advisor --user
+gjc plugin install ./verification-receipts --user
+gjc plugin install ./ui-regression --user
 gjc plugin list && gjc plugin doctor
 ```
 
-## Configure
+An existing installation requires the supported replacement/upgrade operation; inspect `gjc plugin install --help` and the recorded source before replacing it. Rebuilding source alone does not update a running GJC session. Verify upgraded surfaces in a fresh GJC process.
 
-Register an API key — one file, the single configuration channel, survives upgrades:
+Credentials remain outside the replaceable installation tree in `~/.gjc/agent/jev-advisor/.env`, or process environment. `JEV_ADVISOR_API_KEY` takes priority over `OPENROUTER_API_KEY`; process values override same-named file values. Never put credentials in source or result records. See [Jev configuration](jev-advisor/README.md#configuration).
+
+## Private results
+
+All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJC still owns installed code under `~/.gjc/agent/gjc-plugins/`, and the credential file above is unchanged.
+
+| Path beneath `~/.gjc-plugin/` | Contents |
+| --- | --- |
+| `jev-advisor/state.v2.json` | Bounded metadata-only task/launch/terminal correlation |
+| `verification-receipts/receipts/v1/<repository-digest>/<receipt-id>.json` | Shared immutable verification/UI storage envelopes: public receipt and private selected-input binding |
+| `<plugin>/journal/v1/` | Sanitized handled-outcome records, including run/status/manual/advice/observation failures and assessment/storage results |
+| `ui-regression/locks/` | Private owned browser-run coordination lock |
+
+Directories are owned `0700`; files are owned single-link regular `0600`. Symlinks, unsafe owners/modes, hard links and corrupt/unknown inventory fail closed without permission repair, lock stealing or legacy fallback. `JEV_ADVISOR_STATE` no longer controls the result path; a supplied value is ignored and reported as `state_override_ignored`. It is never recorded.
+
+Existing `.gjc` results remain untouched: no automatic migration, deletion or lookup. Old receipt IDs are unavailable in the new store. Uninstalling/upgrading code does not erase results. Archive or remove history only through an explicit user-owned operation after checking ownership and stopping writers.
+
+### What is recorded
+
+Every handled invocation attempts exactly one journal record after its known assessment/storage results. Jev batch advice records up to32 normalized task indices, tiers, confidence semantics and no-decision reasons in one bounded record; per-task `basis` retains the normalized advice's `confidenceKind` without rounding scores. Result observers record terminal-status and storage-transaction counts in one record. Full validated probabilities remain in manual advice records and eligible correlation state. Disabled/unconfigured providers still produce local operational records; calibration remains network-free and correlation-read-only, but now journals the lookup.
+
+Records contain only allowlisted enums/reason codes, timestamps/durations, digests/UUID references, native counts, assertion kinds/outcomes, validated tier/score/probability fields and storage metadata. They contain **no** assignment/context/rationale prose, raw logs/source/stacks, credentials, account routing, snapshots, URLs, selectors or fill/expected values. Selected test locators exist only in the private bound storage envelope and are omitted from returned receipts, journals and provider requests.
+
+Responses separate observed execution, adequacy assessment, receipt/evidence storage and `journalStorage`. A failed write never changes an actual test result. `persisted:false` means recording is not confirmed; disk failure cannot guarantee a durable error record. Status never reruns tests or opens a browser.
+
+### Retention and capacity
+
+Immutable receipt admission is bounded to **200 receipts / 2 MiB per repository / 32 KiB per complete envelope**. `count`, `bytes` and `nearCapacity` are returned when measurable; warning starts at 180 receipts or 90% bytes. `store_full` preserves history and does not advertise a rejected receipt as durable. The independent outcome journal can continue recording while receipts are full.
+
+Each plugin journal has **4 KiB records, 1 MiB segments and eight retained segments**, with a 100 ms lock-wait bound. Marker-bound rotation retires only validated owned closed segments. `rotated` and `retainedSegments` describe the retention boundary; indefinite history is not promised. Unknown files or interrupted/corrupt publication are not adopted or repaired automatically.
+
+## Verification tools
+
+`verification_run` accepts explicit repository-relative `.js` / `.mjs` / `.cjs` files (1–32), not globs, arbitrary commands or alternate runners. Inspect test effects first: test code is not sandboxed. Native pass/fail/skip/TODO/cancellation counts are execution evidence, not assertion counts or coverage proof. Empty and skipped-only files cannot establish successful testing.
+
+Freshness covers normal Git-visible source **and the safely validated explicit selected test inputs, including ignored files**. A private receipt/repository/spec-bound input manifest lets status hash those same bytes. Missing, unsafe, sensitive/cache-excluded or unhashable inputs make freshness unavailable; they are never silently omitted. Dependency caches and excluded credentials are not covered.
+
+`ui_regression_run` requires explicit ephemeral account routing, one exact loopback origin, a first `goto`, and at least one assertion. It supports unique visible current CSS targets, non-sensitive text fields and explicit `button[type="button"]`. Inspect handlers: loopback and post-action origin checks do not sandbox redirects, popups or network effects. One scenario uses one Aside REPL invocation and closes only its owned tab. Timeouts, cancellation, malformed/partial observations or unconfirmed cleanup cannot pass.
+
+Text matching preserves case and internal whitespace, normalizing only line endings and surrounding whitespace. **Normalized-empty substring expectations are rejected**; exact-empty assertions and empty fills remain meaningful supported cases. UI status explicitly reports `currentUiState:"not_reobserved"` and `browserBuildBinding:"unverified"`; historical success is not current/deployed UI evidence.
+
+Both verification/UI tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured. Only validated supplied semantic summaries/notes and bounded host facts leave. Omitted context, stale/missing/nonpassing evidence, unscored/low-confidence results and transport failure do not establish sufficient verification. No automatic repairs or execution gates are added.
+
+## Develop and verify
 
 ```sh
-mkdir -p ~/.gjc/agent/jev-advisor
-printf 'OPENROUTER_API_KEY=sk-or-v1-...\n' >> ~/.gjc/agent/jev-advisor/.env
-chmod 600 ~/.gjc/agent/jev-advisor/.env
+bun run build
+bun run test
+node verification-receipts/scripts/smoke-host.mjs --installed
+node verification-receipts/scripts/smoke-host.mjs --installed --advisor
+node jev-advisor/scripts/smoke-results.mjs
+UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui
 ```
 
-`OPENROUTER_API_KEY` is the same variable `gjc` itself reads for its OpenRouter provider; `JEV_ADVISOR_API_KEY` takes priority for a plugin-only key. Exported env vars always win over the file. To run without any key — nothing leaves the machine — set `JEV_ADVISOR_PROVIDER=ollaya` (local decision server), or `off` to disable the advisor entirely. Every other knob lives in the same file or env; the full table is in [jev-advisor/README.md](jev-advisor/README.md#configuration).
-
-## Manage
-
-| You want to | Run |
-| --- | --- |
-| Check health | `gjc plugin list && gjc plugin doctor` |
-| Upgrade to latest | `gjc plugin upgrade jev-advisor --user` |
-| Pin / downgrade to a version | `gjc plugin uninstall jev-advisor --user && gjc plugin install https://github.com/jjongguet/gjc-plugin#v0.0.3 --user` (install refuses over an existing copy; data survives both steps) |
-| Disable temporarily | put `JEV_ADVISOR_PROVIDER=off` in the `.env` (or export it) |
-| Turn off local memory only | put `JEV_ADVISOR_MEMORY=off` in the `.env` |
-| Uninstall | `gjc plugin uninstall jev-advisor --user` |
-| Purge all data | `rm -rf ~/.gjc/agent/jev-advisor` |
-
-Notes:
-
-- If an upgrade ever fails because its recorded source no longer exists (e.g. the checkout moved), uninstall and install again from the URL — both keep your data.
-- Uninstall keeps, purge deletes. What lives where:
-
-| Path | Contents | Survives uninstall | Survives upgrade |
-| --- | --- | --- | --- |
-| `~/.gjc/agent/gjc-plugins/jev-advisor/` | installed plugin code | no (removed) | no (replaced wholesale) |
-| `~/.gjc/agent/jev-advisor/.env` | your key + config | yes | yes |
-| `~/.gjc/agent/jev-advisor/state.json` | local evidence memory (bounded, `0600`) | yes | yes |
-
-## Evidence memory & calibration
-
-Once a provider is configured, the advisor keeps a bounded local record per delegation (`~/.gjc/agent/jev-advisor/state.json`, ≤ 200 assignments × 10 events, assignment heads capped at 120 chars). Pre-call advisories include the prior outcomes of the *identical* assignment; the status line shows `· n prior` when there are n. Ask for the predicted-vs-outcome statistics any time — offline, no key needed:
-
-```
-jev_advise report="calibration"
-```
-
-Turn the memory off with `JEV_ADVISOR_MEMORY=off`; store only fingerprints (no assignment text) with `JEV_ADVISOR_MEMORY_HEAD_CHARS=0`.
-
-## Privacy & data flow
-
-- **Nothing leaves the machine until a key exists** (or you select the local `ollaya` provider). A fresh install performs zero network calls and zero writes.
-- Once configured, task assignment text (role, task ids/descriptions/assignments/tiers, shared context; capped) is transmitted to the configured provider on advisory calls. Default provider `jev` sends it to OpenRouter. Use `JEV_ADVISOR_PROVIDER=off` for sensitive material.
-- The evidence memory never leaves the machine. It starts writing only once a provider is configured, stores bounded assignment heads (reducible to fingerprints only), never stores keys, and is file-mode `0600`.
-- Egress is allowlisted in code: HTTPS `openrouter.ai` / `api.typesafe.ai` plus loopback HTTP for local servers; every other destination is refused before any request is sent. Attribution headers (`HTTP-Referer`, `X-Title`) go to OpenRouter only.
-
-## Troubleshoot
-
-| Symptom | Cause → fix |
-| --- | --- |
-| No advisories at all | Fresh install is inert until a key exists — see Configure. Or the 15 s per-surface rate limit is suppressing repeats; it counts per surface, not per session. |
-| Advisories appear but nothing blocks | `shadow` is the default — status line only. `hint` notifies; `enforce` blocks only weaker-than-recommended tiers at confidence ≥ `JEV_ADVISOR_MIN_CONFIDENCE`. |
-| `provider returned HTTP 401` | Bad or expired key — fix the `.env` entry. |
-| `report="calibration"` says no data | Memory starts empty and only hooks feed it (manual `jev_advise` asks are not recorded); run a real `task` delegation first. |
-| `state.json` looks corrupt | Delete it — the store auto-resets to empty and rebuilds from new events. |
-| Upgrade fails on missing recorded source | Uninstall + install from the URL again (see Manage); `.env` and `state.json` survive. |
-
-## Develop
-
-From a local checkout, point the install at the plugin directory:
-
-```sh
-gjc plugin install "$(pwd)/jev-advisor" --user   # fresh install
-gjc plugin upgrade jev-advisor --user            # after rebuilds
-```
-
-Architecture, configuration reference, and the offline test suite:
-[jev-advisor/README.md](jev-advisor/README.md).
+Builds are keyless. Verification/UI builders support `--check`; Jev's suite compares all generated surfaces to its canonical builder. Offline tests use disposable repositories/homes and synthetic or disabled transport. Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events: it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately.
 
 ## Add a plugin
 
-1. Create `<name>/gajae-plugin.json` (see jev-advisor for the shape).
-2. Declare every runtime file the manifest references — the installer copies exactly the declared set, nothing else.
-3. If the plugin generates surfaces, commit them keyless and never inline secrets at build time. Credentials belong in a user-owned file outside the installed tree; the installer replaces that tree on every upgrade.
-4. Add a row to the table above.
-
-Plugins are user-owned: gajae-code's upstream data-scope decisions (issue #5842) are unaffected — task text leaves the machine only when a provider and API key are explicitly configured.
+Declare every installed surface in its manifest, keep generated surfaces keyless, add the distribution-index entry and table row, and reuse the shared private result primitives at build time. Do not serialize arbitrary tool output as evidence.
 
 ## Workspace standard
 
-The repo is onboarded to the workspace standard (`standard.json`, v1.0.1, profile `plugin-ts`, root `.`). Root `gjc-plugin.json` is a distribution index; each plugin's `gajae-plugin.json` remains the version source of truth.
+The repo uses `standard.json`, profile `plugin-ts`, root `.`. `gjc-plugin.json` is a distribution index; each plugin manifest remains its version source of truth and is bumped only at an explicitly requested release.
 
-- **Dashboard** (`dashboard/`) — a local operations view. Until its Supabase is connected (deferred — Addendum 1), it renders **local meta only**: the root package version and the latest git tag, read statically at build time. The envelope area states the disconnected status; there is no push-envelope.
-- **Validator** — local-only: run `npm run validate` inside `dashboard/` (`node ../../workspace-standard/validator/cli.mjs validate --root ..`). It is not wired into `vercel-build` — the canonical `workspace-standard` repo does not exist on hosting build servers; the hosted build is `vercel-build` (`next build`) alone.
-- **Manual workflow** (`steps.json`) — three human-executed steps: record (mac: bump version + tag at release), verify (server: validator green), review (human). Nothing runs on a timer.
-
-`SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` / `DASHBOARD_TOKEN` are listed in `dashboard/.env.example` and intentionally left unset until the Supabase connection ships.
+- **Dashboard** (`dashboard/`): local meta only until Supabase connection; no push-envelope.
+- **Validator**: local-only `npm run validate` inside `dashboard/`; not part of `vercel-build` because hosting lacks the canonical workspace-standard checkout.
+- **Manual workflow** (`steps.json`): record, verify, human review. No timer execution.
 
 ## Related
 
-- [gajae-code](https://github.com/Yeachan-Heo/gajae-code) — the coding agent these plugins extend
+- [gajae-code](https://github.com/Yeachan-Heo/gajae-code)
