@@ -8,6 +8,7 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import path from "node:path";
 import { createSmokeEnvironment } from "./isolate.mjs";
+import { noiseFloor } from "./gates.mjs";
 import { startStubProvider } from "./stub-provider.mjs";
 
 export const DEFAULT_K = 3;
@@ -210,7 +211,7 @@ export async function runStochasticEvaluation(input) {
       baseline,
       candidate,
       delta,
-      floor: Math.max(minDelta, baseline.spread),
+      floor: noiseFloor({ minDelta, stochastic: true, baselineRuns: baseline.runs }),
       trials: { baseline: baselineRuns, candidate: candidateRuns },
       logs: [...baselineRuns, ...candidateRuns].map((run) => run.logPath),
       stubCalls: stub ? stub.calls() : null,

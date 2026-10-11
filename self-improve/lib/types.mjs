@@ -11,27 +11,6 @@ export const ROW_KINDS = Object.freeze(["cycle", "adoption"]);
 export const VERDICTS = Object.freeze(["adopt", "reject", "inconclusive"]);
 export const INSTALL_STATES = Object.freeze(["not_attempted", "upgraded", "failed"]);
 
-export const REJECT_REASONS = Object.freeze([
-  "critic_leakage",
-  "critic_protected",
-  "critic_generated_edit",
-  "critic_surface",
-  "critic_special_case",
-  "critic_secret",
-  "critic_network",
-  "guard_fail",
-  "floor_not_met",
-  "cost_rule",
-  "heldout_regression",
-  "budget_exceeded",
-  "base_mismatch",
-  "history_duplicate_hypothesis",
-  "post_apply_failure",
-  "dirty_worktree",
-  "replay_failed",
-  "empty_patch",
-]);
-
 export function sha256Hex(text) {
   return createHash("sha256").update(text).digest("hex");
 }

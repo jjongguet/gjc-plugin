@@ -14,8 +14,9 @@ points at a command, a receipt, or a ledger row.
   objective force the next proposal onto an unexplored probe
   (`forced_exploration`).
 - Budget: the rung tightens with accepted cycles in the campaign (0 accepted ->
-  3 files/12 hunks, 1 -> 2/8, 2+ -> 1/4). Resets require an auditable reason
-  (campaign close, objective-set change, explicit flag).
+  3 files/12 hunks, 1 -> 2/8, 2+ -> 1/4). Resets require an auditable reason:
+  rotating the campaign id, or the explicit `--reset-budget` flag (accepted
+  count treated as 0).
 
 ## Commit pattern (max 3 commits per accepted cycle)
 

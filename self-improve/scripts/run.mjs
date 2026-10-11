@@ -18,7 +18,7 @@ const USAGE = `usage: node self-improve/scripts/run.mjs <command> [options]
 commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
-          [--domain <id>] [--campaign <id>] [--dry-run] [--json]
+          [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
   prune   [--run-root <path>] [--keep <n>] [--json]
   runner  --baseline <dir> --candidate <dir> [--mode local_stub|live] [--k <n>]
@@ -53,6 +53,8 @@ function parseArgs(argv) {
     if (token === "--json") options.json = true;
     else if (token === "--dry-run") options.dryRun = true;
     else if (token === "--live-approved") options.liveApproved = true;
+    else if (token === "--install") options.install = true;
+    else if (token === "--reset-budget") options.resetBudget = true;
     else if (VALUED_FLAGS.has(token)) {
       const value = rest[i + 1];
       if (value === undefined || value.startsWith("--")) return { error: `${token} requires a value` };
@@ -105,6 +107,8 @@ async function runCycleCommand(options) {
     runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
     ledgerPath: options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl"),
     dryRun: options.dryRun === true,
+    install: options.install === true,
+    resetBudget: options.resetBudget === true,
   });
   if (options.json) {
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

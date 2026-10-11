@@ -17,7 +17,7 @@ plus declared probes, and records every decision in an append-only ledger
 | `scripts/run.mjs` | CLI (`report`, `cycle`) |
 | `scripts/verify-unit.mjs` | runs the unit suite; prints `ALL PASS (N cases)`; zero cases fails |
 | `tests/unit/` | `node:test` unit suite (node builtins only) |
-| `rrsi.json` | gate defaults (minDelta, k, stall, cost, budget schedule, retention) |
+| `rrsi.json` | gate defaults loaded by the engine (minDelta, cost, stall, retention) |
 | `PATTERNS.md` | proposer/review rules (commit pattern, resubmission ban, threat model, labels) |
 
 ## Gates
@@ -62,7 +62,10 @@ bun run test:self-improve
    guard set and probes, writes nothing and commits nothing.
 3. Run the real cycle: one ledger row plus a ledger-only
    `chore(self-improve): cycle <id> <decision>` commit. Adoptions add the code
-   commit and the adoption row (see `PATTERNS.md`).
+   commit (including regenerated surfaces) and the adoption row (see
+   `PATTERNS.md`). Accepted cycles can optionally install with `--install`
+   (user-scoped `gjc plugin upgrade` + `gjc plugin doctor`, recorded on the
+   adoption row) and reset the annealed rung with `--reset-budget`.
 4. `history --json` exposes recent rejects, per-objective reject streaks and
    stalled objectives; `recover --repo .` rolls back a cycle that crashed
    mid-apply.

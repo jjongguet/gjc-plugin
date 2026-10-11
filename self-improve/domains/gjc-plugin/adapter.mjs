@@ -15,6 +15,7 @@ export const DOMAIN = Object.freeze({
     "jev-advisor/src/*.adapter.ts",
     "verification-receipts/lib/**",
     "verification-receipts/src/*.adapter.ts",
+    "jev-advisor/subskills/jev-advisor/SKILL.md",
   ],
   generated: [
     "jev-advisor/hooks/**",

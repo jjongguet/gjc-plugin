@@ -3,8 +3,9 @@
  * decisions, ledger recording, replay-gated adoption and crash recovery.
  *
  * Cycle state machine (journaled in `<runRoot>/runs/<cycleId>/phase.json`):
- *   scoring -> cycle-committed -> [replaying -> applying -> applied ->
- *   adoption-committed] | replay_failed | rolled_back -> done
+ *   scoring -> cycle-committed -> [replaying -> applying -> committing ->
+ *   applied -> adoption-recorded] | replay_failed | rolled_back |
+ *   adopt_aborted -> done
  */
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -12,8 +13,9 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { checkBudget, rungFor } from "./budget.mjs";
+import { budgetResetDecision, checkBudget, rungFor } from "./budget.mjs";
 import { buildCriticFindings, decideCycle, evaluateCostRule, evaluateHeldout } from "./gates.mjs";
+import { matchesEditable } from "./domain.mjs";
 import { buildGuardPlan, runGuards as defaultRunGuards } from "./guards.mjs";
 import { createScratchCopy } from "./isolate.mjs";
 import { appendRow, readLedger } from "./ledger.mjs";
@@ -127,19 +129,6 @@ function applyPatch(dir, patchText) {
   if (apply.status !== 0) throw new Error(`patch_apply_failed: ${apply.stderr || apply.status}`);
 }
 
-function revertWorkspace({ repoRoot, modified, added }) {
-  for (const rel of added) {
-    try {
-      fs.rmSync(path.join(repoRoot, rel), { force: true });
-    } catch {
-      /* best effort */
-    }
-  }
-  if (modified.length > 0) {
-    const proc = gitProc(repoRoot, ["checkout", "--", ...modified]);
-    if (proc.status !== 0) throw new Error(`rollback_failed: ${proc.stderr || proc.status}`);
-  }
-}
 
 function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
@@ -154,9 +143,53 @@ function commitPaths(repoRoot, message, relPaths) {
   return gitOut(repoRoot, ["rev-parse", "HEAD"]);
 }
 
+let cachedConfig;
+function loadConfig() {
+  if (cachedConfig !== undefined) return cachedConfig;
+  try {
+    cachedConfig = JSON.parse(fs.readFileSync(path.join(SELF_IMPROVE_ROOT, "rrsi.json"), "utf8"));
+  } catch {
+    cachedConfig = {};
+  }
+  return cachedConfig;
+}
+
+function porcelainPaths(repoRoot) {
+  // Parse the raw porcelain stream: trimming would strip the leading status
+  // space of the first line and corrupt that path.
+  const proc = gitProc(repoRoot, ["status", "--porcelain"]);
+  if (proc.status !== 0) throw new Error(`git status failed: ${proc.stderr || proc.status}`);
+  return proc.stdout
+    .split("\n")
+    .filter((line) => line.length > 0)
+    .map((line) => {
+      const rest = line.slice(3);
+      return rest.includes(" -> ") ? rest.split(" -> ")[1] : rest;
+    });
+}
+
+/** Restore tracked paths and remove untracked ones; used for rollback and recovery sweeps. */
+function restorePaths(repoRoot, relPaths) {
+  for (const rel of relPaths) {
+    const tracked = gitProc(repoRoot, ["ls-files", "--error-unmatch", "--", rel]).status === 0;
+    if (tracked) {
+      const proc = gitProc(repoRoot, ["checkout", "--", rel]);
+      if (proc.status !== 0) throw new Error(`rollback_failed: ${proc.stderr || proc.status}`);
+    } else {
+      fs.rmSync(path.join(repoRoot, rel), { recursive: true, force: true });
+    }
+  }
+}
+
 export function campaignAcceptedCount(ledgerPath, campaignId) {
-  return readLedger(ledgerPath).filter(
-    (row) => row.kind === "cycle" && row.campaignId === campaignId && row.verdict?.decision === "adopt",
+  const rows = readLedger(ledgerPath);
+  const adopted = new Set(rows.filter((row) => row.kind === "adoption").map((row) => row.cycleId));
+  return rows.filter(
+    (row) =>
+      row.kind === "cycle" &&
+      row.campaignId === campaignId &&
+      row.verdict?.decision === "adopt" &&
+      adopted.has(row.cycleId),
   ).length;
 }
 
@@ -243,6 +276,29 @@ async function defaultEvaluateProbes({ adapter, baselineDir, candidateDir }) {
   };
 }
 
+function resolvePluginName(touched) {
+  return (
+    touched
+      .map((rel) => rel.split("/")[0])
+      .find((name) => /^(jev-advisor|verification-receipts|ui-regression)$/.test(name)) ?? null
+  );
+}
+
+/** Explicit `--install` path: user-scoped plugin upgrade plus a doctor check. */
+function defaultRunInstall({ repoRoot, touched }) {
+  const plugin = resolvePluginName(touched);
+  if (!plugin) return { install: "failed", reason: "plugin_not_resolved" };
+  const upgrade = spawnSync("gjc", ["plugin", "upgrade", plugin, "--user"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    timeout: 120000,
+  });
+  if (upgrade.status !== 0) return { install: "failed", reason: `upgrade_exit_${upgrade.status}`, plugin };
+  const doctor = spawnSync("gjc", ["plugin", "doctor"], { cwd: repoRoot, encoding: "utf8", timeout: 120000 });
+  if (doctor.status !== 0) return { install: "failed", reason: `doctor_exit_${doctor.status}`, plugin };
+  return { install: "upgraded", plugin };
+}
+
 export async function runCycle(input) {
   const {
     repoRoot,
@@ -259,12 +315,21 @@ export async function runCycle(input) {
     throw new Error("proposal_requires patchFile, hypothesis and objective");
   }
   if (!proposal.commitMessage) throw new Error("proposal_requires commitMessage");
+  const ledgerRel = path.relative(repoRoot, ledgerPath);
+  if (ledgerRel.startsWith("..") || path.isAbsolute(ledgerRel)) {
+    throw new Error("ledger_must_live_inside_repository");
+  }
   const runGuards = deps.runGuards ?? defaultRunGuards;
   const evaluateProbes = deps.evaluateProbes ?? defaultEvaluateProbes;
   const now = deps.now ?? (() => new Date().toISOString());
-  const minDelta = input.minDelta ?? 0.01;
-  const costConfig = input.costConfig ?? { wallMsBytesIncreaseRatio: 0.15, gainMultipleOfFloor: 2 };
-  const retention = input.retention ?? 10;
+  const config = loadConfig();
+  const minDelta = input.minDelta ?? config.minDelta ?? 0.01;
+  const costConfig = input.costConfig ?? {
+    wallMsBytesIncreaseRatio: config.cost?.wallMsBytesIncreaseRatio ?? 0.15,
+    gainMultipleOfFloor: config.cost?.gainMultipleOfFloor ?? 2,
+  };
+  const retention = input.retention ?? config.retention?.rawCycles ?? 10;
+  const stallK = input.stallK ?? config.stall?.k ?? 3;
   const startedAt = Date.now();
 
   const patchFile = path.resolve(proposal.patchFile);
@@ -282,7 +347,7 @@ export async function runCycle(input) {
     ledgerPath,
     proposal,
     adapterObjectives: adapter.objectives ?? [],
-    k: input.stallK ?? 3,
+    k: stallK,
   });
   if (!history.ok) {
     return {
@@ -314,7 +379,6 @@ export async function runCycle(input) {
   const cycleRunDir = dryRun
     ? fs.mkdtempSync(path.join(os.tmpdir(), "self-improve-dry-"))
     : path.join(runRoot, "runs", cycleId);
-  const ledgerRel = path.relative(repoRoot, ledgerPath);
   const phase = (name, extra = {}) => {
     if (!dryRun) writeJson(path.join(cycleRunDir, "phase.json"), { phase: name, at: now(), ...extra });
   };
@@ -325,9 +389,18 @@ export async function runCycle(input) {
   const guardHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "self-improve-guard-home-"));
 
   try {
-    if (!dryRun) fs.mkdirSync(cycleRunDir, { recursive: true, mode: 0o700 });
+    if (!dryRun) {
+      fs.mkdirSync(cycleRunDir, { recursive: true, mode: 0o700 });
+      try {
+        fs.copyFileSync(patchFile, path.join(cycleRunDir, "patch.diff"));
+        writeJson(path.join(cycleRunDir, "proposal.json"), proposal);
+      } catch {
+        /* raw evidence copies are best effort */
+      }
+    }
     phase("scoring");
-    const accepted = campaignAcceptedCount(ledgerPath, campaignId);
+    const resetDecision = budgetResetDecision({ resetFlag: input.resetBudget === true });
+    const accepted = resetDecision.reset ? 0 : campaignAcceptedCount(ledgerPath, campaignId);
     const rung = rungFor(accepted, adapter.budget);
     const budgetReport = checkBudget({ files: touched, hunks }, rung);
     const surface = proposal.surface ?? touched;
@@ -437,6 +510,7 @@ export async function runCycle(input) {
     const cycleReceipt = appendRow(ledgerPath, cycleRow);
     commitPaths(repoRoot, `chore(self-improve): cycle ${cycleId} ${decision.decision}`, [ledgerRel]);
     phase("cycle-committed", { decision: decision.decision, row: cycleReceipt.seq });
+    const postRecordHead = gitOut(repoRoot, ["rev-parse", "HEAD"]).slice(0, 7);
 
     const result = {
       status: "ok",
@@ -480,6 +554,13 @@ export async function runCycle(input) {
       return result;
     }
 
+    const preApply = assertRepoState({ repoRoot, baseCommit: postRecordHead });
+    if (!preApply.ok) {
+      writeJson(path.join(cycleRunDir, "failure.json"), { reason: preApply.reason, stage: "pre-apply", at: now() });
+      phase("adopt_aborted", { reason: preApply.reason });
+      result.adoption = `aborted_${preApply.reason}`;
+      return result;
+    }
     phase("applying");
     const modified = touched.filter((rel) => fs.existsSync(path.join(repoRoot, rel)));
     const added = touched.filter((rel) => !fs.existsSync(path.join(repoRoot, rel)));
@@ -497,8 +578,8 @@ export async function runCycle(input) {
       logDir: path.join(cycleRunDir, "logs", "real"),
     });
     if (realGuards.some((guard) => guard.status !== "pass")) {
-      revertWorkspace({ repoRoot, modified, added });
-      const clean = gitOut(repoRoot, ["status", "--porcelain"]).length === 0;
+      restorePaths(repoRoot, porcelainPaths(repoRoot));
+      const clean = porcelainPaths(repoRoot).length === 0;
       writeJson(path.join(cycleRunDir, "failure.json"), {
         reason: "post_apply_failure",
         guards: realGuards.map(({ id, status }) => ({ id, status })),
@@ -512,15 +593,51 @@ export async function runCycle(input) {
       return result;
     }
 
-    const codeCommit = commitPaths(repoRoot, proposal.commitMessage, touched);
+    // The adopted commit includes the regenerated surfaces rewritten by the
+    // build guard: staging only the patch paths would commit stale generated
+    // files and leave the worktree dirty for the next cycle.
+    const dirty = porcelainPaths(repoRoot);
+    const expected = new Set([...touched, ...dirty.filter((rel) => matchesEditable(rel, adapter.generated))]);
+    const unexpected = dirty.filter((rel) => !expected.has(rel));
+    if (unexpected.length > 0) {
+      restorePaths(repoRoot, dirty);
+      const clean = porcelainPaths(repoRoot).length === 0;
+      writeJson(path.join(cycleRunDir, "failure.json"), {
+        reason: "unexpected_workspace_changes",
+        unexpected,
+        clean,
+        at: now(),
+      });
+      phase("rolled_back", { clean });
+      result.adoption = "post_apply_failure";
+      result.rolledBack = true;
+      result.clean = clean;
+      return result;
+    }
+
+    phase("committing");
+    const codeCommit = commitPaths(repoRoot, proposal.commitMessage, [...expected]);
     phase("applied", { codeCommit: codeCommit.slice(0, 7) });
+    let installState = "not_attempted";
+    if (input.install === true) {
+      const installer = deps.runInstall ?? defaultRunInstall;
+      let installResult;
+      try {
+        installResult = installer({ repoRoot, touched });
+      } catch (error) {
+        installResult = { install: "failed", reason: error.message };
+      }
+      installState = installResult.install === "upgraded" ? "upgraded" : "failed";
+      writeJson(path.join(cycleRunDir, "install.json"), { ...installResult, at: now() });
+    }
     appendRow(ledgerPath, {
       kind: "adoption",
       cycleId,
       commit: codeCommit.slice(0, 7),
-      install: "not_attempted",
+      install: installState,
       createdAt: now(),
     });
+    phase("adoption-recorded");
     commitPaths(repoRoot, `chore(self-improve): record adoption ${cycleId}`, [ledgerRel]);
     phase("done");
     result.adoption = "committed";
@@ -548,13 +665,19 @@ export async function runCycle(input) {
 }
 
 /**
- * Roll back a cycle that crashed mid-apply: any run directory whose phase is
- * `applying` has its journaled paths restored before the run can continue.
+ * Roll back or complete cycles that crashed mid-apply or between commits:
+ *  - `applying`: sweep every dirty path back to HEAD (the clean precondition
+ *    means all dirt came from this cycle) and record the rollback.
+ *  - `committing`: a crash spanning the code commit. Dirty paths are rolled
+ *    back; a clean tree with the commit possibly landed is reported as
+ *    `commit_state_uncertain` for the operator instead of guessing.
+ *  - `adoption-recorded`: finish the missing adoption chore commit.
  */
 export function recoverPendingCycle({ runRoot = defaultRunRoot(), repoRoot }) {
   const runsRoot = path.join(runRoot, "runs");
   const results = [];
   if (!fs.existsSync(runsRoot)) return results;
+  const at = new Date().toISOString();
   for (const name of fs.readdirSync(runsRoot)) {
     const dir = path.join(runsRoot, name);
     if (!fs.statSync(dir).isDirectory()) continue;
@@ -566,27 +689,61 @@ export function recoverPendingCycle({ runRoot = defaultRunRoot(), repoRoot }) {
     } catch {
       phaseRecord = null;
     }
-    if (!phaseRecord || phaseRecord.phase !== "applying") continue;
-    const journalPath = path.join(dir, "applied.json");
-    if (repoRoot && fs.existsSync(journalPath)) {
-      const journal = JSON.parse(fs.readFileSync(journalPath, "utf8"));
-      revertWorkspace({ repoRoot, modified: journal.modified ?? [], added: journal.added ?? [] });
-      const clean = gitOut(repoRoot, ["status", "--porcelain"]).length === 0;
-      writeJson(phasePath, { ...phaseRecord, phase: "rolled_back", clean, at: new Date().toISOString() });
-      writeJson(path.join(dir, "failure.json"), {
-        reason: "post_apply_failure",
-        recovered: true,
-        clean,
-        at: new Date().toISOString(),
-      });
+    if (!phaseRecord || !phaseRecord.phase) continue;
+    const phaseName = phaseRecord.phase;
+    if (phaseName === "applying") {
+      if (!repoRoot) {
+        results.push({ cycleId: name, recovered: false, clean: null });
+        continue;
+      }
+      restorePaths(repoRoot, porcelainPaths(repoRoot));
+      const clean = porcelainPaths(repoRoot).length === 0;
+      writeJson(phasePath, { ...phaseRecord, phase: "rolled_back", clean, at });
+      writeJson(path.join(dir, "failure.json"), { reason: "post_apply_failure", recovered: true, clean, at });
       results.push({ cycleId: name, recovered: true, clean });
-    } else {
-      writeJson(path.join(dir, "failure.json"), {
-        reason: "recovery_journal_missing",
-        recovered: false,
-        at: new Date().toISOString(),
-      });
-      results.push({ cycleId: name, recovered: false, clean: null });
+      continue;
+    }
+    if (phaseName === "committing") {
+      if (!repoRoot) {
+        results.push({ cycleId: name, recovered: false, clean: null });
+        continue;
+      }
+      const dirty = porcelainPaths(repoRoot);
+      if (dirty.length > 0) {
+        restorePaths(repoRoot, dirty);
+        const clean = porcelainPaths(repoRoot).length === 0;
+        writeJson(phasePath, { ...phaseRecord, phase: "rolled_back", clean, at });
+        writeJson(path.join(dir, "failure.json"), { reason: "post_apply_failure", recovered: true, clean, at });
+        results.push({ cycleId: name, recovered: true, clean });
+      } else {
+        writeJson(phasePath, { ...phaseRecord, phase: "commit_state_uncertain", at });
+        writeJson(path.join(dir, "failure.json"), { reason: "commit_state_uncertain", recovered: false, at });
+        results.push({ cycleId: name, recovered: false, clean: true });
+      }
+      continue;
+    }
+    if (phaseName === "adoption-recorded") {
+      if (!repoRoot) {
+        results.push({ cycleId: name, recovered: false, clean: null });
+        continue;
+      }
+      const dirty = porcelainPaths(repoRoot);
+      const ledgerRel = path.posix.join("self-improve", "ledger.jsonl");
+      if (dirty.length > 0 && dirty.every((rel) => rel === ledgerRel)) {
+        commitPaths(repoRoot, `chore(self-improve): record adoption ${name}`, [ledgerRel]);
+        writeJson(phasePath, { ...phaseRecord, phase: "done", at });
+        results.push({ cycleId: name, recovered: true, clean: true });
+      } else {
+        const settled = dirty.length === 0;
+        writeJson(phasePath, { ...phaseRecord, phase: settled ? "done" : "adoption_state_uncertain", at });
+        writeJson(path.join(dir, "failure.json"), {
+          reason: settled ? "adoption_settled" : "adoption_state_uncertain",
+          dirty,
+          at,
+        });
+        results.push({ cycleId: name, recovered: settled, clean: settled, ...(settled ? {} : { dirty }) });
+      }
+      continue;
     }
   }
   return results;

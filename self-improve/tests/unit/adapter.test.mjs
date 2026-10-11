@@ -15,6 +15,8 @@ test("editable allowlist covers exact and glob source paths only", () => {
   assert.equal(matchesEditable("jev-advisor/src/hook.adapter.ts", DOMAIN.editable), true);
   assert.equal(matchesEditable("verification-receipts/lib/receipts.ts", DOMAIN.editable), true);
   assert.equal(matchesEditable("verification-receipts/src/run.adapter.ts", DOMAIN.editable), true);
+  assert.equal(matchesEditable("jev-advisor/subskills/jev-advisor/SKILL.md", DOMAIN.editable), true);
+  assert.ok(DOMAIN.textFixtures.includes("jev-advisor/subskills/jev-advisor/SKILL.md"));
   assert.equal(matchesEditable("jev-advisor/hooks/jev-advisor.ts", DOMAIN.editable), false);
   assert.equal(matchesEditable("ui-regression/lib/aside.ts", DOMAIN.editable), false);
   assert.equal(matchesEditable("README.md", DOMAIN.editable), false);

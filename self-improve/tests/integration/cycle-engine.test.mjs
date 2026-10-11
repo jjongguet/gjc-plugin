@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import DOMAIN from "../../domains/gjc-plugin/adapter.mjs";
 import { recoverPendingCycle, runCycle } from "../../lib/engine.mjs";
-import { readLedger } from "../../lib/ledger.mjs";
+import { appendRow, readLedger } from "../../lib/ledger.mjs";
 
 function git(cwd, args) {
   const proc = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -29,6 +29,8 @@ function makeFixture() {
   writeFileSync(join(repo, "verification-receipts", "lib", "extra.ts"), "export const extra = 1;\n");
   writeFileSync(join(repo, "jev-advisor", "tests", "decision.test.ts"), "// protected\n");
   writeFileSync(join(repo, "self-improve", "ledger.jsonl"), "");
+  mkdirSync(join(repo, "jev-advisor", "hooks"), { recursive: true });
+  writeFileSync(join(repo, "jev-advisor", "hooks", "hook.ts"), "// generated v1\n");
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.name", "fixture"]);
   git(repo, ["config", "user.email", "fixture@example.invalid"]);
@@ -58,10 +60,13 @@ const oversizePatch = [
   patchFor("verification-receipts/lib/extra.ts", "export const extra = 1;", "export const extra = 11;"),
 ].join("");
 
-function makeFakeGuards({ failBuildOnCall = null } = {}) {
+function makeFakeGuards({ failBuildOnCall = null, mutateOnCall = null } = {}) {
   const state = { calls: 0 };
   const runner = async ({ guards }) => {
     state.calls += 1;
+    if (mutateOnCall && mutateOnCall.call === state.calls) {
+      writeFileSync(join(mutateOnCall.repo, mutateOnCall.path), `${mutateOnCall.content}\n`);
+    }
     return guards.map((guard) => ({
       id: guard.id,
       status: failBuildOnCall === state.calls && guard.id === "build" ? "fail" : "pass",
@@ -316,5 +321,132 @@ test("duplicate hypothesis is rejected without evaluation and stalls force explo
   const lastCycle = rows.filter((row) => row.kind === "cycle").at(-1);
   assert.equal(lastCycle.forcedExploration, true);
   assert.equal(lastCycle.objective, "probe.other");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("adopted commits include regenerated surfaces rewritten by the build guard", async () => {
+  const { root, repo } = makeFixture();
+  const fake = makeFakeGuards({
+    mutateOnCall: { call: 4, repo, path: "jev-advisor/hooks/hook.ts", content: "// generated v2" },
+  });
+  const patchFile = writePatch(root, "regen.patch", cleanPatch);
+  const result = await runCycle(
+    cycleInput({ root, repo, patchFile, hypothesis: "regen", deps: { runGuards: fake.runner, evaluateProbes: improvingProbes } }),
+  );
+  assert.equal(result.adoption, "committed");
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  const stat = git(repo, ["show", "--name-only", "--format=%s", "HEAD~1"]);
+  assert.ok(stat.includes("jev-advisor/hooks/hook.ts"), stat);
+  assert.ok(stat.includes("jev-advisor/lib/decision.ts"), stat);
+  assert.equal(readFileSync(join(repo, "jev-advisor", "hooks", "hook.ts"), "utf8"), "// generated v2\n");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("unexpected workspace changes abort the adopt and roll everything back", async () => {
+  const { root, repo } = makeFixture();
+  const baseCommits = Number(git(repo, ["rev-list", "--count", "HEAD"]));
+  const fake = makeFakeGuards({ mutateOnCall: { call: 4, repo, path: "notes.txt", content: "stray" } });
+  const patchFile = writePatch(root, "stray.patch", cleanPatch);
+  const result = await runCycle(
+    cycleInput({ root, repo, patchFile, hypothesis: "stray", deps: { runGuards: fake.runner, evaluateProbes: improvingProbes } }),
+  );
+  assert.equal(result.decision, "adopt");
+  assert.equal(result.adoption, "post_apply_failure");
+  assert.equal(result.clean, true);
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  assert.equal(Number(git(repo, ["rev-list", "--count", "HEAD"])), baseCommits + 1);
+  assert.equal(readLedger(join(repo, "self-improve", "ledger.jsonl")).length, 1);
+  const runDirs = readdirSync(join(root, "runroot", "runs"));
+  const failure = JSON.parse(readFileSync(join(root, "runroot", "runs", runDirs[0], "failure.json"), "utf8"));
+  assert.equal(failure.reason, "unexpected_workspace_changes");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("concurrent workspace drift aborts the adopt before apply and preserves the foreign edit", async () => {
+  const { root, repo } = makeFixture();
+  const baseCommits = Number(git(repo, ["rev-list", "--count", "HEAD"]));
+  const fake = makeFakeGuards({
+    mutateOnCall: { call: 3, repo, path: "jev-advisor/src/alpha.adapter.ts", content: "// drift" },
+  });
+  const patchFile = writePatch(root, "drift.patch", cleanPatch);
+  const result = await runCycle(
+    cycleInput({ root, repo, patchFile, hypothesis: "drift", deps: { runGuards: fake.runner, evaluateProbes: improvingProbes } }),
+  );
+  assert.equal(result.decision, "adopt");
+  assert.equal(result.adoption, "aborted_dirty_worktree");
+  assert.equal(readFileSync(join(repo, "jev-advisor", "src", "alpha.adapter.ts"), "utf8"), "// drift\n");
+  assert.equal(Number(git(repo, ["rev-list", "--count", "HEAD"])), baseCommits + 1);
+  git(repo, ["checkout", "--", "jev-advisor/src/alpha.adapter.ts"]);
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("the install flag records the install state through the seam", async () => {
+  const { root, repo } = makeFixture();
+  const fake = makeFakeGuards();
+  const patchFile = writePatch(root, "install.patch", cleanPatch);
+  const result = await runCycle({
+    ...cycleInput({ root, repo, patchFile, hypothesis: "install", deps: {} }),
+    install: true,
+    deps: {
+      runGuards: fake.runner,
+      evaluateProbes: improvingProbes,
+      runInstall: () => ({ install: "upgraded", plugin: "jev-advisor" }),
+    },
+  });
+  assert.equal(result.adoption, "committed");
+  const rows = readLedger(join(repo, "self-improve", "ledger.jsonl"));
+  assert.equal(rows.at(-1).install, "upgraded");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("recovery reports an uncertain commit state instead of guessing", () => {
+  const { root, repo } = makeFixture();
+  const runRoot = join(root, "runroot");
+  const dir = join(runRoot, "runs", "cyc-uncertain");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "phase.json"), JSON.stringify({ phase: "committing", at: "simulated" }));
+  const results = recoverPendingCycle({ runRoot, repoRoot: repo });
+  assert.deepEqual(results, [{ cycleId: "cyc-uncertain", recovered: false, clean: true }]);
+  assert.equal(JSON.parse(readFileSync(join(dir, "phase.json"), "utf8")).phase, "commit_state_uncertain");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("recovery completes a missing adoption chore commit", () => {
+  const { root, repo } = makeFixture();
+  const runRoot = join(root, "runroot");
+  const dir = join(runRoot, "runs", "cyc-adopt-pending");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "phase.json"), JSON.stringify({ phase: "adoption-recorded", at: "simulated" }));
+  appendRow(join(repo, "self-improve", "ledger.jsonl"), {
+    kind: "adoption",
+    cycleId: "cyc-adopt-pending",
+    commit: "abcdef0",
+    install: "not_attempted",
+    createdAt: "2026-10-12T00:00:00.000Z",
+  });
+  assert.notEqual(git(repo, ["status", "--porcelain"]), "");
+  const results = recoverPendingCycle({ runRoot, repoRoot: repo });
+  assert.deepEqual(results, [{ cycleId: "cyc-adopt-pending", recovered: true, clean: true }]);
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  assert.match(git(repo, ["log", "-1", "--format=%s"]), /^chore\(self-improve\): record adoption cyc-adopt-pending$/);
+  assert.equal(JSON.parse(readFileSync(join(dir, "phase.json"), "utf8")).phase, "done");
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("a ledger outside the repository is refused before any side effects", async () => {
+  const { root, repo } = makeFixture();
+  const fake = makeFakeGuards();
+  const patchFile = writePatch(root, "outside.patch", cleanPatch);
+  await assert.rejects(
+    runCycle({
+      ...cycleInput({ root, repo, patchFile, hypothesis: "outside", deps: {} }),
+      ledgerPath: join(root, "outside-ledger.jsonl"),
+      deps: { runGuards: fake.runner, evaluateProbes: improvingProbes },
+    }),
+    /ledger_must_live_inside_repository/,
+  );
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  assert.equal(existsSync(join(root, "outside-ledger.jsonl")), false);
   rmSync(root, { recursive: true, force: true });
 });

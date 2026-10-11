@@ -1,18 +1,7 @@
 {
   "schema": "gjc.self-improve.rrsi.v1",
-  "domain": "gjc-plugin",
   "minDelta": 0.01,
-  "k": { "deterministic": 1, "stochastic": 3 },
-  "stall": { "k": 3, "forcedProbeReason": "forced_exploration" },
   "cost": { "wallMsBytesIncreaseRatio": 0.15, "gainMultipleOfFloor": 2 },
-  "budget": {
-    "schedule": [
-      { "maxFiles": 3, "maxHunks": 12 },
-      { "maxFiles": 2, "maxHunks": 8 },
-      { "maxFiles": 1, "maxHunks": 4 }
-    ]
-  },
-  "retention": { "rawCycles": 10, "archives": 3 },
-  "runner": { "mode": "local_stub", "pins": ["--no-skills", "--no-rules"], "env": { "GJC_NOTIFY": "off" } },
-  "privateRoot": "~/.gjc-plugin/self-improve"
+  "stall": { "k": 3 },
+  "retention": { "rawCycles": 10 }
 }
