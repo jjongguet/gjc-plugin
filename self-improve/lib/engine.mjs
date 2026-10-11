@@ -11,12 +11,15 @@ import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { checkBudget, rungFor } from "./budget.mjs";
 import { buildCriticFindings, decideCycle, evaluateCostRule, evaluateHeldout } from "./gates.mjs";
 import { buildGuardPlan, runGuards as defaultRunGuards } from "./guards.mjs";
 import { createScratchCopy } from "./isolate.mjs";
 import { appendRow, readLedger } from "./ledger.mjs";
 import { sha256Hex } from "./types.mjs";
+
+const SELF_IMPROVE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
 export function defaultRunRoot() {
   return path.join(os.homedir(), ".gjc-plugin", "self-improve");
@@ -157,16 +160,87 @@ export function campaignAcceptedCount(ledgerPath, campaignId) {
   ).length;
 }
 
+export function historyState(ledgerPath, { k = 3 } = {}) {
+  const cycles = readLedger(ledgerPath).filter((row) => row.kind === "cycle");
+  const lastRejects = cycles
+    .filter((row) => row.verdict?.decision === "reject")
+    .slice(-5)
+    .map((row) => ({
+      cycleId: row.cycleId,
+      objective: row.objective,
+      hypothesisHash: row.hypothesisHash,
+      reasons: row.verdict.reasons,
+    }));
+  const perObjective = new Map();
+  for (const row of cycles) {
+    const entry = perObjective.get(row.objective) ?? {
+      objective: row.objective,
+      attempts: 0,
+      consecutiveRejects: 0,
+      hypothesisHashes: [],
+    };
+    entry.attempts += 1;
+    entry.consecutiveRejects = row.verdict?.decision === "reject" ? entry.consecutiveRejects + 1 : 0;
+    entry.hypothesisHashes.push(row.hypothesisHash);
+    perObjective.set(row.objective, entry);
+  }
+  const objectives = [...perObjective.values()];
+  const stalled = objectives.filter((entry) => entry.consecutiveRejects >= k).map((entry) => entry.objective);
+  return { lastRejects, objectives, stalled };
+}
+
+/**
+ * History conditioning: reject the same (objective, hypothesis) resubmission and
+ * force stalled objectives onto an unexplored probe before any evaluation runs.
+ */
+export function checkProposalHistory({ ledgerPath, proposal, adapterObjectives = [], k = 3 }) {
+  const cycles = readLedger(ledgerPath).filter((row) => row.kind === "cycle");
+  const hypothesisHash = sha256Hex(proposal.hypothesis);
+  if (cycles.some((row) => row.objective === proposal.objective && row.hypothesisHash === hypothesisHash)) {
+    return { ok: false, reason: "history_duplicate_hypothesis", hypothesisHash };
+  }
+  const state = historyState(ledgerPath, { k });
+  if (state.stalled.includes(proposal.objective)) {
+    const unexplored = adapterObjectives.filter(
+      (objective) => !state.objectives.some((entry) => entry.objective === objective),
+    );
+    return { ok: false, reason: "forced_exploration", stalled: proposal.objective, unexplored };
+  }
+  return { ok: true, reason: null, hypothesisHash, forcedExploration: state.stalled.length > 0 };
+}
+
 function defaultCycleId(now) {
   const compact = now.replace(/[-:.TZ]/g, "").slice(0, 14);
   return `cyc-${compact}-${randomBytes(2).toString("hex")}`;
 }
 
-async function defaultEvaluateProbes({ adapter }) {
+async function defaultEvaluateProbes({ adapter, baselineDir, candidateDir }) {
   if (!Array.isArray(adapter.probes) || adapter.probes.length === 0) {
     return { baseline: {}, candidate: {}, delta: 0, heldout: { baseline: {}, candidate: {} } };
   }
-  throw new Error("probe_evaluator_missing: adapter declares probes but no evaluator is wired");
+  const runnerRel = adapter.probes[0].runner;
+  if (typeof runnerRel !== "string" || runnerRel.length === 0) {
+    throw new Error("probe_runner_missing: adapter probes must declare a runner path");
+  }
+  const runnerPath = path.resolve(SELF_IMPROVE_ROOT, runnerRel);
+  const proc = spawnSync("bun", [runnerPath, "--baseline", baselineDir, "--candidate", candidateDir, "--json"], {
+    encoding: "utf8",
+    timeout: 120000,
+    maxBuffer: 16 * 1024 * 1024,
+  });
+  if (proc.status !== 0) throw new Error(`probe_runner_failed: ${proc.stderr || proc.status}`);
+  let parsed;
+  try {
+    parsed = JSON.parse(proc.stdout);
+  } catch (error) {
+    throw new Error(`probe_runner_invalid_json: ${error.message}`);
+  }
+  return {
+    baseline: parsed.baseline ?? {},
+    candidate: parsed.candidate ?? {},
+    delta: parsed.delta ?? 0,
+    heldout: parsed.heldout ?? { baseline: {}, candidate: {} },
+  };
 }
 
 export async function runCycle(input) {
@@ -202,6 +276,22 @@ export async function runCycle(input) {
   const hunks = countHunks(patchText);
   if (touched.length === 0) {
     return { status: "rejected", decision: "reject", reasons: ["empty_patch"], recorded: false };
+  }
+
+  const history = checkProposalHistory({
+    ledgerPath,
+    proposal,
+    adapterObjectives: adapter.objectives ?? [],
+    k: input.stallK ?? 3,
+  });
+  if (!history.ok) {
+    return {
+      status: "rejected",
+      decision: "reject",
+      reasons: [history.reason],
+      recorded: false,
+      ...(history.unexplored ? { unexplored: history.unexplored } : {}),
+    };
   }
 
   const repoState = assertRepoState({ repoRoot, baseCommit: proposal.baseCommit });
@@ -333,6 +423,8 @@ export async function runCycle(input) {
       guards: candidateGuards.map(({ id, status }) => ({ id, status })),
       critic: { verdict: critic.verdict, rules: critic.rules.map(({ id, reason }) => ({ id, reason })) },
       verdict: { decision: decision.decision, reasons: decision.reasons },
+      ...(touched.some((rel) => (adapter.textFixtures ?? []).includes(rel)) ? { labels: ["text_fixture"] } : {}),
+      ...(history.forcedExploration ? { forcedExploration: true } : {}),
       createdAt: now(),
     };
     const cycleReceipt = appendRow(ledgerPath, cycleRow);

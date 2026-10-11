@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * self-improve CLI: report, cycle (single deterministic cycle), recover, prune.
+ * self-improve CLI: report, cycle, recover, prune, runner, history.
  */
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
-import { defaultRunRoot, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
+import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
 import { ledgerCounts } from "../lib/ledger.mjs";
+import { buildTextFixturePrompt, runStochasticEvaluation } from "../lib/runner.mjs";
 
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_LEDGER = join(SELF_IMPROVE_DIR, "ledger.jsonl");
@@ -20,17 +21,38 @@ commands:
           [--domain <id>] [--campaign <id>] [--dry-run] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
   prune   [--run-root <path>] [--keep <n>] [--json]
+  runner  --baseline <dir> --candidate <dir> [--mode local_stub|live] [--k <n>]
+          [--timeout-ms <n>] [--model <pin>] [--prompt <text> | --text-fixture <path>]
+          [--live-approved] [--run-root <path>] [--json]
+  history [--json] [--ledger <path>]
 `;
 
-const VALUED_FLAGS = new Set(["--ledger", "--domain", "--proposal", "--repo", "--run-root", "--campaign", "--keep"]);
+const VALUED_FLAGS = new Set([
+  "--ledger",
+  "--domain",
+  "--proposal",
+  "--repo",
+  "--run-root",
+  "--campaign",
+  "--keep",
+  "--baseline",
+  "--candidate",
+  "--mode",
+  "--k",
+  "--timeout-ms",
+  "--model",
+  "--prompt",
+  "--text-fixture",
+]);
 
 function parseArgs(argv) {
   const [command = "", ...rest] = argv;
-  const options = { json: false, dryRun: false };
+  const options = { json: false, dryRun: false, liveApproved: false };
   for (let i = 0; i < rest.length; i += 1) {
     const token = rest[i];
     if (token === "--json") options.json = true;
     else if (token === "--dry-run") options.dryRun = true;
+    else if (token === "--live-approved") options.liveApproved = true;
     else if (VALUED_FLAGS.has(token)) {
       const value = rest[i + 1];
       if (value === undefined || value.startsWith("--")) return { error: `${token} requires a value` };
@@ -112,7 +134,61 @@ function runPruneCommand(options) {
   }
   const result = pruneRuns({ runRoot, keep });
   if (options.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  else process.stdout.write(`removed=${result.removed.length}${result.removed.length ? ` (${result.removed.join(", ")})` : ""}\n`);
+  else
+    process.stdout.write(`removed=${result.removed.length}${result.removed.length ? ` (${result.removed.join(", ")})` : ""}\n`);
+  return 0;
+}
+
+async function runRunnerCommand(options) {
+  if (!options.baseline || !options.candidate) {
+    process.stderr.write(`runner requires --baseline <dir> and --candidate <dir>\n\n${USAGE}`);
+    return 2;
+  }
+  const runRoot = options["run-root"] ? resolve(options["run-root"]) : defaultRunRoot();
+  let prompt = options.prompt ?? "self-improve local stub trial";
+  let textFixture = null;
+  if (options["text-fixture"]) {
+    const built = buildTextFixturePrompt({ fixturePath: options["text-fixture"] });
+    prompt = built.prompt;
+    textFixture = built.textFixture;
+  }
+  const k = options.k === undefined ? undefined : Number.parseInt(options.k, 10);
+  if (k !== undefined && (!Number.isInteger(k) || k < 3)) {
+    process.stderr.write(`invalid --k: ${options.k} (k >= 3)\n`);
+    return 2;
+  }
+  const timeoutMs = options["timeout-ms"] === undefined ? undefined : Number.parseInt(options["timeout-ms"], 10);
+  const result = await runStochasticEvaluation({
+    mode: options.mode ?? "local_stub",
+    k,
+    timeoutMs: Number.isInteger(timeoutMs) ? timeoutMs : undefined,
+    modelPin: options.model,
+    prompt,
+    textFixture,
+    liveApproved: options.liveApproved === true,
+    baselineDir: resolve(options.baseline),
+    candidateDir: resolve(options.candidate),
+    runRoot,
+  });
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `mode=${result.mode ?? "-"} skipped=${result.skipped ?? false}${result.reason ? ` reason=${result.reason}` : ""} ` +
+        `baseline=${result.baseline?.median ?? "-"} candidate=${result.candidate?.median ?? "-"} delta=${result.delta ?? "-"} floor=${result.floor ?? "-"}\n`,
+    );
+  }
+  return 0;
+}
+
+function runHistoryCommand(options) {
+  const ledgerPath = options.ledger ? resolve(options.ledger) : DEFAULT_LEDGER;
+  const state = historyState(ledgerPath);
+  if (options.json) process.stdout.write(`${JSON.stringify({ ledger: ledgerPath, ...state }, null, 2)}\n`);
+  else
+    process.stdout.write(
+      `ledger=${ledgerPath} stalled=[${state.stalled.join(", ")}] recentRejects=${state.lastRejects.length}\n`,
+    );
   return 0;
 }
 
@@ -127,6 +203,8 @@ async function run(argv) {
   if (command === "cycle") return await runCycleCommand(options);
   if (command === "recover") return runRecoverCommand(options);
   if (command === "prune") return runPruneCommand(options);
+  if (command === "runner") return await runRunnerCommand(options);
+  if (command === "history") return runHistoryCommand(options);
   if (command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(USAGE);
     return 0;

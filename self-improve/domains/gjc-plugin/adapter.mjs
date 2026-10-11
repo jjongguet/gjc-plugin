@@ -22,6 +22,7 @@ export const DOMAIN = Object.freeze({
     "verification-receipts/tools/**",
     "ui-regression/tools/**",
   ],
+  textFixtures: ["jev-advisor/subskills/jev-advisor/SKILL.md"],
   protectedPaths: [
     "**/tests/**",
     "**/scripts/verify.ts",
@@ -82,8 +83,15 @@ export const DOMAIN = Object.freeze({
     { id: "smoke-advisor", args: ["--advisor"], plugin: "jev-advisor" },
     { id: "smoke-metrics", args: ["--metrics"], plugin: "jev-advisor" },
   ],
-  probes: [],
-  heldout: [],
+  probes: [
+    { id: "decision_accuracy", objective: "probe.decision_accuracy", runner: "domains/gjc-plugin/probes/run.ts" },
+    { id: "extract_coverage", objective: "probe.extract_coverage", runner: "domains/gjc-plugin/probes/run.ts" },
+    { id: "egress_boundary", objective: "probe.egress_boundary", runner: "domains/gjc-plugin/probes/run.ts" },
+  ],
+  heldout: [
+    { id: "heldout_coverage", objective: "probe.heldout_coverage", runner: "domains/gjc-plugin/probes/run.ts" },
+  ],
+  objectives: ["probe.decision_accuracy", "probe.extract_coverage", "probe.egress_boundary"],
 });
 
 export default DOMAIN;

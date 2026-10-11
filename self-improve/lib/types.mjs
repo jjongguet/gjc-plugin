@@ -124,6 +124,12 @@ export function validateCycleRow(row) {
   if (row.forcedExploration !== undefined) {
     assert(typeof row.forcedExploration === "boolean", "forcedExploration must be boolean");
   }
+  if (row.labels !== undefined) {
+    assert(
+      Array.isArray(row.labels) && row.labels.every((label) => typeof label === "string" && label.length > 0),
+      "labels must be an array of non-empty strings when present",
+    );
+  }
   assert(typeof row.createdAt === "string" && row.createdAt.length > 0, "createdAt required");
 }
 

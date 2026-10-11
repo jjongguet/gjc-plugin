@@ -86,14 +86,14 @@ const flatProbes = async () => ({
   heldout: { baseline: {}, candidate: {} },
 });
 
-function cycleInput({ root, repo, patchFile, deps, dryRun = false }) {
+function cycleInput({ root, repo, patchFile, deps, dryRun = false, hypothesis = "fixture hypothesis", objective = "probe.coverage" }) {
   return {
     repoRoot: repo,
     adapter: DOMAIN,
     proposal: {
       source: "manual",
-      hypothesis: "fixture hypothesis",
-      objective: "probe.coverage",
+      hypothesis,
+      objective,
       commitMessage: "feat(jev-advisor): apply fixture change",
       patchFile,
       campaignId: "default",
@@ -134,7 +134,13 @@ test("malicious proposals are rejected: protected edit, held-out hardcode, budge
     const fake = makeFakeGuards();
     const patchFile = writePatch(root, `${testCase.name}.patch`, testCase.patch);
     const result = await runCycle(
-      cycleInput({ root, repo, patchFile, deps: { runGuards: fake.runner, evaluateProbes: testCase.probes } }),
+      cycleInput({
+        root,
+        repo,
+        patchFile,
+        hypothesis: `${testCase.name} hypothesis`,
+        deps: { runGuards: fake.runner, evaluateProbes: testCase.probes },
+      }),
     );
     assert.equal(result.decision, "reject", testCase.name);
     assert.ok(result.reasons.some((reason) => testCase.expect.test(reason)), `${testCase.name}: ${result.reasons.join(",")}`);
@@ -157,7 +163,13 @@ test("reject then adopt: adoption commits code plus adoption row (three-commit p
   const fake2 = makeFakeGuards();
   const adoptPatch = writePatch(root, "adopt.patch", cleanPatch);
   const adopted = await runCycle(
-    cycleInput({ root, repo, patchFile: adoptPatch, deps: { runGuards: fake2.runner, evaluateProbes: improvingProbes } }),
+    cycleInput({
+      root,
+      repo,
+      patchFile: adoptPatch,
+      hypothesis: "adopt hypothesis",
+      deps: { runGuards: fake2.runner, evaluateProbes: improvingProbes },
+    }),
   );
   assert.equal(adopted.decision, "adopt");
   assert.equal(adopted.adoption, "committed");
@@ -261,5 +273,48 @@ test("cycle lock refuses busy and stale holders without stealing", async () => {
     { status: "busy", reason: "cycle_busy_stale", stale: true },
   );
   assert.equal(existsSync(lockPath), true);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("duplicate hypothesis is rejected without evaluation and stalls force exploration", async () => {
+  const { root, repo } = makeFixture();
+  const fake = makeFakeGuards();
+  const patchFile = writePatch(root, "history.patch", noBenefitPatch);
+  const first = await runCycle(
+    cycleInput({ root, repo, patchFile, deps: { runGuards: fake.runner, evaluateProbes: flatProbes } }),
+  );
+  assert.equal(first.decision, "reject");
+  const duplicate = await runCycle(
+    cycleInput({ root, repo, patchFile, deps: { runGuards: fake.runner, evaluateProbes: flatProbes } }),
+  );
+  assert.equal(duplicate.reasons[0], "history_duplicate_hypothesis");
+  assert.equal(duplicate.recorded, false);
+  assert.equal(readLedger(join(repo, "self-improve", "ledger.jsonl")).length, 1);
+  for (const [index, hypothesis] of ["h2", "h3"].entries()) {
+    const rejected = await runCycle(
+      cycleInput({ root, repo, patchFile, hypothesis, deps: { runGuards: fake.runner, evaluateProbes: flatProbes } }),
+    );
+    assert.equal(rejected.decision, "reject", `reject ${index + 2}`);
+  }
+  const stalled = await runCycle(
+    cycleInput({ root, repo, patchFile, hypothesis: "h4", deps: { runGuards: fake.runner, evaluateProbes: flatProbes } }),
+  );
+  assert.equal(stalled.reasons[0], "forced_exploration");
+  assert.equal(stalled.recorded, false);
+  const redirect = await runCycle(
+    cycleInput({
+      root,
+      repo,
+      patchFile,
+      hypothesis: "redirect hypothesis",
+      objective: "probe.other",
+      deps: { runGuards: fake.runner, evaluateProbes: improvingProbes },
+    }),
+  );
+  assert.equal(redirect.decision, "adopt");
+  const rows = readLedger(join(repo, "self-improve", "ledger.jsonl"));
+  const lastCycle = rows.filter((row) => row.kind === "cycle").at(-1);
+  assert.equal(lastCycle.forcedExploration, true);
+  assert.equal(lastCycle.objective, "probe.other");
   rmSync(root, { recursive: true, force: true });
 });

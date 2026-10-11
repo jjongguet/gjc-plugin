@@ -35,10 +35,11 @@ Partial regularization: anything beyond this set is explicitly out of scope.
 
 ## Status
 
-The deterministic cycle engine is in place: gates, guard pipeline, scratch-copy
-isolation, replay-gated adoption, ledger commits and crash recovery, covered by
-the unit suite plus scratch-guard and cycle-engine integrations. Probe suites,
-the stochastic runner and the real-cycle report land with later milestones.
+The deterministic cycle engine is in place (gates, guard pipeline, scratch-copy
+isolation, replay-gated adoption, ledger commits, crash recovery), together with
+the deterministic probe/held-out suites, history conditioning (duplicate-hypothesis
+ban, forced exploration) and the k>=3 local-stub stochastic runner. The real-cycle
+report lands with the final milestones.
 
 ## Commands
 

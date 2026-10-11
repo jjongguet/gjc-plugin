@@ -1,0 +1,167 @@
+{
+  "description": "Held-out cases for the gjc-plugin domain, kept separate from the probe fixtures in ../probes/fixtures.json. Used to compute heldout_coverage.",
+  "cases": {
+    "extract_coverage": [
+      {
+        "input": {
+          "role": "reviewer",
+          "tasks": [
+            { "id": "h-1", "description": "Review pull request", "assignment": "Check tests", "tier": "balanced" }
+          ]
+        },
+        "maxPromptChars": 1900,
+        "expected": {
+          "extractedIndexes": [0],
+          "rejectedIndexes": [],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "tasks": [
+            { "id": "h-2", "assignment": "Valid assignment" },
+            { "id": "h-3", "description": 42 }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [0],
+          "rejectedIndexes": [1],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "context": 12345,
+          "tasks": [
+            { "id": "h-4", "assignment": "task four" },
+            { "id": "h-5", "assignment": "task five" }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [],
+          "rejectedIndexes": [0, 1],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "tasks": [
+            { "id": "h-6", "assignment": "" },
+            { "id": "h-7", "assignment": "   " }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [],
+          "rejectedIndexes": [0, 1],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": "tasks: some free-form text",
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [],
+          "rejectedIndexes": [-1],
+          "omittedCount": 0
+        }
+      }
+    ],
+    "decision_accuracy": [
+      {
+        "raw": "{\"tier\":\"strong\",\"confidence\":0.4}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "strong" }
+      },
+      {
+        "raw": "{\"tier\":\"balanced\",\"confidence\":0.0}",
+        "confidenceKind": "provider_choice",
+        "expected": { "accept": true, "tier": "balanced" }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":\"high\"}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":123,\"confidence\":0.9}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"FAST\",\"confidence\":0.8}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "fast" }
+      },
+      {
+        "raw": "{\"tier\":\"strong\",\"confidence\":0.9,\"probabilities\":{\"fast\":0.1,\"balanced\":0.2,\"strong\":0.7}}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "strong" }
+      },
+      {
+        "raw": "{\"tier\":\"strong\",\"confidence\":0.9,\"probabilities\":{\"fast\":\"high\"}}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"balanced\",\"confidence\":0.9,\"rationale\":123}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"balanced\",\"confidence\":0.9,\"rationale\":\"choose balanced for cost\"}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "balanced" }
+      },
+      {
+        "raw": "just some plain text",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "[{\"tier\":\"fast\",\"confidence\":0.9}]",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      }
+    ],
+    "egress_boundary": [
+      {
+        "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "http://localhost:9999/api",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "ftp://example.com/file",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "https://sub.evil.invalid/path",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "http://10.0.0.5/v1",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "not a url at all",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "https://user@openrouter.ai/api/alpha/decisions",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "http://[::1]:8080/health",
+        "expected": { "allowed": true }
+      }
+    ]
+  }
+}
