@@ -45,7 +45,41 @@ report lands with the final milestones.
 
 ```sh
 node self-improve/scripts/run.mjs report --json
+node self-improve/scripts/run.mjs history --json
 node self-improve/scripts/verify-unit.mjs
+node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json
+node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo .
+node self-improve/scripts/run.mjs recover --repo .
+node self-improve/scripts/run.mjs runner --baseline . --candidate . --k 3 --json
 bun run test:self-improve
-bun run self-improve:cycle -- --domain gjc-plugin --proposal <path>
 ```
+
+## Runbook
+
+1. Write a proposal JSON next to its patch; `patchFile` resolves relative to the
+   proposal file.
+2. Dry-run first: evaluates baseline and candidate scratch copies with the full
+   guard set and probes, writes nothing and commits nothing.
+3. Run the real cycle: one ledger row plus a ledger-only
+   `chore(self-improve): cycle <id> <decision>` commit. Adoptions add the code
+   commit and the adoption row (see `PATTERNS.md`).
+4. `history --json` exposes recent rejects, per-objective reject streaks and
+   stalled objectives; `recover --repo .` rolls back a cycle that crashed
+   mid-apply.
+
+Proposal shape:
+
+```json
+{
+  "source": "manual",
+  "hypothesis": "why this edit should move the objective",
+  "objective": "probe.decision_accuracy",
+  "commitMessage": "fix(jev-advisor): ...",
+  "patchFile": "relative-or-absolute.patch"
+}
+```
+
+The stochastic runner is keyless by default (`local_stub`: k>=3 pinned
+`gjc --print` trials against an in-process loopback scripted provider). Live
+provider calls require `--live-approved` and an approved budget; without it the
+run is recorded as `skipped`.

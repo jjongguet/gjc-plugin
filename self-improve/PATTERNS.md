@@ -46,8 +46,24 @@ never as a runtime-loaded skill surface: the plugin manifest does not register
 `subskills`, the installed bundle does not contain it, and skill loaders scan
 only project `.gjc/skills/` and user `~/.gjc/agent/skills/`.
 
+## Partial regularization (limits)
+
+What is deliberately not regularized yet:
+
+- Hypothesis resubmission is keyed to `(objective, hypothesisHash)` without a
+  probe-file content hash: changing only fixtures does not unlock a rejected
+  hypothesis — update the hypothesis text when the corpus changes materially.
+- Stall redirection blocks a stalled objective and marks the redirect cycle
+  (`forcedExploration`), but choosing the next objective remains proposer work;
+  the engine reports the unexplored objectives.
+- Stochastic calibration is one baseline spread per side (median comparison);
+  no bootstrap or multi-campaign calibration exists.
+- Held-out coverage remains best-effort per the threat model above.
+
 ## Honesty
 
 Missing is not zero; unmeasured is `null`; unrun is `skipped`. No completion
-claim without a receipt. Ledger rows are <= 2 KiB; raw logs stay in
+claim without a receipt. Flaky repository tests are never silently retried: a
+guard failure rejects the cycle — fix the flaky test in the repository instead.
+Ledger rows are <= 2 KiB; raw logs stay in
 `~/.gjc-plugin/self-improve/runs/<cycleId>/` (0700, never committed).
