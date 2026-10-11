@@ -45,6 +45,13 @@ export function assertSurface({ touched, surface, editable }) {
     : { ok: false, reason: "surface_violation", offending };
 }
 
+export function assertNoProtectedTouched(paths, protectedPatterns) {
+  const offending = paths.filter((candidate) => matchesEditable(candidate, protectedPatterns));
+  return offending.length === 0
+    ? { ok: true, reason: null, offending }
+    : { ok: false, reason: "protected_path_touched", offending };
+}
+
 export function validateAdapterShape(adapter) {
   const required = [
     "id",

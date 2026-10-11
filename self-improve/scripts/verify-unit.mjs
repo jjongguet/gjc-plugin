@@ -40,6 +40,7 @@ if (result.status === 0 && cases > 0) {
   process.exitCode = 0;
 } else {
   process.stdout.write(output);
-  process.stderr.write(`FAIL (${cases} cases, ${pass} pass, ${fail} fail)\n`);
+  const detail = `status=${result.status ?? "null"}${result.signal ? `, signal=${result.signal}` : ""}${result.error ? `, error=${result.error.message}` : ""}`;
+  process.stderr.write(`FAIL (${cases} cases, ${pass} pass, ${fail} fail, ${detail})\n`);
   process.exitCode = 1;
 }
