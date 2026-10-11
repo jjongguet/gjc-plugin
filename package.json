@@ -6,13 +6,15 @@
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
   "scripts": {
     "build": "bun run build:advisor && bun run build:verification && bun run build:ui",
-    "test": "bun run test:shared && bun run test:advisor && bun run test:verification && bun run test:ui",
+    "test": "bun run test:shared && bun run test:advisor && bun run test:verification && bun run test:ui && bun run test:self-improve",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",
     "build:verification": "bun verification-receipts/scripts/build.mjs",
     "test:verification": "bun verification-receipts/scripts/verify.ts",
     "build:ui": "bun ui-regression/scripts/build.mjs",
     "test:ui": "bun ui-regression/scripts/verify.ts",
-    "test:shared": "bun test shared/tests/results.test.ts"
+    "test:shared": "bun test shared/tests/results.test.ts",
+    "test:self-improve": "node self-improve/scripts/verify-unit.mjs",
+    "self-improve:cycle": "node self-improve/scripts/run.mjs cycle"
   }
 }

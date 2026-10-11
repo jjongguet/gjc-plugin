@@ -79,6 +79,10 @@ Missing sources are not zero. Unmeasured values are `null`. Duration sums and av
 
 This tool is descriptive monitoring only. It never claims quality, accuracy, routing-correctness, cost/token, overhead, provider/assessment latency or causal ROI. Causal evaluation requires a separate controlled comparison.
 
+## Self-improvement loop (`self-improve/`)
+
+[`self-improve/`](self-improve/) is a repo-native harness self-improvement loop over this repository's own plugin surfaces (regularized recursive self-improvement, inspired by the RRSI design). It edits only declared `editable` sources, scores candidates with the repository's deterministic checkers plus declared probes, and records every decision in a committed append-only ledger. Regularizations beyond the documented set are explicitly out of scope (partial regularization). Candidates run in `git archive` scratch copies with an allowlisted environment; the live `~/.gjc/agent` is never modified. The loop is keyless and never reads credentials. See [`self-improve/README.md`](self-improve/README.md) and [`self-improve/PATTERNS.md`](self-improve/PATTERNS.md).
+
 ## Develop and verify
 
 ```sh
