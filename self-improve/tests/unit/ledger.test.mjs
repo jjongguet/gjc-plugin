@@ -67,6 +67,7 @@ test("ledgerCounts aggregates verdicts and kinds", () => {
   assert.equal(counts.total, 3);
   assert.deepEqual(counts.byKind, { cycle: 2, adoption: 1 });
   assert.deepEqual(counts.byVerdict, { adopt: 1, reject: 1, inconclusive: 0 });
+  assert.deepEqual(counts.cost, { cycleRows: 2, wallMsMeasured: 2, bytesMeasured: 2, tokensMeasured: 0, tokensNull: 2 });
   assert.equal(counts.chain.ok, true);
 });
 

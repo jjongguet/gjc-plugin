@@ -88,11 +88,18 @@ export function ledgerCounts(filePath) {
   const entries = loadEntries(filePath);
   const byKind = { cycle: 0, adoption: 0 };
   const byVerdict = { adopt: 0, reject: 0, inconclusive: 0 };
+  const cost = { cycleRows: 0, wallMsMeasured: 0, bytesMeasured: 0, tokensMeasured: 0, tokensNull: 0 };
   for (const { row } of entries) {
     if (byKind[row.kind] !== undefined) byKind[row.kind] += 1;
-    if (row.kind === "cycle" && byVerdict[row.verdict?.decision] !== undefined) {
+    if (row.kind !== "cycle") continue;
+    cost.cycleRows += 1;
+    if (typeof row.cost?.wallMs === "number") cost.wallMsMeasured += 1;
+    if (typeof row.cost?.bytes === "number") cost.bytesMeasured += 1;
+    if (row.cost?.tokens === null || row.cost?.tokens === undefined) cost.tokensNull += 1;
+    else if (typeof row.cost.tokens === "number") cost.tokensMeasured += 1;
+    if (byVerdict[row.verdict?.decision] !== undefined) {
       byVerdict[row.verdict.decision] += 1;
     }
   }
-  return { total: entries.length, byKind, byVerdict, chain: verifyChain(filePath) };
+  return { total: entries.length, byKind, byVerdict, cost, chain: verifyChain(filePath) };
 }
