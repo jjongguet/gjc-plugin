@@ -319,6 +319,11 @@ export async function runCycle(input) {
     if (!dryRun) writeJson(path.join(cycleRunDir, "phase.json"), { phase: name, at: now(), ...extra });
   };
 
+  // Guard fixtures live under the OS temp dir, never under a `.gjc-plugin`
+  // component: plugin result-root boundary detection would otherwise mis-anchor
+  // on this run's own storage tree.
+  const guardHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "self-improve-guard-home-"));
+
   try {
     if (!dryRun) fs.mkdirSync(cycleRunDir, { recursive: true, mode: 0o700 });
     phase("scoring");
@@ -338,6 +343,7 @@ export async function runCycle(input) {
         scratchDir: baseline.scratchDir,
         runRoot: path.join(cycleRunDir, "baseline-eval"),
         includeSmoke,
+        homeRoot: guardHomeRoot,
       }),
       runRoot: path.join(cycleRunDir, "baseline-eval"),
       logDir: path.join(cycleRunDir, "logs", "baseline"),
@@ -350,6 +356,7 @@ export async function runCycle(input) {
         scratchDir: candidate.scratchDir,
         runRoot: path.join(cycleRunDir, "candidate-eval"),
         includeSmoke,
+        homeRoot: guardHomeRoot,
       }),
       runRoot: path.join(cycleRunDir, "candidate-eval"),
       logDir: path.join(cycleRunDir, "logs", "candidate"),
@@ -457,6 +464,7 @@ export async function runCycle(input) {
         scratchDir: replay.scratchDir,
         runRoot: path.join(cycleRunDir, "replay-eval"),
         includeSmoke,
+        homeRoot: guardHomeRoot,
       }),
       runRoot: path.join(cycleRunDir, "replay-eval"),
       logDir: path.join(cycleRunDir, "logs", "replay"),
@@ -483,6 +491,7 @@ export async function runCycle(input) {
         scratchDir: repoRoot,
         runRoot: path.join(cycleRunDir, "real-eval"),
         includeSmoke,
+        homeRoot: guardHomeRoot,
       }),
       runRoot: path.join(cycleRunDir, "real-eval"),
       logDir: path.join(cycleRunDir, "logs", "real"),
@@ -530,6 +539,11 @@ export async function runCycle(input) {
     throw error;
   } finally {
     lock?.release();
+    try {
+      fs.rmSync(guardHomeRoot, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
   }
 }
 

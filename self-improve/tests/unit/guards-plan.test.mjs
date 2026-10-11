@@ -41,6 +41,23 @@ test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized
   rmSync(root, { recursive: true, force: true });
 });
 
+test("guard home can be relocated outside the run root", () => {
+  const root = tempRoot();
+  const scratch = join(root, "repo");
+  mkdirSync(scratch, { recursive: true });
+  const plan = buildGuardPlan({
+    repoRoot: root,
+    scratchDir: scratch,
+    runRoot: join(root, "run"),
+    includeSmoke: false,
+    homeRoot: join(root, "elsewhere-home"),
+  });
+  for (const guard of plan) {
+    assert.equal(guard.env.HOME, join(root, "elsewhere-home"));
+  }
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("runGuards executes commands, writes logs and reports failures without stopping", async () => {
   const root = tempRoot();
   const logs = join(root, "logs");

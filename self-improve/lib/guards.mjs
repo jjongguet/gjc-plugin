@@ -12,8 +12,12 @@ export function resolveValidatorEntry(repoRoot) {
   return path.resolve(repoRoot, "..", "products", "shared", "workspace-standard", "validator", "cli.mjs");
 }
 
-export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = true, env = process.env }) {
-  const runHome = path.join(runRoot, "home");
+export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = true, env = process.env, homeRoot }) {
+  // Guard fixtures must not live under a `.gjc-plugin` path component: plugin
+  // result-root boundary detection treats the first such component as the
+  // private root, which breaks tests that intentionally relax umbrella modes
+  // (e.g. shared/tests/results.test.ts under ~/.gjc-plugin/self-improve).
+  const runHome = homeRoot ? path.resolve(homeRoot) : path.join(runRoot, "home");
   fs.mkdirSync(runHome, { recursive: true, mode: 0o700 });
   const guardEnv = { ...sanitizeGuardEnv(env), HOME: runHome, TMPDIR: runHome };
   const guards = [
