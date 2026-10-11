@@ -12,7 +12,7 @@ plus declared probes, and records every decision in an append-only ledger
 
 | Path | Role |
 | --- | --- |
-| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, plus engine/gates/isolate/runner as they land) |
+| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, plus `runner` as it lands) |
 | `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON) |
 | `scripts/run.mjs` | CLI (`report`, `cycle`) |
 | `scripts/verify-unit.mjs` | runs the unit suite; prints `ALL PASS (N cases)`; zero cases fails |
@@ -35,8 +35,10 @@ Partial regularization: anything beyond this set is explicitly out of scope.
 
 ## Status
 
-Early scaffold: ledger/budget primitives and the unit suite exist; cycle
-execution (engine, gates, isolation) lands with the engine milestone.
+The deterministic cycle engine is in place: gates, guard pipeline, scratch-copy
+isolation, replay-gated adoption, ledger commits and crash recovery, covered by
+the unit suite plus scratch-guard and cycle-engine integrations. Probe suites,
+the stochastic runner and the real-cycle report land with later milestones.
 
 ## Commands
 

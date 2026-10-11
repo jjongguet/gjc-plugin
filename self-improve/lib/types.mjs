@@ -27,6 +27,9 @@ export const REJECT_REASONS = Object.freeze([
   "base_mismatch",
   "history_duplicate_hypothesis",
   "post_apply_failure",
+  "dirty_worktree",
+  "replay_failed",
+  "empty_patch",
 ]);
 
 export function sha256Hex(text) {
