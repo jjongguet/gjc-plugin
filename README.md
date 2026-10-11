@@ -7,6 +7,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice, bounded delegation correlation and an offline descriptive report. Shadow by default; advice is not model routing or quality proof. |
 | [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts and source freshness. |
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
+| `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
 
@@ -64,11 +65,26 @@ Text matching preserves case and internal whitespace, normalizing only line endi
 
 Both verification/UI tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured. Only validated supplied semantic summaries/notes and bounded host facts leave. Omitted context, stale/missing/nonpassing evidence, unscored/low-confidence results and transport failure do not establish sufficient verification. No automatic repairs or execution gates are added.
 
+## Plugin metrics
+
+`plugin_metrics` (shipped with [`jev-advisor`](jev-advisor/)) is an explicitly invoked, strictly read-only reporting tool that aggregates all three plugins' retained operational records into one bounded JSON envelope. It accepts exactly `{}` — no user paths, filters or config.
+
+It reads the retained `~/.gjc-plugin/` journals of `jev-advisor`, `verification-receipts` and `ui-regression`, plus Jev's retained v2 correlation state. It never writes, locks or repairs anything, never loads credentials, never touches the network, and appends no journal record of its own.
+
+What it reports: per-source retained-record counts and operation frequencies; separate run vs. status invocation buckets; execution, assessment, freshness, receipt-storage distributions with field-present denominators; native test counts (recorded observations — overlapping dimensions, not coverage); recorded UI assertion entries; Jev manual advice vs. task-advice batch/entry counts; evidence-observation sightings; and canonical correlation via `calibrationSummary` (unique session+job terminal jobs, agreement as requested/recommended tier match — not correctness).
+
+Measured intervals are exact and bounded: a verification/UI run receipt's duration spans the run entry through post-execution/after-fingerprint only — it excludes receipt storage, adequacy call and journal write. A status record copies the old receipt's duration and never contributes to run duration aggregates. Jev `task_advice` duration spans hook entry through pre-journal finish, not per-provider latency. State durations include only positive, non-conflicted stored values. No cross-instrument totals exist.
+
+Missing sources are not zero. Unmeasured values are `null`. Duration sums and averages with no measured samples, zero-denominator rates, and native counts/assertions with no contributing samples are `null`. A recorded zero-duration sample remains numeric zero. All data is from retained observed rows only: rotation and eviction mean no lifetime totals, failed writes are invisible, and no recording-reliability rate exists. There are no time or repository filters. Historical producer version and smoke-vs-real workload are unidentifiable.
+
+This tool is descriptive monitoring only. It never claims quality, accuracy, routing-correctness, cost/token, overhead, provider/assessment latency or causal ROI. Causal evaluation requires a separate controlled comparison.
+
 ## Develop and verify
 
 ```sh
 bun run build
 bun run test
+node verification-receipts/scripts/smoke-host.mjs --metrics
 node verification-receipts/scripts/smoke-host.mjs --installed
 node verification-receipts/scripts/smoke-host.mjs --installed --advisor
 node jev-advisor/scripts/smoke-results.mjs

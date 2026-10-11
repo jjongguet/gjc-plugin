@@ -9,10 +9,11 @@ import {createSmokeEnvironment,assertSmokeIsolation} from './smoke-environment.m
 const worktree=process.cwd();
 const uiMode=process.argv.includes('--ui');
 const advisorMode=process.argv.includes('--advisor');
-assert.ok(!(uiMode&&advisorMode),'ambiguous_smoke_surface');
+const metricsMode=process.argv.includes('--metrics');
+assert.ok([uiMode,advisorMode,metricsMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
 const installedMode=process.argv.includes('--installed');
-const plugin=advisorMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
-const toolNames=advisorMode?['jev_advise']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
+const plugin=advisorMode||metricsMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
+const toolNames=metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
 const account=process.env.UI_REGRESSION_ACCOUNT;
 if(uiMode&&!account)throw Error('explicit_ephemeral_account_required');
 const userAgent=path.resolve(process.env.GJC_CODING_AGENT_DIR || process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(),'.gjc','agent'));
@@ -49,7 +50,10 @@ try {
  let step=0,passId,capacitySeeds=0;const evidence=[],journalIds=[];let discovered=[];let mockError='';
  let scenario;let submissions=0;
  const fixtureBody=uiMode?await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/index.html')):null;
- const calls=advisorMode?[
+ const calls=metricsMode?[
+  ()=>({name:'plugin_metrics',args:{}}),
+  ()=>({name:'plugin_metrics',args:{}})
+ ]:advisorMode?[
   ()=>({name:'jev_advise',args:{assignment:'Non-sensitive local fixture advice',role:'executor'}}),
   ()=>({name:'jev_advise',args:{report:'calibration'}}),
   ()=>({name:'jev_advise',args:{}})
@@ -62,6 +66,44 @@ try {
   ()=>({name:toolNames[1],args:{receiptId:'missing'}})
  ]:[()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['fail.mjs']}}),()=>({name:'verification_run',args:{files:['empty.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_run',args:{files:['../escape.mjs']}}),()=>({name:'verification_status',args:{receiptId:'missing'}}),()=>({name:'verification_run',args:{files:['pass.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['pass.mjs']}})];
  const journalLock=()=>path.join(env.HOME,'.gjc-plugin',plugin,'journal','v1','.append.lock');
+ const metricsBase=path.join(env.HOME,'.gjc-plugin');
+ let metricsBefore;
+ async function metricsFingerprint(){
+  const entries=[];
+  async function visit(dir){
+   for(const name of (await fs.readdir(dir)).sort()){
+    const file=path.join(dir,name),info=await fs.lstat(file);
+    assert.ok(!info.isSymbolicLink(),'unexpected_fixture_symlink');
+    entries.push([path.relative(metricsBase,file),info.mode,info.nlink,info.size,info.isFile()?createHash('sha256').update(await fs.readFile(file)).digest('hex'):null]);
+    if(info.isDirectory())await visit(file);
+   }
+  }
+  try{await visit(metricsBase);}catch(error){if(error.code==='ENOENT')return null;throw error;}
+  return entries;
+ }
+ async function seedMetrics(){
+  await assertSmokeIsolation(env,owned);
+  // Execute the canonical TS writer only in the sanitized fixture HOME.
+  // Explicit baseDir is required even with the isolated child environment.
+  const seedFile=path.join(owned,'seed-metrics.ts');
+  await fs.writeFile(seedFile,`
+import {appendPluginOutcome} from ${JSON.stringify(path.join(worktree,'shared/lib/results.ts'))};
+const baseDir=${JSON.stringify(metricsBase)};
+const cases=[
+ ['verification-receipts',{operation:'run',durationMs:1234}],
+ ['verification-receipts',{operation:'status',durationMs:9999}],
+ ['ui-regression',{operation:'run',durationMs:0}],
+ ['jev-advisor',{operation:'task_advice',durationMs:42,taskAdvice:[{index:0,status:'no_decision',reason:'disabled'}]}],
+ ['jev-advisor',{operation:'advise',advice:{status:'no_decision',reason:'disabled'}}],
+];
+for(const [plugin,outcome] of cases){
+ const result=await appendPluginOutcome(plugin as any,outcome,{baseDir});
+ if(!result.persisted)throw Error('isolated_seed_failed:'+result.reason);
+}
+`,{mode:0o600,flag:'wx'});
+  execFileSync('bun',['--no-env-file',seedFile],{env,cwd:root,stdio:'pipe',timeout:30000});
+  metricsBefore=await metricsFingerprint();
+ }
  async function seedCapacityFixtures(){
   // Owned isolated metadata fixtures, not new execution claims or production history.
   const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1'),dirs=await fs.readdir(base);assert.equal(dirs.length,1);
@@ -89,6 +131,30 @@ try {
     const content=tool.output??tool.content;
     const text=typeof content==='string'?content:content.map(c=>c.text??'').join('');
     const begin=advisorMode&&step===2?text.lastIndexOf('{"journalStorage":'):text.indexOf('{'),end=text.lastIndexOf('}');const result=JSON.parse(text.slice(begin,end+1));
+    if(metricsMode){
+     assert.equal(result.schemaVersion,1);assert.equal(result.report,'plugin_metrics');
+     assert.equal(result.mode,'offline_descriptive');assert.equal(result.window,'all_retained');
+     assert.equal(result.scope,'current_process_home_all_repositories');
+     assert.equal(result.correlation.status,'missing');
+     assert.ok(Object.values(result.unavailableMeasures).every(value=>value===null));
+     assert.equal(result.limitations[0],'retained_not_lifetime');
+     for(const source of Object.values(result.plugins))assert.equal(source.status,step===1?'missing':'ok');
+     if(step===1){
+      assert.equal(result.status,'unavailable');assert.equal(await metricsFingerprint(),null,'missing_report_created_store');
+      evidence.push({probe:'metrics_missing',status:'passed',nonmutating:true});
+      await seedMetrics();
+     }else{
+      assert.equal(result.status,'partial');
+      const verification=result.plugins['verification-receipts'].metrics;
+      assert.deepEqual(verification.operations,{run:1,status:1});
+      assert.deepEqual(verification.run.recordedReceiptDurationMs,{measured:1,sum:1234,average:1234});
+      assert.equal(verification.status.recordedReceiptDurationMs,null);
+      assert.deepEqual(result.plugins['ui-regression'].metrics.run.recordedReceiptDurationMs,{measured:1,sum:0,average:0});
+      assert.equal(result.plugins['jev-advisor'].metrics.taskAdvice.entries,1);
+      assert.deepEqual(await metricsFingerprint(),metricsBefore,'metrics_mutated_retained_sources');
+      evidence.push({probe:'metrics_seeded',status:'passed',runStatusSeparated:true,measuredZeroPreserved:true,nonmutating:true});
+     }
+    }else{
     const expectedJournalFailure=!advisorMode&&!uiMode&&step===11;
     assert.equal(result.journalStorage.persisted,!expectedJournalFailure,'outcome_journal_confirmation_mismatch');if(!expectedJournalFailure)journalIds.push(result.journalStorage.id);
     if(!advisorMode)assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
@@ -118,6 +184,7 @@ try {
     if(step===11){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.counts.passed,1);assert.equal(result.journalStorage.reason,'store_busy');assert.ok(result.warnings.includes('journal_not_persisted'));assert.equal(await fs.readFile(journalLock(),'utf8'),'foreign-owned-smoke-lock');await fs.unlink(journalLock());evidence.push({probe:'journal_busy',status:'passed',receiptPersisted:false,journalPersisted:false,journalReason:'store_busy',foreignLockUnchanged:true});}
     }
    }
+   }
    res.writeHead(200,{'content-type':'text/event-stream'});
    if(responses){
     const send=e=>res.write('event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n');
@@ -145,12 +212,16 @@ try {
  if(uiMode){scenario=JSON.parse(await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/scenario.json'),'utf8'));scenario.steps[0].url='http://127.0.0.1:'+server.address().port+'/';}
  const host=await child(['--print','--no-session','--no-title','--no-mcp','--no-lsp','--no-rules','--no-pty','--model','openai/gpt-4o','--thinking','off','--tools',toolNames.join(','),'Execute explicitly authorized non-sensitive local fixture tools selected by the local test provider. Do not assess or use other tools.'],90000);
  assert.equal(mockError,'',mockError);assert.equal(host.code,0,'installed_dispatch_failed');assert.equal(step,calls.length+1,'installed_dispatch_incomplete');assert.equal(submissions,0);
+ if(metricsMode){
+  report={schemaVersion:1,kind:'package-consumer-report',isolated:true,installedBundle:installedMode,productionCredentials:false,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,nonmutating:true};
+ }else{
  const journal=path.join(env.HOME,'.gjc-plugin',plugin,'journal','v1'),inventory=JSON.parse(await fs.readFile(path.join(journal,'inventory.json'),'utf8'));
  const records=[];for(const segment of inventory.segments){const file=path.join(journal,segment.name),body=await fs.readFile(file);assert.equal(body.length,segment.bytes);assert.equal(createHash('sha256').update(body).digest('hex'),segment.digest);assert.equal((await fs.stat(file)).mode&0o777,0o600);records.push(...body.toString().trimEnd().split('\n').map(line=>JSON.parse(line)));}
  assert.deepEqual(records.map(record=>record.id),journalIds);assert.equal((await fs.stat(journal)).mode&0o777,0o700);
  let receiptCount=0;
  if(!advisorMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?2:200);}
  report={schemaVersion:1,kind:'package-consumer-report',hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,submissions,standalone:uiMode,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,persistence:{root:'.gjc-plugin',receiptCount,syntheticCapacityMetadataEntries:capacitySeeds,journalIds,operations:records.map(record=>record.operation),privateModes:true}};
+ }
 } finally {
  try {if(server)await new Promise(resolve=>server.close(resolve));}
  finally {

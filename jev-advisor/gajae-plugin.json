@@ -30,6 +30,11 @@
       "name": "jev_advise",
       "path": "tools/jev-advise.ts",
       "description": "Request task-level effort advice or offline retained correlation coverage; both journal sanitized outcomes under ~/.gjc-plugin, not task-quality accuracy"
+    },
+    {
+      "name": "plugin_metrics",
+      "path": "tools/plugin-metrics.ts",
+      "description": "One bounded offline aggregate report of the three plugins' retained sanitized journals and Jev's retained v2 correlation state. Strictly read-only: creates nothing, appends nothing, no provider or tests. Missing is not zero; unmeasured is null; descriptive monitoring only, never proof of routing accuracy, task quality or causal benefit."
     }
   ]
 }

@@ -5,8 +5,7 @@ description: Opt-in delegation-effort advisories for subagent tasks via a remote
 
 # jev-advisor
 
-Advisory only by default. The plugin has two surfaces:
-
+Advisory only by default. The plugin has three surfaces:
 1. **Automatic hook** (`task` tool, before phase): when a provider and API key are
    configured, every `task` call gets a tier recommendation (`fast` / `balanced` /
    `strong`) from the decision model.
@@ -28,6 +27,13 @@ Advisory only by default. The plugin has two surfaces:
    for descriptive retained correlation coverage (offline, no key needed).
    Manual advice and reports append sanitized operational outcomes, but only
    real delegation observations feed correlation state. Confidence is not quality.
+3. **`plugin_metrics` tool**: read-only offline aggregate of all three plugins'
+   retained journals and Jev's retained v2 correlation state. Accepts exactly
+   `{}` — no paths, filters or config. Never writes, locks, repairs, loads
+   credentials or uses the network, and appends no journal record of its own.
+   Missing sources are not zero; unmeasured values are null; descriptive
+   monitoring only — never proof of routing accuracy, task quality or causal
+   benefit.
 
 Evidence memory: once a provider is configured, each delegation's fingerprint and
 terminal outcome are stored locally (`~/.gjc-plugin/jev-advisor/state.v2.json` —

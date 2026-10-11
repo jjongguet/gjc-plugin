@@ -316,21 +316,28 @@ function resultsInventory(value: unknown, plugin: ResultsPlugin, maxSegments: nu
   if (!segments.length || next < segments.length || segments.some((s, i) => s.name !== `${owner}-${next - segments.length + i}.jsonl` || s.bytes === 0)) resultsFail('store_corrupt');
   return { schemaVersion: 1, plugin, owner, next, segments };
 }
-function resultsValidateSegment(body: Buffer, plugin: ResultsPlugin, maxRecordBytes: number): void {
+type ResultsDecodedRecord = { id: string; observedAt: string; record: Record<string, unknown> };
+// The single canonical decoder. The writer and the snapshot reader share this
+// exact projection, so the reader never keeps a second permissive parser.
+function resultsDecodeSegment(body: Buffer, plugin: ResultsPlugin, maxRecordBytes: number): ResultsDecodedRecord[] {
   const text = body.toString('utf8');
   if (!text.endsWith('\n')) resultsFail('store_corrupt');
+  const decoded: ResultsDecodedRecord[] = [];
   for (const line of text.slice(0, -1).split('\n')) {
     if (Buffer.byteLength(line + '\n') > maxRecordBytes) resultsFail('store_corrupt');
     const raw = JSON.parse(line);
     const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
     if (record.schemaVersion !== 1 || record.plugin !== plugin) resultsFail('store_corrupt');
-    resultsPattern(record.id, resultsId);
+    const id = resultsPattern(record.id, resultsId);
     if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
-    const { schemaVersion, plugin: storedPlugin, id, observedAt, ...outcome } = record;
-    const canonical = { schemaVersion, plugin: storedPlugin, id, observedAt, ...resultsProject(outcome) };
+    const { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...outcome } = record;
+    const canonical = { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...resultsProject(outcome) };
     if (JSON.stringify(canonical) !== line) resultsFail('store_corrupt');
+    decoded.push({ id, observedAt, record: canonical });
   }
+  return decoded;
 }
+function resultsValidateSegment(body: Buffer, plugin: ResultsPlugin, maxRecordBytes: number): void { resultsDecodeSegment(body, plugin, maxRecordBytes); }
 function resultsFailure(error: unknown): ResultsAppend {
   const reason = error instanceof Error ? error.message : '';
   return { persisted: false, reason: ['unsafe_path', 'resource_limit', 'store_corrupt', 'store_busy'].includes(reason) ? reason : 'store_unavailable' };
@@ -470,4 +477,127 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     }
   }
   return result;
+}
+export type ResultsSnapshotReason = 'store_busy' | 'store_corrupt' | 'unsafe_path' | 'resource_limit' | 'changed_during_read' | 'store_unavailable';
+export type ResultsSnapshot = {
+  status: 'ok' | 'missing' | 'unavailable';
+  reason: ResultsSnapshotReason | null;
+  records: Record<string, unknown>[];
+  segments: number;
+  bytes: number;
+};
+type ResultsSnapshotDependencies = { baseDir?: string };
+type ResultsDirectoryIdentity = { path: string; dev: number; ino: number; mode: number };
+function resultsIdentity(info: ResultsStats): ResultsDirectoryIdentity { return { path: '', dev: info.dev, ino: info.ino, mode: info.mode }; }
+function resultsStable(a: ResultsStats, b: ResultsStats): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs && a.uid === b.uid && a.mode === b.mode && a.nlink === b.nlink;
+}
+function resultsIdentityStable(list: ResultsDirectoryIdentity[], directories: ResultsDirectory[]): boolean {
+  return list.length === directories.length && list.every((entry, index) => entry.path === directories[index].path && entry.dev === directories[index].info.dev && entry.ino === directories[index].info.ino && entry.mode === directories[index].info.mode);
+}
+function resultsSnapshotFailure(error: unknown): ResultsSnapshot {
+  const reason = error instanceof Error ? error.message : '';
+  if (['store_busy', 'store_corrupt', 'unsafe_path', 'resource_limit', 'changed_during_read'].includes(reason)) return { status: 'unavailable', reason: reason as ResultsSnapshotReason, records: [], segments: 0, bytes: 0 };
+  return { status: 'unavailable', reason: 'store_unavailable', records: [], segments: 0, bytes: 0 };
+}
+function resultsSafeMissing(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+}
+/**
+ * One bounded optimistic snapshot attempt. Never creates, repairs, deletes or
+ * locks anything: an existing safe append lock means store_busy. A safe empty
+ * journal directory is missing; a nonempty directory without an inventory is
+ * unavailable rather than synthesized empty. All identities are rechecked
+ * before any record is published, so a generation that changed mid-read is
+ * discarded whole (changed_during_read), never salvaged as a prefix.
+ */
+export async function readPluginOutcomeSnapshot(plugin: ResultsPlugin, deps: ResultsSnapshotDependencies = {}): Promise<ResultsSnapshot> {
+  const maxRecordBytes = 4096, maxSegmentBytes = 1024 * 1024, maxSegments = 8;
+  try {
+    resultsEnum(plugin, resultsPlugins);
+    const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
+    const dir = resultsJoin(base, plugin, 'journal', 'v1');
+    let directories: ResultsDirectory[];
+    try { directories = await resultsDirectories(dir, false, base); }
+    catch (error) {
+      if (resultsSafeMissing(error)) return { status: 'missing', reason: null, records: [], segments: 0, bytes: 0 };
+      throw error;
+    }
+    const identities = directories.map(entry => ({ ...resultsIdentity(entry.info), path: entry.path }));
+    // Bounded exact-name listing before any content read.
+    const names: string[] = [];
+    const listing = await resultsFs.opendir(dir);
+    for await (const entry of listing) {
+      names.push(entry.name);
+      if (names.length > maxSegments + 2) resultsFail('store_corrupt');
+    }
+    if (names.includes('.append.lock')) {
+      const lockPath = resultsJoin(dir, '.append.lock');
+      const lockInfo = await resultsFs.lstat(lockPath);
+      resultsPrivateFile(lockInfo);
+      resultsFail('store_busy');
+    }
+    if (names.includes('.inventory.pending')) resultsFail('store_corrupt');
+    const markerPath = resultsJoin(dir, 'inventory.json');
+    if (!names.includes('inventory.json')) {
+      if (names.length === 0) return { status: 'missing', reason: null, records: [], segments: 0, bytes: 0 };
+      resultsFail('store_corrupt');
+    }
+    const markerInfo = await resultsFs.lstat(markerPath);
+    resultsPrivateFile(markerInfo);
+    const markerText = (await readPrivateResultFile(markerPath, 8192)).toString('utf8');
+    let inventory: ResultsInventory;
+    try { inventory = resultsInventory(JSON.parse(markerText), plugin, maxSegments, maxSegmentBytes); }
+    catch { resultsFail('store_corrupt'); }
+    const expected = new Set(['inventory.json', ...inventory.segments.map(segment => segment.name)]);
+    if (names.length !== expected.size || names.some(name => !expected.has(name))) resultsFail('store_corrupt');
+    const records: Record<string, unknown>[] = [];
+    const segmentInfos: { name: string; info: ResultsStats }[] = [];
+    let bytes = 0;
+    const seenIds = new Set<string>();
+    for (const segment of inventory.segments) {
+      const path = resultsJoin(dir, segment.name);
+      const info = await resultsFs.lstat(path);
+      resultsPrivateFile(info);
+      const body = await readPrivateResultFile(path, maxSegmentBytes);
+      if (body.length !== segment.bytes || resultsDigest(body) !== segment.digest) resultsFail('store_corrupt');
+      let decodedRecords: ResultsDecodedRecord[];
+      try { decodedRecords = resultsDecodeSegment(body, plugin, maxRecordBytes); }
+      catch { resultsFail('store_corrupt'); }
+      for (const decoded of decodedRecords) {
+        if (seenIds.has(decoded.id)) resultsFail('store_corrupt');
+        seenIds.add(decoded.id);
+        records.push(decoded.record);
+      }
+      bytes += body.length;
+      segmentInfos.push({ name: segment.name, info });
+    }
+    // Recheck every identity, name, lock/pending absence and the marker before publishing.
+    if (!resultsIdentityStable(identities, await resultsDirectories(dir, false, base))) resultsFail('changed_during_read');
+    const after: string[] = [];
+    const relisting = await resultsFs.opendir(dir);
+    for await (const entry of relisting) {
+      after.push(entry.name);
+      if (after.length > maxSegments + 2) resultsFail('store_corrupt');
+    }
+    if (after.length !== names.length || after.some(name => !names.includes(name))) resultsFail('changed_during_read');
+    if (after.includes('.append.lock') || after.includes('.inventory.pending')) resultsFail('changed_during_read');
+    let currentMarker: ResultsStats;
+    try { currentMarker = await resultsCheckFile(markerPath, markerInfo); }
+    catch { resultsFail('changed_during_read'); }
+    if (!resultsStable(markerInfo, currentMarker)) resultsFail('changed_during_read');
+    const recheckText = (await readPrivateResultFile(markerPath, 8192)).toString('utf8');
+    let recheckInventory: unknown;
+    try { recheckInventory = resultsInventory(JSON.parse(recheckText), plugin, maxSegments, maxSegmentBytes); } catch { resultsFail('changed_during_read'); }
+    if (JSON.stringify(recheckInventory) !== JSON.stringify(inventory)) resultsFail('changed_during_read');
+    for (const { name, info } of segmentInfos) {
+      const path = resultsJoin(dir, name);
+      let current: ResultsStats;
+      try { current = await resultsCheckFile(path, info); }
+      catch { resultsFail('changed_during_read'); }
+      if (!resultsStable(info, current)) resultsFail('changed_during_read');
+      if (resultsDigest(await readPrivateResultFile(path, maxSegmentBytes)) !== inventory.segments.find(segment => segment.name === name)!.digest) resultsFail('changed_during_read');
+    }
+    return { status: 'ok', reason: null, records, segments: inventory.segments.length, bytes };
+  } catch (error) { return resultsSnapshotFailure(error); }
 }

@@ -12,6 +12,7 @@ import {
 	lstatSync,
 	mkdirSync,
 	openSync,
+	readSync,
 	readFileSync,
 	renameSync,
 	unlinkSync,
@@ -21,7 +22,7 @@ import { createHash, randomUUID } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
-import { pluginResultsRoot } from "../../shared/lib/results";
+import { pluginResultsRoot, readPluginOutcomeSnapshot } from "../../shared/lib/results";
 
 export const TIERS = ["fast", "balanced", "strong"] as const;
 export type Tier = (typeof TIERS)[number];
@@ -693,6 +694,22 @@ function isMissingError(error: unknown): boolean {
 
 type StateDirectoryIdentity = { path: string; dev: number; ino: number };
 
+type StateFileMetadata = {
+	dev: number;
+	ino: number;
+	size: number;
+	mtimeMs: number;
+	ctimeMs: number;
+	uid: number;
+	mode: number;
+	nlink: number;
+};
+
+function sameStateFileMetadata(a: StateFileMetadata, b: StateFileMetadata): boolean {
+	return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs &&
+		a.ctimeMs === b.ctimeMs && a.uid === b.uid && a.mode === b.mode && a.nlink === b.nlink;
+}
+
 function verifyStateDirectory(directory: string, create: boolean, expected?: StateDirectoryIdentity[]): StateDirectoryIdentity[] {
 	const absolute = path.resolve(directory);
 	let current = path.parse(absolute).root;
@@ -724,17 +741,49 @@ function verifyStateDirectory(directory: string, create: boolean, expected?: Sta
 function readStoreFile(file: string): StoreReadResult {
 	let fd: number | undefined;
 	try {
-		const info = lstatSync(file);
+		let info: ReturnType<typeof lstatSync>;
+		try {
+			info = lstatSync(file);
+		} catch (error) {
+			if (isMissingError(error)) return { status: "missing" };
+			throw error;
+		}
 		if (info.isSymbolicLink() || !info.isFile() || info.nlink !== 1 || info.uid !== process.getuid?.()) return { status: "unavailable", reason: "unsafe_path" };
 		if ((info.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
 		if (info.size > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
 		const noFollow = fsConstants.O_NOFOLLOW ?? 0;
 		fd = openSync(file, fsConstants.O_RDONLY | noFollow);
 		const opened = fstatSync(fd);
-		if (!opened.isFile() || opened.dev !== info.dev || opened.ino !== info.ino || opened.nlink !== 1 || opened.uid !== process.getuid?.() || (opened.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
+		if (!opened.isFile() || !sameStateFileMetadata(info, opened) || opened.nlink !== 1 || opened.uid !== process.getuid?.() || (opened.mode & 0o7777) !== 0o600) return { status: "unavailable", reason: "unsafe_path" };
 		if (opened.size > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
-		const text = readFileSync(fd, "utf8");
-		if (Buffer.byteLength(text, "utf8") > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		// Bounded descriptor read: at most MAX_STORE_BYTES plus one overflow-
+		// detection byte are consumed before any decode or unbounded allocation.
+		// A pre-read size check alone is insufficient when the file grows between
+		// stat and read; growth is caught at the descriptor read itself and still
+		// yields the existing oversized result before any decode of excess bytes.
+		const bounded = new Uint8Array(MAX_STORE_BYTES + 1);
+		let total = 0;
+		while (total < bounded.length) {
+			const read = readSync(fd, bounded, total, bounded.length - total, total);
+			if (read === 0) break;
+			total += read;
+		}
+		if (total > MAX_STORE_BYTES) return { status: "unavailable", reason: "oversized" };
+		if (total !== opened.size) return { status: "unavailable", reason: "unsafe_path" };
+		const afterOpened = fstatSync(fd);
+		if (!afterOpened.isFile() || !sameStateFileMetadata(opened, afterOpened) || afterOpened.nlink !== 1 || afterOpened.uid !== process.getuid?.() || (afterOpened.mode & 0o7777) !== 0o600) {
+			return { status: "unavailable", reason: "unsafe_path" };
+		}
+		let afterPath: ReturnType<typeof lstatSync>;
+		try {
+			afterPath = lstatSync(file);
+		} catch {
+			return { status: "unavailable", reason: "unsafe_path" };
+		}
+		if (afterPath.isSymbolicLink() || !afterPath.isFile() || !sameStateFileMetadata(opened, afterPath)) {
+			return { status: "unavailable", reason: "unsafe_path" };
+		}
+		const text = Buffer.from(bounded.buffer, bounded.byteOffset, total).toString("utf8");
 		let parsed: unknown;
 		try {
 			parsed = JSON.parse(text);
@@ -745,12 +794,24 @@ function readStoreFile(file: string): StoreReadResult {
 		if (!validateStore(parsed)) return { status: "unavailable", reason: "corrupt" };
 		return { status: "ok", value: parsed };
 	} catch (error) {
-		if (isMissingError(error)) return { status: "missing" };
+		if (error instanceof Error && error.message === "unsafe_path") return { status: "unavailable", reason: "unsafe_path" };
 		return { status: "unavailable", reason: "io_error" };
 	} finally {
 		if (fd !== undefined) {
 			try { closeSync(fd); } catch {}
 		}
+	}
+}
+
+function stateLockResult(lockFile: string): StoreReadResult | null {
+	try {
+		const lockInfo = lstatSync(lockFile);
+		if (lockInfo.isSymbolicLink() || !lockInfo.isFile() || lockInfo.nlink !== 1 || lockInfo.uid !== process.getuid?.() || (lockInfo.mode & 0o7777) !== 0o600) {
+			return { status: "unavailable", reason: "unsafe_path" };
+		}
+		return { status: "unavailable", reason: "locked" };
+	} catch (error) {
+		return isMissingError(error) ? null : { status: "unavailable", reason: "io_error" };
 	}
 }
 
@@ -761,10 +822,18 @@ export function readEvidenceV2(file: string): StoreReadResult {
 	try { directoryIdentity = verifyStateDirectory(paths.directory, false); } catch (error) {
 		return isMissingError(error) ? { status: "missing" } : { status: "unavailable", reason: "unsafe_path" };
 	}
+	// Public read-only lock rejection lives here, outside transaction-owned
+	// readStoreFile: an existing transaction owns its lock and calls
+	// readStoreFile directly, so it must not reject its own lock.
+	const lockBeforeRead = stateLockResult(paths.lock);
+	if (lockBeforeRead) return lockBeforeRead;
 	const result = readStoreFile(paths.file);
 	try { verifyStateDirectory(paths.directory, false, directoryIdentity); } catch { return { status: "unavailable", reason: "unsafe_path" }; }
+	const lockAfterRead = stateLockResult(paths.lock);
+	if (lockAfterRead) return lockAfterRead;
 	return result;
 }
+
 
 function releaseOwnedLock(lockFile: string, lockFd: number, token: string, directoryIdentity: StateDirectoryIdentity[]): void {
 	try {
@@ -1351,6 +1420,510 @@ export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummar
 	}
 	const text = textLines.join("\n");
 	return { json: summary, text };
+}
+
+
+// ─── plugin_metrics: offline descriptive report (plan S06/S07/S08) ───────────
+// Read-only orchestration over the shared journals and the retained v2 state.
+// Never appends a journal record, never loads credentials, never touches the
+// network. All helpers below are pure except the snapshot reads themselves.
+
+export type MetricsFrequency = Record<string, number>;
+
+export interface MetricsFraction {
+	numerator: number;
+	denominator: number;
+	rate: number | null;
+}
+
+export interface MetricsDuration {
+	measured: number;
+	sum: number | null;
+	average: number | null;
+}
+
+export interface MetricsFieldCounts {
+	present: number;
+	byStatus: MetricsFrequency;
+	byReason: MetricsFrequency;
+}
+
+export type MetricsOperation =
+	| "run" | "status" | "advise" | "calibration" | "task_advice" | "task_launch" | "subagent_terminal";
+
+export interface RunStatusMetrics {
+	operations: MetricsFrequency;
+	run: OperationMetrics;
+	status: OperationMetrics;
+}
+
+export interface OperationMetrics {
+	invocations: number;
+	execution: MetricsFieldCounts;
+	executionMissing: number;
+	passedFraction: MetricsFraction;
+	assessment: MetricsFieldCounts;
+	assessmentAnswers: {
+		coverage_alignment: { present: number; choices: MetricsFrequency };
+		boundary_evidence: { present: number; choices: MetricsFrequency };
+	};
+	freshness: { present: number; counts: MetricsFrequency };
+	cleanup: { present: number; counts: MetricsFrequency };
+	receiptStorage: {
+		present: number; persisted: number; notPersisted: number;
+		byReason: MetricsFrequency; nearCapacityPresent: number; nearCapacityTrue: number;
+	};
+	recordedReceiptDurationMs: MetricsDuration | null;
+	nativeCounts: null | { contributingRecords: number; totals: Record<string, number> };
+	assertions: null | { contributingRecords: number; entries: number; byKind: MetricsFrequency; byStatus: MetricsFrequency };
+}
+
+export interface JevMetrics {
+	operations: MetricsFrequency;
+	manualAdvice: {
+		invocations: number; present: number;
+		byStatus: MetricsFrequency; byTier: MetricsFrequency;
+		confidenceBasis: MetricsFrequency; byReason: MetricsFrequency;
+	};
+	taskAdvice: {
+		batches: number; batchesWithEntries: number; entries: number;
+		byStatus: MetricsFrequency; byTier: MetricsFrequency;
+		confidenceBasis: MetricsFrequency; byReason: MetricsFrequency;
+		recordedPreJournalHookDurationMs: MetricsDuration;
+	};
+	evidenceObservations: Partial<Record<MetricsOperation, {
+		contributingRecords: number; completed: number; failed: number;
+		cancelled: number; stored: number; unavailable: number;
+	}>>;
+	evidenceStorage: MetricsFieldCounts;
+}
+
+export type JournalSourceReason = "store_busy" | "store_corrupt" | "unsafe_path" | "resource_limit" | "changed_during_read" | "store_unavailable";
+
+export interface JournalSource<T> {
+	status: "ok" | "missing" | "unavailable";
+	reason: JournalSourceReason | null;
+	readStartedAt: string;
+	readCompletedAt: string;
+	retention: { maxRecordBytes: 4096; maxSegmentBytes: 1048576; maxSegments: 8 };
+	snapshot: { segments: number; bytes: number; records: number; oldestObservedAt: string | null; newestObservedAt: string | null } | null;
+	metrics: T | null;
+}
+
+export type CalibrationReport = Omit<CalibrationSummary, "terminalJobs"> & {
+	terminalJobs: Omit<CalibrationSummary["terminalJobs"], "durationMs" | "byRecommendation"> & {
+		durationMs: MetricsDuration;
+		byRecommendation: Record<string, Omit<CalibrationSummary["terminalJobs"]["byRecommendation"][string], "durationMs"> & { durationMs: MetricsDuration }>;
+	};
+};
+
+export interface CorrelationSource {
+	status: "ok" | "missing" | "unavailable";
+	reason: StoreUnavailableReason | null;
+	readStartedAt: string;
+	readCompletedAt: string;
+	window: "retained_v2_metadata";
+	metrics: CalibrationReport | null;
+}
+
+export interface PluginMetricsReport {
+	schemaVersion: 1;
+	report: "plugin_metrics";
+	mode: "offline_descriptive";
+	window: "all_retained";
+	scope: "current_process_home_all_repositories";
+	generatedAt: string;
+	status: "complete" | "partial" | "unavailable";
+	plugins: {
+		"jev-advisor": JournalSource<JevMetrics>;
+		"verification-receipts": JournalSource<RunStatusMetrics>;
+		"ui-regression": JournalSource<RunStatusMetrics>;
+	};
+	correlation: CorrelationSource;
+	unavailableMeasures: {
+		pluginOverheadMs: null; providerLatencyMs: null; assessmentLatencyMs: null;
+		endToEndInvocationMs: null; providerCost: null; tokenUsage: null;
+		quality: null; accuracy: null; causalRoi: null;
+	};
+	limitations: string[];
+}
+
+function metricsFreq(): MetricsFrequency { return {}; }
+function metricsBump(freq: MetricsFrequency, key: string): void {
+	if (!Number.isSafeInteger(freq[key] ?? 0) || (freq[key] ?? 0) + 1 > Number.MAX_SAFE_INTEGER) throw new Error("resource_limit");
+	freq[key] = (freq[key] ?? 0) + 1;
+}
+function metricsDuration(): MetricsDuration { return { measured: 0, sum: null, average: null }; }
+function metricsDurationAdd(d: MetricsDuration, value: number): void {
+	if (!Number.isSafeInteger(value)) throw new Error("resource_limit");
+	d.measured++;
+	d.sum = (d.sum ?? 0) + value;
+	if (d.sum > Number.MAX_SAFE_INTEGER) throw new Error("resource_limit");
+	d.average = d.sum / d.measured;
+}
+function metricsFraction(numerator: number, denominator: number): MetricsFraction {
+	return { numerator, denominator, rate: denominator === 0 ? null : numerator / denominator };
+}
+function metricsEmptyFieldCounts(): MetricsFieldCounts { return { present: 0, byStatus: metricsFreq(), byReason: metricsFreq() }; }
+function metricsEmptyOperation(statusDurationNull: boolean): OperationMetrics {
+	return {
+		invocations: 0,
+		execution: metricsEmptyFieldCounts(),
+		executionMissing: 0,
+		passedFraction: metricsFraction(0, 0),
+		assessment: metricsEmptyFieldCounts(),
+		assessmentAnswers: {
+			coverage_alignment: { present: 0, choices: metricsFreq() },
+			boundary_evidence: { present: 0, choices: metricsFreq() },
+		},
+		freshness: { present: 0, counts: metricsFreq() },
+		cleanup: { present: 0, counts: metricsFreq() },
+		receiptStorage: { present: 0, persisted: 0, notPersisted: 0, byReason: metricsFreq(), nearCapacityPresent: 0, nearCapacityTrue: 0 },
+		recordedReceiptDurationMs: statusDurationNull ? null : metricsDuration(),
+		nativeCounts: null,
+		assertions: null,
+	};
+}
+
+const RESULTS_COUNT_KEYS = ["tests", "suites", "topLevel", "passed", "failed", "skipped", "todo", "cancelled"];
+const RESULTS_ASSESSMENT_ANSWERS = ["coverage_alignment", "boundary_evidence"] as const;
+
+/** Run/status journals (verification-receipts, ui-regression) → RunStatusMetrics. Plan S07. */
+export function aggregateRunStatusMetrics(
+	records: Record<string, unknown>[],
+	source: "verification-receipts" | "ui-regression",
+): RunStatusMetrics {
+	const report: RunStatusMetrics = {
+		operations: metricsFreq(),
+		run: metricsEmptyOperation(false),
+		status: metricsEmptyOperation(true),
+	};
+	for (const record of records) {
+		const op = String(record.operation);
+		metricsBump(report.operations, op);
+		if (op !== "run" && op !== "status") continue;
+		const bucket = op === "run" ? report.run : report.status;
+		bucket.invocations++;
+		const execution = record.execution as Record<string, unknown> | undefined;
+		if (execution === undefined) {
+			bucket.executionMissing++;
+		} else {
+			bucket.execution.present++;
+			metricsBump(bucket.execution.byStatus, String(execution.status));
+			metricsBump(bucket.execution.byReason, String(execution.reason));
+			if (execution.status === "passed") bucket.passedFraction.numerator++;
+			bucket.passedFraction.denominator++;
+			const counts = execution.counts as Record<string, number> | null | undefined;
+			if (source === "verification-receipts" && op === "run" && counts) {
+				if (bucket.nativeCounts === null) bucket.nativeCounts = { contributingRecords: 0, totals: Object.fromEntries(RESULTS_COUNT_KEYS.map(key => [key, 0])) };
+				bucket.nativeCounts.contributingRecords++;
+				for (const key of RESULTS_COUNT_KEYS) {
+					const value = counts[key];
+					if (typeof value === "number") {
+						if (!Number.isSafeInteger(bucket.nativeCounts.totals[key]! + value)) throw new Error("resource_limit");
+						bucket.nativeCounts.totals[key]! += value;
+					}
+				}
+			}
+			const assertions = execution.assertions as Record<string, unknown>[] | undefined;
+			if (source === "ui-regression" && op === "run" && Array.isArray(assertions)) {
+				if (bucket.assertions === null) bucket.assertions = { contributingRecords: 0, entries: 0, byKind: metricsFreq(), byStatus: metricsFreq() };
+				bucket.assertions.contributingRecords++;
+				for (const assertion of assertions) {
+					bucket.assertions.entries++;
+					metricsBump(bucket.assertions.byKind, String(assertion.kind));
+					metricsBump(bucket.assertions.byStatus, String(assertion.status));
+				}
+			}
+		}
+		const assessment = record.assessment as Record<string, unknown> | undefined;
+		if (assessment !== undefined) {
+			bucket.assessment.present++;
+			metricsBump(bucket.assessment.byStatus, String(assessment.status));
+			metricsBump(bucket.assessment.byReason, String(assessment.reason));
+			const answers = assessment.answers as Record<string, Record<string, unknown>> | undefined;
+			if (answers !== undefined) {
+				for (const answerKey of RESULTS_ASSESSMENT_ANSWERS) {
+					const answer = answers[answerKey];
+					if (answer === undefined) continue;
+					bucket.assessmentAnswers[answerKey].present++;
+					metricsBump(bucket.assessmentAnswers[answerKey].choices, String(answer.choice));
+				}
+			}
+		}
+		if (record.freshness !== undefined) {
+			bucket.freshness.present++;
+			metricsBump(bucket.freshness.counts, String(record.freshness));
+		}
+		const executionCleanup = execution?.cleanup;
+		if (executionCleanup !== undefined) {
+			bucket.cleanup.present++;
+			metricsBump(bucket.cleanup.counts, String(executionCleanup));
+		}
+		const storage = record.receiptStorage as Record<string, unknown> | undefined;
+		if (storage !== undefined) {
+			bucket.receiptStorage.present++;
+			if (storage.persisted === true) bucket.receiptStorage.persisted++;
+			else bucket.receiptStorage.notPersisted++;
+			metricsBump(bucket.receiptStorage.byReason, String(storage.reason));
+			if (storage.nearCapacity !== undefined) {
+				bucket.receiptStorage.nearCapacityPresent++;
+				if (storage.nearCapacity === true) bucket.receiptStorage.nearCapacityTrue++;
+			}
+		}
+		if (op === "run" && record.durationMs !== undefined) {
+			if (bucket.recordedReceiptDurationMs === null) bucket.recordedReceiptDurationMs = metricsDuration();
+			metricsDurationAdd(bucket.recordedReceiptDurationMs, Number(record.durationMs));
+		}
+	}
+	for (const op of ["run", "status"] as const) {
+		const bucket = op === "run" ? report.run : report.status;
+		bucket.passedFraction = metricsFraction(bucket.passedFraction.numerator, bucket.execution.present);
+	}
+	return report;
+}
+
+/** Jev journal → JevMetrics. Manual advise vs task_advice buckets, plan S07. */
+export function aggregateJevMetrics(records: Record<string, unknown>[]): JevMetrics {
+	const report: JevMetrics = {
+		operations: metricsFreq(),
+		manualAdvice: { invocations: 0, present: 0, byStatus: metricsFreq(), byTier: metricsFreq(), confidenceBasis: metricsFreq(), byReason: metricsFreq() },
+		taskAdvice: {
+			batches: 0, batchesWithEntries: 0, entries: 0,
+			byStatus: metricsFreq(), byTier: metricsFreq(), confidenceBasis: metricsFreq(), byReason: metricsFreq(),
+			recordedPreJournalHookDurationMs: metricsDuration(),
+		},
+		evidenceObservations: {},
+		evidenceStorage: metricsEmptyFieldCounts(),
+	};
+
+	for (const record of records) {
+		const op = String(record.operation);
+		metricsBump(report.operations, op);
+		const advice = record.advice as Record<string, unknown> | undefined;
+		if (op === "advise") {
+			report.manualAdvice.invocations++;
+			if (advice !== undefined) {
+				report.manualAdvice.present++;
+				metricsBump(report.manualAdvice.byStatus, String(advice.status));
+				if (advice.tier !== undefined) metricsBump(report.manualAdvice.byTier, String(advice.tier));
+				if (advice.confidenceKind !== undefined) metricsBump(report.manualAdvice.confidenceBasis, String(advice.confidenceKind));
+				if (advice.reason !== undefined) metricsBump(report.manualAdvice.byReason, String(advice.reason));
+			}
+		}
+		const taskAdvice = record.taskAdvice as Record<string, unknown>[] | undefined;
+		if (op === "task_advice") {
+			report.taskAdvice.batches++;
+			if (record.durationMs !== undefined) metricsDurationAdd(report.taskAdvice.recordedPreJournalHookDurationMs, Number(record.durationMs));
+			if (Array.isArray(taskAdvice) && taskAdvice.length > 0) {
+				report.taskAdvice.batchesWithEntries++;
+				for (const task of taskAdvice) {
+					report.taskAdvice.entries++;
+					metricsBump(report.taskAdvice.byStatus, String(task.status));
+					if (task.tier !== undefined) metricsBump(report.taskAdvice.byTier, String(task.tier));
+					if (task.basis !== undefined) metricsBump(report.taskAdvice.confidenceBasis, String(task.basis));
+					if (task.reason !== undefined) metricsBump(report.taskAdvice.byReason, String(task.reason));
+				}
+			}
+		}
+		const observations = record.evidenceObservations as Record<string, number> | undefined;
+		if (observations !== undefined) {
+			const bucket = report.evidenceObservations[op] ??= { contributingRecords: 0, completed: 0, failed: 0, cancelled: 0, stored: 0, unavailable: 0 };
+			bucket.contributingRecords++;
+			for (const key of ["completed", "failed", "cancelled", "stored", "unavailable"] as const) {
+				const value = observations[key];
+				if (typeof value === "number") {
+					if (!Number.isSafeInteger(bucket[key] + value)) throw new Error("resource_limit");
+					bucket[key] += value;
+				}
+			}
+		}
+		const evidenceStorage = record.evidenceStorage as Record<string, unknown> | undefined;
+		if (evidenceStorage !== undefined) {
+			report.evidenceStorage.present++;
+			metricsBump(report.evidenceStorage.byStatus, String(evidenceStorage.status));
+			if (evidenceStorage.reason !== undefined) metricsBump(report.evidenceStorage.byReason, String(evidenceStorage.reason));
+		}
+	}
+	return report;
+}
+
+/** Presentation-only validation/null projection. Calibration arithmetic unchanged. */
+export function projectCalibrationForReport(summary: CalibrationSummary): StoreResult<CalibrationReport> {
+	const durationIsRepresentable = (d: CalibrationSummary["terminalJobs"]["durationMs"]) =>
+		Number.isFinite(d.sum) && (!Number.isInteger(d.sum) || Number.isSafeInteger(d.sum)) &&
+		(d.average === null || Number.isFinite(d.average));
+	if (!durationIsRepresentable(summary.terminalJobs.durationMs) ||
+		Object.values(summary.terminalJobs.byRecommendation).some(stats => !durationIsRepresentable(stats.durationMs))) {
+		return { status: "unavailable", reason: "corrupt" };
+	}
+	const project = (d: CalibrationSummary["terminalJobs"]["durationMs"]): MetricsDuration =>
+		d.measured === 0 ? { ...d, sum: null } : d;
+	return {
+		status: "ok",
+		value: {
+			...summary,
+			terminalJobs: {
+				...summary.terminalJobs,
+				durationMs: project(summary.terminalJobs.durationMs),
+				byRecommendation: Object.fromEntries(
+					Object.entries(summary.terminalJobs.byRecommendation).map(([tier, stats]) => [
+						tier,
+						{ ...stats, durationMs: project(stats.durationMs) },
+					]),
+				),
+			},
+		},
+	};
+}
+
+const METRICS_BASE_LIMITATIONS = [
+	"retained_not_lifetime",
+	"unrecorded_invocations_unknown",
+	"independent_source_snapshots",
+	"wall_clock_not_event_authority",
+	"run_observations_not_unique_executions",
+	"status_not_reexecution",
+	"terminal_sightings_not_unique_jobs",
+	"correlation_window_independent",
+	"unknown_identity_and_unobserved_terminals",
+	"receipt_duration_excludes_storage_assessment_journal",
+	"hook_duration_excludes_journal",
+	"provider_assessment_latency_unmeasured",
+	"end_to_end_and_isolated_overhead_unmeasured",
+	"historical_version_unidentified",
+	"smoke_real_workload_unidentified",
+	"counts_not_coverage",
+	"assessment_not_quality",
+	"causal_effect_unmeasured",
+] as const;
+
+type MetricsJournalSnapshot = {
+	status: string;
+	reason: string | null;
+	records: Record<string, unknown>[];
+	segments: number;
+	bytes: number;
+};
+
+function aggregateJournalSnapshot<T>(
+	snapshot: MetricsJournalSnapshot,
+	aggregate: (records: Record<string, unknown>[]) => T,
+): { snapshot: MetricsJournalSnapshot; metrics: T | null } {
+	if (snapshot.status !== "ok") return { snapshot, metrics: null };
+	try {
+		return { snapshot, metrics: aggregate(snapshot.records) };
+	} catch (error) {
+		if (!(error instanceof Error) || error.message !== "resource_limit") throw error;
+		return {
+			snapshot: { status: "unavailable", reason: "resource_limit", records: [], segments: 0, bytes: 0 },
+			metrics: null,
+		};
+	}
+}
+
+function journalSourceEnvelope<T>(
+	startedAt: Date,
+	completedAt: Date,
+	snapshot: MetricsJournalSnapshot | null,
+	metrics: T | null,
+): JournalSource<T> {
+	const status = (snapshot?.status ?? "unavailable") as JournalSource<T>["status"];
+	let oldestObservedAt: string | null = null;
+	let newestObservedAt: string | null = null;
+	let oldestObservedAtMs = Number.POSITIVE_INFINITY;
+	let newestObservedAtMs = Number.NEGATIVE_INFINITY;
+	if (status === "ok" && snapshot) {
+		for (const record of snapshot.records) {
+			const observedAt = record.observedAt as string;
+			const observedAtMs = Date.parse(observedAt);
+			if (observedAtMs < oldestObservedAtMs) {
+				oldestObservedAt = observedAt;
+				oldestObservedAtMs = observedAtMs;
+			}
+			if (observedAtMs > newestObservedAtMs) {
+				newestObservedAt = observedAt;
+				newestObservedAtMs = observedAtMs;
+			}
+		}
+	}
+	return {
+		status,
+		reason: status === "ok" || status === "missing" ? null : ((snapshot?.reason ?? "store_unavailable") as JournalSourceReason),
+		readStartedAt: startedAt.toISOString(),
+		readCompletedAt: completedAt.toISOString(),
+		retention: { maxRecordBytes: 4096, maxSegmentBytes: 1048576, maxSegments: 8 },
+		snapshot: status === "ok" && snapshot ? {
+			segments: snapshot.segments,
+			bytes: snapshot.bytes,
+			records: snapshot.records.length,
+			oldestObservedAt,
+			newestObservedAt,
+		} : null,
+		metrics: status === "ok" ? metrics : null,
+	};
+}
+
+/**
+ * Offline orchestration: three journal snapshots + one canonical calibration
+ * projection. Strictly read-only — no append, no lock, no credential, no network.
+ */
+export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
+	const startedAt = new Date();
+	const plugins: PluginMetricsReport["plugins"] = {
+		"jev-advisor": null as unknown as JournalSource<JevMetrics>,
+		"verification-receipts": null as unknown as JournalSource<RunStatusMetrics>,
+		"ui-regression": null as unknown as JournalSource<RunStatusMetrics>,
+	};
+	for (const plugin of ["jev-advisor", "verification-receipts", "ui-regression"] as const) {
+		const sourceStartedAt = new Date();
+		const snapshot = await readPluginOutcomeSnapshot(plugin);
+		const completedAt = new Date();
+		if (plugin === "jev-advisor") {
+			const source = aggregateJournalSnapshot(snapshot, aggregateJevMetrics);
+			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
+		} else {
+			const source = aggregateJournalSnapshot(snapshot, records => aggregateRunStatusMetrics(records, plugin));
+			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
+		}
+	}
+	const stateStartedAt = new Date();
+	const stateRead = readEvidenceV2(version2StateFile(pluginStateFile()));
+	const stateCompletedAt = new Date();
+	const correlationRead = stateRead.status === "ok"
+		? projectCalibrationForReport(calibrationSummary(stateRead.value).json)
+		: stateRead;
+	const correlation: CorrelationSource = {
+		status: correlationRead.status,
+		reason: correlationRead.status === "unavailable" ? correlationRead.reason : null,
+		readStartedAt: stateStartedAt.toISOString(),
+		readCompletedAt: stateCompletedAt.toISOString(),
+		window: "retained_v2_metadata",
+		metrics: correlationRead.status === "ok" ? correlationRead.value : null,
+	};
+	const statuses = [plugins["jev-advisor"].status, plugins["verification-receipts"].status, plugins["ui-regression"].status, correlation.status];
+	const okCount = statuses.filter(status => status === "ok").length;
+	const status: PluginMetricsReport["status"] = okCount === 4 ? "complete" : okCount === 0 ? "unavailable" : "partial";
+	const limitations: string[] = [...METRICS_BASE_LIMITATIONS];
+	if (statuses.includes("missing")) limitations.push("source_missing");
+	if (statuses.includes("unavailable")) limitations.push("source_unavailable");
+	return {
+		schemaVersion: 1,
+		report: "plugin_metrics",
+		mode: "offline_descriptive",
+		window: "all_retained",
+		scope: "current_process_home_all_repositories",
+		generatedAt: startedAt.toISOString(),
+		status,
+		plugins,
+		correlation,
+		unavailableMeasures: {
+			pluginOverheadMs: null, providerLatencyMs: null, assessmentLatencyMs: null,
+			endToEndInvocationMs: null, providerCost: null, tokenUsage: null,
+			quality: null, accuracy: null, causalRoi: null,
+		},
+		limitations,
+	};
 }
 
 export function readSessionId(ctx: unknown): string | null {

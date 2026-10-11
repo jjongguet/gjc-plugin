@@ -4,7 +4,7 @@ import type { FileHandle } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { appendPluginOutcome, ensurePrivateResultDirectory, pluginResultsRoot, readPrivateResultFile } from '../lib/results';
+import { appendPluginOutcome, ensurePrivateResultDirectory, pluginResultsRoot, readPluginOutcomeSnapshot, readPrivateResultFile } from '../lib/results';
 import type { PluginOutcome } from '../lib/results';
 
 const owned: string[] = [];
@@ -435,4 +435,242 @@ test('HOME changes select independent private consumers despite a cached OS home
   const b=await appendPluginOutcome('verification-receipts',outcome);expect(b.persisted).toBe(true);
   expect((await records(first.journal)).map(row=>row.id)).toEqual([a.id]);expect((await records(second.journal)).map(row=>row.id)).toEqual([b.id]);
  }finally{if(previous===undefined)delete process.env.HOME;else process.env.HOME=previous;}
+});
+test('snapshot reader distinguishes missing home, empty directory and readable full journals without creating anything', async () => {
+  const { root, baseDir, journal } = await fixture();
+  // Missing: nothing exists at all, and the reader must not create it.
+  const absent = await readPluginOutcomeSnapshot('verification-receipts', { baseDir: path.join(root, 'absent') });
+  expect(absent.status).toBe('missing'); expect(absent.reason).toBeNull();
+  expect(await missing(path.join(root, 'absent'))).toBe(true);
+  // Safe empty journal directory is missing, never synthesized as empty metrics.
+  await ensurePrivateResultDirectory(journal);
+  const empty = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(empty.status).toBe('missing'); expect(empty.reason).toBeNull();
+  // Full readable journal returns records exactly as stored.
+  const result = await appendPluginOutcome('verification-receipts', { ...outcome, durationMs: 12 }, { baseDir });
+  expect(result.persisted).toBe(true);
+  const second = await appendPluginOutcome('jev-advisor', { operation: 'advise', advice: { status: 'no_decision', reason: 'disabled' } }, { baseDir });
+  expect(second.persisted).toBe(true);
+  const full = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(full.status).toBe('ok'); expect(full.reason).toBeNull();
+  expect(full.records.map(record => record.id)).toEqual([result.id]);
+  expect(full.segments).toBe((await inventory(journal)).segments.length);
+  expect(full.bytes).toBe((await inventory(journal)).segments.reduce((sum: number, segment: any) => sum + segment.bytes, 0));
+  const other = await readPluginOutcomeSnapshot('jev-advisor', { baseDir });
+  expect(other.status).toBe('ok');
+  expect(other.records.length).toBe(1);
+  expect((await records(journal)).length).toBe(1);
+  expect(await missing(path.join(journal, '.append.lock'))).toBe(true);
+});
+
+test('snapshot reader distinguishes an absent journal from a readable empty canonical inventory', async () => {
+  const { baseDir, journal } = await fixture();
+  const absent = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(absent).toMatchObject({ status: 'missing', reason: null, records: [] });
+  expect(await missing(baseDir)).toBe(true);
+
+  expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+  const marker = await inventory(journal);
+  const markerPath = path.join(journal, 'inventory.json');
+  const emptyInventory = JSON.stringify({ ...marker, segments: [] });
+  await fs.writeFile(markerPath, emptyInventory, { mode: 0o600 });
+  await fs.unlink(path.join(journal, marker.segments[0].name));
+
+  const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(snapshot).toMatchObject({ status: 'unavailable', reason: 'store_corrupt', records: [], segments: 0, bytes: 0 });
+  expect(await fs.readFile(markerPath, 'utf8')).toBe(emptyInventory);
+});
+
+test('snapshot reader maps malformed inventory JSON to store_corrupt without records', async () => {
+  const { baseDir, journal } = await fixture();
+  expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+  const markerPath = path.join(journal, 'inventory.json');
+  await fs.writeFile(markerPath, '{ malformed JSON', { mode: 0o600 });
+
+  const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(snapshot).toMatchObject({ status: 'unavailable', reason: 'store_corrupt', records: [], segments: 0, bytes: 0 });
+  expect(await fs.readFile(markerPath, 'utf8')).toBe('{ malformed JSON');
+});
+
+test('snapshot reader classifies shape-invalid inventory metadata as corrupt without modifying it', async () => {
+  for (const variant of ['empty object', 'missing owner', 'invalid segment bytes']) {
+    const { baseDir, journal } = await fixture();
+    expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+    expect((await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).status).toBe('ok');
+    const marker = await inventory(journal);
+    const markerPath = path.join(journal, 'inventory.json');
+    const invalid = variant === 'empty object' ? {} : variant === 'missing owner' ? { ...marker, owner: undefined } : { ...marker, segments: [{ ...marker.segments[0], bytes: -1 }] };
+    const body = JSON.stringify(invalid);
+    await fs.writeFile(markerPath, body, { mode: 0o600 });
+    const names = (await fs.readdir(journal)).sort();
+
+    expect(await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).toEqual({ status: 'unavailable', reason: 'store_corrupt', records: [], segments: 0, bytes: 0 });
+    expect(await fs.readFile(markerPath, 'utf8')).toBe(body);
+    expect((await fs.readdir(journal)).sort()).toEqual(names);
+  }
+});
+
+test('snapshot reader rejects digest-matching malformed and schema-invalid segments without salvaging records', async () => {
+  for (const variant of ['malformed JSON', 'invalid operation']) {
+    const { baseDir, journal } = await fixture();
+    for (let index = 0; index < 2; index++) expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+    expect((await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).records).toHaveLength(2);
+    const stored = await records(journal);
+    const marker = await inventory(journal);
+    const segment = marker.segments[0];
+    const segmentPath = path.join(journal, segment.name);
+    const invalidLine = variant === 'malformed JSON' ? '{"schemaVersion":' : JSON.stringify({ ...stored[1], operation: 'invalid' });
+    const body = JSON.stringify(stored[0]) + '\n' + invalidLine + '\n';
+    segment.bytes = Buffer.byteLength(body);
+    segment.digest = createHash('sha256').update(body).digest('hex');
+    const markerPath = path.join(journal, 'inventory.json');
+    const markerBody = JSON.stringify(marker);
+    await fs.writeFile(segmentPath, body);
+    await fs.writeFile(markerPath, markerBody);
+
+    expect(await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).toEqual({ status: 'unavailable', reason: 'store_corrupt', records: [], segments: 0, bytes: 0 });
+    expect(await fs.readFile(segmentPath, 'utf8')).toBe(body);
+    expect(await fs.readFile(markerPath, 'utf8')).toBe(markerBody);
+  }
+});
+
+test('snapshot reader keeps inventory and segment descriptor I/O failures distinct from corrupt content', async () => {
+  for (const target of ['inventory', 'segment']) {
+    const { baseDir, journal } = await fixture();
+    expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+    const before = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(before.status).toBe('ok');
+    const marker = await inventory(journal);
+    const file = path.join(journal, target === 'inventory' ? 'inventory.json' : marker.segments[0].name);
+    const body = await fs.readFile(file);
+    const original = fs.open;
+    let injected = false;
+    const probe = spyOn(fs, 'open').mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+      const handle = await original(...args);
+      if (String(args[0]) === file) return wrappedHandle(handle, { read: async () => { injected = true; throw Object.assign(new Error('PRIVATE_IO_FAILURE'), { code: 'EIO' }); } });
+      return handle;
+    }) as typeof fs.open);
+    try { expect(await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).toEqual({ status: 'unavailable', reason: 'store_unavailable', records: [], segments: 0, bytes: 0 }); }
+    finally { probe.mockRestore(); }
+    expect(injected).toBe(true);
+    expect(await fs.readFile(file)).toEqual(body);
+    expect(await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).toEqual(before);
+  }
+});
+
+test('snapshot reader bounds oversized inventory reads and returns unavailable without records', async () => {
+  const { baseDir, journal } = await fixture();
+  expect((await appendPluginOutcome('verification-receipts', outcome, { baseDir })).persisted).toBe(true);
+  const markerPath = path.join(journal, 'inventory.json');
+  const oversized = (await fs.readFile(markerPath, 'utf8')) + ' '.repeat(8192);
+  await fs.writeFile(markerPath, oversized, { mode: 0o600 });
+  expect((await fs.lstat(markerPath)).size).toBeGreaterThan(8192);
+
+  const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(snapshot).toMatchObject({ status: 'unavailable', reason: 'resource_limit', records: [], segments: 0, bytes: 0 });
+  expect(await fs.readFile(markerPath, 'utf8')).toBe(oversized);
+});
+
+test('snapshot reader returns busy for a safe lock and unsafe_path for an unsafe one, never stealing either', async () => {
+  for (const variant of ['safe', 'unsafe']) {
+    const { baseDir, journal } = await fixture();
+    await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+    const file = path.join(journal, '.append.lock');
+    await fs.writeFile(file, 'FOREIGN_LOCK', { mode: variant === 'safe' ? 0o600 : 0o644 });
+    const before = await fs.lstat(file);
+    const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(snapshot.status).toBe('unavailable');
+    expect(snapshot.reason).toBe(variant === 'safe' ? 'store_busy' : 'unsafe_path');
+    expect(await fs.readFile(file, 'utf8')).toBe('FOREIGN_LOCK');
+    expect((await fs.lstat(file)).ino).toBe(before.ino);
+  }
+});
+
+test('snapshot reader fails closed on unknown, pending and unlisted files and on corrupt canonical records', async () => {
+  for (const [name, body] of [['legacy.jsonl', 'FOREIGN'], ['.inventory.pending', '{}'], ['00000000-0000-4000-8000-000000000000-9.jsonl', 'FOREIGN']] as const) {
+    const { baseDir, journal } = await fixture();
+    await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+    await fs.writeFile(path.join(journal, name), body, { mode: 0o600 });
+    const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(snapshot.status).toBe('unavailable');
+    expect(snapshot.reason).toBe(name === '.inventory.pending' ? 'store_corrupt' : name === 'legacy.jsonl' || name.endsWith('-9.jsonl') ? 'store_corrupt' : 'store_corrupt');
+    expect(await fs.readFile(path.join(journal, name), 'utf8')).toBe(body);
+  }
+  {
+    const { baseDir, journal } = await fixture();
+    await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+    const marker = await inventory(journal);
+    const file = path.join(journal, marker.segments[0].name);
+    const body = (await fs.readFile(file, 'utf8')).slice(0, -1);
+    await fs.writeFile(file, body);
+    const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(snapshot).toMatchObject({ status: 'unavailable', reason: 'store_corrupt', records: [] });
+    expect(await fs.readFile(file, 'utf8')).toBe(body);
+  }
+});
+
+test('snapshot reader rejects duplicate record UUIDs as corrupt instead of deduplicating', async () => {
+  const { baseDir, journal } = await fixture();
+  const first = await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+  expect(first.persisted).toBe(true);
+  const stored = (await records(journal))[0];
+  expect((await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).status).toBe('ok');
+  // Rebind the stored record with a duplicated canonical id through the writer path.
+  const duplicate = JSON.parse(JSON.stringify(stored));
+  await appendPluginOutcome('verification-receipts', { operation: 'status', durationMs: 5 }, { baseDir });
+  const marker = await inventory(journal);
+  const segment = path.join(journal, marker.segments[0].name);
+  const body = (await fs.readFile(segment, 'utf8'));
+  const lines = body.trimEnd().split('\n');
+  lines[lines.length - 1] = JSON.stringify(duplicate);
+  await fs.writeFile(segment, lines.join('\n') + '\n');
+  const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+  expect(snapshot.status).toBe('unavailable');
+  expect(snapshot.reason).toBe('store_corrupt');
+  expect(snapshot.records).toEqual([]);
+});
+
+test('unsafe inventory, segment and directory ownership never reaches snapshot records', async () => {
+  for (const target of ['inventory', 'segment', 'journal']) {
+    const { baseDir, journal } = await fixture();
+    await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+    const marker = await inventory(journal);
+    await fs.chmod(target === 'journal' ? journal : target === 'inventory' ? path.join(journal, 'inventory.json') : path.join(journal, marker.segments[0].name), target === 'journal' ? 0o755 : 0o644);
+    const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(snapshot.status).toBe('unavailable');
+    expect(snapshot.reason).toBe('unsafe_path');
+    expect(snapshot.records).toEqual([]);
+  }
+  {
+    const { root, baseDir } = await fixture();
+    const external = path.join(root, 'EXTERNAL'); await fs.mkdir(external, { mode: 0o700 });
+    await fs.writeFile(path.join(external, 'sentinel'), 'OUTSIDE', { mode: 0o600 });
+    await fs.symlink(external, baseDir);
+    const snapshot = await readPluginOutcomeSnapshot('verification-receipts', { baseDir });
+    expect(snapshot.reason).toBe('unsafe_path');
+    expect(await fs.readFile(path.join(external, 'sentinel'), 'utf8')).toBe('OUTSIDE');
+  }
+});
+
+test('snapshot reader discards a journal generation that changes mid-read instead of salvaging a prefix', async () => {
+  const { baseDir, journal } = await fixture();
+  await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+  const marker = await inventory(journal);
+  const segmentPath = path.join(journal, marker.segments[0].name);
+  const original = fs.open;
+  let segmentOpens = 0;
+  let injected = false;
+  const probe = spyOn(fs, 'open').mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+    const handle = await original(...args);
+    if (String(args[0]) === segmentPath && ++segmentOpens === 2 && !injected) {
+      injected = true;
+      await appendPluginOutcome('verification-receipts', { operation: 'status', durationMs: 9 }, { baseDir });
+    }
+    return handle;
+  }) as typeof fs.open);
+  try { expect((await readPluginOutcomeSnapshot('verification-receipts', { baseDir })).reason).toBe('changed_during_read'); }
+  finally { probe.mockRestore(); }
+  expect(injected).toBe(true);
+  expect((await records(journal)).length).toBe(2);
+  expect(marker.segments.length).toBeLessThanOrEqual(8);
 });

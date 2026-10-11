@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 /** Offline generated-package acceptance. No product import before child isolation. */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync, statSync, symlinkSync, linkSync, copyFileSync, realpathSync, renameSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -51,6 +53,8 @@ async function runSuite(root: string) {
 	const preModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor.ts")).href);
 	const resultModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-result.ts")).href);
 	const toolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-advise.ts")).href);
+	const sharedResults = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
+	const appendPluginOutcome = sharedResults.appendPluginOutcome as (plugin: any, outcome: any, deps?: any) => Promise<{ persisted: boolean; id?: string; reason?: string }>;
 	assert.ok(core.pluginEnvFile().startsWith(path.join(root, "home") + path.sep));
 	assert.ok(!existsSync(core.pluginEnvFile()));
 	const check = async (name: string, fn: () => unknown | Promise<unknown>) => {
@@ -58,6 +62,30 @@ async function runSuite(root: string) {
 		try { await fn(); console.log(`ok ${cases} ${name}`); }
 		catch (error) { failures++; console.error(`FAIL ${name}: ${error instanceof Error ? error.stack : String(error)}`); }
 	};
+	const withFileIoCounters = async <T>(fn: () => T | Promise<T>) => {
+		const calls = { reads: 0, writes: 0 };
+		const restore: Array<() => void> = [];
+		const instrument = (target: any, method: string, kind: "read" | "write" | "both") => {
+			const original = target[method];
+			if (typeof original !== "function") return;
+			target[method] = function (this: unknown, ...args: unknown[]) {
+				if (kind !== "write") calls.reads++;
+				if (kind !== "read") calls.writes++;
+				return original.apply(this, args);
+			};
+			restore.push(() => { target[method] = original; });
+		};
+		for (const method of ["readSync", "readFileSync", "lstatSync", "fstatSync", "statSync", "readdirSync", "existsSync", "accessSync", "opendirSync"]) instrument(fs, method, "read");
+		for (const method of ["writeSync", "writeFileSync", "appendFileSync", "mkdirSync", "renameSync", "unlinkSync", "rmSync", "rmdirSync", "mkdtempSync"]) instrument(fs, method, "write");
+		instrument(fs, "openSync", "both");
+		for (const method of ["readFile", "lstat", "stat", "readdir", "opendir", "access"]) instrument(fs.promises, method, "read");
+		for (const method of ["writeFile", "appendFile", "mkdir", "rename", "unlink", "rm", "rmdir"]) instrument(fs.promises, method, "write");
+		instrument(fs.promises, "open", "both");
+		syncBuiltinESMExports();
+		try { return { value: await fn(), calls }; }
+		finally { for (const undo of restore.reverse()) undo(); syncBuiltinESMExports(); }
+	};
+
 	const cfg = (overrides: Record<string, string> = {}) => core.readConfig({ JEV_ADVISOR_API_KEY: "synthetic-key", JEV_ADVISOR_MIN_INTERVAL_MS: "0", ...overrides }, {});
 	const batch = (assignments = ["Repair a typo"], tiers = ["fast"]) => ({ agent: "executor", tasks: assignments.map((assignment, i) => ({ id: `input-${i}`, assignment, tier: tiers[i] ?? "balanced" })) });
 	const task = (text = "Repair a typo", cap: 1900 | 4000 = 4000) => core.extractTasks(batch([text]), cap).tasks[0];
@@ -265,9 +293,11 @@ async function runSuite(root: string) {
 		const lock = `${stateFile()}.lock`; writeFileSync(lock, "foreign-late-owner", { mode: 0o600 });
 		try {
 			release(system()); assert.equal(await pending, undefined); assert.equal(fetchCalls - start, 1);
-			assert.equal(records()[0].advice, null); assert.ok(messages.some(s => /unavailable.*locked|locked.*unavailable/i.test(s)), messages.join("\n"));
+			assert.equal(core.readEvidenceV2(stateFile()).reason, "locked", "public reader reports the foreign lock instead of a stale snapshot");
+			assert.ok(messages.some(s => /unavailable.*locked|locked.*unavailable/i.test(s)), messages.join("\n"));
 			assert.equal(readFileSync(lock, "utf8"), "foreign-late-owner");
 		} finally { rmSync(lock, { force: true }); }
+		assert.equal(records()[0].advice, null, "the failed advice write left the record without advice");
 	});
 	await check("blocked-marker persistence failure remains visible", async () => {
 		env({ JEV_ADVISOR_MODE: "enforce" }); responder = () => system(decision("strong"));
@@ -278,10 +308,11 @@ async function runSuite(root: string) {
 		} };
 		try {
 			assert.equal((await hook(preModule)(call(), ctx))?.block, true);
-			assert.equal(records()[0].advice.status, "decision"); assert.equal(records()[0].launchDisposition, "not_observed");
+			assert.equal(core.readEvidenceV2(stateFile()).reason, "locked", "public reader reports the foreign lock during the block-marker failure");
 			assert.ok(messages.some(s => /unavailable.*locked|locked.*unavailable/i.test(s)), messages.join("\n"));
 			assert.equal(readFileSync(lock, "utf8"), "foreign-block-owner");
 		} finally { rmSync(lock, { force: true }); }
+		assert.equal(records()[0].advice.status, "decision"); assert.equal(records()[0].launchDisposition, "not_observed");
 	});
 	await check("one failed child write does not suppress later healthy child writes", async () => {
 		env(); const messages: string[] = []; let requestIndex = 0; const lock = `${stateFile()}.lock`;
@@ -786,15 +817,15 @@ async function runSuite(root: string) {
 		(globalThis as any)[slotKey] = undefined;
 		core.widgetLifecycleResetForTests();
 	});
-	await check("canonical builder exact bytes for all three surfaces and stale candidate", () => {
+	await check("canonical builder exact bytes for all four surfaces and stale candidate", () => {
 		const fixture = path.join(root, "builder");
 		for (const dir of ["scripts", "lib", "src", "hooks", "tools"]) mkdirSync(path.join(fixture, dir), { recursive: true });
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
-		for (const file of ["scripts/build.mjs", "lib/decision.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "lib/decision.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/metrics.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
-		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts"]) {
+		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/plugin-metrics.ts"]) {
 			const expected = readFileSync(path.join(fixture, file)); const actual = readFileSync(path.join(plugin, file)); assert.deepEqual(actual, expected, file);
 			assert.notDeepEqual(Buffer.concat([actual, Buffer.from(" ")]), expected); console.log(`artifact-sync ${file}: exact`);
 		}
@@ -803,13 +834,476 @@ async function runSuite(root: string) {
 		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.4");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [["tool_call", "task", "before"], ["tool_result", "task", "after"], ["tool_result", "subagent", "after"]]);
 		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 3);
+		const toolNames = manifest.tools.map((t: any) => t.name);
+		assert.deepEqual(toolNames.sort(), ["jev_advise", "plugin_metrics"]);
+		const metricsTool = manifest.tools.find((t: any) => t.name === "plugin_metrics"); assert.equal(metricsTool.path, "tools/plugin-metrics.ts");
 	});
 	await check("no unexpected fetch and no owned transaction residue", () => {
 		assert.equal(unexpectedFetches, 0);
 		const walk = (dir: string) => { for (const item of readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) walk(file); else assert.ok(!item.name.endsWith(".lock") && !item.name.endsWith(".tmp"), file); } };
 		walk(root);
 	});
-	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 3 }));
+	await check("plugin_metrics tool: invalid_input rejection before any reads, exact envelope, nonmutation", async () => {
+		const metricsModule = await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href);
+		const sourceMetricsModule = await import(pathToFileURL(path.join(plugin, "src/metrics.adapter.ts")).href);
+		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+		const sourceMetricsTool = sourceMetricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+		const metricsSurfaces = [["generated", metricsTool], ["source", sourceMetricsTool]] as const;
+		assert.equal(metricsTool.name, "plugin_metrics");
+		const pluginMetricsFetchCalls = fetchCalls;
+		const pluginMetricsUnexpectedFetches = unexpectedFetches;
+		// home without any data: envelope over missing sources
+		env({ JEV_ADVISOR_PROVIDER: "off" });
+		const home = process.env.HOME!;
+		const result = JSON.parse(text(await metricsTool.execute("m1", {})));
+		assert.equal(result.schemaVersion, 1); assert.equal(result.report, "plugin_metrics");
+		assert.equal(result.mode, "offline_descriptive"); assert.equal(result.window, "all_retained");
+		assert.equal(result.scope, "current_process_home_all_repositories");
+		assert.equal(result.status, "unavailable");
+		for (const p of ["jev-advisor", "verification-receipts", "ui-regression"]) {
+			assert.equal(result.plugins[p].status, "missing"); assert.equal(result.plugins[p].reason, null);
+			assert.equal(result.plugins[p].metrics, null); assert.equal(result.plugins[p].snapshot, null);
+		}
+		assert.equal(result.correlation.status, "missing"); assert.equal(result.correlation.metrics, null);
+		assert.equal(result.correlation.window, "retained_v2_metadata");
+		assert.ok(result.limitations.slice(0, 18).join(",") === "retained_not_lifetime,unrecorded_invocations_unknown,independent_source_snapshots,wall_clock_not_event_authority,run_observations_not_unique_executions,status_not_reexecution,terminal_sightings_not_unique_jobs,correlation_window_independent,unknown_identity_and_unobserved_terminals,receipt_duration_excludes_storage_assessment_journal,hook_duration_excludes_journal,provider_assessment_latency_unmeasured,end_to_end_and_isolated_overhead_unmeasured,historical_version_unidentified,smoke_real_workload_unidentified,counts_not_coverage,assessment_not_quality,causal_effect_unmeasured");
+		assert.deepEqual(result.limitations.slice(18), ["source_missing"]);
+		for (const key of ["pluginOverheadMs", "providerLatencyMs", "assessmentLatencyMs", "endToEndInvocationMs", "providerCost", "tokenUsage", "quality", "accuracy", "causalRoi"]) assert.equal(result.unavailableMeasures[key], null);
+		// privacy canaries / raw identifier exclusion
+		const serialized = JSON.stringify(result);
+		for (const canary of ["PRIVATE", "SECRET", "synthetic-key", "sk-", "http"]) assert.ok(!serialized.includes(canary), "privacy canary in report");
+		// nonmutation fingerprint: file/dir names, sizes, modes, link counts unchanged
+		const fingerprint = async () => { const out: any = {}; for (const p of ["verification-receipts", "jev-advisor", "ui-regression"]) { const dirP = path.join(home, ".gjc-plugin", p); out[p] = { exists: existsSync(dirP) }; if (out[p].exists) { out[p].entries = readdirSync(path.join(dirP, "journal", "v1")).sort(); out[p].mode = statSync(path.join(dirP, "journal", "v1")).mode & 0o7777; } } return out; };
+		const fp1 = await fingerprint();
+		await metricsTool.execute("m2", {});
+		assert.deepEqual(await fingerprint(), fp1, "metrics invocation must not mutate anything");
+		// Positive controls prove interception observes real tool reads and fixture writes.
+		for (const [surface, tool] of metricsSurfaces) {
+			const { value: control, calls } = await withFileIoCounters(() => tool.execute(`m-io-control-${surface}`, {}));
+			assert.equal(JSON.parse(text(control)).report, "plugin_metrics");
+			assert.ok(calls.reads > 0, `${surface}: valid input reaches instrumented store reads`);
+		}
+		const ioControlPath = path.join(root, "metrics-io-control.txt");
+		const { calls: controlIoCalls } = await withFileIoCounters(async () => {
+			fs.writeFileSync(ioControlPath, "LOCAL_IO_CONTROL", { mode: 0o600 });
+			assert.equal(await fs.promises.readFile(ioControlPath, "utf8"), "LOCAL_IO_CONTROL");
+		});
+		rmSync(ioControlPath);
+		assert.ok(controlIoCalls.reads > 0 && controlIoCalls.writes > 0, "actual fixture read/write exercises both I/O counters");
+		// Every invalid runtime category must fail before any store access.
+		const beforeInvalid = await fingerprint();
+		const revoked = Proxy.revocable({}, {});
+		revoked.revoke();
+		const invalidParams: [string, unknown][] = [
+			["null", null], ["undefined", undefined], ["empty array", []], ["nonempty array", [1]],
+			["string primitive", "path"], ["number primitive", 1], ["boolean primitive", false],
+			["bigint primitive", 1n], ["symbol primitive", Symbol("invalid")], ["function", () => undefined],
+			["nonempty object", { path: "/etc/passwd", limit: 10 }], ["empty non-plain object", new Date(0)],
+			["null-prototype object", Object.create(null)], ["symbol field", { [Symbol("invalid")]: 1 }],
+			["nonenumerable field", Object.defineProperty({}, "hidden", { value: 1 })], ["revoked Proxy", revoked.proxy],
+		];
+		const fixedInvalidInputText = "plugin_metrics: invalid_input. This tool accepts exactly {} — no user paths, filters or config.";
+		const { value: invalidResults, calls: invalidIoCalls } = await withFileIoCounters(async () => {
+			const results = [];
+			for (const [surface, tool] of metricsSurfaces) {
+				for (let index = 0; index < invalidParams.length; index++) {
+					results.push({ label: `${surface}: ${invalidParams[index][0]}`, result: await tool.execute(`m-invalid-${surface}-${index}`, invalidParams[index][1]) });
+				}
+			}
+			return results;
+		});
+		for (const { label, result } of invalidResults) {
+			assert.equal(result.isError, true, `${label} must use the native tool error result`);
+			assert.equal(text(result), fixedInvalidInputText, `${label} fixed invalid_input text`);
+		}
+		assert.deepEqual(invalidIoCalls, { reads: 0, writes: 0 }, "invalid inputs must not read or write stores");
+		assert.deepEqual(await fingerprint(), beforeInvalid, "invalid input must not mutate stores");
+		assert.equal(fetchCalls, pluginMetricsFetchCalls, "invalid plugin_metrics input must not call fetch");
+		assert.equal(unexpectedFetches, pluginMetricsUnexpectedFetches, "invalid plugin_metrics input must not attempt network access");
+		// envelope over full seeded journals: run/status arithmetic AC6
+		const home2 = path.join(root, `home-full-${++serial}`); mkdirSync(home2, { mode: 0o700 }); process.env.HOME = home2;
+		for (const [plugin, ops] of [["verification-receipts", [{ operation: "run", durationMs: 100 }, { operation: "status", durationMs: 100 }, { operation: "status", durationMs: 100 }, { operation: "status", durationMs: 100 }]], ["ui-regression", [{ operation: "run", durationMs: 100 }, { operation: "status", durationMs: 100 }, { operation: "status", durationMs: 100 }, { operation: "status", durationMs: 100 }]]] as const) {
+			for (const op of ops) { const r = await appendPluginOutcome(plugin, op as any, {}); assert.equal(r.persisted, true, JSON.stringify(r)); }
+		}
+		const batchRecord: any = { operation: "task_advice", durationMs: 80, taskAdvice: Array.from({ length: 32 }, (_, index) => index === 0 ? { index, status: "decision", tier: "fast", confidence: 0.9, basis: "provider_choice" } : { index, status: "no_decision", reason: "batch_limit" }) };
+		await appendPluginOutcome("jev-advisor", batchRecord, {});
+		await appendPluginOutcome("jev-advisor", { operation: "subagent_terminal", evidenceObservations: { completed: 2, failed: 0, cancelled: 0, stored: 2, unavailable: 0 } }, {});
+		await appendPluginOutcome("jev-advisor", { operation: "advise", advice: { status: "decision", tier: "strong", confidence: 0.9, confidenceKind: "self_reported" } }, {});
+		const fullReport = JSON.parse(text(await metricsTool.execute("m4", {})));
+		assert.equal(fullReport.status, "partial");
+		for (const p of ["verification-receipts", "ui-regression"]) {
+			const m = fullReport.plugins[p].metrics;
+			assert.deepEqual(m.operations, { run: 1, status: 3 });
+			assert.equal(m.run.invocations, 1); assert.equal(m.status.invocations, 3);
+			assert.deepEqual(m.run.recordedReceiptDurationMs, { measured: 1, sum: 100, average: 100 });
+			assert.equal(m.status.recordedReceiptDurationMs, null, "status never contributes duration");
+			assert.equal(m.run.nativeCounts, null, "no count-bearing run sample → nativeCounts null");
+			assert.equal(m.run.assertions, null);
+			assert.deepEqual(m.run.passedFraction, { numerator: 0, denominator: 0, rate: null });
+		}
+		const jm = fullReport.plugins["jev-advisor"].metrics;
+		assert.deepEqual(jm.operations, { task_advice: 1, subagent_terminal: 1, advise: 1 });
+		assert.equal(jm.taskAdvice.batches, 1); assert.equal(jm.taskAdvice.batchesWithEntries, 1); assert.equal(jm.taskAdvice.entries, 32);
+		assert.deepEqual(jm.taskAdvice.recordedPreJournalHookDurationMs, { measured: 1, sum: 80, average: 80 });
+		assert.equal(jm.taskAdvice.byTier.fast, 1); assert.equal(jm.taskAdvice.byReason.batch_limit, 31);
+		assert.equal(jm.manualAdvice.invocations, 1); assert.equal(jm.manualAdvice.present, 1); assert.equal(jm.manualAdvice.byTier.strong, 1);
+		assert.deepEqual(jm.evidenceObservations.subagent_terminal, { contributingRecords: 1, completed: 2, failed: 0, cancelled: 0, stored: 2, unavailable: 0 });
+		// full envelope over seeded state: measured=0 duration → null sum
+		const file2 = await version2StateFileFixture(home2);
+		await seedStateWithZeroDuration(file2);
+		const withState = JSON.parse(text(await metricsTool.execute("m5", {})));
+		assert.equal(withState.correlation.status, "ok", `correlation unavailable: ${withState.correlation.reason}`);
+		assert.deepEqual(withState.correlation.metrics.terminalJobs.durationMs, { measured: 0, sum: null, average: null }, "measured=0 → sum/average null in report view");
+		assert.equal(withState.correlation.metrics.terminalJobs.actualTier, null); assert.equal(withState.correlation.metrics.terminalJobs.quality, null);
+		assert.equal(fetchCalls, pluginMetricsFetchCalls, "plugin_metrics invocations must not add fetch calls");
+		assert.equal(unexpectedFetches, pluginMetricsUnexpectedFetches, "plugin_metrics invocations must not attempt network access");
+		// 2MiB+1 bounded state read: exact cap passes, cap+1 fails oversized before decode
+		const bigFile = core.version2StateFile(base());
+		mkdirSync(path.dirname(bigFile), { recursive: true, mode: 0o700 });
+		const emptyJson = JSON.stringify(core.emptyEvidenceV2());
+		const padTo = (total: number) => `${emptyJson.slice(0, -1)},"pad":"${"x".repeat(total - 9 - emptyJson.length)}"}`;
+		const oversizeBody = padTo(2097153);
+		assert.equal(Buffer.byteLength(oversizeBody), 2097153, "fixture is exactly MAX_STORE_BYTES + 1");
+		writeFileSync(bigFile, oversizeBody, { mode: 0o600 });
+		assert.equal(core.readEvidenceV2(bigFile).reason, "oversized", "cap+1 → oversized before decode");
+		const exactBody = padTo(2097152);
+		assert.equal(Buffer.byteLength(exactBody), 2097152, "fixture is exactly MAX_STORE_BYTES");
+		writeFileSync(bigFile, exactBody, { mode: 0o600 });
+		const exactRead = core.readEvidenceV2(bigFile);
+		assert.equal(exactRead.status, "unavailable"); assert.equal(exactRead.reason, "corrupt", "exact cap reads and decodes before canonical validation fails");
+		writeFileSync(bigFile, JSON.stringify(core.emptyEvidenceV2()), { mode: 0o600 });
+		assert.equal(core.readEvidenceV2(bigFile).status, "ok", "canonical small state passes after cap fixtures");
+		// public lock vs transaction-owned lock separation
+		writeFileSync(`${bigFile}.lock`, "foreign-owner", { mode: 0o600 });
+		assert.equal(core.readEvidenceV2(bigFile).reason, "locked", "public reader rejects foreign lock");
+		rmSync(`${bigFile}.lock`);
+		const txn = await core.transaction(bigFile, limits, () => {});
+		assert.equal(txn.status, "ok", "transaction works under its own lock while no foreign lock exists");
+	});
+
+	await check("plugin_metrics counts all seven canonical operations without widening run/status buckets", async () => {
+		env({ JEV_ADVISOR_PROVIDER: "off" });
+		const beforeFetch = fetchCalls, beforeUnexpectedFetches = unexpectedFetches;
+		const operations = ["run", "status", "advise", "calibration", "task_advice", "task_launch", "subagent_terminal"] as const;
+		const counts = { tests: 3, suites: 1, topLevel: 2, passed: 2, failed: 1, skipped: 0, todo: 0, cancelled: 0 };
+		const otherCounts = { tests: 50, suites: 5, topLevel: 40, passed: 49, failed: 1, skipped: 0, todo: 0, cancelled: 0 };
+		for (const pluginName of ["verification-receipts", "ui-regression"] as const) {
+			for (const operation of operations) {
+				const run = operation === "run";
+				const outcome = {
+					operation,
+					durationMs: run ? 100 : Number.MAX_SAFE_INTEGER,
+					execution: {
+						status: run ? "passed" : "failed", reason: run ? "complete" : "native_failure",
+						counts: run ? counts : otherCounts,
+						assertions: run
+							? [{ step: 0, id: "step-0", kind: "visible", status: "passed" }, { step: 1, id: "step-1", kind: "text_exact", status: "failed" }]
+							: [{ step: 0, id: "step-0", kind: "text_substring", status: "failed" }],
+					},
+				};
+				assert.equal((await appendPluginOutcome(pluginName, outcome)).persisted, true, `${pluginName}: ${operation} canonical writer accepts fixture`);
+			}
+		}
+		assert.equal((await appendPluginOutcome("jev-advisor", { operation: "advise" })).persisted, true);
+		await seedStateWithZeroDuration(await version2StateFileFixture(process.env.HOME!));
+		for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
+			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			const native = await tool.execute("m-all-operations", {});
+			assert.notEqual(native.isError, true, surface);
+			const report = JSON.parse(text(native));
+			assert.equal(report.status, "complete", surface);
+			for (const pluginName of ["verification-receipts", "ui-regression"] as const) {
+				const source = report.plugins[pluginName], m = source.metrics;
+				assert.equal(source.status, "ok"); assert.equal(source.reason, null); assert.equal(source.snapshot.records, 7);
+				assert.deepEqual(m.operations, Object.fromEntries(operations.map(operation => [operation, 1])));
+				assert.equal(m.run.invocations, 1); assert.equal(m.status.invocations, 1);
+				assert.deepEqual(m.run.execution, { present: 1, byStatus: { passed: 1 }, byReason: { complete: 1 } });
+				assert.deepEqual(m.status.execution, { present: 1, byStatus: { failed: 1 }, byReason: { native_failure: 1 } });
+				assert.equal(m.run.executionMissing, 0); assert.equal(m.status.executionMissing, 0);
+				assert.deepEqual(m.run.passedFraction, { numerator: 1, denominator: 1, rate: 1 });
+				assert.deepEqual(m.status.passedFraction, { numerator: 0, denominator: 1, rate: 0 });
+				assert.deepEqual(m.run.recordedReceiptDurationMs, { measured: 1, sum: 100, average: 100 });
+				assert.equal(m.status.recordedReceiptDurationMs, null);
+				assert.equal(m.status.nativeCounts, null); assert.equal(m.status.assertions, null);
+				if (pluginName === "verification-receipts") {
+					assert.deepEqual(m.run.nativeCounts, { contributingRecords: 1, totals: counts });
+					assert.equal(m.run.assertions, null);
+				} else {
+					assert.equal(m.run.nativeCounts, null);
+					assert.deepEqual(m.run.assertions, { contributingRecords: 1, entries: 2, byKind: { visible: 1, text_exact: 1 }, byStatus: { passed: 1, failed: 1 } });
+				}
+			}
+		}
+		assert.equal(fetchCalls, beforeFetch); assert.equal(unexpectedFetches, beforeUnexpectedFetches);
+	});
+
+	await check("plugin_metrics correlation rejects nonrepresentable sums, preserves fractions and readable siblings", async () => {
+		const beforeFetch = fetchCalls, beforeUnexpectedFetches = unexpectedFetches;
+		const fixtures = [
+			{ name: "nonfinite", durations: [1e308, 1e308], duration: { sum: Infinity, measured: 2, average: Infinity }, unavailable: true },
+			{ name: "unsafe integer", durations: [Number.MAX_SAFE_INTEGER, 1], duration: { sum: Number.MAX_SAFE_INTEGER + 1, measured: 2, average: 4503599627370496 }, unavailable: true },
+			{ name: "fractional", durations: [1.25, 2.5], duration: { sum: 3.75, measured: 2, average: 1.875 }, unavailable: false },
+			{ name: "safe integer boundary", durations: [Number.MAX_SAFE_INTEGER - 1, 1], duration: { sum: Number.MAX_SAFE_INTEGER, measured: 2, average: 4503599627370495.5 }, unavailable: false },
+		] as const;
+		for (const fixture of fixtures) {
+			env({ JEV_ADVISOR_PROVIDER: "off" });
+			for (const pluginName of ["jev-advisor", "verification-receipts", "ui-regression"] as const) {
+				assert.equal((await appendPluginOutcome(pluginName, { operation: pluginName === "jev-advisor" ? "task_advice" : "run", durationMs: 80 })).persisted, true);
+			}
+			const siblings = (await core.buildPluginMetricsReport()).plugins;
+			const file = await version2StateFileFixture(process.env.HOME!);
+			const durations: Array<number | undefined> = [...fixture.durations];
+			if (fixture.name === "fractional") durations.push(undefined);
+			for (const [index, durationMs] of durations.entries()) {
+				const id = `duration-${index}`, ref = { sessionId: "s", jobId: id };
+				const prepared = await core.prepareTaskRecords(file, limits, "s", id, [task()], 1);
+				assert.equal(prepared.status, "ok");
+				assert.equal((await core.updateTaskAdvice(file, limits, { sessionId: "s", toolCallId: id, taskIndex: 0 }, prepared.value[0].token, advice(index === 2 ? "strong" : "fast"), 2)).status, "ok");
+				assert.equal((await core.observeTaskLaunch(file, limits, "s", id, true, 0, ref, 3)).status, "ok");
+				assert.equal((await core.observeTerminalJob(file, limits, ref, { status: "completed", durationMs }, 4)).status, "ok");
+			}
+			const retained = core.readEvidenceV2(file);
+			assert.equal(retained.status, "ok", "canonical validator accepts every seeded duration");
+			for (const job of Object.values(retained.value.jobs) as any[]) assert.deepEqual(job.conflicts, []);
+			const canonical = core.calibrationSummary(retained.value).json;
+			assert.equal(canonical.terminalJobs.count, durations.length); assert.equal(canonical.terminalJobs.joined, durations.length);
+			assert.equal(canonical.terminalJobs.conflicted, 0);
+			assert.deepEqual(canonical.terminalJobs.durationMs, fixture.duration, "calibration arithmetic is unchanged");
+			assert.deepEqual(canonical.terminalJobs.byRecommendation.fast.durationMs, fixture.duration);
+			const expected = structuredClone(canonical);
+			if (fixture.name === "fractional") {
+				assert.deepEqual(canonical.terminalJobs.byRecommendation.strong.durationMs, { sum: 0, measured: 0, average: null });
+				expected.terminalJobs.byRecommendation.strong.durationMs.sum = null;
+			}
+			const beforeState = readFileSync(file);
+			for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
+				const module = await import(pathToFileURL(path.join(plugin, surface)).href);
+				const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+				const native = await tool.execute(`m-correlation-${fixture.name}`, {});
+				assert.notEqual(native.isError, true, `${surface}: retained numeric boundary is a source-level result`);
+				const report = JSON.parse(text(native));
+				assert.equal(report.status, fixture.unavailable ? "partial" : "complete");
+				assert.equal(report.correlation.status, fixture.unavailable ? "unavailable" : "ok");
+				assert.equal(report.correlation.reason, fixture.unavailable ? "corrupt" : null);
+				assert.deepEqual(report.correlation.metrics, fixture.unavailable ? null : expected);
+				assert.equal(report.limitations.includes("source_unavailable"), fixture.unavailable);
+				assert.equal(report.limitations.includes("source_missing"), false);
+				for (const pluginName of ["jev-advisor", "verification-receipts", "ui-regression"] as const) {
+					assert.equal(report.plugins[pluginName].status, "ok"); assert.equal(report.plugins[pluginName].reason, null);
+					assert.deepEqual(report.plugins[pluginName].snapshot, siblings[pluginName].snapshot);
+					assert.deepEqual(report.plugins[pluginName].metrics, siblings[pluginName].metrics);
+				}
+				if (fixture.name === "fractional") {
+					const originalIsInteger = Number.isInteger;
+					let injected = false;
+					try {
+						Number.isInteger = (value: unknown) => {
+							if (value === 3.75) { injected = true; throw new Error("PRIVATE_CORRELATION_PROJECTION_EXCEPTION"); }
+							return originalIsInteger(value);
+						};
+						const failed = await tool.execute("m-correlation-exception", {});
+						assert.equal(injected, true, "unexpected exception occurs in numeric projection");
+						assert.deepEqual(failed, { content: [{ type: "text", text: "plugin_metrics: unexpected_error. The report could not be produced." }], isError: true });
+					} finally { Number.isInteger = originalIsInteger; }
+					const recovered = await tool.execute("m-correlation-recovered", {});
+					assert.notEqual(recovered.isError, true); assert.deepEqual(JSON.parse(text(recovered)).correlation.metrics, expected);
+				}
+			}
+			assert.deepEqual(readFileSync(file), beforeState, "report leaves canonical state bytes unchanged");
+		}
+		assert.equal(fetchCalls, beforeFetch); assert.equal(unexpectedFetches, beforeUnexpectedFetches);
+	});
+
+	await check("plugin_metrics source and generated tools return fixed native errors for unexpected report and serialization exceptions", async () => {
+		env({ JEV_ADVISOR_PROVIDER: "off" });
+		const beforeFetch = fetchCalls;
+		const beforeUnexpectedFetches = unexpectedFetches;
+		const fixedError = { content: [{ type: "text", text: "plugin_metrics: unexpected_error. The report could not be produced." }], isError: true };
+		for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
+			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			for (const stage of ["report", "serialization"]) {
+				const originalISOString = Date.prototype.toISOString;
+				const originalStringify = JSON.stringify;
+				let injected = false;
+				let result;
+				try {
+					if (stage === "report") Date.prototype.toISOString = function () { injected = true; throw new Error("PRIVATE_REPORT_EXCEPTION"); };
+					else JSON.stringify = ((value: any, ...args: any[]) => {
+						if (value?.report === "plugin_metrics") { injected = true; throw new Error("PRIVATE_SERIALIZATION_EXCEPTION"); }
+						return (originalStringify as any)(value, ...args);
+					}) as typeof JSON.stringify;
+					result = await tool.execute(`m-exception-${stage}`, {});
+				} finally { Date.prototype.toISOString = originalISOString; JSON.stringify = originalStringify; }
+				assert.equal(injected, true, `${surface}: ${stage} exception fixture must run`);
+				assert.deepEqual(result, fixedError, `${surface}: ${stage} exception is a fixed native error, not a successful report`);
+				const recovered = await tool.execute(`m-recovered-${stage}`, {});
+				assert.notEqual(recovered.isError, true);
+				assert.equal(JSON.parse(text(recovered)).report, "plugin_metrics", "normal JSON report survives exception fixture restoration");
+			}
+		}
+		assert.equal(fetchCalls, beforeFetch);
+		assert.equal(unexpectedFetches, beforeUnexpectedFetches);
+	});
+
+	await check("metrics corrupt inventory and digest-matching malformed segments stay source-local", async () => {
+		const { createHash } = await import("node:crypto");
+		const metricsModule = await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href);
+		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+		const beforeFetch = fetchCalls;
+		const beforeUnexpectedFetches = unexpectedFetches;
+		const priorHome = process.env.HOME;
+		try {
+			for (const variant of ["empty inventory", "malformed JSON", "invalid operation"]) {
+				const home = path.join(root, `metrics-corrupt-home-${++serial}`);
+				mkdirSync(home, { mode: 0o700 }); process.env.HOME = home;
+				const baseDir = path.join(home, ".gjc-plugin");
+				for (const pluginName of ["jev-advisor", "verification-receipts", "ui-regression"]) {
+					assert.equal((await appendPluginOutcome(pluginName, { operation: pluginName === "jev-advisor" ? "advise" : "run", durationMs: 0 }, { baseDir })).persisted, true);
+				}
+				await seedStateWithZeroDuration(await version2StateFileFixture(home));
+				assert.equal((await core.buildPluginMetricsReport()).status, "complete", "positive control: all four sources are readable");
+				const journal = path.join(baseDir, "verification-receipts", "journal", "v1");
+				const inventoryPath = path.join(journal, "inventory.json");
+				const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+				const segment = inventory.segments[0];
+				const segmentPath = path.join(journal, segment.name);
+				if (variant === "empty inventory") writeFileSync(inventoryPath, "{}");
+				else {
+					const record = JSON.parse(readFileSync(segmentPath, "utf8").trimEnd());
+					const body = variant === "malformed JSON" ? '{"schemaVersion":\n' : JSON.stringify({ ...record, operation: "invalid" }) + "\n";
+					segment.bytes = Buffer.byteLength(body); segment.digest = createHash("sha256").update(body).digest("hex");
+					writeFileSync(segmentPath, body); writeFileSync(inventoryPath, JSON.stringify(inventory));
+					assert.equal(readFileSync(segmentPath).length, segment.bytes);
+					assert.equal(createHash("sha256").update(readFileSync(segmentPath)).digest("hex"), segment.digest);
+				}
+				const inventoryBefore = readFileSync(inventoryPath), segmentBefore = readFileSync(segmentPath);
+				const native = await metricsTool.execute(`m-corrupt-${variant}`, {});
+				assert.notEqual(native.isError, true, "expected source failure remains a successful JSON report");
+				for (const report of [await core.buildPluginMetricsReport(), JSON.parse(text(native))]) {
+					assert.equal(report.status, "partial", variant);
+					assert.equal(report.plugins["verification-receipts"].status, "unavailable");
+					assert.equal(report.plugins["verification-receipts"].reason, "store_corrupt");
+					assert.equal(report.plugins["verification-receipts"].metrics, null);
+					assert.equal(report.plugins["verification-receipts"].snapshot, null);
+					assert.equal(report.plugins["jev-advisor"].status, "ok");
+					assert.equal(report.plugins["ui-regression"].status, "ok");
+					assert.equal(report.correlation.status, "ok");
+				}
+				assert.deepEqual(readFileSync(inventoryPath), inventoryBefore);
+				assert.deepEqual(readFileSync(segmentPath), segmentBefore);
+			}
+		} finally { process.env.HOME = priorHome; }
+		assert.equal(fetchCalls, beforeFetch);
+		assert.equal(unexpectedFetches, beforeUnexpectedFetches);
+	});
+
+	await check("state descriptor growth, replacement and late lock fail closed without unbounded reads", async () => {
+		const { mock } = await import("bun:test");
+		const file = path.join(root, "state-read-races", "state.v2.json");
+		mkdirSync(path.dirname(file), { mode: 0o700 });
+		const canonical = JSON.stringify(core.emptyEvidenceV2());
+		for (const scenario of ["overflow", "rewrite", "replace", "lock"]) {
+			writeFileSync(file, canonical, { mode: 0o600 });
+			const originalRead = fs.readSync;
+			const originalParse = JSON.parse;
+			let injected = false, consumed = 0, parses = 0;
+			const interceptedRead = (...args: any[]) => {
+				if (!injected) {
+					injected = true;
+					if (scenario === "overflow") fs.appendFileSync(file, " ".repeat(2097153));
+					if (scenario === "rewrite") {
+						writeFileSync(file, canonical, { mode: 0o600 });
+						fs.utimesSync(file, new Date(), new Date(Date.now() + 10000));
+					}
+					if (scenario === "replace") {
+						writeFileSync(`${file}.replacement`, canonical, { mode: 0o600 });
+						renameSync(`${file}.replacement`, file);
+					}
+					if (scenario === "lock") writeFileSync(`${file}.lock`, "foreign", { mode: 0o600 });
+				}
+				const bytes = (originalRead as any)(...args);
+				consumed += bytes;
+				return bytes;
+			};
+			mock.module("node:fs", () => ({ ...fs, default: fs, readSync: interceptedRead }));
+			const raceCore = await import(pathToFileURL(path.join(plugin, "lib/decision.ts")).href + `?race=${scenario}`);
+			JSON.parse = ((...args: any[]) => { parses++; return (originalParse as any)(...args); }) as typeof JSON.parse;
+			let result;
+			try { result = raceCore.readEvidenceV2(file); }
+			finally { mock.restore(); JSON.parse = originalParse; syncBuiltinESMExports(); }
+			assert.equal(injected, true, `${scenario}: descriptor interception ran (${JSON.stringify(result)})`);
+			assert.equal(result.status, "unavailable", scenario);
+			assert.equal(result.reason, scenario === "overflow" ? "oversized" : scenario === "lock" ? "locked" : "unsafe_path", scenario);
+			assert.ok(consumed <= 2097153, `${scenario}: bounded descriptor consumption`);
+			if (scenario === "overflow") { assert.equal(consumed, 2097153); assert.equal(parses, 0, "overflow never reaches JSON decoding"); }
+			rmSync(`${file}.lock`, { force: true });
+		}
+		writeFileSync(file, canonical, { mode: 0o600 });
+		assert.equal((await core.transaction(file, limits, () => {})).status, "ok", "internal reader accepts transaction-owned lock");
+	});
+
+	await check("metrics sparse source-specific fields, overflow isolation and timestamp extrema", async () => {
+		const counts = { tests: 0, suites: 0, topLevel: 0, passed: 0, failed: 0, skipped: 0, todo: 0, cancelled: 0 };
+		const records = [{ operation: "run", execution: { status: "passed", reason: "complete", counts, assertions: [] } }];
+		const verification = core.aggregateRunStatusMetrics(records, "verification-receipts");
+		const ui = core.aggregateRunStatusMetrics(records, "ui-regression");
+		assert.deepEqual(verification.run.execution.byReason, { complete: 1 });
+		assert.equal(verification.run.assertions, null);
+		assert.deepEqual(verification.run.nativeCounts, { contributingRecords: 1, totals: counts });
+		assert.equal(ui.run.nativeCounts, null);
+		assert.equal(ui.run.assertions.contributingRecords, 1);
+		assert.deepEqual(core.aggregateRunStatusMetrics([], "ui-regression").run.execution.byStatus, {});
+		const home = path.join(root, "metrics-overflow-home");
+		mkdirSync(home, { mode: 0o700 });
+		const baseDir = path.join(home, ".gjc-plugin");
+		const priorHome = process.env.HOME;
+		process.env.HOME = home;
+		try {
+			for (const [pluginName, operation, durations] of [
+				["verification-receipts", "run", [Number.MAX_SAFE_INTEGER, 1]],
+				["ui-regression", "run", [0]],
+				["jev-advisor", "task_advice", [1, 2, 3]],
+			] as const) {
+				for (const durationMs of durations) assert.equal((await appendPluginOutcome(pluginName, { operation, durationMs }, { baseDir })).persisted, true);
+			}
+			const journal = path.join(baseDir, "jev-advisor", "journal", "v1");
+			const inventoryPath = path.join(journal, "inventory.json");
+			const inventory = JSON.parse(readFileSync(inventoryPath, "utf8"));
+			assert.equal(inventory.segments.length, 1);
+			const segment = inventory.segments[0];
+			const segmentPath = path.join(journal, segment.name);
+			const times = ["2026-01-03T00:00:00.000Z", "2026-01-01T00:00:00.000Z", "2026-01-02T00:00:00.000Z"];
+			const body = readFileSync(segmentPath, "utf8").trimEnd().split("\n").map((line, index) => {
+				const record = JSON.parse(line); record.observedAt = times[index]; return JSON.stringify(record);
+			}).join("\n") + "\n";
+			segment.bytes = Buffer.byteLength(body);
+			segment.digest = (await import("node:crypto")).createHash("sha256").update(body).digest("hex");
+			writeFileSync(segmentPath, body); writeFileSync(inventoryPath, JSON.stringify(inventory));
+			const report = await core.buildPluginMetricsReport();
+			assert.equal(report.status, "partial");
+			assert.equal(report.plugins["verification-receipts"].reason, "resource_limit");
+			assert.equal(report.plugins["verification-receipts"].metrics, null);
+			assert.equal(report.plugins["verification-receipts"].snapshot, null);
+			assert.equal(report.plugins["ui-regression"].status, "ok");
+			assert.equal(report.plugins["jev-advisor"].status, "ok");
+			assert.equal(report.plugins["jev-advisor"].snapshot.oldestObservedAt, times[1]);
+			assert.equal(report.plugins["jev-advisor"].snapshot.newestObservedAt, times[0]);
+		} finally { process.env.HOME = priorHome; }
+	});
+
+async function version2StateFileFixture(home: string): Promise<string> {
+	return path.join(home, ".gjc-plugin", "jev-advisor", "state.v2.json");
+}
+
+async function seedStateWithZeroDuration(file: string): Promise<void> {
+	mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	const state = core.emptyEvidenceV2();
+	state.jobs[JSON.stringify(["s", "j0"])] = { ref: { sessionId: "s", jobId: "j0" }, status: "completed", statusObservations: ["completed"], durationObservations: [], requestedModelObservations: [], effectiveModelObservations: [], allocatedChildIds: [], actualTier: null, observedAt: Date.now(), taskKey: null, conflicts: [] };
+	writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
+}
+	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 4 }));
 	console.log(failures ? `FAILED ${failures}/${cases}` : `ALL PASS (${cases} cases)`);
 	process.exitCode = failures || cases === 0 ? 1 : 0;
 }

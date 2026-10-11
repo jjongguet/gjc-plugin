@@ -20,6 +20,14 @@ and confidence is not a probability of task success.
   `report="calibration"` for an offline descriptive report. Manual advice does
   not create a delegation-correlation record; both paths append sanitized
   operational outcomes under `~/.gjc-plugin/jev-advisor/journal/v1/`.
+- **`plugin_metrics`:** explicitly request one offline descriptive aggregate of
+  all three plugins' retained journals and Jev's retained v2 correlation state.
+  Accepts exactly `{}`; strictly read-only — creates nothing, appends nothing,
+  acquires no lock, performs no repair, loads no credentials and uses no
+  network, and appends no journal record of its own. Missing sources are not
+  zero and unmeasured values are null; descriptive monitoring only, never
+  proof of routing accuracy, task quality or causal benefit. See the
+  [`plugin_metrics` sections](#plugin_metrics-tool) below.
 
 **UI surface.** A batch with a non-empty summary draws one keyed widget (`jev-advisor`) above the editor with its per-task advisories. The widget is batch-scoped and event-driven: it clears when the launch receipt shows the call ended (sync/error/abort/block) or when the batch's observed children reach terminal closure (async batches), is replaced when a newer batch supersedes it, and is disposed by session transitions (`/new`, `/drop`, fork/session switch, restart — `/clear` keeps the session id and the widget). Lifecycle state is in-process only: not persisted, no task text, and a process restart simply degrades to replace-on-next-batch. Residuals are advisory-only: never-observed children keep the widget until the next batch or session transition, and a foreign terminal counted for never-listed children can clear early.
 
@@ -173,17 +181,118 @@ All-missing means unknown, not zero. Unobserved terminals and missing-identity
 observations are outside report coverage. No automatic NEXT recommendation,
 prior-outcome prompt injection, accepted-quality or cost-saving claim is made.
 
-## Architecture and verification
+## `plugin_metrics` tool
+The plugin ships one additional explicitly invoked tool, `plugin_metrics`. It is
+strictly read-only: it accepts exactly `{}` (any other parameter set is rejected
+without touching any store) and aggregates only what is already on disk:
 
+- the retained `~/.gjc-plugin/<plugin>/journal/v1/` outcome journals of
+  `jev-advisor`, `verification-receipts` and `ui-regression`, and
+- Jev's retained v2 correlation state (`state.v2.json`).
+
+The tool creates nothing, appends nothing, acquires no lock, performs no repair
+and never calls a provider. It also never loads credentials and never touches
+the network: it reads the three journals and the v2 state directly from
+`~/.gjc-plugin/`, returning a single bounded JSON envelope.
+
+## What `plugin_metrics` reports
+
+The envelope is a **descriptive retained-window summary**, not a guarantee, and
+not a coverage measurement. Its content is bounded to what each plugin actually
+wrote to disk:
+
+- **Retained record counts and operation frequencies** per source journal —
+  how many records of each operation kind are present in the retained segments.
+- **Separate run and status invocation buckets** for the verification and UI
+  plugins, with the same shape (execution/assessment/freshness/storage counts,
+  field-present denominators, recorded durations). Status records never
+  contribute to run-duration aggregates: a status copy inherits the original
+  receipt's duration but is excluded from run-side duration statistics.
+- **Execution, assessment, freshness and receipt-storage distributions** with
+  field-present denominators: a rate is only computed over records that
+  actually carry the relevant field.
+- **Verification native test counts** (pass/fail/skip/TODO etc.) and **UI
+  recorded assertion entries** (assertion kind, outcome, count). These are
+  *recorded observations*, overlapping dimensions across records — not
+  coverage, not correctness, and not a substitute for reading the underlying
+  receipts.
+- **Jev manual advice and task advice**: manual-advice invocations, present
+  statuses, tiers, confidence bases and no-decision reasons; task-advice batch
+  and entry counts with the same breakdowns. These are separate buckets and
+  are never merged.
+- **Evidence-observation sightings** per operation (task launch, subagent
+  terminal, advice, calibration) — how many retained records report each
+  observation kind.
+- **Canonical correlation via `calibrationSummary`**: unique session+job
+  terminal jobs, agreement between requested and recommended tier, and
+  duration statistics. Agreement is a descriptive match rate, not
+  correctness and not proof a recommended tier was honored at the model
+  layer.
+
+## Measured intervals
+
+The report uses only exactly defined intervals:
+
+- Verification and UI run receipt duration spans the run entry through
+  post-execution/after-fingerprint only. It excludes receipt storage, the
+  Jev adequacy call, and the journal write.
+- Status records copy the original receipt's duration verbatim and never
+  contribute to run duration aggregates.
+- Jev `task_advice` duration spans hook entry through pre-journal finish only.
+  It is not per-provider latency and never claims to be.
+- Correlation state durations are positive, non-conflicted stored values only.
+- No cross-instrument totals are produced: durations from one journal are
+  never summed with durations from another.
+
+## Missing sources, nulls and denominators
+
+The tool is deliberately conservative about absence:
+
+- A missing journal or store is reported as `missing`, never as zero.
+- Unmeasured values are `null`, never invented.
+- A duration with `measured = 0` yields `null` sum and average; a rate over a
+  zero denominator is `null`; native counts and assertion aggregates with no
+  count-bearing samples are `null`. Genuine zeros remain numeric.
+- Correlation state reports independent snapshot windows; the journal and the
+  correlation store are independent snapshots and are never reconciled.
+
+## Scope limits
+
+Coverage is bounded by what each plugin actually retained:
+
+- **All retained observed rows only.** Rotation, eviction and the bounded
+  store mean there are no lifetime totals.
+- **Failed writes are invisible.** A record that was never successfully
+  journaled cannot be counted, so the report can't produce a recording
+  reliability rate.
+- **No time or repository filters.** The report reads the whole retained
+  window in the current process home; you cannot narrow it to a time range or
+  a specific repository through the tool parameters.
+- **Historical producer version and smoke-vs-real workload are
+  unidentifiable.** A record written by an older plugin version, a smoke test,
+  or real usage looks identical and cannot be distinguished after the fact.
+
+## Non-causal statement
+
+The tool is **descriptive monitoring only**. It never claims quality,
+accuracy, routing correctness, cost or token usage, overhead, provider or
+assessment latency, or causal ROI. It does not imply that a recommended tier
+actually ran, and it does not measure cost, accuracy or causal benefit.
+Causal evaluation of delegation policy requires a separate controlled
+comparison, not this report.
+
+## Architecture and verification
 ```text
 lib/decision.ts             Config, task inputs, providers, v2 transactions/report
 src/hook.adapter.ts         Per-task pre-call advice and optional enforcement
 src/result.adapter.ts       Provider-free task/subagent receipt observer
 src/tool.adapter.ts         Explicit advice and offline report
+src/metrics.adapter.ts      Thin read-only plugin_metrics tool adapter
 scripts/build.mjs           Keyless embedding of shared results, core and adapters
 hooks/jev-advisor.ts         Generated pre-call surface
 hooks/jev-advisor-result.ts  Generated result surface, two manifest targets
 tools/jev-advise.ts          Generated explicit-tool surface
+tools/plugin-metrics.ts      Generated read-only metrics surface
 ```
 
 Installed surfaces are self-contained because the installer copies only
@@ -201,7 +310,7 @@ in-memory fetch only: no real provider, local-model server or user memory.
 It exercises actual generated adapters, strict parsing, mixed/oversized tasks,
 throttle/enforce boundaries, terminal identity/replays/conflicts, concurrent
 writes, legacy preservation, unavailable stores and report denominators. It
-compares all three generated files byte-for-byte against the unchanged builder
+compares all four generated files byte-for-byte against the unchanged builder
 run in a temporary fixture, including a deliberately stale candidate.
 
 These checks establish local package behavior, not installed-host dispatch,
