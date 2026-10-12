@@ -20,6 +20,7 @@ export const DOMAIN = Object.freeze({
   generated: [
     "jev-advisor/hooks/**",
     "jev-advisor/tools/**",
+    "verification-receipts/hooks/**",
     "verification-receipts/tools/**",
     "ui-regression/tools/**",
   ],
@@ -58,7 +59,7 @@ export const DOMAIN = Object.freeze({
     {
       id: "critic_generated_edit",
       reason: "generated surface hand-edit",
-      pattern: "^diff --git a/(jev-advisor/(hooks|tools)/|verification-receipts/tools/|ui-regression/tools/)",
+      pattern: "^diff --git a/(jev-advisor/(hooks|tools)/|verification-receipts/(hooks|tools)/|ui-regression/tools/)",
       flags: "m",
     },
     {
@@ -81,6 +82,7 @@ export const DOMAIN = Object.freeze({
   ],
   smoke: [
     { id: "smoke-verification", args: ["--installed"], plugin: "verification-receipts" },
+    { id: "smoke-loop", args: ["--loop"], plugin: "verification-receipts" },
     { id: "smoke-advisor", args: ["--advisor"], plugin: "jev-advisor" },
     { id: "smoke-metrics", args: ["--metrics"], plugin: "jev-advisor" },
   ],

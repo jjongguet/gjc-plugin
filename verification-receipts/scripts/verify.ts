@@ -2,7 +2,7 @@ import {spawnSync} from 'node:child_process';
 import path from 'node:path';
 const root=path.resolve(import.meta.dir,'..');
 const env={PATH:process.env.PATH ?? '',HOME:process.env.HOME ?? '',TMPDIR:process.env.TMPDIR ?? '/tmp',JEV_ADVISOR_PROVIDER:'off'};
-for (const args of [['scripts/build.mjs','--check'],['test','tests/receipts.test.ts','tests/decision.test.ts','tests/runner.test.ts','tests/adapters.test.ts','tests/smoke-environment.test.ts']]) {
+for (const args of [['scripts/build.mjs','--check'],['test','tests/receipts.test.ts','tests/decision.test.ts','tests/runner.test.ts','tests/adapters.test.ts','tests/smoke-environment.test.ts','tests/loop.test.ts','tests/gate-hook.test.ts']]) {
  const result=spawnSync(process.execPath,args,{cwd:root,env,encoding:'utf8',maxBuffer:4*1024*1024});
  process.stdout.write(result.stdout ?? ''); process.stderr.write(result.stderr ?? '');
  if (result.status !== 0) process.exit(result.status ?? 1);

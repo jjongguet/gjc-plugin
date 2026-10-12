@@ -66,6 +66,35 @@ test('all handled operations and plugins accept missing repository/receipt ident
   }
 });
 
+test('gate and loop outcomes round-trip canonical enums and reject malformed or unknown fields', async () => {
+  const { baseDir } = await fixture();
+  const gate: PluginOutcome = {
+    operation: 'gate_emitted', repositoryDigest: null, toolCallDigest: 'a'.repeat(64),
+    gate: { trigger: 'task', facts: 'available', baselinePresent: true, binding: 'none', stateWrite: 'ok', persistence: 'no_changes', changedFiles: 0, commits: 0, receiptState: 'none' },
+  };
+  const loop: PluginOutcome = {
+    operation: 'loop_run', repositoryDigest: null, receiptId: null, freshness: 'fresh',
+    loop: { status: 'gaps', openGates: 2, resolvedGates: 1, scannedSessionFiles: 3, scanTruncated: false, silentPending: 1, gapKinds: ['no_receipt_after_gate', 'changed_test_uncovered'] },
+  };
+  for (const value of [gate, loop]) expect((await appendPluginOutcome('verification-receipts', value, { baseDir })).persisted).toBe(true);
+  const stored = await records(path.join(baseDir, 'verification-receipts', 'journal', 'v1'));
+  expect(stored[0].gate).toEqual(gate.gate);
+  expect(stored[1].loop).toEqual(loop.loop);
+  const rejected: PluginOutcome[] = [
+    { operation: 'gate_emitted', gate: { ...gate.gate!, trigger: 'other' as any } },
+    { operation: 'gate_emitted', gate: { ...gate.gate!, facts: 'best' as any } },
+    { operation: 'gate_emitted', gate: { ...gate.gate!, changedFiles: -1 } },
+    { operation: 'gate_emitted', gate: { ...gate.gate!, extra: true } as any },
+    { operation: 'gate_emitted', gate: { trigger: 'task', facts: 'available', baselinePresent: true, binding: 'none', stateWrite: 'ok', changedFiles: 0 } as any },
+    { operation: 'loop_run', loop: { ...loop.loop!, status: 'done' as any } },
+    { operation: 'loop_run', loop: { ...loop.loop!, gapKinds: Array.from({ length: 11 }, () => 'receipt_stale') as any } },
+    { operation: 'loop_run', loop: { ...loop.loop!, gapKinds: ['unknown_kind'] as any } },
+    { operation: 'loop_run', loop: { ...loop.loop!, silentPending: 1.5 } },
+  ];
+  for (const value of rejected) expect((await appendPluginOutcome('verification-receipts', value, { baseDir })).persisted).toBe(false);
+  expect((await records(path.join(baseDir, 'verification-receipts', 'journal', 'v1'))).length).toBe(2);
+});
+
 test('strict nested metadata projection permits native assertions and bounded provider choices only', async () => {
   const { baseDir } = await fixture();
   const value: PluginOutcome = {

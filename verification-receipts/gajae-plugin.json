@@ -2,8 +2,15 @@
   "kind": "gajae-code-plugin",
   "name": "verification-receipts",
   "version": "0.0.2",
+  "hooks": [
+    { "name": "verification-gate-baseline", "event": "tool_call", "target": "task", "phase": "before", "path": "hooks/verification-gate-baseline.ts" },
+    { "name": "verification-gate-task", "event": "tool_result", "target": "task", "phase": "after", "path": "hooks/verification-gate.ts" },
+    { "name": "verification-gate-subagent", "event": "tool_result", "target": "subagent", "phase": "after", "path": "hooks/verification-gate.ts" },
+    { "name": "verification-gate-job", "event": "tool_result", "target": "job", "phase": "after", "path": "hooks/verification-gate.ts" }
+  ],
   "tools": [
     { "name": "verification_run", "path": "tools/verification-run.ts", "description": "Run explicit Node JS tests with selected-input freshness, private receipts and independent outcome journaling under ~/.gjc-plugin; automatic warning-only Jev adequacy." },
-    { "name": "verification_status", "path": "tools/verification-status.ts", "description": "Read a private repository receipt, recompute its bound selected-input freshness without rerunning tests, and journal the lookup; automatic warning-only Jev adequacy." }
+    { "name": "verification_status", "path": "tools/verification-status.ts", "description": "Read a private repository receipt, recompute its bound selected-input freshness without rerunning tests, and journal the lookup; automatic warning-only Jev adequacy." },
+    { "name": "verification_loop", "path": "tools/verification-loop.ts", "description": "Recompute the private post-delegation verification ledger for the current repository: resolve or report every open delegation gate from local facts and receipts. clean is a mechanical recheck, not proof of correctness or coverage; unreadable state is reported as blocked. Bounded (≤15s), no network.", "schema": { "type": "object", "properties": {}, "additionalProperties": false } }
   ]
 }

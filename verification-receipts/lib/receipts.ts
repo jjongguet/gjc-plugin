@@ -302,6 +302,9 @@ async function loadReceiptEnvelope(root: string, id: string, base: string): Prom
 export async function loadReceipt(root: string, id: string, base = receiptStoreBase()): Promise<VerificationReceipt | null> {
  return (await loadReceiptEnvelope(root, id, base))?.receipt ?? null;
 }
+export async function loadReceiptInputs(root: string, id: string, base = receiptStoreBase()): Promise<string[] | null> {
+ return (await loadReceiptEnvelope(root, id, base))?.selectedInputs.files ?? null;
+}
 export async function currentReceiptFreshness(root: string, receipt: VerificationReceipt, base = receiptStoreBase()): Promise<ReceiptFreshness> {
  try {
   if (!receiptPlainData(receipt) || !receipt || !validReceiptMetadata(receipt, receipt.repositoryDigest)) return 'unavailable';

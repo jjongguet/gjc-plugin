@@ -22,7 +22,7 @@ test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized
   });
   assert.deepEqual(
     plan.map((guard) => guard.id),
-    ["build", "test", "validator", "smoke-verification", "smoke-advisor", "smoke-metrics"],
+    ["build", "test", "validator", "smoke-verification", "smoke-loop", "smoke-advisor", "smoke-metrics"],
   );
   for (const guard of plan) {
     assert.equal(guard.cwd, scratch);

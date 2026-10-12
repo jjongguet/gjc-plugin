@@ -8,7 +8,7 @@ import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypt
 import { performance as resultsClock } from 'node:perf_hooks';
 
 export type PluginOutcome = {
-  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check';
+  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check' | 'gate_emitted' | 'loop_run';
   repositoryDigest?: string | null;
   receiptId?: string | null;
   toolCallDigest?: string;
@@ -22,12 +22,16 @@ export type PluginOutcome = {
   evidenceObservations?: {completed:number;failed:number;cancelled:number;stored:number;unavailable:number};
   receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
   evidenceStorage?: { status: string; reason?: string };
+  gate?: { trigger: 'task' | 'task_async' | 'subagent_terminal' | 'job_terminal'; facts: 'available' | 'partial' | 'unavailable'; baselinePresent: boolean; binding: 'none' | 'bound' | 'unknown'; stateWrite: 'ok' | 'drop'; persistence?: 'applied' | 'no_changes' | 'recovery_available'; changedFiles: number; commits?: number; receiptState: 'none' | 'present' | 'fresh_passed' | 'unavailable' };
+  loop?: { status: 'clean' | 'gaps' | 'blocked'; openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKind[] };
 };
+export type LoopGapKind = 'no_receipt_after_gate' | 'receipt_not_passed' | 'receipt_no_tests' | 'receipt_incomplete' | 'receipt_stale' | 'receipt_changed_during_run' | 'receipt_freshness_unavailable' | 'changed_test_uncovered' | 'state_unavailable' | 'not_a_repository';
 type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan';
 type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
 type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
 const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan'];
-const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check'];
+const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run'];
+const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'];
 const resultsHex = /^[a-f0-9]{64}$/;
 const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const resultsCountKeys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'];
@@ -108,8 +112,36 @@ function resultsAdvice(value:unknown):Record<string,unknown> {
   if (a.reason !== undefined) advice.reason = resultsEnum(a.reason, resultsAdviceReasons);
   return advice;
 }
+function resultsGate(value: unknown): Record<string, unknown> {
+  const g = resultsObject(value, ['trigger', 'facts', 'baselinePresent', 'binding', 'stateWrite', 'persistence', 'changedFiles', 'commits', 'receiptState'], ['trigger', 'facts', 'baselinePresent', 'binding', 'stateWrite', 'changedFiles', 'receiptState']);
+  const gate: Record<string, unknown> = {
+    trigger: resultsEnum(g.trigger, ['task', 'task_async', 'subagent_terminal', 'job_terminal']),
+    facts: resultsEnum(g.facts, ['available', 'partial', 'unavailable']),
+    baselinePresent: resultsBoolean(g.baselinePresent),
+    binding: resultsEnum(g.binding, ['none', 'bound', 'unknown']),
+    stateWrite: resultsEnum(g.stateWrite, ['ok', 'drop']),
+    changedFiles: resultsInteger(g.changedFiles, 100000),
+    receiptState: resultsEnum(g.receiptState, ['none', 'present', 'fresh_passed', 'unavailable']),
+  };
+  if (g.persistence !== undefined) gate.persistence = resultsEnum(g.persistence, ['applied', 'no_changes', 'recovery_available']);
+  if (g.commits !== undefined) gate.commits = resultsInteger(g.commits, 100000);
+  return gate;
+}
+function resultsLoop(value: unknown): Record<string, unknown> {
+  const l = resultsObject(value, ['status', 'openGates', 'resolvedGates', 'scannedSessionFiles', 'scanTruncated', 'silentPending', 'gapKinds'], ['status', 'openGates', 'resolvedGates', 'scannedSessionFiles', 'scanTruncated', 'silentPending', 'gapKinds']);
+  const loop: Record<string, unknown> = {
+    status: resultsEnum(l.status, ['clean', 'gaps', 'blocked']),
+    openGates: resultsInteger(l.openGates, 10000),
+    resolvedGates: resultsInteger(l.resolvedGates, 10000),
+    scannedSessionFiles: resultsInteger(l.scannedSessionFiles, 1000),
+    scanTruncated: resultsBoolean(l.scanTruncated),
+    silentPending: resultsInteger(l.silentPending, 10000),
+    gapKinds: resultsArray(l.gapKinds, 10).map(value => resultsEnum(value, resultsGapKinds)),
+  };
+  return loop;
+}
 function resultsProject(value: unknown): Record<string, unknown> {
-  const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage'], ['operation']);
+  const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop'], ['operation']);
   const output: Record<string, unknown> = { operation: resultsEnum(raw.operation, resultsOperations) };
   for (const key of ['repositoryDigest', 'receiptId']) if (raw[key] !== undefined) output[key] = raw[key] === null ? null : resultsPattern(raw[key], key === 'receiptId' ? resultsId : resultsHex);
   if (raw.toolCallDigest !== undefined) output.toolCallDigest = resultsPattern(raw.toolCallDigest, resultsHex);
@@ -175,6 +207,8 @@ function resultsProject(value: unknown): Record<string, unknown> {
     if (s.reason !== undefined) storage.reason = resultsEnum(s.reason, resultsEvidenceReasons);
     output.evidenceStorage = storage;
   }
+  if (raw.gate !== undefined) output.gate = resultsGate(raw.gate);
+  if (raw.loop !== undefined) output.loop = resultsLoop(raw.loop);
   return output;
 }
 
@@ -327,7 +361,7 @@ function resultsDecodeSegment(body: Buffer, plugin: ResultsPlugin, maxRecordByte
   for (const line of text.slice(0, -1).split('\n')) {
     if (Buffer.byteLength(line + '\n') > maxRecordBytes) resultsFail('store_corrupt');
     const raw = JSON.parse(line);
-    const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
+    const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
     if (record.schemaVersion !== 1 || record.plugin !== plugin) resultsFail('store_corrupt');
     const id = resultsPattern(record.id, resultsId);
     if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
@@ -905,6 +939,9 @@ async function loadReceiptEnvelope(root: string, id: string, base: string): Prom
 }
 export async function loadReceipt(root: string, id: string, base = receiptStoreBase()): Promise<VerificationReceipt | null> {
  return (await loadReceiptEnvelope(root, id, base))?.receipt ?? null;
+}
+export async function loadReceiptInputs(root: string, id: string, base = receiptStoreBase()): Promise<string[] | null> {
+ return (await loadReceiptEnvelope(root, id, base))?.selectedInputs.files ?? null;
 }
 export async function currentReceiptFreshness(root: string, receipt: VerificationReceipt, base = receiptStoreBase()): Promise<ReceiptFreshness> {
  try {

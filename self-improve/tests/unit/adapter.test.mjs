@@ -27,6 +27,7 @@ test("generated surfaces are declared and excluded from editable", () => {
     "jev-advisor/hooks/jev-advisor.ts",
     "jev-advisor/tools/jev-advise.ts",
     "verification-receipts/tools/verification-run.ts",
+    "verification-receipts/hooks/verification-gate.ts",
     "ui-regression/tools/ui-regression-run.ts",
   ]) {
     assert.equal(matchesEditable(candidate, DOMAIN.generated), true, candidate);
@@ -81,7 +82,7 @@ test("guards declare deterministic checkers plus isolated smoke surfaces", () =>
   );
   assert.deepEqual(
     DOMAIN.smoke.map((entry) => entry.id),
-    ["smoke-verification", "smoke-advisor", "smoke-metrics"],
+    ["smoke-verification", "smoke-loop", "smoke-advisor", "smoke-metrics"],
   );
   for (const entry of DOMAIN.smoke) {
     assert.ok(entry.plugin.length > 0);
