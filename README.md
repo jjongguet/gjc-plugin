@@ -5,7 +5,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | Plugin | Purpose |
 | --- | --- |
 | [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice, bounded delegation correlation and an offline descriptive report. Shadow by default; advice is not model routing or quality proof. |
-| [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts and source freshness. |
+| [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts, source freshness, deterministic post-delegation verification gates and the `verification_loop` recheck tool. |
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
 | [`wiki`](wiki/) | Read-only personal-wiki lookup and pending-proposal submission (capture + propose). Never approves or publishes; human approval of the exact digest stays outside the plugin. |
 | [`rea`](rea/) | Offline readiness report (`rea_readiness`) and the pinned GJC workflow skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0). The integration runs the pinned CLI (`npx -y rea-agents@6.4.0 <command>`); an optional `gjc mcp add` registration exists for stateful MCP sessions — GJC 0.18.5 refuses plugin-bundle stdio MCP servers off Linux, so no manifest `mcps` surface is declared. |
@@ -38,6 +38,7 @@ All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJ
 | --- | --- |
 | `jev-advisor/state.v2.json` | Bounded metadata-only task/launch/terminal correlation |
 | `verification-receipts/receipts/v1/<repository-digest>/<receipt-id>.json` | Shared immutable verification/UI storage envelopes: public receipt and private selected-input binding |
+| `verification-receipts/loop/v1/<repository-digest>/<session-digest>.json` | Per-session delegation-gate state (baselines, pending async launches, gates and resolutions). Writer-owned: a session only ever writes its own file and read-merges at most 16 other session files |
 | `<plugin>/journal/v1/` | Sanitized handled-outcome records, including run/status/manual/advice/observation failures and assessment/storage results |
 | `ui-regression/locks/` | Private owned browser-run coordination lock |
 
@@ -69,7 +70,17 @@ Freshness covers normal Git-visible source **and the safely validated explicit s
 
 Text matching preserves case and internal whitespace, normalizing only line endings and surrounding whitespace. **Normalized-empty substring expectations are rejected**; exact-empty assertions and empty fills remain meaningful supported cases. UI status explicitly reports `currentUiState:"not_reobserved"` and `browserBuildBinding:"unverified"`; historical success is not current/deployed UI evidence.
 
-Both verification/UI tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured. Only validated supplied semantic summaries/notes and bounded host facts leave. Omitted context, stale/missing/nonpassing evidence, unscored/low-confidence results and transport failure do not establish sufficient verification. No automatic repairs or execution gates are added.
+Both verification/UI tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured. Only validated supplied semantic summaries/notes and bounded host facts leave. Omitted context, stale/missing/nonpassing evidence, unscored/low-confidence results and transport failure do not establish sufficient verification. No automatic repairs are added. The delegation verification gate below is a requirement appended to a completed result, never a hard block, and `verification_loop` only rechecks its own private gate ledger.
+
+## Delegation verification loop
+
+After a delegated `task` batch completes visibly (sync completion, a race-completed async envelope, or a terminal `job`/`subagent` observation), the plugin appends a bounded `[delegation-verification-gate]` block to that tool result: machine facts (changed files, commits, tree state, binding evidence, newest receipt), a required `verification_loop` recheck and a judgment-only sweep checklist. Backgrounded launches that are still `running` record a pending marker instead and are gated when their terminal observation arrives; the same job id never produces two gates across `job` and `subagent` polling. Failures, aborts and errors are never gated.
+
+`verification_loop` (no parameters, ≤15s budget, no network) recomputes the ledger for the current repository: open gates from this and earlier sessions, covering-receipt evaluation (`verification-receipts` receipts only, recomputed freshness, passed status, changed test files included in the run's selected inputs), and honest gap kinds. `status:"clean"` is a mechanical recheck, not proof of correctness or coverage; unreadable state reports `blocked` instead of silently clean. `silentPending` is an upper-bound proxy for launches without an observed terminal (it may include still-running or cancelled jobs), not a count of missed gates; `scanTruncated` marks bounded cross-session scans.
+
+The gate hook is fail-open and bounded: the before-hook baseline capture shares a single 3s wall-clock budget and never blocks or throws; the after-hook appends text within its isolated execution and leaves the original result untouched on any failure. If the private state write is dropped (lock timeout or budget), the requirement text is still appended and the drop is journaled (`stateWrite:"drop"`). Gates and loop runs journal `gate_emitted` and `loop_run` counts under `~/.gjc-plugin/verification-receipts/journal/v1/`.
+
+Hooks load at session start: after installing or upgrading this plugin, only a **new** GJC session has the gate and `verification_loop` available.
 
 ## Plugin metrics
 
