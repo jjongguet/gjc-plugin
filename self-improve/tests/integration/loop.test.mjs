@@ -521,6 +521,67 @@ test("an invalid (unparseable) patch is a soft proposal failure: the loop contin
   rmSync(root, { recursive: true, force: true });
 });
 
+test("a deployed current policy steers live selection and its stop rule", async () => {
+  const { root, repo } = makeFixture();
+  const policyDir = join(repo, "self-improve", "policies");
+  mkdirSync(policyDir, { recursive: true });
+  const config = { order: "failure_greedy", batchSize: 1, stopRule: "first_adoption", stallRedirect: false, stallK: 3 };
+  writeFileSync(
+    join(policyDir, "pi-1-25.json"),
+    `${JSON.stringify({ schema: "gjc.self-improve.policy.v1", id: "pi-1-25", seed: 1, config, createdAt: "2026-10-13T00:00:00.000Z" }, null, 2)}\n`,
+  );
+  writeFileSync(
+    join(policyDir, "current.json"),
+    `${JSON.stringify({ id: "pi-1-25", file: "pi-1-25.json", sha256: "unused-in-this-test", decision: "deploy" }, null, 2)}\n`,
+  );
+  git(repo, ["add", "."]);
+  git(repo, ["commit", "-qm", "deploy policy fixture"]);
+  const fake = makeFakeGuards();
+  const result = await runLoop(
+    loopInput({
+      root,
+      repo,
+      deps: {
+        runGuards: fake.runGuards,
+        evaluateProbes: improvingProbes,
+        scanProbeFailures: () => ({
+          ok: true,
+          reason: null,
+          failures: [{ metric: "decision_accuracy", label: "decision_accuracy#10", summary: "documented tolerance boundary" }],
+        }),
+      },
+      maxCycles: 3,
+      maxProposerCalls: 3,
+    }),
+  );
+  assert.equal(result.status, "ok");
+  assert.equal(result.stoppedReason, "adopted", "the policy's first-adoption stop rule ends the campaign");
+  assert.equal(result.counters.cycles, 1);
+  const state = JSON.parse(readFileSync(result.statePath, "utf8"));
+  assert.equal(state.caps.policy.id, "pi-1-25");
+  assert.equal(state.caps.policy.order, "failure_greedy");
+  assert.equal(state.caps.policy.stallRedirect, false);
+  assert.equal(state.caps.stopOnAdoptEffective, true);
+  assert.equal(state.cycles[0].policyId, "pi-1-25");
+  assert.equal(state.cycles[0].selectionReason, "policy:failure_greedy");
+  assert.equal(state.cycles[0].objective, "probe.decision_accuracy");
+  const logLines = readFileSync(result.logPath, "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line));
+  assert.equal(
+    logLines.some((entry) => entry.type === "policy" && entry.policyId === "pi-1-25" && entry.orderRule === "failure_greedy"),
+    true,
+    "the loop log records the active policy",
+  );
+  assert.equal(
+    logLines.some((entry) => entry.type === "cycle" && entry.policyId === "pi-1-25" && entry.selectionReason === "policy:failure_greedy"),
+    true,
+    "cycle log lines carry the policy-steered selection reason",
+  );
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("the loop CLI --install flag reaches the loop caps", () => {
   const { root, repo } = makeFixture();
   const runRoot = join(root, "cli-runroot");

@@ -29,6 +29,8 @@ import {
   scanProbeFailures,
   validateAgentProposal,
 } from "./propose.mjs";
+import { readLedger } from "./ledger.mjs";
+import { policyArtifactPath, policyCurrentPath, readCurrentPolicy, readPolicyArtifact } from "./policy.mjs";
 
 export const LOOP_STATE_SCHEMA = "gjc.self-improve.loop.v1";
 export const LOOP_DEFAULTS = Object.freeze({
@@ -75,6 +77,41 @@ function appendLog(logPath, entry) {
   fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`);
 }
 
+function adoptedObjectives(ledgerPath) {
+  return new Set(
+    readLedger(ledgerPath)
+      .filter((row) => row.kind === "cycle" && row.verdict?.decision === "adopt")
+      .map((row) => row.objective),
+  );
+}
+
+/**
+ * Load the deployed current policy for this repository (absent file ⇒ null,
+ * i.e. today's behavior). A present-but-unreadable pointer is reported, never
+ * silently ignored.
+ */
+export function loadCurrentLoopPolicy({ repoRoot, policyDir = path.join(repoRoot, "self-improve", "policies") }) {
+  const currentPath = policyCurrentPath({ policyDir });
+  if (!fs.existsSync(currentPath)) return { policy: null, error: null, policyDir };
+  try {
+    const pointer = readCurrentPolicy({ policyDir });
+    if (!pointer || typeof pointer.id !== "string") throw new Error("invalid_current_pointer");
+    const { policy } = readPolicyArtifact(policyArtifactPath({ policyDir, id: pointer.id }));
+    return { policy: { id: policy.id, config: policy.config }, error: null, policyDir };
+  } catch (error) {
+    return { policy: null, error: `policy_load_failed: ${error.message}`, policyDir };
+  }
+}
+
+/**
+ * Stop-rule precedence for the live loop: an explicit CLI flag wins, then the
+ * deployed policy's stop rule, then the default (do not stop on adoption).
+ */
+export function effectiveStopOnAdopt({ cliStopOnAdopt = false, policy = null } = {}) {
+  if (cliStopOnAdopt === true) return true;
+  return policy?.config?.stopRule === "first_adoption";
+}
+
 /**
  * Admissible next objectives: stalled objectives are blocked (forced
  * exploration onto unexplored probes); otherwise the least-attempted objective
@@ -83,19 +120,34 @@ function appendLog(logPath, entry) {
  * Selection rule for the automatic loop: when the probe scan reports failing
  * cases, the objective that owns those cases leads the list, because `delta` is
  * computed on PRIMARY=decision_accuracy only, so a fully saturated objective can
- * never adopt. Stall and duplicate rules still win — a stalled preferred
- * objective is dropped and the regularization order (forced exploration, then
- * least-attempted) applies.
+ * never adopt. A deployed policy steers the order instead:
+ *   fixed          adapter order
+ *   round_robin    rotate the starting objective by the recorded attempt count
+ *   success_greedy objectives with recorded adoptions first, then least-attempted
+ *   failure_greedy the failing-case/preferred objective first, then least-attempted
+ *   novelty_first  unexplored objectives first, then least-attempted
+ * `stallRedirect:false` (policy) skips the stall redirect entirely, so stalled
+ * objectives are proposed again by the order rule; `true`/absent keeps the
+ * regularization semantics (redirect only while unexplored probes remain).
  */
-export function computeAdmissibleActions({ ledgerPath, adapter, k = 3, preferredObjective = null }) {
+export function computeAdmissibleActions({
+  ledgerPath,
+  adapter,
+  k = 3,
+  preferredObjective = null,
+  orderRule = null,
+  stallRedirect = null,
+}) {
   const state = historyState(ledgerPath, { k });
   const stalled = new Set(state.stalled);
   const attempts = new Map(state.objectives.map((entry) => [entry.objective, entry.attempts]));
   const seen = new Set([...attempts.keys()]);
   const unexplored = adapter.objectives.filter((objective) => !seen.has(objective));
   const order = new Map(adapter.objectives.map((objective, index) => [objective, index]));
-  const live = adapter.objectives.filter((objective) => !stalled.has(objective));
-  const forced = stalled.size > 0 ? unexplored.filter((objective) => !stalled.has(objective)) : [];
+  const adopted = adoptedObjectives(ledgerPath);
+  const redirectActive = stallRedirect !== false;
+  const live = redirectActive ? adapter.objectives.filter((objective) => !stalled.has(objective)) : [...adapter.objectives];
+  const forced = redirectActive && stalled.size > 0 ? unexplored.filter((objective) => !stalled.has(objective)) : [];
   let pool = forced.length > 0 ? forced : live;
   // Stall redirects exploration only while alternatives remain. Once every
   // objective has a stall streak and nothing is unexplored, the campaign
@@ -103,18 +155,65 @@ export function computeAdmissibleActions({ ledgerPath, adapter, k = 3, preferred
   // proposer-call cap bounds per-gap retries (§16 R1).
   const stallFallback = pool.length === 0 && adapter.objectives.length > 0;
   if (stallFallback) pool = [...adapter.objectives];
-  const actions = [...pool]
-    .sort((left, right) => (attempts.get(left) ?? 0) - (attempts.get(right) ?? 0) || order.get(left) - order.get(right))
-    .map((objective) => ({ objective, reason: "regularization", forcedExploration: stalled.size > 0 }));
-  const preferredAvailable =
-    preferredObjective !== null && (!stalled.has(preferredObjective) || stallFallback) && actions.some((action) => action.objective === preferredObjective);
-  const ordered = preferredAvailable
+  const leastAttempted = (left, right) =>
+    (attempts.get(left) ?? 0) - (attempts.get(right) ?? 0) || order.get(left) - order.get(right);
+  const totalAttempts = [...attempts.values()].reduce((sum, value) => sum + value, 0);
+  let sorted;
+  switch (orderRule) {
+    case "fixed":
+      sorted = [...pool].sort((left, right) => order.get(left) - order.get(right));
+      break;
+    case "round_robin": {
+      const count = adapter.objectives.length || 1;
+      const start = totalAttempts % count;
+      const rank = (objective) => ((order.get(objective) ?? 0) - start + count) % count;
+      sorted = [...pool].sort((left, right) => rank(left) - rank(right) || leastAttempted(left, right));
+      break;
+    }
+    case "success_greedy":
+      sorted = [...pool].sort(
+        (left, right) => Number(adopted.has(right)) - Number(adopted.has(left)) || leastAttempted(left, right),
+      );
+      break;
+    case "novelty_first":
+      sorted = [...pool].sort((left, right) => {
+        const leftUnexplored = unexplored.includes(left) ? 0 : 1;
+        const rightUnexplored = unexplored.includes(right) ? 0 : 1;
+        return leftUnexplored - rightUnexplored || leastAttempted(left, right);
+      });
+      break;
+    default:
+      sorted = [...pool].sort(leastAttempted);
+      break;
+  }
+  const reason = orderRule ? `policy:${orderRule}` : "regularization";
+  const actions = sorted.map((objective) => ({
+    objective,
+    reason,
+    forcedExploration: redirectActive && stalled.size > 0,
+  }));
+  const preferredLeads =
+    preferredObjective !== null &&
+    (orderRule === null || orderRule === "failure_greedy") &&
+    (!stalled.has(preferredObjective) || !redirectActive || stallFallback) &&
+    actions.some((action) => action.objective === preferredObjective);
+  const ordered = preferredLeads
     ? [
-        { objective: preferredObjective, reason: "failing_cases", forcedExploration: stalled.size > 0 },
+        {
+          objective: preferredObjective,
+          reason: orderRule ? `policy:${orderRule}` : "failing_cases",
+          forcedExploration: redirectActive && stalled.size > 0,
+        },
         ...actions.filter((action) => action.objective !== preferredObjective),
       ]
     : actions;
-  return { actions: ordered, stalled: [...stalled], unexplored, priorAttempts: state.lastRejects };
+  return {
+    actions: ordered,
+    stalled: [...stalled],
+    unexplored,
+    priorAttempts: state.lastRejects,
+    orderRule: orderRule ?? null,
+  };
 }
 
 /**
@@ -243,6 +342,39 @@ export async function runLoop(input) {
     };
   }
 
+  // Deployed-policy wiring (M4a): the repository's current policy steers live
+  // selection. Absent file ⇒ today's behavior exactly; a broken pointer is
+  // reported and the loop falls back to the default schedule.
+  const loadedPolicy =
+    deps.currentPolicy !== undefined
+      ? { policy: deps.currentPolicy, error: null }
+      : loadCurrentLoopPolicy({ repoRoot });
+  const activePolicy = loadedPolicy.policy ?? null;
+  const orderRule = activePolicy?.config?.order ?? null;
+  const stallRedirect = activePolicy?.config?.stallRedirect ?? null;
+  const stopOnAdoptEffective = effectiveStopOnAdopt({ cliStopOnAdopt: stopOnAdopt === true, policy: activePolicy });
+  state.caps.policy = activePolicy
+    ? {
+        id: activePolicy.id,
+        order: activePolicy.config.order,
+        batchSize: activePolicy.config.batchSize,
+        stopRule: activePolicy.config.stopRule,
+        stallRedirect: activePolicy.config.stallRedirect,
+        stallK: activePolicy.config.stallK,
+      }
+    : null;
+  state.caps.stopOnAdoptEffective = stopOnAdoptEffective;
+  if (loadedPolicy.error) state.policyError = loadedPolicy.error;
+  persist();
+  log({
+    type: "policy",
+    policyId: activePolicy?.id ?? null,
+    orderRule,
+    stallRedirect,
+    stopOnAdoptEffective,
+    ...(loadedPolicy.error ? { error: loadedPolicy.error } : {}),
+  });
+
   state.recovery = recoverPendingCycle({ runRoot: root, repoRoot });
   persist();
   log({ type: "recovery", results: state.recovery });
@@ -276,6 +408,8 @@ export async function runLoop(input) {
       adapter,
       k: adapter.stallK ?? 3,
       preferredObjective,
+      orderRule,
+      stallRedirect,
     });
     if (actions.length === 0) {
       stoppedReason = stalled.length > 0 ? "all_objectives_stalled" : "no_admissible_actions";
@@ -441,6 +575,7 @@ export async function runLoop(input) {
         cycleIndex: item.cycleIndex,
         objective: item.objective,
         selectionReason: item.reason ?? null,
+        policyId: activePolicy?.id ?? null,
         hypothesis: item.proposal.hypothesis,
         status: result.status,
         cycleId: result.cycleId ?? null,
@@ -457,13 +592,15 @@ export async function runLoop(input) {
         cycleIndex: entry.cycleIndex,
         cycleId: entry.cycleId,
         objective: entry.objective,
+        selectionReason: entry.selectionReason,
+        policyId: entry.policyId,
         decision: entry.decision,
         adoption: entry.adoption,
         failureClass,
         dryRun: dryRun === true,
       });
       persist();
-      if (stopOnAdopt === true && result.adoption === "committed") {
+      if (stopOnAdoptEffective && result.adoption === "committed") {
         stoppedReason = "adopted";
         break;
       }
