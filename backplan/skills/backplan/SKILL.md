@@ -1,24 +1,32 @@
 ---
 name: backplan
-description: Turn a work request into a backward-derived plan before execution — write the end state first, derive success criteria, the issue breakdown, Linear project mapping, policy decisions and automation candidates, then grade and render the plan with backplan_check. Use for every work request in the jjongguet workspace (implementation, production, research, ops); skip only for pure read-only questions.
+description: Plan execution-bound work backward from its end state at the moment it arrives — write the end state first, derive success criteria, the issue breakdown, Linear project mapping, policy decisions and automation candidates, then grade and render the plan with backplan_check. Fires when the request will change something (files, deploys, artifacts, money) and completion criteria are unclear, work spans multiple steps or repos, project attribution is undecided, boundaries need agreement, or an existing project is being changed. Never for pure read-only questions.
 ---
 
 # Backplan — backward planning into Linear
 
-Every work request becomes a Linear project/issue **before** execution. This
-skill is the front door of that flow; `backplan_check` (gjc-plugin `backplan`)
-is the deterministic gate that grades the draft and renders Linear-ready
-payloads. The plugin is keyless and local: it never writes to Linear;
-registration goes through the workspace Linear MCP tools and
-`~/.gjc-user-policy/bin/linear-trace.py`.
+Not a named ceremony — this is what planning looks like at the moment
+execution-bound work arrives: derive it, grade it, register it, then execute.
+`backplan_check` (gjc-plugin `backplan`) is the deterministic gate that grades
+the draft and renders Linear-ready payloads. The plugin is keyless and local:
+it never writes to Linear; registration goes through the workspace Linear MCP
+tools and `~/.gjc-user-policy/bin/linear-trace.py`.
 
-## When it runs, when it does not
+## When this fires
 
-- Run for any request that will change files, deploy, produce artifacts, spend
-  money, or otherwise execute work.
-- Skip for pure consultation/lookup ("이거 뭐야", "설명해줘", "왜 그래?") —
-  the workspace rule forbids tickets for those.
-- Preserve the request verbatim in `request`. Do not paraphrase scope away.
+Fire when any of these holds — the depth of the derivation scales with the
+situation, but the grade-and-register step does not get skipped:
+
+- The request will change something: files, deployments, artifacts, money.
+- Completion criteria are not yet checkable ("검증 가능한 형태").
+- The work spans multiple steps, repos, or sessions.
+- Project attribution must be decided (including creating a project).
+- Scope/boundaries must be agreed before size and risk are knowable.
+- An existing project is being changed (reuse vs extension vs redefinition).
+
+Skip only for pure consultation/lookup ("이거 뭐야", "설명해줘", "왜 그래?") —
+the workspace rule forbids tickets for those. Preserve the request verbatim in
+`request`. Do not paraphrase scope away.
 
 ## The method — write the end first
 

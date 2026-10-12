@@ -1,12 +1,12 @@
 {
 	"kind": "gajae-code-plugin",
 	"name": "backplan",
-	"version": "0.0.2",
+	"version": "0.0.3",
 	"tools": [
 		{
 			"name": "backplan_check",
 			"path": "tools/backplan-check.ts",
-			"description": "Validate a backward-derived work plan (end state, success criteria, per-issue objective/scope/completion criteria, Linear project mapping, policy decisions, automation candidates) against the fixed contract and render Linear-ready project/issue payloads plus a stable content digest. Deterministic, offline and keyless: it never writes to Linear or touches the network; registration stays with the agent's Linear MCP or linear-trace.py path."
+			"description": "Validate a backward-derived work plan (end state, success criteria, per-issue objective/scope/completion criteria, Linear project mapping, policy decisions, automation candidates) against the fixed contract and render Linear-ready project/issue payloads plus a stable content digest. Deterministic, offline and keyless: it never writes to Linear or touches the network; registration stays with the agent's Linear MCP or linear-trace.py path. Fire at the moment executable work arrives (unclear completion criteria, multi-step or multi-repo scope, undecided project attribution, scope needing agreement) — never as a recurring ritual, and never for pure read-only questions."
 		}
 	]
 }

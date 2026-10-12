@@ -1,9 +1,10 @@
 # backplan
 
-GJC workflow gate for backward-derived work plans (역기획): every work request
-becomes a Linear project/issue **before** execution. Deterministic, offline and
-keyless — it grades the draft and renders the payloads; registration itself
-stays with the agent's Linear MCP tools and the workspace trace tool.
+The planning step that fires when execution-bound work arrives: write the end
+state first, and the work becomes a Linear project/issue **before** it starts.
+Deterministic, offline and keyless — it grades the draft and renders the
+payloads; registration itself stays with the agent's Linear MCP tools and the
+workspace trace tool.
 
 Two deliverables:
 
