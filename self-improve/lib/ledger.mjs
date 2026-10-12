@@ -10,6 +10,7 @@ import {
   sha256Hex,
   validateAdoptionRow,
   validateCycleRow,
+  validatePolicyRow,
 } from "./types.mjs";
 
 function parseEntries(rawText) {
@@ -71,6 +72,12 @@ export function appendRow(filePath, rowData) {
     if (duplicate) {
       throw new Error(`duplicate_adoption: cycleId ${row.cycleId} already recorded at seq ${duplicate.row.seq}`);
     }
+  } else if (row.kind === "policy") {
+    validatePolicyRow(row);
+    const duplicate = entries.find((entry) => entry.row.kind === "policy" && entry.row.policyId === row.policyId);
+    if (duplicate) {
+      throw new Error(`duplicate_policy: policyId ${row.policyId} already recorded at seq ${duplicate.row.seq}`);
+    }
   } else {
     throw new Error(`unknown ledger row kind: ${String(row.kind)}`);
   }
@@ -86,7 +93,7 @@ export function appendRow(filePath, rowData) {
 
 export function ledgerCounts(filePath) {
   const entries = loadEntries(filePath);
-  const byKind = { cycle: 0, adoption: 0 };
+  const byKind = { cycle: 0, adoption: 0, policy: 0 };
   const byVerdict = { adopt: 0, reject: 0, inconclusive: 0 };
   const cost = { cycleRows: 0, wallMsMeasured: 0, bytesMeasured: 0, tokensMeasured: 0, tokensNull: 0 };
   for (const { row } of entries) {

@@ -7,9 +7,10 @@ import { createHash } from "node:crypto";
 export const LEDGER_SCHEMA = "gjc.self-improve.ledger.v1";
 export const MAX_LEDGER_ROW_BYTES = 2048;
 
-export const ROW_KINDS = Object.freeze(["cycle", "adoption"]);
+export const ROW_KINDS = Object.freeze(["cycle", "adoption", "policy"]);
 export const VERDICTS = Object.freeze(["adopt", "reject", "inconclusive"]);
 export const INSTALL_STATES = Object.freeze(["not_attempted", "upgraded", "failed"]);
+export const POLICY_DECISIONS = Object.freeze(["deploy", "retire"]);
 
 export function sha256Hex(text) {
   return createHash("sha256").update(text).digest("hex");
@@ -125,5 +126,22 @@ export function validateAdoptionRow(row) {
   assert(typeof row.cycleId === "string" && row.cycleId.length > 0, "cycleId required");
   assert(typeof row.commit === "string" && HEX_REVISION.test(row.commit), "commit must be a hex revision");
   assert(INSTALL_STATES.includes(row.install), `install must be one of ${INSTALL_STATES.join("|")}`);
+  assert(typeof row.createdAt === "string" && row.createdAt.length > 0, "createdAt required");
+}
+
+export function validatePolicyRow(row) {
+  assert(isPlainObject(row), "policy row must be an object");
+  assert(row.kind === "policy", "policy row kind must be policy");
+  assert(row.schema === LEDGER_SCHEMA, `policy row schema must be ${LEDGER_SCHEMA}`);
+  assert(
+    typeof row.policyId === "string" && /^[a-z0-9][a-z0-9-]{2,63}$/.test(row.policyId),
+    "policyId must be a lowercase slug (3-64 chars)",
+  );
+  assert(POLICY_DECISIONS.includes(row.decision), `decision must be one of ${POLICY_DECISIONS.join("|")}`);
+  assert(Number.isInteger(row.seed), "seed must be an integer");
+  assert(typeof row.configHash === "string" && HEX256.test(row.configHash), "configHash must be a sha256 hex");
+  assert(isPlainObject(row.artifact), "artifact {path, sha256} required");
+  assert(typeof row.artifact.path === "string" && row.artifact.path.length > 0, "artifact.path required");
+  assert(typeof row.artifact.sha256 === "string" && HEX256.test(row.artifact.sha256), "artifact.sha256 must be a sha256 hex");
   assert(typeof row.createdAt === "string" && row.createdAt.length > 0, "createdAt required");
 }

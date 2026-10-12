@@ -1,0 +1,74 @@
+{
+  "schema": "gjc.self-improve.replay-protocol.v1",
+  "status": "draft-pending-m3b-corpus-freeze",
+  "primary": "attempts-to-first-adoption (quality), recorded wallMs (cost proxy), attempts per round (parallelism)",
+  "passGate": {
+    "n": 20,
+    "train": 14,
+    "validation": 6,
+    "validationRequiresAdoption": true,
+    "insufficientEvidenceVerdict": "insufficient evidence at pass-gate size — thresholds not evaluated",
+    "source": "self-improve/rrsi-protocol.json p2 (this file does not re-derive them)"
+  },
+  "epochRule": {
+    "boundary": "editable-surface digest; an adoption is the observable boundary event, ledger-only chore commits are not",
+    "baseCommit": "provenance only, never the epoch key",
+    "adoptionOrderPreserved": true,
+    "withinEpochRejectsReorderable": true,
+    "crossEpochReplay": "disallowed (a later epoch becomes available only after the adoption that opened it was played)",
+    "historyRule": "attempts recorded before a replayed slice are ex-ante prior knowledge: branch hypothesis novelty, prior revealed outcomes and prior guard-failure classes may use them"
+  },
+  "revealProtocol": {
+    "selection": "ex-ante features only; an attempt's outcome is revealed after it is selected",
+    "allowedFeatures": [
+      "objective / gap id",
+      "attempt index within branch",
+      "hypothesis-novelty flag",
+      "files",
+      "hunks",
+      "prior revealed outcomes of the same branch or objective",
+      "prior guard-failure classes",
+      "budget rung"
+    ],
+    "sealed": ["verdict", "delta", "ledger order of unplayed attempts", "adoption flags of unplayed attempts"]
+  },
+  "policies": {
+    "B0": "recorded order, batch 1, stop at first adoption",
+    "B1": "fixed round-robin objective order, batch 1, stop at first adoption",
+    "piStar": "selected by dreaming on the TRAIN split only from the deterministic candidate space",
+    "candidateSpace": "5 order rules (fixed, round_robin, success_greedy, failure_greedy, novelty_first) x batch size 1-3 x stall switch x stop rule = 40 candidates by construction (<=48)"
+  },
+  "thresholds": {
+    "validationAttempts": "pi* attempts-to-first-adoption <= min(B0, B1) - 1",
+    "validationCost": "pi* cost-to-first-adoption <= 0.7 x B0 cost-to-first-adoption",
+    "antiFluke": "full-corpus pi* cost-to-first-adoption <= B0 cost-to-first-adoption",
+    "determinism": "same seed => byte-identical receipt (receiptHash)"
+  },
+  "betas": {
+    "beta1": 0.01,
+    "beta2": 0.005,
+    "source": "self-improve/rrsi.json policy defaults",
+    "note": "the paper-shaped replay value V = s - beta1*N + beta2*N/max(1,k) is reported for reference; ranking uses the primary metrics above"
+  },
+  "seed": 1,
+  "costProxyCaveat": "the cost proxy is load-dependent recorded wallMs, not a fresh measurement",
+  "noStatisticalSignificance": "All P2 comparisons are off-policy replays over ONE realized corpus of fewer than ~24 recorded attempts; no statistical significance is claimed; effect sizes are reported with n and are not confidence-interval estimates of future performance; the cost proxy is load-dependent recorded wallMs, not a fresh measurement.",
+  "noPostHocEdits": "No post-hoc threshold edits: thresholds are frozen by this file's commit and re-hashed in the evidence map.",
+  "corpus": {
+    "path": "self-improve/ledger.jsonl",
+    "sha256": "<filled at the M3b corpus freeze>",
+    "attemptsAtFreeze": null,
+    "adoptionsAtFreeze": null
+  },
+  "policyArtifacts": {
+    "dir": "self-improve/policies",
+    "current": "self-improve/policies/current.json",
+    "rowKind": "policy"
+  },
+  "evidence": [
+    "replay/dream JSON receipts (per-policy per-world scores)",
+    "this protocol file plus its commit hash",
+    "the deployed policy artifact and current.json",
+    "the seed used for the dream run"
+  ]
+}

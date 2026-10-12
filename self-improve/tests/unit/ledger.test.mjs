@@ -65,7 +65,7 @@ test("ledgerCounts aggregates verdicts and kinds", () => {
   });
   const counts = ledgerCounts(file);
   assert.equal(counts.total, 3);
-  assert.deepEqual(counts.byKind, { cycle: 2, adoption: 1 });
+  assert.deepEqual(counts.byKind, { cycle: 2, adoption: 1, policy: 0 });
   assert.deepEqual(counts.byVerdict, { adopt: 1, reject: 1, inconclusive: 0 });
   assert.deepEqual(counts.cost, { cycleRows: 2, wallMsMeasured: 2, bytesMeasured: 2, tokensMeasured: 0, tokensNull: 2 });
   assert.equal(counts.chain.ok, true);
@@ -75,6 +75,24 @@ test("duplicate cycleId is rejected (crash recovery guard)", () => {
   const file = tempLedgerPath();
   appendRow(file, cycleRow());
   assert.throws(() => appendRow(file, cycleRow()), /duplicate_cycle/);
+});
+
+test("policy rows validate and a duplicate policyId is rejected", () => {
+  const file = tempLedgerPath();
+  const row = {
+    kind: "policy",
+    policyId: "pi-1-01",
+    decision: "deploy",
+    seed: 1,
+    configHash: "a".repeat(64),
+    artifact: { path: "self-improve/policies/pi-1-01.json", sha256: "b".repeat(64) },
+    createdAt: "2026-10-13T00:00:00.000Z",
+  };
+  appendRow(file, row);
+  assert.deepEqual(ledgerCounts(file).byKind, { cycle: 0, adoption: 0, policy: 1 });
+  assert.throws(() => appendRow(file, row), /duplicate_policy/);
+  assert.throws(() => appendRow(file, { ...row, policyId: "Bad Id" }), /policyId/);
+  assert.throws(() => appendRow(file, { ...row, policyId: "pi-1-02", decision: "promote" }), /decision/);
 });
 
 test("oversized rows are rejected", () => {
