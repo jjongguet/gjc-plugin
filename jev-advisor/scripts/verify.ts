@@ -831,7 +831,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.4");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.5");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [["tool_call", "task", "before"], ["tool_result", "task", "after"], ["tool_result", "subagent", "after"]]);
 		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 3);
 		const toolNames = manifest.tools.map((t: any) => t.name);
