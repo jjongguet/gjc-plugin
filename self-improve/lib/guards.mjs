@@ -42,6 +42,7 @@ export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = t
   if (includeSmoke) {
     for (const [id, args, plugin] of [
       ["smoke-verification", ["--installed"], "verification-receipts"],
+      ["smoke-loop", ["--loop"], "verification-receipts"],
       ["smoke-advisor", ["--advisor"], "jev-advisor"],
       ["smoke-metrics", ["--metrics"], "jev-advisor"],
     ]) {
