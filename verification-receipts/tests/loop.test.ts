@@ -480,3 +480,33 @@ test('git delta facts ignore session noise paths and mark resolution attempts ho
  expect(resolved.stateWriteAttempted).toBe(true);
  expect(resolved.stateWritten).toBe(true);
 });
+
+test('coverage resolution requires available git facts', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-facts');
+ await fs.writeFile(path.join(root, 'cover.test.mjs'), 'export const c = 1;\n');
+ git(root, 'add', '.');
+ git(root, 'commit', '-q', '-m', 'base');
+ const base = await captureBaseline(root);
+ await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-facts', { ...base!, toolCallId: '' });
+ await fs.writeFile(path.join(root, 'cover.test.mjs'), 'export const c = 2;\n');
+ git(root, 'add', '.');
+ git(root, 'commit', '-q', '-m', 'change');
+ const gate = await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('facts-gate'), baselineToolCallId: 'call-facts', changedFiles: 1, commits: 1 }));
+ expect(gate.stateWrite).toBe('ok');
+ await makeReceipt(root, ['cover.test.mjs'], 'passed');
+ const shim = await gitShimDir('6');
+ const originalPath = process.env.PATH;
+ process.env.PATH = shim + ':' + (originalPath ?? '');
+ try {
+  const evaluation = await evaluateRepoGates(root, repoDigest, sessionDigest, { budgetMs: 6000 });
+  expect(evaluation.status).not.toBe('clean');
+  expect(evaluation.gapKinds).toContain('state_unavailable');
+  expect(evaluation.gaps.some(gap => gap.gateId === gate.gateId && gap.kind === 'state_unavailable')).toBe(true);
+ } finally { process.env.PATH = originalPath; }
+ const recovered = await evaluateRepoGates(root, repoDigest, sessionDigest);
+ expect(recovered.status).toBe('clean');
+ expect(recovered.resolvedGates).toBeGreaterThanOrEqual(1);
+}, 30000);

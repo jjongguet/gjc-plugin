@@ -1482,15 +1482,17 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
     continue;
    }
    const changedTests = current.available ? current.changedTestFiles : [];
-   const covering = candidates.find(candidate => isCoveringCandidate(candidate, changedTests));
+   const covering = current.available ? candidates.find(candidate => isCoveringCandidate(candidate, changedTests)) : undefined;
    if (covering) {
     resolvedGates++;
     if (session.own) resolutionsToStamp.push({ gateId: gate.id, resolution: 'receipt', resolvedReceiptId: covering.id, at: new Date(now).toISOString() });
     continue;
    }
-   const kind = gapKindForCandidate(candidates[0], changedTests);
+   // Coverage can only be judged from available repository facts: a receipt is never treated as covering
+   // (and a gap is never classified as receipt-side) while the git delta itself is unreadable.
+   const kind = !current.available ? 'state_unavailable' : gapKindForCandidate(candidates[0], changedTests);
    openGates++;
-   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
+   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
    if (!gapKinds.includes(kind)) gapKinds.push(kind);
   }
  }
