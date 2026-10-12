@@ -7,6 +7,7 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
 import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
+import { LOOP_DEFAULTS, runLoop } from "../lib/loop.mjs";
 import { ledgerCounts } from "../lib/ledger.mjs";
 import { buildTextFixturePrompt, runStochasticEvaluation } from "../lib/runner.mjs";
 
@@ -19,6 +20,9 @@ commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
+  loop    [--repo <path>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
+          [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W]
+          [--stop-on-adopt] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
   prune   [--run-root <path>] [--keep <n>] [--json]
   runner  --baseline <dir> --candidate <dir> [--mode local_stub|live] [--k <n>]
@@ -43,6 +47,13 @@ const VALUED_FLAGS = new Set([
   "--model",
   "--prompt",
   "--text-fixture",
+  "--proposer",
+  "--proposer-cmd",
+  "--max-cycles",
+  "--max-wall-ms",
+  "--max-proposer-calls",
+  "--batch-size",
+  "--loop-id",
 ]);
 
 function parseArgs(argv) {
@@ -55,6 +66,7 @@ function parseArgs(argv) {
     else if (token === "--live-approved") options.liveApproved = true;
     else if (token === "--install") options.install = true;
     else if (token === "--reset-budget") options.resetBudget = true;
+    else if (token === "--stop-on-adopt") options.stopOnAdopt = true;
     else if (VALUED_FLAGS.has(token)) {
       const value = rest[i + 1];
       if (value === undefined || value.startsWith("--")) return { error: `${token} requires a value` };
@@ -186,6 +198,58 @@ async function runRunnerCommand(options) {
   return 0;
 }
 
+async function runLoopCommand(options) {
+  const repoRoot = resolve(options.repo ?? process.cwd());
+  const proposer = options.proposer ?? "stub";
+  if (proposer !== "stub" && proposer !== "cmd") {
+    process.stderr.write(`unknown --proposer: ${proposer} (stub|cmd)\n`);
+    return 2;
+  }
+  if (proposer === "cmd" && !options["proposer-cmd"]) {
+    process.stderr.write(`loop --proposer cmd requires --proposer-cmd '<template>'\n`);
+    return 2;
+  }
+  const numberFlag = (name) => {
+    if (options[name] === undefined) return undefined;
+    const value = Number.parseInt(options[name], 10);
+    if (!Number.isInteger(value) || value < 1) {
+      process.stderr.write(`invalid --${name}: ${options[name]}\n`);
+      return null;
+    }
+    return value;
+  };
+  const maxCycles = numberFlag("max-cycles");
+  const maxWallMs = numberFlag("max-wall-ms");
+  const maxProposerCalls = numberFlag("max-proposer-calls");
+  const batchSize = numberFlag("batch-size");
+  if ([maxCycles, maxWallMs, maxProposerCalls, batchSize].includes(null)) return 2;
+  const result = await runLoop({
+    repoRoot,
+    adapter: DOMAIN,
+    proposer,
+    proposerCmd: options["proposer-cmd"] ?? null,
+    liveApproved: options.liveApproved === true,
+    maxCycles: maxCycles ?? LOOP_DEFAULTS.maxCycles,
+    maxWallMs: maxWallMs ?? LOOP_DEFAULTS.maxWallMs,
+    maxProposerCalls: maxProposerCalls ?? LOOP_DEFAULTS.maxProposerCalls,
+    batchSize: batchSize ?? LOOP_DEFAULTS.batchSize,
+    stopOnAdopt: options.stopOnAdopt === true,
+    loopId: options["loop-id"],
+    runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
+    ledgerPath: options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl"),
+    dryRun: options.dryRun === true,
+  });
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+  } else {
+    process.stdout.write(
+      `status=${result.status} loop=${result.loopId ?? "-"} cycles=${result.counters?.cycles ?? 0} ` +
+        `stopped=${result.stoppedReason ?? result.reason ?? "-"}\n`,
+    );
+  }
+  return 0;
+}
+
 function runHistoryCommand(options) {
   const ledgerPath = options.ledger ? resolve(options.ledger) : DEFAULT_LEDGER;
   const state = historyState(ledgerPath);
@@ -206,6 +270,7 @@ async function run(argv) {
   const { command, options } = parsed;
   if (command === "report") return runReport(options);
   if (command === "cycle") return await runCycleCommand(options);
+  if (command === "loop") return await runLoopCommand(options);
   if (command === "recover") return runRecoverCommand(options);
   if (command === "prune") return runPruneCommand(options);
   if (command === "runner") return await runRunnerCommand(options);

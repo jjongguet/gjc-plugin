@@ -12,11 +12,13 @@ plus declared probes, and records every decision in an append-only ledger
 
 | Path | Role |
 | --- | --- |
-| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, plus `runner` as it lands) |
-| `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON) |
-| `scripts/run.mjs` | CLI (`report`, `cycle`) |
+| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `runner`, `propose`, `loop`) |
+| `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON, incl. per-case `failures` labels) |
+| `scripts/run.mjs` | CLI (`report`, `cycle`, `loop`, `recover`, `prune`, `runner`, `history`) |
 | `scripts/verify-unit.mjs` | runs the unit suite; prints `ALL PASS (N cases)`; zero cases fails |
+| `scripts/verify-integration.mjs` | runs the integration suite the same way; part of the `test:self-improve` chain and therefore every cycle's `test` guard |
 | `tests/unit/` | `node:test` unit suite (node builtins only) |
+| `tests/integration/` | `node:test` integration suite (temp git fixtures; calls the real `gjc`/`bun`/`git` toolchain) |
 | `rrsi.json` | gate defaults loaded by the engine (minDelta, cost, stall, retention) |
 | `PATTERNS.md` | proposer/review rules (commit pattern, resubmission ban, threat model, labels) |
 
@@ -38,8 +40,11 @@ Partial regularization: anything beyond this set is explicitly out of scope.
 The deterministic cycle engine is in place (gates, guard pipeline, scratch-copy
 isolation, replay-gated adoption, ledger commits, crash recovery), together with
 the deterministic probe/held-out suites, history conditioning (duplicate-hypothesis
-ban, forced exploration) and the k>=3 local-stub stochastic runner. The real-cycle
-report lands with the final milestones.
+ban, forced exploration) and the k>=3 local-stub stochastic runner. The bounded
+automatic loop (`loop`) drives that engine without hand-written proposals via the
+`stub`/`cmd` proposer seam, with per-cycle loop state, `failureClass` labels and
+the HEAD-moved re-propose rule. The real-cycle report lands with the final
+milestones.
 
 ## Commands
 
@@ -47,17 +52,65 @@ report lands with the final milestones.
 node self-improve/scripts/run.mjs report --json
 node self-improve/scripts/run.mjs history --json
 node self-improve/scripts/verify-unit.mjs
+node self-improve/scripts/verify-integration.mjs
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo .
+node self-improve/scripts/run.mjs loop --max-cycles 2 --proposer stub --json
+node self-improve/scripts/run.mjs loop --max-cycles 1 --proposer cmd --proposer-cmd 'node tools/proposer.mjs {request} {response}' --live-approved --json
 node self-improve/scripts/run.mjs recover --repo .
 node self-improve/scripts/run.mjs runner --baseline . --candidate . --k 3 --json
 bun run test:self-improve
 ```
 
+Run the CLI from the repository root: the engine's patch parsing follows git's
+restriction that `git apply` ignores paths outside the current directory when it
+is invoked from a repository subdirectory.
+
+## Automatic loop (`loop`)
+
+```sh
+node self-improve/scripts/run.mjs loop --repo . [--proposer stub|cmd] [--proposer-cmd '<template>'] \
+  [--live-approved] [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] \
+  [--stop-on-adopt] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
+```
+
+Each iteration: recover sweep (`recoverPendingCycle`) → admissible-action
+selection (stalled objectives blocked, least-attempted first, unexplored probes
+reported) → proposer request → proposer invocation → validation pipeline →
+serialized `runCycle` calls → loop-state persistence. `--dry-run` propagates to
+the engine (full evaluation, no ledger rows and no commits).
+
+- **Request**: objective, failing probe cases as short `<metric>#<index>` labels,
+editable surfaces, rung caps (`maxFiles`/`maxHunks`), base commit, prior attempts,
+and constraints (editable-only, no network, no timers, no secrets, patch must
+`git apply` at HEAD).
+- **Proposer seam**: `stub` is a keyless scripted test double; `cmd` runs a
+template via `sh -c` inside a fresh `git archive` scratch copy with
+`self-improve/domains/**` excluded (held-out fixtures never reach the proposer),
+with `sanitizeGuardEnv` filtered through an explicit allowlist. Request files
+and loop logs record env key names only, never values. `cmd` is live mode:
+without `--live-approved` the invocation is recorded `skipped`.
+- **Validation**: schema, budget pre-check, protected-path pre-check,
+hypothesis-novelty pre-check, verbatim held-out value scan over the patch's
+added lines only (probe-corpus vocabulary is not treated as held-out; matches
+are reported as short hashes).
+- **Bounds**: max cycles, max wall-clock, max proposer calls, batch size <= W
+(proposal preparation only — engine cycles stay serialized by the cycle lock).
+No timers; guard failures are never retried; a crashed cycle is swept by
+`recover` on the next start.
+- **HEAD-moved rule**: a proposal authored against an old HEAD is discarded
+un-evaluated and re-proposed; repeated movement stops the campaign.
+- **State**: only under `<run-root>/loop-<loopId>/` (`~/.gjc-plugin/self-improve`
+by default) — `loop-state.json` (incl. per-cycle `failureClass`:
+`known_flake_suspect` vs `other`), append-only `loop-log.jsonl`, request files,
+proposer scratch copies. Nothing is written into the repository outside the
+engine's own ledger commits.
+
 ## Runbook
 
 1. Write a proposal JSON next to its patch; `patchFile` resolves relative to the
-   proposal file.
+   proposal file (`cycle`), or run the `loop` above and let the proposer author
+   it against the current HEAD.
 2. Dry-run first: evaluates baseline and candidate scratch copies with the full
    guard set and probes, writes nothing and commits nothing.
 3. Run the real cycle: one ledger row plus a ledger-only

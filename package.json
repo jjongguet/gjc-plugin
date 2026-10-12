@@ -20,7 +20,9 @@
     "test:rea": "bun rea/scripts/verify.ts",
     "build:backplan": "bun backplan/scripts/build.mjs",
     "test:backplan": "bun backplan/scripts/verify.ts",
-    "test:self-improve": "node self-improve/scripts/verify-unit.mjs",
-    "self-improve:cycle": "node self-improve/scripts/run.mjs cycle"
+    "test:self-improve": "node self-improve/scripts/verify-unit.mjs && node self-improve/scripts/verify-integration.mjs",
+    "self-improve:cycle": "node self-improve/scripts/run.mjs cycle",
+    "self-improve:loop": "node self-improve/scripts/run.mjs loop",
+    "self-improve:integration": "node self-improve/scripts/verify-integration.mjs"
   }
 }

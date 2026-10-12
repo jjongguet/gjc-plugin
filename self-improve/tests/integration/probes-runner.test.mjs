@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -66,4 +68,44 @@ test('invalid directory causes non-zero exit with stderr message', () => {
   const r = runRunner(fakeDir, worktreeRoot);
   assert.notEqual(r.status, 0, 'runner must exit non-zero when decision.ts is missing');
   assert.ok(r.stderr && r.stderr.trim().length > 0, 'stderr must contain an error message');
+});
+
+test('failures output lists per-case labels for the three probe metrics only', () => {
+  const brokenDir = mkdtempSync(path.join(tmpdir(), 'probes-broken-'));
+  try {
+    mkdirSync(path.join(brokenDir, 'jev-advisor', 'lib'), { recursive: true });
+    writeFileSync(
+      path.join(brokenDir, 'jev-advisor', 'lib', 'decision.ts'),
+      [
+        'export function extractTasks() { return { tasks: [], rejected: [], omittedCount: 0 }; }',
+        'export function parseDecision() { return { status: "no_decision" }; }',
+        'export function isAllowedEndpoint() { return false; }',
+        '',
+      ].join('\n'),
+    );
+    const r = runRunner(brokenDir, worktreeRoot);
+    assert.equal(r.status, 0, `runner failed: ${r.stderr}`);
+    const json = JSON.parse(r.stdout.trim());
+    assert.ok(json.failures && json.failures.baseline && json.failures.candidate, 'failures section missing');
+    const fixtures = JSON.parse(
+      readFileSync(path.join(worktreeRoot, 'self-improve', 'domains', 'gjc-plugin', 'probes', 'fixtures.json'), 'utf8'),
+    );
+    for (const side of ['baseline', 'candidate']) {
+      for (const metric of ['extract_coverage', 'decision_accuracy', 'egress_boundary']) {
+        assert.ok(Array.isArray(json.failures[side][metric]), `failures.${side}.${metric} must be an array`);
+      }
+    }
+    const expectedDecisionMisses = fixtures.cases.decision_accuracy.filter((item) => item.expected.accept).length;
+    const expectedEgressMisses = fixtures.cases.egress_boundary.filter((item) => item.expected.allowed).length;
+    assert.equal(json.failures.baseline.decision_accuracy.length, expectedDecisionMisses);
+    assert.equal(json.failures.baseline.egress_boundary.length, expectedEgressMisses);
+    for (const label of json.failures.baseline.decision_accuracy) {
+      assert.match(label, /^decision_accuracy#\d+$/);
+    }
+    assert.equal(json.failures.candidate.decision_accuracy.length, 0, 'healthy side must have no decision failures');
+    assert.equal(json.failures.candidate.egress_boundary.length, 0, 'healthy side must have no egress failures');
+    assert.equal(JSON.stringify(json.failures).includes('heldout'), false, 'failures must cover probe metrics only');
+  } finally {
+    rmSync(brokenDir, { recursive: true, force: true });
+  }
 });

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -10,7 +11,15 @@ import { computeHarnessDigest, createScratchCopy } from "../../lib/isolate.mjs";
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REPO_ROOT = resolve(SELF_IMPROVE_DIR, "..");
 
-test("scratch-copy guards run green and leave the live harness digest unchanged", async () => {
+test("scratch-copy guards run green and leave the live harness digest unchanged", async (t) => {
+  // This probe needs a real git work tree at the repository root. When the suite
+  // itself runs inside an engine scratch copy (git archive export, no .git) the
+  // probe is already inside the artifact it would test, so it is skipped with a
+  // reason instead of failing every cycle's `test` guard.
+  if (spawnSync("git", ["-C", REPO_ROOT, "rev-parse", "--git-dir"], { encoding: "utf8" }).status !== 0) {
+    t.skip("repository root is not a git work tree (nested scratch copy)");
+    return;
+  }
   const runRoot = mkdtempSync(join(tmpdir(), "self-improve-integration-"));
   let passed = false;
   try {
