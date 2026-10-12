@@ -213,6 +213,71 @@ async function runSuite(root) {
 		}
 	});
 
+	await check("repeated criteria warn while the plan still passes", () => {
+		const plan = validPlan();
+		plan.issues[0].completion_criteria = ["`bun test tests/pipeline.test.ts` green", "`bun test tests/pipeline.test.ts` green"];
+		const report = core.checkBackplanPlan(plan);
+		assert.equal(report.status, "ok");
+		assert.ok(report.warnings.some(warning => /duplicates/.test(warning)), JSON.stringify(report.warnings));
+		const goals = validPlan();
+		goals.success_criteria = ["`bun test tests/pipeline.test.ts` green", "`bun test tests/pipeline.test.ts` green"];
+		const goalReport = core.checkBackplanPlan(goals);
+		assert.equal(goalReport.status, "ok");
+		assert.ok(goalReport.warnings.some(warning => /success_criteria\[1\]/.test(warning)), JSON.stringify(goalReport.warnings));
+	});
+
+	await check("count limits bound criteria and issues", () => {
+		const criteria = validPlan();
+		criteria.success_criteria = Array.from({ length: core.BACKPLAN_CRITERIA_LIMIT + 1 }, (_, index) => `\`bun test suite-${index}\` shows case ${index} green`);
+		const criteriaReport = core.checkBackplanPlan(criteria);
+		assert.equal(criteriaReport.status, "invalid");
+		assert.ok(criteriaReport.errors.some(error => /12-criterion limit/.test(error)), JSON.stringify(criteriaReport.errors));
+		const issues = validPlan();
+		issues.issues = Array.from({ length: core.BACKPLAN_ISSUE_LIMIT + 1 }, (_, index) => ({ ...validPlan().issues[0], title: `Issue ${index} rejects malformed widget input with a recorded regression test` }));
+		const issuesReport = core.checkBackplanPlan(issues);
+		assert.equal(issuesReport.status, "invalid");
+		assert.ok(issuesReport.errors.some(error => /24-issue limit/.test(error)), JSON.stringify(issuesReport.errors));
+	});
+
+	await check("nested unknown keys and prototype keys are rejected without pollution", () => {
+		const nested = validPlan();
+		nested.issues[0].extra = "nope";
+		const nestedReport = core.checkBackplanPlan(nested);
+		assert.equal(nestedReport.status, "invalid");
+		assert.ok(nestedReport.errors.some(error => /issues\[0\]\.extra: unknown key/.test(error)), JSON.stringify(nestedReport.errors));
+		const polluted = JSON.parse(`{"__proto__":{"polluted":true},${JSON.stringify(validPlan()).slice(1)}`);
+		assert.equal(Object.getPrototypeOf(polluted), Object.prototype);
+		const pollutedReport = core.checkBackplanPlan(polluted);
+		assert.equal(pollutedReport.status, "invalid");
+		assert.ok(pollutedReport.errors.some(error => /__proto__: unknown key/.test(error)), JSON.stringify(pollutedReport.errors));
+		assert.equal(({} as Record<string, unknown>).polluted, undefined);
+	});
+
+	await check("labels must be well-formed, unicode is accepted and request stays optional", () => {
+		const badLabel = validPlan();
+		badLabel.issues[0].labels = ["Bad Label!"];
+		const labelReport = core.checkBackplanPlan(badLabel);
+		assert.equal(labelReport.status, "invalid");
+		assert.ok(labelReport.errors.some(error => /expected a label like repo:gjc-plugin/.test(error)), JSON.stringify(labelReport.errors));
+		const unicode = validPlan();
+		unicode.issues[0].completion_criteria = ["`bun test tests/pipeline.test.ts` 통과 ✅ shows malformed input rejected"];
+		assert.equal(core.checkBackplanPlan(unicode).status, "ok");
+		const noRequest = validPlan();
+		delete noRequest.request;
+		const requestReport = core.checkBackplanPlan(noRequest);
+		assert.equal(requestReport.status, "ok");
+		assert.match(requestReport.digest, /^[a-f0-9]{64}$/);
+	});
+
+	await check("oversized rendered output is rejected with a bounded error", () => {
+		const plan = validPlan();
+		plan.issues[0].scope_in = Array.from({ length: core.BACKPLAN_ARRAY_LIMIT }, (_, index) => `In-scope item ${index}: ${"x".repeat(1900)}`);
+		plan.issues[0].scope_out = Array.from({ length: core.BACKPLAN_ARRAY_LIMIT }, (_, index) => `Out-of-scope item ${index}: ${"y".repeat(1900)}`);
+		const report = core.checkBackplanPlan(plan);
+		assert.equal(report.status, "invalid");
+		assert.deepEqual(report.errors, ["rendered output exceeds the bounded limit; split the plan into smaller issues"]);
+	});
+
 	await check("execute renders ok and journals one sanitized record", async () => {
 		const result = await tool.execute("call-ok", { plan: JSON.stringify(validPlan()), session: "s", worktree: "/w", branch: "b" });
 		assert.notEqual(result.isError, true);
@@ -264,6 +329,11 @@ async function runSuite(root) {
 		const viaLink = await tool.execute("call-link", { plan_path: link });
 		assert.equal(viaLink.isError, true);
 		assert.match(viaLink.content[0].text, /no symlinks/);
+		const dirPath = path.join(root, "tmp", "plan-dir");
+		mkdirSync(dirPath);
+		const viaDir = await tool.execute("call-dir", { plan_path: dirPath });
+		assert.equal(viaDir.isError, true);
+		assert.match(viaDir.content[0].text, /regular file/);
 		const inline = validPlan();
 		inline.goal = `goal ${"x".repeat(core.BACKPLAN_PLAN_BYTES)}`;
 		const tooBigInline = await tool.execute("call-inline-big", { plan: JSON.stringify(inline) });

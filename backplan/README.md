@@ -50,8 +50,8 @@ minimal example.
 
 Checks: required sections and types; non-empty goal/end state; per-issue
 objective/context/scope_in/scope_out/delivery; at least one observable
-completion criterion per issue (generic phrases and duplicates are rejected or
-warned); a project mapping with a reason for every draft; policy decisions
+completion criterion per issue (generic phrases are rejected, repeated entries
+warn and duplicate titles are rejected); a project mapping with a reason for every draft; policy decisions
 carry `needs_user_decision`, options and a record location; automation
 candidates are `backlog` or `out_of_scope` only.
 

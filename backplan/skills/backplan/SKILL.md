@@ -57,7 +57,8 @@ registration goes through the workspace Linear MCP tools and
    as judgment calls. The tool is the contract, not a suggestion.
 3. Create or reuse the Linear project (`linear.project`; for `create` mode use
    the rendered description), then create the issues with the rendered
-   `description` and `labels`, in plan order.
+   `description` and `labels`, in plan order. Create any missing label first
+   (`save_issue_label`) so registration cannot half-fail.
 4. Start trace:
    `python3 ~/.gjc-user-policy/bin/linear-trace.py record --issue JJO-N --event start --authority user-approved --summary '실행 연결 …' --publish`.
    Include the plan digest in the first trace summary or the issue footer.
@@ -67,7 +68,7 @@ registration goes through the workspace Linear MCP tools and
 
 ## Draft contract (snake_case)
 
-Required: `goal`, `end_state`, `success_criteria` (1..24), `project`
+Required: `goal`, `end_state`, `success_criteria` (1..12), `project`
 (`{name, mode: "reuse"|"create", reason, boundaries?}`), `issues` (1..24),
 `policy_decisions`, `automation_candidates` (both may be `[]` — but ask
 yourself honestly before writing an empty array). Optional: `request`,
@@ -78,7 +79,7 @@ Each issue: `title`, `objective`, `context`, `scope_in` (≥1), `scope_out`
 `delivery`.
 
 Completion criteria must be observable; generic phrases ("완료", "동작함",
-"done") are rejected, as are duplicates. Unknown keys are rejected. Sizes are
+"done") are rejected, repeated criteria only warn, and duplicate issue titles are rejected. Unknown keys are rejected. Sizes are
 bounded (strings ≤ 2000 chars, plan ≤ 256 KiB).
 
 Minimal example:
