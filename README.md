@@ -7,6 +7,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice, bounded delegation correlation and an offline descriptive report. Shadow by default; advice is not model routing or quality proof. |
 | [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts and source freshness. |
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
+| [`wiki`](wiki/) | Read-only personal-wiki lookup and pending-proposal submission (capture + propose). Never approves or publishes; human approval of the exact digest stays outside the plugin. |
 | `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
@@ -17,6 +18,7 @@ Use a local plugin directory or a published source containing that plugin with G
 gjc plugin install ./jev-advisor --user
 gjc plugin install ./verification-receipts --user
 gjc plugin install ./ui-regression --user
+gjc plugin install ./wiki --user
 gjc plugin list && gjc plugin doctor
 ```
 
