@@ -150,6 +150,7 @@ test("collectEditableContents embeds only editable files with per-file and total
     const collected = collectEditableContents({
       cwd: root,
       editableSurfaces: ["verification-receipts/lib/**", "self-improve/**"],
+      totalCap: PER_FILE_CAP_BYTES + 1024,
     });
     assert.deepEqual(
       collected.files.map((file) => file.path),

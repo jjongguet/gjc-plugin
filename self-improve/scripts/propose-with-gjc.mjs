@@ -32,7 +32,7 @@ export const DEFAULT_BIN = "gjc";
 export const DEFAULT_MODEL = "openai/gpt-4o";
 export const DEFAULT_TIMEOUT_MS = 300000;
 export const PER_FILE_CAP_BYTES = 256 * 1024;
-export const TOTAL_CAP_BYTES = 512 * 1024;
+export const TOTAL_CAP_BYTES = 140 * 1024;
 
 /** Never embed these, even if a request lists a matching surface. */
 export const EXCLUDED_CONTENT_PREFIXES = Object.freeze(["self-improve/domains/", ".git/", "node_modules/"]);
