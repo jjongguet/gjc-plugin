@@ -21,12 +21,25 @@ function readSessionId(ctx: unknown): string | null {
 }
 
 function bindingEvidenceOf(input: Record<string, any>, details: Record<string, any>): { evidence: LoopBindingEvidence; boundRoot?: string } {
-	const binding = isRecord(input.repositoryBinding) ? input.repositoryBinding : isRecord(details.repositoryBinding) ? details.repositoryBinding : null;
+	const bindings: Record<string, any>[] = [];
+	if (isRecord(input.repositoryBinding)) bindings.push(input.repositoryBinding);
+	if (isRecord(details.repositoryBinding)) bindings.push(details.repositoryBinding);
+	if (Array.isArray(input.tasks)) for (const entry of input.tasks) if (isRecord(entry) && isRecord(entry.repositoryBinding)) bindings.push(entry.repositoryBinding);
+	let persistencePresent = false;
+	let persistenceUnknown = false;
+	if (Array.isArray(details.results)) for (const entry of details.results) {
+		if (!isRecord(entry)) continue;
+		if (isRecord(entry.repositoryBinding)) bindings.push(entry.repositoryBinding);
+		const outcome = isRecord(entry.persistence) && typeof entry.persistence.outcome === 'string' ? entry.persistence.outcome : '';
+		if (outcome === 'applied' || outcome === 'recovery_available') persistencePresent = true;
+		else if (outcome === 'no_changes') persistenceUnknown = true;
+	}
 	const isolated = input.isolated === true || details.isolated === true;
-	if (binding || isolated) {
-		const worktreeRoot = binding && typeof binding.worktreeRoot === 'string' && binding.worktreeRoot.length <= 4096 ? binding.worktreeRoot : undefined;
+	if (bindings.length || isolated || persistencePresent) {
+		const worktreeRoot = typeof bindings[0]?.worktreeRoot === 'string' && bindings[0].worktreeRoot.length <= 4096 ? bindings[0].worktreeRoot : undefined;
 		return { evidence: 'present', ...(worktreeRoot ? { boundRoot: worktreeRoot } : {}) };
 	}
+	if (persistenceUnknown) return { evidence: 'unknown' };
 	return { evidence: 'absent' };
 }
 
