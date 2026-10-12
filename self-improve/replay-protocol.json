@@ -1,6 +1,6 @@
 {
   "schema": "gjc.self-improve.replay-protocol.v1",
-  "status": "draft-pending-m3b-corpus-freeze",
+  "status": "frozen",
   "primary": "attempts-to-first-adoption (quality), recorded wallMs (cost proxy), attempts per round (parallelism)",
   "passGate": {
     "n": 20,
@@ -30,7 +30,12 @@
       "prior guard-failure classes",
       "budget rung"
     ],
-    "sealed": ["verdict", "delta", "ledger order of unplayed attempts", "adoption flags of unplayed attempts"]
+    "sealed": [
+      "verdict",
+      "delta",
+      "ledger order of unplayed attempts",
+      "adoption flags of unplayed attempts"
+    ]
   },
   "policies": {
     "B0": "recorded order, batch 1, stop at first adoption",
@@ -56,9 +61,15 @@
   "noPostHocEdits": "No post-hoc threshold edits: thresholds are frozen by this file's commit and re-hashed in the evidence map.",
   "corpus": {
     "path": "self-improve/ledger.jsonl",
-    "sha256": "<filled at the M3b corpus freeze>",
-    "attemptsAtFreeze": null,
-    "adoptionsAtFreeze": null
+    "sha256": "72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e",
+    "attemptsAtFreeze": 13,
+    "adoptionsAtFreeze": 1,
+    "rejectsAtFreeze": 12,
+    "epochsAtFreeze": 2,
+    "frozenAt": "2026-10-12T22:03:01.161Z",
+    "passGateSituation": "attemptsAtFreeze (13) < passGate.n (20): the dream run reports the frozen insufficient-evidence verdict; thresholds are NOT evaluated or re-derived",
+    "downgradeNote": "plan 4.3 / M3 brief: a corpus in [12,19] attempts (here 13, >= the pass-1 floor of 12) yields \"insufficient evidence at pass-gate size - thresholds not evaluated\" as a measured, escalated verdict with this downgrade recorded explicitly - no silent downgrade and no threshold relaxation",
+    "integrity": "protocol file hash and corpus hash are recorded in the M3 evidence dir before and after the evidence runs (no post-hoc edits)"
   },
   "policyArtifacts": {
     "dir": "self-improve/policies",
