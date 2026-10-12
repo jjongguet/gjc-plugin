@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildGuardPlan, resolveValidatorEntry, runGuards } from "../../lib/guards.mjs";
@@ -39,6 +39,32 @@ test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized
   });
   assert.deepEqual(noSmoke.map((guard) => guard.id), ["build", "test", "validator"]);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("resolveValidatorEntry finds the validator across workspace layouts", () => {
+  const root = tempRoot();
+  const rel = join("workspace-standard", "validator", "cli.mjs");
+  try {
+    // Repositories at the workspace root: <base>/<repo> with <base>/shared beside them.
+    const flatRepo = join(root, "flat", "repo");
+    mkdirSync(join(root, "flat", "shared", "workspace-standard", "validator"), { recursive: true });
+    writeFileSync(join(root, "flat", "shared", rel), "");
+    assert.equal(resolveValidatorEntry(flatRepo), join(root, "flat", "shared", rel));
+
+    // Session worktrees under lanes/: <base>/lanes/<name> with <base>/shared at the top.
+    const laneRepo = join(root, "laned", "lanes", "name");
+    mkdirSync(join(root, "laned", "shared", "workspace-standard", "validator"), { recursive: true });
+    writeFileSync(join(root, "laned", "shared", rel), "");
+    assert.equal(resolveValidatorEntry(laneRepo), join(root, "laned", "shared", rel));
+
+    // Legacy pre-reorg layout: <base>/<repo> with <base>/products/shared beside it.
+    const legacyRepo = join(root, "legacy", "repo");
+    mkdirSync(join(root, "legacy", "products", "shared", "workspace-standard", "validator"), { recursive: true });
+    writeFileSync(join(root, "legacy", "products", "shared", rel), "");
+    assert.equal(resolveValidatorEntry(legacyRepo), join(root, "legacy", "products", "shared", rel));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("guard home can be relocated outside the run root", () => {

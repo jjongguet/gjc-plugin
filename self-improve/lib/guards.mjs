@@ -9,7 +9,15 @@ import { createSmokeEnvironment, sanitizeGuardEnv } from "./isolate.mjs";
 
 /** The workspace-standard validator lives beside the repository, not inside it. */
 export function resolveValidatorEntry(repoRoot) {
-  return path.resolve(repoRoot, "..", "products", "shared", "workspace-standard", "validator", "cli.mjs");
+  const candidates = [
+    // Repositories at the workspace root (post-2026-10-12 reorg layout).
+    path.resolve(repoRoot, "..", "shared", "workspace-standard", "validator", "cli.mjs"),
+    // Session worktrees nested under lanes/ (post-reorg layout).
+    path.resolve(repoRoot, "..", "..", "shared", "workspace-standard", "validator", "cli.mjs"),
+    // Legacy pre-reorg layout (products/shared beside the workspace repos).
+    path.resolve(repoRoot, "..", "products", "shared", "workspace-standard", "validator", "cli.mjs"),
+  ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? candidates[0];
 }
 
 export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = true, env = process.env, homeRoot }) {
