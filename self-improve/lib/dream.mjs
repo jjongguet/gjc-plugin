@@ -177,8 +177,29 @@ export function runDream({
     }),
   );
 
-  const thresholds = evaluateThresholds({ selected, baselines: baselineResults });
-  const verdict = gate.ok ? (thresholds.attemptsOk && thresholds.costOk && thresholds.antiFlukeOk ? "met" : "unmet") : INSUFFICIENT_EVIDENCE_VERDICT;
+  const thresholdEvaluation = evaluateThresholds({ selected, baselines: baselineResults });
+  const validationNumbers = {
+    attemptsPlayed: validation.attempts.length,
+    adoptions: validation.adoptionCount,
+    trainAttempts: train.attempts.length,
+  };
+  const thresholds = gate.ok
+    ? { evaluated: true, reason: null, ...thresholdEvaluation, statements: THRESHOLD_STATEMENTS, validationNumbers }
+    : {
+        evaluated: false,
+        reason: gate.reason,
+        advisory: thresholdEvaluation,
+        statements: THRESHOLD_STATEMENTS,
+        validationNumbers,
+        passGateSituation: `attempts (${total}) < passGateN (${passGateN})`,
+        downgradeNote:
+          "plan 4.3 / M3 brief: a corpus in [12,19] attempts yields the frozen insufficient-evidence verdict with the downgrade recorded explicitly - no silent downgrade, no threshold relaxation",
+      };
+  const verdict = gate.ok
+    ? thresholdEvaluation.attemptsOk && thresholdEvaluation.costOk && thresholdEvaluation.antiFlukeOk
+      ? "met"
+      : "unmet"
+    : INSUFFICIENT_EVIDENCE_VERDICT;
   const receipt = {
     schema: DREAM_SCHEMA,
     seed,
@@ -196,7 +217,7 @@ export function runDream({
     rankings: ranked.map((entry) => entry.id),
     selected: { id: selected.id, config: selected.config },
     baselines: { B0: { train: baselineResults.B0.train, validation: baselineResults.B0.validation, full: baselineResults.B0.full }, B1: { train: baselineResults.B1.train, validation: baselineResults.B1.validation, full: baselineResults.B1.full } },
-    thresholds: { ...thresholds, statements: THRESHOLD_STATEMENTS },
+    thresholds,
     gate,
     calibration: [
       {
@@ -227,7 +248,6 @@ function evaluateThresholds({ selected, baselines }) {
   const costOk = costOf(pi) <= 0.7 * costOf(b0);
   const antiFlukeOk = costOf(selected.fullScore) <= costOf(b0Full);
   return {
-    evaluated: true,
     attemptsOk,
     costOk,
     antiFlukeOk,

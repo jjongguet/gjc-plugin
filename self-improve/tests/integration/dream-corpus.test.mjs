@@ -84,6 +84,7 @@ test("dream/replay/policy CLI run end-to-end over a synthetic corpus with a byte
     assert.equal(receipt.seed, 11);
     assert.equal(receipt.gate.ok, true, JSON.stringify(receipt.gate));
     assert.equal(receipt.verdict, "met", JSON.stringify(receipt.thresholds));
+    assert.equal(receipt.thresholds.evaluated, true);
     assert.equal(receipt.thresholds.attemptsOk, true);
     assert.equal(receipt.thresholds.costOk, true);
     assert.equal(receipt.thresholds.antiFlukeOk, true);
@@ -141,6 +142,7 @@ test("the repository ledger at this commit is below the pass gate, so P2 reports
   assert.equal(receipt.gate.reason, "corpus_below_pass_gate");
   assert.equal(receipt.verdict, "insufficient evidence at pass-gate size — thresholds not evaluated");
   assert.equal(receipt.corpus.attempts < receipt.gate.passGateN, true);
-  assert.equal(receipt.thresholds.attemptsOk !== undefined, true, "measured scores are still reported");
+  assert.equal(receipt.thresholds.evaluated, false, "the frozen insufficient-evidence path must not present evaluated thresholds");
+  assert.equal(typeof receipt.thresholds.advisory?.attemptsOk, "boolean", "advisory numbers are still reported");
   assert.match(receipt.caveat, /no statistical significance is claimed/);
 });

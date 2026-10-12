@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * self-improve CLI: report, cycle, recover, prune, runner, history.
+ * self-improve CLI: report, cycle, loop, replay, dream, policy, recover, prune, runner, history.
  */
+import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
 import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
@@ -305,9 +306,36 @@ function runPolicyCommand(options) {
       else process.stdout.write(`dry-run: would write ${plan.artifactPath}, ${plan.currentPath} and one policy row\n`);
       return 0;
     }
-    const applied = applyPolicyDeploy({ plan, ledgerPath: ledgerPathFor(options) });
-    if (options.json) process.stdout.write(`${JSON.stringify(applied, null, 2)}\n`);
-    else process.stdout.write(`deployed policy ${policy.id} (row ${applied.rowSeq}); commit with: ${applied.commitMessage}\n`);
+    const ledgerPath = ledgerPathFor(options);
+    const applied = applyPolicyDeploy({ plan, ledgerPath });
+    // The deploy's own commit (plan §5: policy deploys are commits). Only when
+    // the ledger lives inside a git work tree; otherwise the operator commits.
+    let committed = null;
+    let commitError = null;
+    try {
+      const probe = spawnSync("git", ["-C", dirname(ledgerPath), "rev-parse", "--show-toplevel"], { encoding: "utf8" });
+      if (probe.status === 0) {
+        const repoRoot = probe.stdout.trim();
+        const rel = (abs) => relative(repoRoot, resolve(abs));
+        const add = spawnSync("git", ["-C", repoRoot, "add", "--", rel(applied.artifactPath), rel(applied.currentPath), rel(ledgerPath)], { encoding: "utf8" });
+        if (add.status !== 0) throw new Error(add.stderr.trim() || `git_add_exit_${add.status}`);
+        const commit = spawnSync("git", ["-C", repoRoot, "commit", "-m", applied.commitMessage], { encoding: "utf8" });
+        if (commit.status !== 0) throw new Error(commit.stderr.trim() || `git_commit_exit_${commit.status}`);
+        committed = spawnSync("git", ["-C", repoRoot, "rev-parse", "--short=7", "HEAD"], { encoding: "utf8" }).stdout.trim();
+      }
+    } catch (error) {
+      commitError = error.message;
+    }
+    const result = { ...applied, committed, commitError };
+    if (options.json) process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    else {
+      process.stdout.write(
+        `deployed policy ${policy.id} (row ${applied.rowSeq})` +
+          (committed ? `; commit ${committed}` : "; commit skipped (commit with: " + applied.commitMessage + ")") +
+          (commitError ? `; commit failed: ${commitError}` : "") +
+          "\n",
+      );
+    }
     return 0;
   }
   process.stderr.write(`policy requires --list or --deploy <id>\n`);

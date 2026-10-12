@@ -118,6 +118,7 @@ test("dream is deterministic and evaluates the frozen thresholds at pass-gate si
     assert.equal(first.corpus.validationN, 6);
     assert.equal(first.gate.ok, true, JSON.stringify(first.gate));
     assert.equal(first.verdict, "met", JSON.stringify(first.thresholds));
+    assert.equal(first.thresholds.evaluated, true);
     assert.equal(first.thresholds.attemptsOk, true);
     assert.equal(first.thresholds.costOk, true);
     assert.equal(first.thresholds.antiFlukeOk, true);
@@ -171,7 +172,8 @@ test("the pass gate reports insufficient evidence instead of evaluating threshol
     assert.equal(small.verdict, "insufficient evidence at pass-gate size — thresholds not evaluated");
     assert.equal(small.candidates.length, 40, "measured scores are still reported");
     assert.equal(small.candidates[0].train.attemptsToFirstAdoption !== undefined, true);
-    assert.equal(small.thresholds.attemptsOk !== undefined, true);
+    assert.equal(small.thresholds.evaluated, false, "the gate failure must not present evaluated thresholds");
+    assert.equal(small.thresholds.advisory.attemptsOk !== undefined, true, "advisory numbers stay visible");
 
     const noAdoptionRows = corpusRows({ validation: false }).concat(
       corpusRows({ train: false, validation: true })
