@@ -96,12 +96,18 @@ export function computeAdmissibleActions({ ledgerPath, adapter, k = 3, preferred
   const order = new Map(adapter.objectives.map((objective, index) => [objective, index]));
   const live = adapter.objectives.filter((objective) => !stalled.has(objective));
   const forced = stalled.size > 0 ? unexplored.filter((objective) => !stalled.has(objective)) : [];
-  const pool = forced.length > 0 ? forced : live;
+  let pool = forced.length > 0 ? forced : live;
+  // Stall redirects exploration only while alternatives remain. Once every
+  // objective has a stall streak and nothing is unexplored, the campaign
+  // continues on the least-attempted set until a cap breaches (§4.2) — the
+  // proposer-call cap bounds per-gap retries (§16 R1).
+  const stallFallback = pool.length === 0 && adapter.objectives.length > 0;
+  if (stallFallback) pool = [...adapter.objectives];
   const actions = [...pool]
     .sort((left, right) => (attempts.get(left) ?? 0) - (attempts.get(right) ?? 0) || order.get(left) - order.get(right))
     .map((objective) => ({ objective, reason: "regularization", forcedExploration: stalled.size > 0 }));
   const preferredAvailable =
-    preferredObjective !== null && !stalled.has(preferredObjective) && actions.some((action) => action.objective === preferredObjective);
+    preferredObjective !== null && (!stalled.has(preferredObjective) || stallFallback) && actions.some((action) => action.objective === preferredObjective);
   const ordered = preferredAvailable
     ? [
         { objective: preferredObjective, reason: "failing_cases", forcedExploration: stalled.size > 0 },

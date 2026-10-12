@@ -80,3 +80,25 @@ test("stalled objectives are blocked and redirects are marked forced_exploration
   assert.equal(redirect.forcedExploration, true);
   rmSync(root, { recursive: true, force: true });
 });
+
+test("stalled objectives stay admissible when no unexplored probe remains (caps bound retries)", () => {
+  const root = mkdtempSync(join(tmpdir(), "self-improve-history-"));
+  const ledger = join(root, "ledger.jsonl");
+  for (const objective of ["probe.a", "probe.b"]) {
+    for (let index = 1; index <= 3; index += 1) {
+      appendRow(
+        ledger,
+        cycleRow({ cycleId: `${objective}-${index}`, objective, hypothesis: `${objective}-h${index}`, decision: "reject", reasons: ["floor_not_met"] }),
+      );
+    }
+  }
+  const retry = checkProposalHistory({
+    ledgerPath: ledger,
+    proposal: { objective: "probe.a", hypothesis: "retry after full stall" },
+    adapterObjectives: ["probe.a", "probe.b"],
+  });
+  assert.equal(retry.ok, true);
+  assert.equal(retry.forcedExploration, true);
+  assert.equal(retry.stallRetry, true);
+  rmSync(root, { recursive: true, force: true });
+});

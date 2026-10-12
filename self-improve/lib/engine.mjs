@@ -262,7 +262,15 @@ export function checkProposalHistory({ ledgerPath, proposal, adapterObjectives =
     const unexplored = adapterObjectives.filter(
       (objective) => !state.objectives.some((entry) => entry.objective === objective),
     );
-    return { ok: false, reason: "forced_exploration", stalled: proposal.objective, unexplored };
+    // Stall redirects exploration only while an unexplored probe exists to
+    // redirect to. Per the frozen campaign contract (§4.2 "continues to n=20
+    // unless a cap breaches"; §16 R1 "per-gap retries bounded by the
+    // proposer-call cap"), a fully stalled objective set stays admissible once
+    // nothing is left unexplored; the retry is flagged for audit.
+    if (unexplored.length > 0) {
+      return { ok: false, reason: "forced_exploration", stalled: proposal.objective, unexplored };
+    }
+    return { ok: true, reason: null, hypothesisHash, forcedExploration: true, stallRetry: true };
   }
   return { ok: true, reason: null, hypothesisHash, forcedExploration: state.stalled.length > 0 };
 }
