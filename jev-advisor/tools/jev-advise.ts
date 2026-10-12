@@ -1105,7 +1105,7 @@ function validProbabilityRecord(value: unknown): value is Record<Tier, number> {
 	const values = TIERS.map(tier => value[tier]);
 	if (!values.every(number => typeof number === "number" && Number.isFinite(number) && number >= 0 && number <= 1)) return false;
 	const sum = (values as number[]).reduce((a, b) => a + b, 0);
-	return Math.abs(sum - 1) <= 0.001;
+	return Math.abs(sum - 1) <= 0.001 + 1e-9;
 }
 
 function validateStoredAdvice(value: unknown): value is StoredAdvice {
@@ -2554,13 +2554,14 @@ function parseProbabilityMap(value: unknown): Record<Tier, number> | null {
 		probabilities[tier] = probability;
 	}
 	const sum = TIERS.reduce((total, tier) => total + probabilities[tier], 0);
-	return Math.abs(sum - 1) <= 0.001 ? probabilities : null;
+	return Math.abs(sum - 1) <= 0.001 + 1e-9 ? probabilities : null;
 }
 
 /** Strict JSON parser. It accepts a whole JSON document or one complete JSON fence, never a partial object. */
 export function parseDecision(raw: string, confidenceKind: ConfidenceKind = "self_reported"): Advice {
 	try {
 		let text = String(raw ?? "").trim();
+		if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) return noDecision("invalid_response");
 		const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
 		if (fence) text = fence[1].trim();
 		if (!text.startsWith("{") || !text.endsWith("}")) return noDecision("invalid_response");
