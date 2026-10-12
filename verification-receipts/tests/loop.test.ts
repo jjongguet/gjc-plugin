@@ -453,3 +453,30 @@ test('interleaved concurrent state writes never corrupt the file or lose acknowl
  expect(state!.pendingAsync.length).toBe(acknowledged);
  for (const entry of state!.pendingAsync) expect(entry.jobId).toMatch(/^interleave-/);
 });
+
+test('git delta facts ignore session noise paths and mark resolution attempts honestly', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-noise');
+ await fs.mkdir(path.join(root, '.gjc'), { recursive: true, mode: 0o700 });
+ await fs.writeFile(path.join(root, '.gjc', 'session-noise.jsonl'), '{}');
+ const base = await captureBaseline(root);
+ expect(base).not.toBeNull();
+ await fs.writeFile(path.join(root, 'real.mjs'), 'export const real = 1;\n');
+ const facts = await gitDeltaFacts(root, base!.head);
+ expect(facts.changedNames).toContain('real.mjs');
+ expect(facts.changedNames.some(name => name.startsWith('.gjc'))).toBe(false);
+ expect(facts.changedFiles).toBe(1);
+ await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-noise', { ...base!, toolCallId: '' });
+ const gate = await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('noise-gate'), baselineToolCallId: 'call-noise', changedFiles: 1, commits: 0 }));
+ expect(gate.stateWrite).toBe('ok');
+ const unresolved = await evaluateRepoGates(root, repoDigest, sessionDigest);
+ expect(unresolved.stateWriteAttempted).toBe(false);
+ expect(unresolved.stateWritten).toBe(false);
+ await makeReceipt(root, ['real.mjs'], 'passed');
+ const resolved = await evaluateRepoGates(root, repoDigest, sessionDigest);
+ expect(resolved.status).toBe('clean');
+ expect(resolved.stateWriteAttempted).toBe(true);
+ expect(resolved.stateWritten).toBe(true);
+});

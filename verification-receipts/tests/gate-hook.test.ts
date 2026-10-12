@@ -238,6 +238,8 @@ test('loop tool drives a real gate to clean through verification_run and stamps 
 	expect(gaps.status).toBe('gaps');
 	expect(gaps.openGates).toBe(1);
 	expect(gaps.requiredActions.length).toBeGreaterThan(0);
+	expect((gaps.warnings ?? []).includes('state_write_dropped')).toBe(false);
+	expect(gaps.budgetExceeded).toBe(false);
 	const run = verificationRun({ cwd: root, typebox: { Type } });
 	const receipt = JSON.parse(textsOf(await (run as any).execute('run-e2e', { files: ['pass.mjs'] }))[0]);
 	expect(receipt.receipt.execution.status).toBe('passed');
