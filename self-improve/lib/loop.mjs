@@ -111,6 +111,27 @@ export function computeAdmissibleActions({ ledgerPath, adapter, k = 3, preferred
   return { actions: ordered, stalled: [...stalled], unexplored, priorAttempts: state.lastRejects };
 }
 
+/**
+ * Known soft engine errors: a proposal whose patch does not apply is a common
+ * proposer mistake, not a harness failure. These are recorded as proposal
+ * failures and the loop continues within its caps; everything else still stops
+ * the campaign.
+ */
+export const SOFT_ENGINE_ERROR_PREFIXES = Object.freeze(["patch_check_failed"]);
+
+export function isSoftEngineError(message) {
+  return typeof message === "string" && SOFT_ENGINE_ERROR_PREFIXES.some((prefix) => message.startsWith(prefix));
+}
+
+/** Short proposer-facing form of a patch-application failure (bounded, opaque). */
+export function boundedPatchFailure(message) {
+  const text = String(message ?? "");
+  const first = text.split("\n")[0].slice(0, 200);
+  const fileMatch = /patch failed: ([^\s:]+(?::\d+)?)/.exec(text);
+  const location = fileMatch ? fileMatch[1].slice(0, 80) : "unknown file";
+  return { short: `patch_check_failed at ${location}: hunk context mismatch`, detail: first };
+}
+
 function classifyGuardFailure({ result, runRoot }) {
   if (!result.reasons?.includes("guard_fail")) return null;
   try {
@@ -258,7 +279,7 @@ export async function runLoop(input) {
     for (const action of batch) {
       if (state.counters.proposerCalls >= maxProposerCalls) break;
       if (nowMs() >= deadline) break;
-      const cycleIndex = state.counters.cycles + runnable.length + 1;
+      const cycleIndex = state.counters.proposerCalls + 1;
       const request = buildProposerRequest({
         loopId,
         cycleIndex,
@@ -267,7 +288,11 @@ export async function runLoop(input) {
         adapter,
         rung,
         failures: scan.failures ?? [],
-        history: { priorAttempts: state.cycles.filter((entry) => entry.decision === "reject"), stalled, unexplored },
+        history: {
+          priorAttempts: state.cycles.filter((entry) => entry.decision === "reject" || entry.status === "proposal_failed"),
+          stalled,
+          unexplored,
+        },
       });
       state.counters.proposerCalls += 1;
       writeJson(path.join(loopRoot, `cycle-${cycleIndex}.request.json`), request);
@@ -366,14 +391,38 @@ export async function runLoop(input) {
           deps: { runGuards: deps.runGuards, evaluateProbes: deps.evaluateProbes, now: deps.cycleNow, runInstall: deps.runInstall },
         });
       } catch (error) {
+        const message = String(error?.message ?? error);
+        if (isSoftEngineError(message)) {
+          const failure = boundedPatchFailure(message);
+          lastBlockReason = failure.short;
+          state.counters.invalidProposals += 1;
+          state.cycles.push({
+            cycleIndex: item.cycleIndex,
+            objective: item.objective,
+            hypothesis: item.proposal.hypothesis,
+            status: "proposal_failed",
+            reason: "patch_check_failed",
+            reasons: [failure.short],
+            detail: failure.detail,
+          });
+          log({
+            type: "proposal_failed",
+            cycleIndex: item.cycleIndex,
+            objective: item.objective,
+            reason: "patch_check_failed",
+            detail: failure.detail,
+          });
+          persist();
+          continue;
+        }
         state.cycles.push({
           cycleIndex: item.cycleIndex,
           objective: item.objective,
           hypothesis: item.proposal.hypothesis,
           status: "engine_error",
-          reason: error.message,
+          reason: message,
         });
-        log({ type: "engine_error", cycleIndex: item.cycleIndex, message: error.message });
+        log({ type: "engine_error", cycleIndex: item.cycleIndex, message });
         stoppedReason = "engine_error";
         persist();
         break;

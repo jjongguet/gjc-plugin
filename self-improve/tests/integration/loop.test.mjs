@@ -406,6 +406,66 @@ test("objective selection prefers the metric that owns the failing probe cases",
   rmSync(controlRoot, { recursive: true, force: true });
 });
 
+test("a non-applying patch is a soft proposal failure: the loop continues and a later proposal still runs", async () => {
+  const { root, repo } = makeFixture();
+  const scriptPath = join(root, "two-phase-proposer.mjs");
+  const callsFile = join(root, "calls.txt");
+  writeFileSync(
+    scriptPath,
+    [
+      "import { existsSync, readFileSync, writeFileSync } from 'node:fs';\n",
+      "import { join } from 'node:path';\n",
+      "const [requestPath, responsePath] = process.argv.slice(2);\n",
+      "const request = JSON.parse(readFileSync(requestPath, 'utf8'));\n",
+      "const calls = existsSync(process.env.CALLS_FILE) ? Number(readFileSync(process.env.CALLS_FILE, 'utf8')) : 0;\n",
+      "writeFileSync(process.env.CALLS_FILE, String(calls + 1));\n",
+      "const rel = 'jev-advisor/lib/decision.ts';\n",
+      "let patch;\n",
+      "if (calls === 0) {\n",
+      "  // deliberately wrong context: the engine must reject it with patch_check_failed\n",
+      "  patch = ['diff --git a/' + rel + ' b/' + rel, '--- a/' + rel, '+++ b/' + rel, '@@ -1,1 +1,1 @@', '-export const value = 999;', '+export const value = 1000;', ''].join('\\n');\n",
+      "} else {\n",
+      "  const original = readFileSync(join(process.cwd(), rel), 'utf8').replace(/\\n$/, '');\n",
+      "  const lines = original.split('\\n');\n",
+      "  const kept = lines.slice(-3);\n",
+      "  const start = lines.length - kept.length + 1;\n",
+      "  patch = ['diff --git a/' + rel + ' b/' + rel, '--- a/' + rel, '+++ b/' + rel, '@@ -' + start + ',' + kept.length + ' +' + start + ',' + (kept.length + 1) + ' @@', ...kept.map((line) => ' ' + line), '+// soft-continue fixture proposal', ''].join('\\n');\n",
+      "}\n",
+      "writeFileSync(responsePath, JSON.stringify({ hypothesis: 'two-phase proposal ' + (calls + 1), objective: request.objective, commitMessage: 'chore(jev-advisor): soft-continue fixture ' + (calls + 1), patch }));\n",
+    ].join(""),
+  );
+  const fake = makeFakeGuards();
+  const result = await runLoop(
+    loopInput({
+      root,
+      repo,
+      deps: { runGuards: fake.runGuards, evaluateProbes: improvingProbes },
+      proposer: "cmd",
+      proposerCmd: `CALLS_FILE=${callsFile} node ${scriptPath} {request} {response}`,
+      liveApproved: true,
+      maxCycles: 1,
+      maxProposerCalls: 2,
+    }),
+  );
+  assert.equal(result.status, "ok");
+  assert.equal(result.stoppedReason, "max_cycles", "a non-applying patch must not stop the loop");
+  assert.equal(result.counters.invalidProposals, 1);
+  assert.equal(result.counters.cycles, 1);
+  assert.deepEqual(result.cycles.map((entry) => entry.status), ["proposal_failed", "ok"]);
+  assert.equal(result.cycles[0].reason, "patch_check_failed");
+  assert.match(result.cycles[0].detail ?? "", /patch failed/);
+  assert.match(result.cycles[0].reasons[0], /^patch_check_failed at .*: hunk context mismatch$/);
+  assert.equal(result.cycles[1].decision, "adopt");
+  const secondRequest = JSON.parse(readFileSync(join(result.loopRoot, "cycle-2.request.json"), "utf8"));
+  assert.equal(
+    secondRequest.priorAttempts.some((entry) => (entry.reasons ?? []).join(" ").includes("patch_check_failed")),
+    true,
+    "the non-applying proposal must feed the next request as a prior attempt",
+  );
+  assert.equal(git(repo, ["status", "--porcelain"]), "");
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("the loop CLI --install flag reaches the loop caps", () => {
   const { root, repo } = makeFixture();
   const runRoot = join(root, "cli-runroot");

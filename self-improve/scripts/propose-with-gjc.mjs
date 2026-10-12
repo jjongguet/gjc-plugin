@@ -24,28 +24,99 @@
  * and the loop records `cmd_proposer_failed`/`cmd_proposer_no_response`.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { matchesEditable } from "../lib/domain.mjs";
 
 export const DEFAULT_BIN = "gjc";
 export const DEFAULT_MODEL = "openai/gpt-4o";
 export const DEFAULT_TIMEOUT_MS = 300000;
+export const PER_FILE_CAP_BYTES = 64 * 1024;
+export const TOTAL_CAP_BYTES = 192 * 1024;
 
-export function buildProposerPrompt(request) {
-  return [
+/** Never embed these, even if a request lists a matching surface. */
+export const EXCLUDED_CONTENT_PREFIXES = Object.freeze(["self-improve/domains/", ".git/", "node_modules/"]);
+
+/**
+ * Read the files the request's editable surfaces match from the scratch cwd, so
+ * the model can author a patch with correct context lines and `@@` numbers
+ * instead of guessing blind. Bounded: per-file and total byte caps with explicit
+ * truncation notes; held-out fixtures and non-editable paths never enter.
+ */
+export function collectEditableContents({
+  cwd,
+  editableSurfaces = [],
+  perFileCap = PER_FILE_CAP_BYTES,
+  totalCap = TOTAL_CAP_BYTES,
+}) {
+  const files = [];
+  let totalBytes = 0;
+  let totalTruncated = false;
+  const excluded = (rel) => EXCLUDED_CONTENT_PREFIXES.some((prefix) => rel.startsWith(prefix));
+  const walk = (dir, rel) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true }).sort((left, right) => (left.name < right.name ? -1 : 1))) {
+      const next = rel === "" ? entry.name : `${rel}/${entry.name}`;
+      if (excluded(next) || excluded(`${next}/`)) continue;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(abs, next);
+        continue;
+      }
+      if (!entry.isFile() || !matchesEditable(next, editableSurfaces)) continue;
+      if (totalBytes >= totalCap) {
+        totalTruncated = true;
+        continue;
+      }
+      let text;
+      try {
+        text = readFileSync(abs, "utf8");
+      } catch {
+        continue;
+      }
+      const bytes = Buffer.byteLength(text, "utf8");
+      const allowed = Math.min(perFileCap, totalCap - totalBytes);
+      const truncated = bytes > allowed;
+      if (truncated) totalTruncated = true;
+      const slice = truncated ? text.slice(0, allowed) : text;
+      const stored = Buffer.byteLength(slice, "utf8");
+      files.push({ path: next, text: slice, bytes: stored, truncated, fullBytes: bytes });
+      totalBytes += stored;
+    }
+  };
+  walk(cwd, "");
+  return { files, totalBytes, truncated: totalTruncated };
+}
+
+export function buildProposerPrompt(request, { editableFiles = [] } = {}) {
+  const lines = [
     "You are the proposer for ONE bounded self-improvement cycle on a software repository.",
     "Reply with ONLY one JSON object, no prose and no code fences, of the shape:",
     '{"hypothesis": "why this edit moves the objective", "objective": "<the requested objective>",',
     ' "commitMessage": "conventional commit message", "patch": "<unified diff text>"}',
     "Rules:",
-    `- the patch must apply with \"git apply\" at commit ${request?.baseCommit ?? "HEAD"};`,
+    `- the patch must apply with "git apply" at commit ${request?.baseCommit ?? "HEAD"};`,
+    "- author a real unified diff: `diff --git a/<path> b/<path>` + `--- a/<path>` + `+++ b/<path>` + `@@ -<start>,<count> +<start>,<count> @@` hunks;",
+    "- copy context lines exactly from the file contents below (leading space, no edits, correct line numbers); never invent or paraphrase context;",
+    "- keep hunks minimal and anchored: a hunk that does not match the file byte-for-byte will be rejected before evaluation;",
     `- edit at most ${request?.budget?.maxFiles ?? "?"} files and ${request?.budget?.maxHunks ?? "?"} hunks;`,
     "- only declared editable surfaces, no tests/generated files/protected paths;",
     "- no network calls, no timers, no secrets or credentials in the patch;",
-    "- do not hardcode held-out fixture values; the hypothesis must be new (see priorAttempts);",
+    "- do not hardcode held-out fixture values; the hypothesis must be new (see priorAttempts, which lists earlier proposals including rejected and non-applying ones);",
     `- failing probe cases (if any): ${JSON.stringify(request?.failingCases ?? [])}.`,
-    "REQUEST:",
-    JSON.stringify(request, null, 2),
-  ].join("\n");
+  ];
+  if (editableFiles.length > 0) {
+    lines.push("", "Current file contents — author your patch against exactly these:");
+    for (const file of editableFiles) {
+      lines.push(
+        `--- ${file.path} (${file.bytes} bytes${file.truncated ? `, truncated from ${file.fullBytes}` : ""}) ---`,
+        file.text,
+      );
+    }
+  } else {
+    lines.push("", "(No editable file contents were readable in the scratch copy; keep hunks minimal and re-check context before answering.)");
+  }
+  lines.push("", "REQUEST:", JSON.stringify(request, null, 2));
+  return lines.join("\n");
 }
 
 /** First complete JSON object in the reply (string-aware brace scan, fences tolerated). */
@@ -134,11 +205,15 @@ export function main(argv = process.argv.slice(2), env = process.env, deps = {})
     return 2;
   }
   const timeoutMs = Number.parseInt(env.GJC_PROPOSER_TIMEOUT_MS ?? "", 10);
+  const editableContents = collectEditableContents({
+    cwd: deps.cwd ?? process.cwd(),
+    editableSurfaces: request.editableSurfaces ?? [],
+  });
   const command = buildTrialCommand({
     bin: env.GJC_PROPOSER_BIN?.trim() || DEFAULT_BIN,
     model: env.GJC_PROPOSER_MODEL?.trim() || DEFAULT_MODEL,
     extraArgs: env.GJC_PROPOSER_EXTRA_ARGS ?? "",
-    prompt: buildProposerPrompt(request),
+    prompt: buildProposerPrompt(request, { editableFiles: editableContents.files }),
   });
   const proc = spawn(command[0], command.slice(1), {
     encoding: "utf8",
@@ -158,7 +233,9 @@ export function main(argv = process.argv.slice(2), env = process.env, deps = {})
     return 1;
   }
   writeFileSync(responsePath, `${JSON.stringify(normalized.proposal, null, 2)}\n`);
-  process.stderr.write(`propose-with-gjc: wrote response (${JSON.stringify(normalized.proposal).length} bytes)\n`);
+  process.stderr.write(
+    `propose-with-gjc: wrote response (${JSON.stringify(normalized.proposal).length} bytes); embedded ${editableContents.files.length} editable file(s), ${editableContents.totalBytes} bytes${editableContents.truncated ? " (truncated)" : ""}\n`,
+  );
   return 0;
 }
 

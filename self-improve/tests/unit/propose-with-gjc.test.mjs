@@ -1,11 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  PER_FILE_CAP_BYTES,
+  TOTAL_CAP_BYTES,
   buildProposerPrompt,
   buildTrialCommand,
+  collectEditableContents,
   extractProposalJson,
   main,
   normalizeProposal,
@@ -110,6 +113,88 @@ test("main fails closed on missing args, bad request, failed spawn and unparsabl
       1,
     );
     assert.equal(existsSync(responseFile), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("buildProposerPrompt embeds the editable contents under a labeled section with authoring rules", () => {
+  const request = { objective: "probe.decision_accuracy", baseCommit: "abcdef0", budget: { maxFiles: 3, maxHunks: 12 } };
+  const prompt = buildProposerPrompt(request, {
+    editableFiles: [
+      { path: "verification-receipts/lib/a.ts", text: "export const a = 1;\n", bytes: 20, truncated: false, fullBytes: 20 },
+    ],
+  });
+  assert.match(prompt, /Current file contents — author your patch against exactly these:/);
+  assert.match(prompt, /--- verification-receipts\/lib\/a\.ts \(20 bytes\) ---/);
+  assert.match(prompt, /export const a = 1;/);
+  assert.match(prompt, /apply with "git apply"/);
+  assert.match(prompt, /copy context lines exactly/i);
+  const noFiles = buildProposerPrompt(request, { editableFiles: [] });
+  assert.match(noFiles, /No editable file contents were readable/);
+  const truncated = buildProposerPrompt(request, {
+    editableFiles: [{ path: "verification-receipts/lib/big.ts", text: "x", bytes: 1, truncated: true, fullBytes: 70000 }],
+  });
+  assert.match(truncated, /\(1 bytes, truncated from 70000\)/);
+});
+
+test("collectEditableContents embeds only editable files with per-file and total caps, never held-out paths", () => {
+  const root = tempRoot();
+  try {
+    mkdirSync(join(root, "verification-receipts", "lib"), { recursive: true });
+    mkdirSync(join(root, "self-improve", "domains", "gjc-plugin", "heldout"), { recursive: true });
+    writeFileSync(join(root, "verification-receipts", "lib", "a.ts"), "export const a = 1;\n");
+    writeFileSync(join(root, "verification-receipts", "lib", "big.ts"), "x".repeat(70000));
+    writeFileSync(join(root, "self-improve", "domains", "gjc-plugin", "heldout", "fixtures.json"), '{"sentinel":"heldout-secret"}\n');
+    writeFileSync(join(root, "package.json"), "{}\n");
+    const collected = collectEditableContents({
+      cwd: root,
+      editableSurfaces: ["verification-receipts/lib/**", "self-improve/**"],
+    });
+    assert.deepEqual(
+      collected.files.map((file) => file.path),
+      ["verification-receipts/lib/a.ts", "verification-receipts/lib/big.ts"],
+    );
+    const big = collected.files.find((file) => file.path.endsWith("big.ts"));
+    assert.equal(big.truncated, true);
+    assert.equal(big.bytes, PER_FILE_CAP_BYTES);
+    assert.equal(collected.truncated, true);
+    assert.equal(JSON.stringify(collected).includes("heldout-secret"), false, "held-out content must never be embedded");
+
+    for (let index = 0; index < 5; index += 1) {
+      writeFileSync(join(root, "verification-receipts", "lib", `chunk-${index}.ts`), "y".repeat(60 * 1024));
+    }
+    const capped = collectEditableContents({ cwd: root, editableSurfaces: ["verification-receipts/lib/**"] });
+    assert.equal(capped.totalBytes <= TOTAL_CAP_BYTES, true);
+    assert.equal(capped.truncated, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("main embeds the scratch editable contents into the prompt it sends to gjc", () => {
+  const root = tempRoot();
+  try {
+    mkdirSync(join(root, "verification-receipts", "lib"), { recursive: true });
+    writeFileSync(join(root, "verification-receipts", "lib", "a.ts"), "export const a = 1;\n");
+    const requestFile = join(root, "request.json");
+    const responseFile = join(root, "response.json");
+    writeFileSync(
+      requestFile,
+      JSON.stringify({ objective: "probe.decision_accuracy", baseCommit: "abcdef0", editableSurfaces: ["verification-receipts/lib/**"] }),
+    );
+    const seen = {};
+    const status = main([requestFile, responseFile], {}, {
+      cwd: root,
+      spawn: (bin, args) => {
+        seen.args = args;
+        return { status: 0, stdout: '{"hypothesis":"h","commitMessage":"m","patch":"p"}', stderr: "" };
+      },
+    });
+    assert.equal(status, 0);
+    const prompt = seen.args.at(-1);
+    assert.match(prompt, /Current file contents — author your patch against exactly these:/);
+    assert.match(prompt, /export const a = 1;/);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

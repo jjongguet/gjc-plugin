@@ -36,7 +36,7 @@ function makeFixture() {
   writeFileSync(join(repo, "package.json"), '{"name":"fixture","private":true,"type":"module"}\n');
   writeFileSync(join(repo, "jev-advisor", "lib", "decision.ts"), "export const value = 1;\n");
   writeFileSync(join(repo, "verification-receipts", "lib", "extra.ts"), "export const extra = 1;\n");
-  writeFileSync(join(repo, "self-improve", "domains", "gjc-plugin", "heldout", "fixtures.json"), '{"cases":{}}\n');
+  writeFileSync(join(repo, "self-improve", "domains", "gjc-plugin", "heldout", "fixtures.json"), '{"cases":{"sentinel":"heldout-content-sentinel"}}\n');
   writeFileSync(join(repo, "self-improve", "ledger.jsonl"), "");
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.name", "fixture"]);
@@ -121,6 +121,11 @@ test("the live-proposer helper drives a cycle through a fake gjc shim (no model 
   assert.match(prompt, /REQUEST:/);
   assert.ok(prompt.includes(request.objective), "prompt must carry the requested objective");
   assert.ok(prompt.includes(request.baseCommit), "prompt must carry the base commit constraint");
+  // the helper embeds the scratch's editable files so the proposer is not blind
+  assert.match(prompt, /Current file contents — author your patch against exactly these:/);
+  assert.match(prompt, /--- verification-receipts\/lib\/extra\.ts/);
+  assert.ok(prompt.includes("export const extra = 1;"), "editable file contents must reach the prompt");
+  assert.equal(prompt.includes("heldout-content-sentinel"), false, "held-out content must never be embedded");
   assert.equal(prompt.includes(sentinel), false, "env values must not reach the model prompt");
 
   const scratchDirs = readdirSync(result.loopRoot).filter((name) => name.startsWith("scratch-cycle-"));
