@@ -83,8 +83,12 @@ setup steps before every investigation.
 
 1. `rea_readiness` (from the `rea` gjc-plugin) gives the offline report:
    runtimes and REA engine fit, the pinned CLI, skill state and remediation.
-2. Probe the real installation with `npx -y rea-agents@6.4.0 doctor`; list
-   configured engines with `providers` and `capabilities`.
+2. Probe the installation with `npx -y rea-agents@6.4.0 --version` (the
+   pinned fetch takes ~1s once cached) and list configured engines with
+   `providers` / `capabilities`. `doctor` audits REA's own MCP registrations
+   across agent clients and emits a large report; in CLI-first mode its
+   registration-drift findings are expected — do not run `rea setup` to
+   satisfy it unless the operator wants those clients registered.
 3. If `npx`/`bunx` is missing or Node falls outside ^22.19 || ^24.11 || >=26,
    fix the runtime before retrying.
 4. Deep native analysis additionally needs a user-provided engine (Hopper on
