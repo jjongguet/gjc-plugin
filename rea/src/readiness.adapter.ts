@@ -18,7 +18,7 @@ export default function reaReadiness(pi: {
 		name: "rea_readiness",
 		label: "REA Readiness",
 		description:
-			"Read-only offline readiness report for the REA integration (pinned rea-agents 6.4.0): Node/npx or Bun/bunx availability and REA engine version fit, GJC MCP registration state in user and project scope, loose-skill installation state, and remediation. Never installs, registers, fetches or runs REA, and never contacts the network.",
+			"Read-only offline readiness report for the REA integration (pinned rea-agents 6.4.0): Node/npx or Bun/bunx availability and REA engine version fit, the pinned CLI invocation, optional GJC MCP registration state in user and project scope, loose-skill installation state, and remediation. Never installs, registers, fetches or runs REA, and never contacts the network.",
 		parameters: pi.typebox.Type.Object({}),
 		async execute(toolCallId: string, _params: Record<string, never>) {
 			const finish = async (text: string, isError: boolean, execution?: { status: string; reason: string }) => {
@@ -43,6 +43,7 @@ export default function reaReadiness(pi: {
 				const lines = [
 					`rea_readiness: ${report.status}`,
 					`pinned rea-agents: ${report.pinnedReaAgentsVersion}; fetch channel: ${report.fetchChannel}`,
+					`cli: ${report.cliCommand} <command>`,
 					`node: ${report.runtimes.node.status}${report.runtimes.node.line ? ` ${report.runtimes.node.line}` : ""}${
 						report.runtimes.node.satisfies === null ? "" : report.runtimes.node.satisfies ? " (satisfies)" : " (unsupported)"
 					}`,

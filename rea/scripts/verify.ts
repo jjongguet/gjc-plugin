@@ -86,6 +86,7 @@ async function runSuite(root) {
 		assert.deepEqual(
 			exported,
 			[
+				"REA_CLI_COMMAND",
 				"REA_MCP_ADD_COMMAND",
 				"REA_PINNED_VERSION",
 				"REA_PROBE_TIMEOUT_MS",
@@ -179,13 +180,26 @@ async function runSuite(root) {
 		assert.deepEqual(report.remediation, []);
 	});
 
+	await check("an unregistered machine with runtimes and the installed skill reports ready", () => {
+		rmSync(path.join(home, ".gjc"), { recursive: true, force: true });
+		mkdirSync(path.dirname(skillFile), { recursive: true });
+		writeFileSync(skillFile, "# rea probe skill\n");
+		const report = core.readinessReport({ cwd, home, probe: probeOf(fullMachine) });
+		assert.equal(report.status, "ready");
+		assert.equal(report.fetchChannel, "npx");
+		assert.equal(report.cliCommand, core.REA_CLI_COMMAND);
+		assert.ok(report.registrations.every((registration) => registration.status === "missing"));
+		assert.deepEqual(report.remediation, []);
+	});
+
 	await check("a bare machine reports not_ready with the exact remediation commands", () => {
 		rmSync(path.join(home, ".gjc"), { recursive: true, force: true });
 		const report = core.readinessReport({ cwd, home, probe: probeOf({}) });
 		assert.equal(report.status, "not_ready");
 		assert.equal(report.fetchChannel, "none");
 		assert.equal(report.runtimes.node.satisfies, null);
-		assert.ok(report.remediation.some((line) => line.includes(core.REA_MCP_ADD_COMMAND)));
+		assert.equal(report.cliCommand, core.REA_CLI_COMMAND);
+		assert.ok(!report.remediation.some((line) => line.includes("gjc mcp add")));
 		assert.ok(report.remediation.some((line) => line.includes("Node.js")));
 		assert.ok(report.remediation.some((line) => line.includes("skills/rea/SKILL.md")));
 	});
@@ -202,8 +216,9 @@ async function runSuite(root) {
 		assert.equal(report.fetchChannel, "bunx");
 		assert.equal(report.status, "not_ready");
 		assert.equal(report.runtimes.node.satisfies, false);
+		assert.ok(report.registrations.some((registration) => registration.status === "disabled"));
 		assert.ok(report.remediation.some((line) => line.includes("does not satisfy")));
-		assert.ok(report.remediation.some((line) => line.includes("disabled")));
+		assert.ok(!report.remediation.some((line) => line.includes("disabled")));
 		assert.ok(!report.remediation.some((line) => line.includes("Install the GJC workflow skill")));
 	});
 
@@ -226,6 +241,7 @@ async function runSuite(root) {
 		const reportLine = JSON.parse(lines[lines.length - 2]);
 		assert.equal(journalLine.journalStorage.persisted, true, JSON.stringify(journalLine));
 		assert.equal(reportLine.report.pinnedReaAgentsVersion, "6.4.0");
+		assert.equal(reportLine.report.cliCommand, core.REA_CLI_COMMAND);
 		const journal = path.join(root, "home", ".gjc-plugin", "rea", "journal", "v1");
 		assert.ok(existsSync(path.join(journal, "inventory.json")), journal);
 		const inventory = JSON.parse(readFileSync(path.join(journal, "inventory.json"), "utf8"));
@@ -252,7 +268,8 @@ async function runSuite(root) {
 	await check("skill payload matches the pinned version and frontmatter contract", () => {
 		const skill = readFileSync(path.join(plugin, "skills", "rea", "SKILL.md"), "utf8");
 		assert.match(skill, /^---\r?\nname: rea\r?\ndescription: [^\n]+\r?\n---/);
-		assert.ok(skill.includes(core.REA_MCP_ADD_COMMAND), "skill must carry the exact pinned registration command");
+		assert.ok(skill.includes(core.REA_CLI_COMMAND), "skill must carry the pinned CLI invocation");
+		assert.ok(skill.includes(core.REA_MCP_ADD_COMMAND), "skill must carry the exact optional registration command");
 		assert.ok(skill.includes(core.REA_PINNED_VERSION), "skill must reference the pinned rea-agents version");
 	});
 

@@ -607,10 +607,11 @@ export async function readPluginOutcomeSnapshot(plugin: ResultsPlugin, deps: Res
 }
 // rea plugin core — an offline, read-only readiness report for the REA
 // integration. The pinned rea-agents version lives here; this module never
-// installs, registers, downloads or executes REA itself. The MCP server is
-// registered by the operator (`gjc mcp add`) because GJC 0.18.5 refuses
-// plugin-bundle stdio MCP servers off Linux and the bundle grammar cannot
-// express a pinned `npx` command.
+// installs, registers, downloads or executes REA itself. The primary channel
+// is the pinned CLI (REA_CLI_COMMAND); an MCP registration is optional for
+// stateful MCP sessions and is reported, never required or repaired — GJC
+// 0.18.5 refuses plugin-bundle stdio MCP servers off Linux and the bundle
+// grammar cannot express a pinned `npx` command.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
@@ -619,6 +620,7 @@ import path from "node:path";
 export const REA_PINNED_VERSION = "6.4.0";
 export const REA_SERVER_NAME = "rea";
 export const REA_PROBE_TIMEOUT_MS = 5000;
+export const REA_CLI_COMMAND = `npx -y rea-agents@${REA_PINNED_VERSION}`;
 export const REA_MCP_ADD_COMMAND = `gjc mcp add ${REA_SERVER_NAME} --timeout 60000 -- npx -y rea-agents@${REA_PINNED_VERSION} mcp`;
 export const REA_SKILL_INSTALL_COMMAND =
 	"mkdir -p ~/.gjc/agent/skills/rea && cp rea/skills/rea/SKILL.md ~/.gjc/agent/skills/rea/SKILL.md";
@@ -739,6 +741,7 @@ export type ReadinessReport = {
 	runtimes: { node: RuntimeReport; npx: RuntimeReport; bun: RuntimeReport; bunx: RuntimeReport };
 	registrations: RegistrationReport[];
 	skill: { path: string; status: "installed" | "missing" };
+	cliCommand: string;
 	mcpAddCommand: string;
 	skillInstallCommand: string;
 	remediation: string[];
@@ -790,32 +793,14 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 			`Node ${runtimes.node.line ?? "?"} does not satisfy the REA engine range (^22.19 || ^24.11 || >=26); upgrade Node.`,
 		);
 	}
-	const registered = registrations.some(registration => registration.status === "registered");
-	if (!registered) {
-		remediation.push(
-			`Register the REA MCP server (user scope): ${REA_MCP_ADD_COMMAND} — then restart the GJC session.`,
-		);
-	}
 	for (const registration of registrations) {
 		if (registration.status === "registered" && registration.timeoutDeclared === false) {
 			remediation.push(
 				`Server "${REA_SERVER_NAME}" in ${registration.path} declares no positive timeout; ordinary sessions wait only ~250ms for startup. Re-add with --timeout 60000 so the npx-backed server can connect.`,
 			);
 		}
-		if (registration.status === "disabled") {
-			remediation.push(
-				`Server "${REA_SERVER_NAME}" is disabled in ${registration.path} (enabled:false or the disabledServers list); re-enable it or re-add with --force.`,
-			);
-		}
-		if (registration.status === "autoload_off") {
-			remediation.push(
-				`Server "${REA_SERVER_NAME}" has autoload:false in ${registration.path}; ordinary sessions will not load its tools at startup.`,
-			);
-		}
 		if (registration.status === "unreadable") {
-			remediation.push(
-				`MCP config ${registration.path} is unreadable or malformed; fix or remove it before re-registering REA.`,
-			);
+			remediation.push(`MCP config ${registration.path} is unreadable or malformed; fix or remove it.`);
 		}
 	}
 	if (skill.status === "missing") {
@@ -824,19 +809,21 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 		);
 	}
 
+	const nodeUnsupported = runtimes.node.satisfies === false;
 	return {
 		pinnedReaAgentsVersion: REA_PINNED_VERSION,
-		status: fetchChannel !== "none" && registered ? "ready" : "not_ready",
+		status: fetchChannel !== "none" && !nodeUnsupported ? "ready" : "not_ready",
 		fetchChannel,
 		runtimes,
 		registrations,
 		skill,
+		cliCommand: REA_CLI_COMMAND,
 		mcpAddCommand: REA_MCP_ADD_COMMAND,
 		skillInstallCommand: REA_SKILL_INSTALL_COMMAND,
 		remediation,
 		notes: [
-			"Offline readiness only: no network, no install/registration, and no proof that the current session connects the server.",
-			"The authoritative capability list is the connected rea MCP server's actual tools/list; deep native analysis additionally needs a user-provided Hopper, Ghidra or IDA.",
+			"Offline readiness only: no network, no install/registration, and no proof that the pinned package is cached or that any command runs.",
+			`Primary channel: the pinned CLI (${REA_CLI_COMMAND} <command>). An MCP registration is optional and only relevant to sessions that opt into the stateful MCP tools; the authoritative capability list is the pinned package's own --llms manifest. Deep native analysis additionally needs a user-provided Hopper, Ghidra or IDA.`,
 		],
 	};
 }
@@ -861,7 +848,7 @@ export default function reaReadiness(pi: {
 		name: "rea_readiness",
 		label: "REA Readiness",
 		description:
-			"Read-only offline readiness report for the REA integration (pinned rea-agents 6.4.0): Node/npx or Bun/bunx availability and REA engine version fit, GJC MCP registration state in user and project scope, loose-skill installation state, and remediation. Never installs, registers, fetches or runs REA, and never contacts the network.",
+			"Read-only offline readiness report for the REA integration (pinned rea-agents 6.4.0): Node/npx or Bun/bunx availability and REA engine version fit, the pinned CLI invocation, optional GJC MCP registration state in user and project scope, loose-skill installation state, and remediation. Never installs, registers, fetches or runs REA, and never contacts the network.",
 		parameters: pi.typebox.Type.Object({}),
 		async execute(toolCallId: string, _params: Record<string, never>) {
 			const finish = async (text: string, isError: boolean, execution?: { status: string; reason: string }) => {
@@ -886,6 +873,7 @@ export default function reaReadiness(pi: {
 				const lines = [
 					`rea_readiness: ${report.status}`,
 					`pinned rea-agents: ${report.pinnedReaAgentsVersion}; fetch channel: ${report.fetchChannel}`,
+					`cli: ${report.cliCommand} <command>`,
 					`node: ${report.runtimes.node.status}${report.runtimes.node.line ? ` ${report.runtimes.node.line}` : ""}${
 						report.runtimes.node.satisfies === null ? "" : report.runtimes.node.satisfies ? " (satisfies)" : " (unsupported)"
 					}`,
