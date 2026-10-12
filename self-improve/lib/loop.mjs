@@ -23,6 +23,7 @@ import {
   buildProposerRequest,
   createProposerScratch,
   invokeCmdProposer,
+  preferredObjectiveFromFailures,
   runStubProposer,
   scanProbeFailures,
   validateAgentProposal,
@@ -77,9 +78,16 @@ function appendLog(logPath, entry) {
 /**
  * Admissible next objectives: stalled objectives are blocked (forced
  * exploration onto unexplored probes); otherwise the least-attempted objective
- * first, adapter order as the tie-break. Pure function of ledger + adapter.
+ * first, adapter order as the tie-break.
+ *
+ * Selection rule for the automatic loop: when the probe scan reports failing
+ * cases, the objective that owns those cases leads the list, because `delta` is
+ * computed on PRIMARY=decision_accuracy only, so a fully saturated objective can
+ * never adopt. Stall and duplicate rules still win — a stalled preferred
+ * objective is dropped and the regularization order (forced exploration, then
+ * least-attempted) applies.
  */
-export function computeAdmissibleActions({ ledgerPath, adapter, k = 3 }) {
+export function computeAdmissibleActions({ ledgerPath, adapter, k = 3, preferredObjective = null }) {
   const state = historyState(ledgerPath, { k });
   const stalled = new Set(state.stalled);
   const attempts = new Map(state.objectives.map((entry) => [entry.objective, entry.attempts]));
@@ -91,8 +99,16 @@ export function computeAdmissibleActions({ ledgerPath, adapter, k = 3 }) {
   const pool = forced.length > 0 ? forced : live;
   const actions = [...pool]
     .sort((left, right) => (attempts.get(left) ?? 0) - (attempts.get(right) ?? 0) || order.get(left) - order.get(right))
-    .map((objective) => ({ objective, forcedExploration: stalled.size > 0 }));
-  return { actions, stalled: [...stalled], unexplored, priorAttempts: state.lastRejects };
+    .map((objective) => ({ objective, reason: "regularization", forcedExploration: stalled.size > 0 }));
+  const preferredAvailable =
+    preferredObjective !== null && !stalled.has(preferredObjective) && actions.some((action) => action.objective === preferredObjective);
+  const ordered = preferredAvailable
+    ? [
+        { objective: preferredObjective, reason: "failing_cases", forcedExploration: stalled.size > 0 },
+        ...actions.filter((action) => action.objective !== preferredObjective),
+      ]
+    : actions;
+  return { actions: ordered, stalled: [...stalled], unexplored, priorAttempts: state.lastRejects };
 }
 
 function classifyGuardFailure({ result, runRoot }) {
@@ -223,18 +239,20 @@ export async function runLoop(input) {
     }
     const accepted = campaignAcceptedCount(ledgerPath, campaignId);
     const rung = rungFor(accepted, adapter.budget);
+    const scan = scanFailures({ repoRoot, adapter, deps });
+    state.probeScan = { ok: scan.ok, reason: scan.reason ?? null, count: scan.failures?.length ?? 0 };
+    if (!scan.ok) log({ type: "probe_scan", ok: false, reason: scan.reason });
+    const preferredObjective = preferredObjectiveFromFailures({ failures: scan.failures ?? [], adapter });
     const { actions, stalled, unexplored } = computeAdmissibleActions({
       ledgerPath,
       adapter,
       k: adapter.stallK ?? 3,
+      preferredObjective,
     });
     if (actions.length === 0) {
       stoppedReason = stalled.length > 0 ? "all_objectives_stalled" : "no_admissible_actions";
       break;
     }
-    const scan = scanFailures({ repoRoot, adapter, deps });
-    state.probeScan = { ok: scan.ok, reason: scan.reason ?? null, count: scan.failures?.length ?? 0 };
-    if (!scan.ok) log({ type: "probe_scan", ok: false, reason: scan.reason });
     const batch = actions.slice(0, batchSize);
     const runnable = [];
     for (const action of batch) {
@@ -316,7 +334,7 @@ export async function runLoop(input) {
         }
         continue;
       }
-      runnable.push({ cycleIndex, objective: action.objective, proposal: validation.proposal, outcome });
+      runnable.push({ cycleIndex, objective: action.objective, reason: action.reason ?? null, proposal: validation.proposal, outcome });
     }
     if (stoppedReason !== null) break;
     if (runnable.length === 0) {
@@ -365,6 +383,7 @@ export async function runLoop(input) {
       const entry = {
         cycleIndex: item.cycleIndex,
         objective: item.objective,
+        selectionReason: item.reason ?? null,
         hypothesis: item.proposal.hypothesis,
         status: result.status,
         cycleId: result.cycleId ?? null,

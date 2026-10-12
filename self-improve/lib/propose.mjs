@@ -25,6 +25,7 @@ export const PROPOSER_MODES = Object.freeze(["stub", "cmd"]);
 export const PROPOSER_REQUEST_SCHEMA = "gjc.self-improve.proposer-request.v1";
 export const CMD_PROPOSER_TIMEOUT_MS = 300000;
 export const MAX_FAILING_CASES = 24;
+export const MAX_SUMMARY_CHARS = 240;
 export const MAX_PRIOR_ATTEMPTS = 5;
 
 /** Held-out fixtures must never reach the proposer's scratch copy. */
@@ -68,17 +69,53 @@ export function probesFixturePath(repoRoot, adapter) {
   return path.join(repoRoot, "self-improve", "domains", adapter.id, "probes", "fixtures.json");
 }
 
-/** Flatten the probe runner's per-case `failures` output into short labels. */
+/**
+ * Flatten the probe runner's per-case misses into proposer-facing entries
+ * `{metric, label, summary}`. The runner's `failureDetails` supplies a short
+ * documented-gap summary per case; `failures` (labels) is the fallback. The
+ * probe corpus stays excluded from the propose-time scratch, so these entries
+ * are the proposer's only view of what is failing — summaries are bounded and
+ * never carry held-out material.
+ */
 export function failureLabelsFromProbeResult(probeResult) {
+  const details = probeResult?.failureDetails?.baseline;
   const failures = probeResult?.failures?.baseline;
-  if (!isPlainObject(failures)) return [];
-  const labels = [];
-  for (const metric of Object.keys(failures).sort()) {
-    for (const label of failures[metric] ?? []) {
-      if (typeof label === "string" && label.length > 0) labels.push({ metric, label });
+  const entries = [];
+  if (isPlainObject(details)) {
+    for (const metric of Object.keys(details).sort()) {
+      for (const entry of details[metric] ?? []) {
+        if (!isPlainObject(entry) || typeof entry.label !== "string" || entry.label.length === 0) continue;
+        const summary = typeof entry.summary === "string" && entry.summary.length > 0 ? entry.summary.slice(0, MAX_SUMMARY_CHARS) : null;
+        entries.push({ metric, label: entry.label, ...(summary ? { summary } : {}) });
+      }
+    }
+  } else if (isPlainObject(failures)) {
+    for (const metric of Object.keys(failures).sort()) {
+      for (const label of failures[metric] ?? []) {
+        if (typeof label === "string" && label.length > 0) entries.push({ metric, label });
+      }
     }
   }
-  return labels.slice(0, MAX_FAILING_CASES);
+  return entries.slice(0, MAX_FAILING_CASES);
+}
+
+/**
+ * Objective the failing cases belong to (`probe.<metric>`), most-failing metric
+ * first, restricted to the adapter's declared objectives. Null when nothing is
+ * failing or no failing metric has a declared objective.
+ */
+export function preferredObjectiveFromFailures({ failures = [], adapter }) {
+  const counts = new Map();
+  for (const entry of failures) {
+    if (!entry || typeof entry.metric !== "string") continue;
+    counts.set(entry.metric, (counts.get(entry.metric) ?? 0) + 1);
+  }
+  const order = new Map((adapter?.objectives ?? []).map((objective, index) => [objective, index]));
+  const candidates = [...counts.entries()]
+    .map(([metric, count]) => ({ metric, objective: `probe.${metric}`, count }))
+    .filter((entry) => order.has(entry.objective))
+    .sort((left, right) => right.count - left.count || order.get(left.objective) - order.get(right.objective));
+  return candidates.length > 0 ? candidates[0].objective : null;
 }
 
 /**

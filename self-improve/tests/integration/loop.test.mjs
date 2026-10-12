@@ -7,7 +7,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import DOMAIN from "../../domains/gjc-plugin/adapter.mjs";
 import { runLoop } from "../../lib/loop.mjs";
-import { readLedger } from "../../lib/ledger.mjs";
+import { appendRow, readLedger } from "../../lib/ledger.mjs";
+import { sha256Hex } from "../../lib/types.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -72,6 +73,26 @@ function makeFakeGuards({ failBuild = false, flakeText = null } = {}) {
   return { runGuards, state };
 }
 
+function seedCycleRow({ cycleId, objective, hypothesis, decision }) {
+  return {
+    kind: "cycle",
+    cycleId,
+    domain: "gjc-plugin",
+    campaignId: "default",
+    baseCommit: "abcdef0",
+    budgetRung: 0,
+    proposal: { source: "agent", patchSha256: "a".repeat(64), files: ["jev-advisor/lib/decision.ts"], hunks: 1 },
+    hypothesisHash: sha256Hex(hypothesis),
+    objective,
+    scores: { baseline: {}, candidate: {}, delta: 0, floor: 0.01 },
+    cost: { wallMs: 1, bytes: 1, tokens: null },
+    guards: [{ id: "build", status: "pass" }],
+    critic: { verdict: "pass", rules: [] },
+    verdict: { decision, reasons: ["floor_not_met"] },
+    createdAt: "2026-10-13T00:00:00.000Z",
+  };
+}
+
 function loopInput({ root, repo, deps, ...overrides }) {
   return {
     repoRoot: repo,
@@ -86,7 +107,7 @@ function loopInput({ root, repo, deps, ...overrides }) {
     deps: {
       runGuards: deps.runGuards,
       evaluateProbes: deps.evaluateProbes,
-      scanProbeFailures: () => ({ ok: true, reason: null, failures: [] }),
+      scanProbeFailures: deps.scanProbeFailures ?? (() => ({ ok: true, reason: null, failures: [] })),
       ...(deps.runInstall ? { runInstall: deps.runInstall } : {}),
       ...(deps.proposerEnv ? { proposerEnv: deps.proposerEnv } : {}),
       ...(deps.now ? { now: deps.now } : {}),
@@ -324,6 +345,65 @@ test("--install flows from the loop into the adopted cycle row", async () => {
   const state = JSON.parse(readFileSync(result.statePath, "utf8"));
   assert.equal(state.caps.install, true);
   rmSync(root, { recursive: true, force: true });
+});
+
+test("objective selection prefers the metric that owns the failing probe cases", async () => {
+  const seeded = (repo) => {
+    const ledgerPath = join(repo, "self-improve", "ledger.jsonl");
+    for (let index = 1; index <= 2; index += 1) {
+      appendRow(
+        ledgerPath,
+        seedCycleRow({ cycleId: `cyc-seed-${index}`, objective: "probe.decision_accuracy", hypothesis: `seed ${index}`, decision: "reject" }),
+      );
+    }
+  };
+  const { root, repo } = makeFixture();
+  seeded(repo);
+  const fake = makeFakeGuards();
+  const failing = await runLoop(
+    loopInput({
+      root,
+      repo,
+      deps: {
+        runGuards: fake.runGuards,
+        evaluateProbes: flatProbes,
+        scanProbeFailures: () => ({
+          ok: true,
+          reason: null,
+          failures: [
+            { metric: "decision_accuracy", label: "decision_accuracy#10", summary: "decision_accuracy#10: documented tolerance boundary" },
+          ],
+        }),
+      },
+      maxCycles: 1,
+      maxProposerCalls: 1,
+    }),
+  );
+  // regularization alone would pick probe.extract_coverage here (0 attempts); the failing-case metric leads instead
+  assert.equal(failing.cycles[0].objective, "probe.decision_accuracy");
+  assert.equal(failing.cycles[0].selectionReason, "failing_cases");
+  const request = JSON.parse(readFileSync(join(failing.loopRoot, "cycle-1.request.json"), "utf8"));
+  assert.equal(request.objective, "probe.decision_accuracy");
+  assert.deepEqual(request.failingCases, [
+    { metric: "decision_accuracy", label: "decision_accuracy#10", summary: "decision_accuracy#10: documented tolerance boundary" },
+  ]);
+  rmSync(root, { recursive: true, force: true });
+
+  const { root: controlRoot, repo: controlRepo } = makeFixture();
+  seeded(controlRepo);
+  const controlFake = makeFakeGuards();
+  const control = await runLoop(
+    loopInput({
+      root: controlRoot,
+      repo: controlRepo,
+      deps: { runGuards: controlFake.runGuards, evaluateProbes: flatProbes },
+      maxCycles: 1,
+      maxProposerCalls: 1,
+    }),
+  );
+  assert.equal(control.cycles[0].objective, "probe.extract_coverage");
+  assert.equal(control.cycles[0].selectionReason, "regularization");
+  rmSync(controlRoot, { recursive: true, force: true });
 });
 
 test("the loop CLI --install flag reaches the loop caps", () => {

@@ -8,6 +8,7 @@ import DOMAIN from "../../domains/gjc-plugin/adapter.mjs";
 import { rungFor } from "../../lib/budget.mjs";
 import { appendRow } from "../../lib/ledger.mjs";
 import {
+  MAX_SUMMARY_CHARS,
   buildAppendPatch,
   buildProposerRequest,
   collectHeldoutValues,
@@ -15,6 +16,7 @@ import {
   failureLabelsFromProbeResult,
   invokeCmdProposer,
   listScratchExclusionSurvivors,
+  preferredObjectiveFromFailures,
   proposerEnv,
   runStubProposer,
   scanHeldoutVerbatim,
@@ -109,6 +111,41 @@ test("failureLabelsFromProbeResult flattens baseline per-case labels determinist
     { metric: "extract_coverage", label: "extract_coverage#1" },
   ]);
   assert.deepEqual(failureLabelsFromProbeResult({}), []);
+});
+
+test("failureLabelsFromProbeResult carries runner summaries and bounds them", () => {
+  const result = {
+    failures: { baseline: { decision_accuracy: ["decision_accuracy#10"] } },
+    failureDetails: {
+      baseline: {
+        decision_accuracy: [
+          { label: "decision_accuracy#10", summary: "decision_accuracy#10: decimal sum sits exactly on the documented tolerance" },
+          { label: "decision_accuracy#11", summary: "x".repeat(1000) },
+        ],
+      },
+    },
+  };
+  const entries = failureLabelsFromProbeResult(result);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].summary, "decision_accuracy#10: decimal sum sits exactly on the documented tolerance");
+  assert.equal(entries[1].summary.length, MAX_SUMMARY_CHARS);
+  assert.equal(preferredObjectiveFromFailures({ failures: entries, adapter: DOMAIN }), "probe.decision_accuracy");
+  // runner without failureDetails (older shape) still works
+  assert.deepEqual(failureLabelsFromProbeResult({ failures: result.failures }), [
+    { metric: "decision_accuracy", label: "decision_accuracy#10" },
+  ]);
+});
+
+test("preferredObjectiveFromFailures picks the most-failing declared metric", () => {
+  const failures = [
+    { metric: "decision_accuracy", label: "decision_accuracy#10" },
+    { metric: "decision_accuracy", label: "decision_accuracy#11" },
+    { metric: "extract_coverage", label: "extract_coverage#0" },
+  ];
+  assert.equal(preferredObjectiveFromFailures({ failures, adapter: DOMAIN }), "probe.decision_accuracy");
+  assert.equal(preferredObjectiveFromFailures({ failures: [], adapter: DOMAIN }), null);
+  assert.equal(preferredObjectiveFromFailures({ failures: [{ metric: "not_a_metric", label: "not_a_metric#0" }], adapter: DOMAIN }), null);
+  assert.equal(preferredObjectiveFromFailures({ failures, adapter: { objectives: [] } }), null);
 });
 
 test("scanProbeFailures reports an empty list with a reason on runner failure", () => {

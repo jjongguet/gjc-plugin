@@ -61,10 +61,38 @@ async function loadDecisionModule(dir: string, label: string): Promise<any> {
 	}
 }
 
+const SUMMARY_MAX = 240;
+
+/**
+ * Short proposer-facing descriptor for one failing case. Derived from the case's
+ * own `provenance` (note, then statement) when present; the fallback is a stable
+ * index-only descriptor. Never includes held-out material: the probe corpus is
+ * visible to the evaluator, not to the proposer, and summaries carry only the
+ * documented-statement text the case was authored from.
+ */
+function caseSummary(item: any, metric: string, index: number): string {
+	const provenance = item && typeof item === "object" ? item.provenance : undefined;
+	const note = provenance && typeof provenance === "object" ? provenance.note : undefined;
+	const statement = provenance && typeof provenance === "object" ? provenance.statement : undefined;
+	const detail =
+		typeof note === "string" && note.trim() !== ""
+			? note.trim()
+			: typeof statement === "string" && statement.trim() !== ""
+				? statement.trim()
+				: "documented expectation not met (no provenance on this case)";
+	return `${metric}#${index}: ${detail}`.slice(0, SUMMARY_MAX);
+}
+
 /** extract_coverage: fraction of extract cases whose extraction outcome matches expectations. */
-function scoreExtract(mod: any, cases: any[]): { score: number; count: number; failures: string[] } {
+function scoreExtract(mod: any, cases: any[]): { score: number; count: number; failures: string[]; failureDetails: any[] } {
 	let hits = 0;
 	const failures: string[] = [];
+	const failureDetails: { label: string; summary: string }[] = [];
+	const miss = (index: number) => {
+		const label = `extract_coverage#${index}`;
+		failures.push(label);
+		failureDetails.push({ label, summary: caseSummary(cases[index], "extract_coverage", index) });
+	};
 	for (const [index, item] of cases.entries()) {
 		try {
 			const extraction = mod.extractTasks(item.input, item.maxPromptChars);
@@ -76,19 +104,25 @@ function scoreExtract(mod: any, cases: any[]): { score: number; count: number; f
 				JSON.stringify(rejectedIndexes) === JSON.stringify(expected.rejectedIndexes) &&
 				extraction.omittedCount === expected.omittedCount;
 			if (ok) hits++;
-			else failures.push(`extract_coverage#${index}`);
+			else miss(index);
 		} catch {
 			// unexpected failure counts as a miss, never crashes the runner
-			failures.push(`extract_coverage#${index}`);
+			miss(index);
 		}
 	}
-	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures };
+	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures, failureDetails };
 }
 
 /** decision_accuracy: fraction of decision cases whose accept/reject outcome matches expectations. */
-function scoreDecision(mod: any, cases: any[]): { score: number; count: number; failures: string[] } {
+function scoreDecision(mod: any, cases: any[]): { score: number; count: number; failures: string[]; failureDetails: any[] } {
 	let hits = 0;
 	const failures: string[] = [];
+	const failureDetails: { label: string; summary: string }[] = [];
+	const miss = (index: number) => {
+		const label = `decision_accuracy#${index}`;
+		failures.push(label);
+		failureDetails.push({ label, summary: caseSummary(cases[index], "decision_accuracy", index) });
+	};
 	for (const [index, item] of cases.entries()) {
 		try {
 			const advice = mod.parseDecision(item.raw, item.confidenceKind);
@@ -98,29 +132,35 @@ function scoreDecision(mod: any, cases: any[]): { score: number; count: number; 
 				ok = advice.tier === item.expected.tier;
 			}
 			if (ok) hits++;
-			else failures.push(`decision_accuracy#${index}`);
+			else miss(index);
 		} catch {
 			// unexpected failure counts as a miss, never crashes the runner
-			failures.push(`decision_accuracy#${index}`);
+			miss(index);
 		}
 	}
-	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures };
+	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures, failureDetails };
 }
 
 /** egress_boundary: fraction of endpoint cases whose allow/block outcome matches expectations. */
-function scoreEgress(mod: any, cases: any[]): { score: number; count: number; failures: string[] } {
+function scoreEgress(mod: any, cases: any[]): { score: number; count: number; failures: string[]; failureDetails: any[] } {
 	let hits = 0;
 	const failures: string[] = [];
+	const failureDetails: { label: string; summary: string }[] = [];
+	const miss = (index: number) => {
+		const label = `egress_boundary#${index}`;
+		failures.push(label);
+		failureDetails.push({ label, summary: caseSummary(cases[index], "egress_boundary", index) });
+	};
 	for (const [index, item] of cases.entries()) {
 		try {
 			if (mod.isAllowedEndpoint(item.endpoint) === item.expected.allowed) hits++;
-			else failures.push(`egress_boundary#${index}`);
+			else miss(index);
 		} catch {
 			// unexpected failure counts as a miss, never crashes the runner
-			failures.push(`egress_boundary#${index}`);
+			miss(index);
 		}
 	}
-	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures };
+	return { score: cases.length ? hits / cases.length : 0, count: cases.length, failures, failureDetails };
 }
 
 async function main(): Promise<void> {
@@ -164,6 +204,11 @@ async function main(): Promise<void> {
 				decision_accuracy: decision.failures,
 				egress_boundary: egress.failures,
 			},
+			failureDetails: {
+				extract_coverage: extract.failureDetails,
+				decision_accuracy: decision.failureDetails,
+				egress_boundary: egress.failureDetails,
+			},
 			heldout: {
 				heldout_coverage: heldoutTotal ? heldoutHits / heldoutTotal : 0,
 			},
@@ -194,6 +239,10 @@ async function main(): Promise<void> {
 			baseline: baseline.failures,
 			candidate: candidate.failures,
 		},
+		failureDetails: {
+			baseline: baseline.failureDetails,
+			candidate: candidate.failureDetails,
+		},
 		notes: [
 			"Metrics are deterministic, non-model hit rates over fixtures in probes/fixtures.json (probe) and heldout/fixtures.json (held-out).",
 			"Signatures verified against jev-advisor/lib/decision.ts: extractTasks (line 327), parseDecision (line 1955), isAllowedEndpoint (line 211).",
@@ -202,6 +251,7 @@ async function main(): Promise<void> {
 			"parseDecision(raw: string, confidenceKind?: ConfidenceKind): Advice compared on accept (status 'decision') vs reject (status 'no_decision') and accepted tier.",
 			"isAllowedEndpoint(endpoint: string): boolean compared on exact allow/block expectation per endpoint.",
 			"failures.{baseline,candidate} lists per-case misses as short `<metric>#<index>` labels for the three probe metrics only (never held-out cases or fixture values); the loop feeds these labels into proposer requests.",
+			"failureDetails.{baseline,candidate} carries the same labels with a short proposer-facing summary derived from each probe case's provenance note/statement (never held-out material, capped at 240 chars), so a proposer blind to self-improve/domains/** can target the actual documented gap.",
 			"No timers, network or randomness are used; identical inputs yield byte-identical stdout JSON.",
 		],
 	};

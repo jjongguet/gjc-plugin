@@ -5,6 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { collectHeldoutValues } from '../../lib/propose.mjs';
 
 const script = fileURLToPath(import.meta.url);
 const worktreeRoot = path.resolve(path.dirname(script), '..', '..', '..');
@@ -114,6 +115,39 @@ test('failures output lists per-case labels for the three probe metrics only', (
       assert.equal(json.failures[side].extract_coverage.length, extractMisses, `${side}: extract failures vs score`);
     }
     assert.equal(JSON.stringify(json.failures).includes('heldout'), false, 'failures must cover probe metrics only');
+
+    // failureDetails: same labels plus a short proposer-facing summary per case
+    const details = json.failureDetails;
+    assert.ok(details && details.baseline && details.candidate, 'failureDetails section missing');
+    for (const side of ['baseline', 'candidate']) {
+      for (const metric of ['extract_coverage', 'decision_accuracy', 'egress_boundary']) {
+        assert.deepEqual(
+          details[side][metric].map((entry) => entry.label),
+          json.failures[side][metric],
+          `${side}.${metric}: detail labels must match the failures list`,
+        );
+        for (const entry of details[side][metric]) {
+          assert.equal(typeof entry.summary, 'string', `${side}.${metric} summary type`);
+          assert.ok(entry.summary.length > 0 && entry.summary.length <= 240, `${side}.${metric} summary bound`);
+          assert.ok(entry.summary.startsWith(`${metric}#`), `${side}.${metric} summary must start with its label`);
+        }
+      }
+    }
+    const headroomSummaries = details.baseline.decision_accuracy.map((entry) => entry.summary).join(' ');
+    assert.match(headroomSummaries, /tolerance/i, 'headroom summaries must describe the documented gap');
+    assert.match(headroomSummaries, /cap|overflow/i, 'cap-cluster summary must describe the documented overflow rule');
+    const probeCases = JSON.parse(
+      readFileSync(path.join(worktreeRoot, 'self-improve', 'domains', 'gjc-plugin', 'probes', 'fixtures.json'), 'utf8'),
+    );
+    const heldoutCases = JSON.parse(
+      readFileSync(path.join(worktreeRoot, 'self-improve', 'domains', 'gjc-plugin', 'heldout', 'fixtures.json'), 'utf8'),
+    );
+    const probeValues = new Set(collectHeldoutValues(probeCases));
+    const heldoutOnly = collectHeldoutValues(heldoutCases).filter((value) => !probeValues.has(value));
+    const detailsText = JSON.stringify(details);
+    for (const value of heldoutOnly) {
+      assert.equal(detailsText.includes(value), false, 'failureDetails must not leak held-out material');
+    }
   } finally {
     rmSync(brokenDir, { recursive: true, force: true });
   }
