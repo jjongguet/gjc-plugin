@@ -9,6 +9,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
 | [`wiki`](wiki/) | Read-only personal-wiki lookup and pending-proposal submission (capture + propose). Never approves or publishes; human approval of the exact digest stays outside the plugin. |
 | [`rea`](rea/) | Offline readiness report (`rea_readiness`) and the pinned GJC workflow skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0). The integration runs the pinned CLI (`npx -y rea-agents@6.4.0 <command>`); an optional `gjc mcp add` registration exists for stateful MCP sessions — GJC 0.18.5 refuses plugin-bundle stdio MCP servers off Linux, so no manifest `mcps` surface is declared. |
+| [`backplan`](backplan/) | Backward-planning gate for work requests: `backplan_check` validates a structured plan (end state, success criteria, issue breakdown, Linear project mapping, policy decisions, automation candidates) and renders Linear-ready payloads plus a stable digest. Deterministic, keyless and offline; registration stays with the agent's Linear MCP / `linear-trace.py` path. |
 | `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
@@ -21,6 +22,7 @@ gjc plugin install ./verification-receipts --user
 gjc plugin install ./ui-regression --user
 gjc plugin install ./wiki --user
 gjc plugin install ./rea --user
+gjc plugin install ./backplan --user
 gjc plugin list && gjc plugin doctor
 ```
 

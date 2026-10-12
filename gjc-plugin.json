@@ -6,6 +6,7 @@
     "verification-receipts/gajae-plugin.json",
     "ui-regression/gajae-plugin.json",
     "wiki/gajae-plugin.json",
-    "rea/gajae-plugin.json"
+    "rea/gajae-plugin.json",
+    "backplan/gajae-plugin.json"
   ]
 }

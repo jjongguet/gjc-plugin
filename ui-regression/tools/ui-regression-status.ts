@@ -8,7 +8,7 @@ import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypt
 import { performance as resultsClock } from 'node:perf_hooks';
 
 export type PluginOutcome = {
-  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness';
+  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check';
   repositoryDigest?: string | null;
   receiptId?: string | null;
   toolCallDigest?: string;
@@ -23,11 +23,11 @@ export type PluginOutcome = {
   receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
   evidenceStorage?: { status: string; reason?: string };
 };
-type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea';
+type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan';
 type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
 type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
-const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea'];
-const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness'];
+const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan'];
+const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check'];
 const resultsHex = /^[a-f0-9]{64}$/;
 const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const resultsCountKeys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'];
