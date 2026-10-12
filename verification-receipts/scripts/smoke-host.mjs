@@ -10,10 +10,12 @@ const worktree=process.cwd();
 const uiMode=process.argv.includes('--ui');
 const advisorMode=process.argv.includes('--advisor');
 const metricsMode=process.argv.includes('--metrics');
-assert.ok([uiMode,advisorMode,metricsMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
+const loopMode=process.argv.includes('--loop');
+const delegationMode=process.argv.includes('--delegation');
+assert.ok([uiMode,advisorMode,metricsMode,loopMode,delegationMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
 const installedMode=process.argv.includes('--installed');
 const plugin=advisorMode||metricsMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
-const toolNames=metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
+const toolNames=delegationMode?['task','subagent','job','verification_run','verification_loop']:metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
 const account=process.env.UI_REGRESSION_ACCOUNT;
 if(uiMode&&!account)throw Error('explicit_ephemeral_account_required');
 const userAgent=path.resolve(process.env.GJC_CODING_AGENT_DIR || process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(),'.gjc','agent'));
@@ -23,10 +25,20 @@ const beforeConfig=await configDigest();
 const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'gjc-installed-smoke-')));
 const root=path.join(owned,'repo');
 let env,server,report;
-async function child(args,timeout=60000){await assertSmokeIsolation(env,owned);return new Promise((resolve,reject)=>{let output='',errors='',bytes=0;const p=spawn('gjc',args,{cwd:root,env,shell:false,detached:true});const timer=setTimeout(()=>{try{process.kill(-p.pid,'SIGKILL');}catch{} reject(Error('host_timeout'));},timeout);p.stdout.on('data',c=>{bytes+=c.length;if(bytes<4e6)output+=c;});p.stderr.on('data',c=>{bytes+=c.length;if(bytes<4e6)errors+=c;});p.on('error',reject);p.on('close',code=>{clearTimeout(timer);resolve({code,output,errors});});});}
+async function child(args,timeout=60000,command='gjc'){await assertSmokeIsolation(env,owned);return new Promise((resolve,reject)=>{let output='',errors='',bytes=0;const p=spawn(command,args,{cwd:root,env,shell:false,detached:true});const timer=setTimeout(()=>{try{process.kill(-p.pid,'SIGKILL');}catch{} reject(Error('host_timeout'));},timeout);p.stdout.on('data',c=>{bytes+=c.length;if(bytes<4e6)output+=c;});p.stderr.on('data',c=>{bytes+=c.length;if(bytes<4e6)errors+=c;});p.on('error',reject);p.on('close',code=>{clearTimeout(timer);resolve({code,output,errors});});});}
 try {
  env=await createSmokeEnvironment(owned);
  await fs.mkdir(root,{mode:0o700});
+ if(loopMode){
+  // Host-level wrapper: install the worktree bundle into the isolated env and delegate to the
+  // passing smoke-loop surface (parent mode), then merge its report. No mock server is started.
+  const bundle=path.join(worktree,'verification-receipts');
+  const install=await child(['plugin','install',bundle,'--user','--json']);
+  assert.equal(install.code,0,'isolated_install_failed');
+  const loop=await child([path.join(bundle,'scripts','smoke-loop.mjs')],150000,'bun');
+  assert.equal(loop.code,0,'host_loop_child_failed:'+loop.errors.slice(0,400));
+  report={...JSON.parse(loop.output.trim().split('\n').filter(Boolean).pop()),delegatedFromHost:true,hostMode:'loop'};
+ }else{
  if(uiMode){
   const bin=path.join(owned,'bin');await fs.mkdir(bin,{mode:0o700});
   const realAside=execFileSync('which',['aside'],{encoding:'utf8',env:{PATH:process.env.PATH}}).trim();
@@ -65,6 +77,60 @@ try {
   ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'empty-substring',steps:scenario.steps.map((s,i)=>i===4?{...s,match:'substring',expected:'   '}:s)}}}),
   ()=>({name:toolNames[1],args:{receiptId:'missing'}})
  ]:[()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['fail.mjs']}}),()=>({name:'verification_run',args:{files:['empty.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_run',args:{files:['../escape.mjs']}}),()=>({name:'verification_status',args:{receiptId:'missing'}}),()=>({name:'verification_run',args:{files:['pass.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['pass.mjs']}})];
+ // Content-reactive delegation router. Parent and child sessions share one loopback provider;
+ // dispatch keys on the child executor system prompt and each step keys on tool-result content.
+ const delegationMarker='Fixture delegated slice',delegationGate='[delegation-verification-gate]';
+ const childStallMs=Number.parseInt(process.env.SMOKE_DELEGATION_STALL_MS??'0',10)||0;
+ let delegationTurn='launch',delegationPolls=0,mockHits=0;
+ const delegationChain={launchEnvelope:'pending_async',jobId:null,terminalGate:false,loopStatuses:[],runStatus:null,receiptPersisted:null};
+ const toolResultTexts=data=>[...((data.messages??data.input)??[])].filter(m=>m.role==='tool'||m.type==='function_call_output').map(m=>{const content=m.output??m.content;return typeof content==='string'?content:Array.isArray(content)?content.map(entry=>entry?.text??'').join(''):JSON.stringify(content??'');});
+ async function delegationDecision(data){
+  const body=JSON.stringify(data);
+  const results=toolResultTexts(data);
+  const last=results[results.length-1]??'';
+  if(body.includes('You are Executor')){
+   assert.ok(body.includes(delegationMarker),'child_assignment_marker_missing');
+   // Optional bounded stall (SMOKE_DELEGATION_STALL_MS > pollWaitDuration) exercises the
+   // running-snapshot re-poll path; the default keeps the acceptance run fast.
+   if(results.length===0){if(childStallMs>0)await new Promise(resolve=>setTimeout(resolve,childStallMs));return {call:{name:'write',args:{path:'feature.mjs',content:"export const fixture = 'delegated-slice';\n"}}};}
+   if(results.length===1)return {call:{name:'write',args:{path:'feature.test.mjs',content:"import test from 'node:test';test('fixture', () => {});\n"}}};
+   return {final:'Fixture delegated slice complete: feature.mjs and feature.test.mjs written.'};
+  }
+  if(results.length===0){delegationTurn='launch';return {call:{name:'task',args:{agent:'executor',tasks:[{id:'fixture-slice',description:'Fixture slice',assignment:delegationMarker+': create feature.mjs and a passing feature.test.mjs in the repository.'}]}}};}
+  if(last.includes('Results will be delivered when complete')){
+   assert.ok(!last.includes(delegationGate),'launch_envelope_gated');
+   const job=/\(job `([^`]+)`\)/.exec(last);assert.ok(job,'launch_envelope_job_id_missing');
+   delegationChain.jobId=job[1];delegationTurn='poll';
+   return {call:{name:'job',args:{poll:[job[1]]}}};
+  }
+  if(last.includes('## Still Running')||last.includes('## Waiting')){
+   delegationPolls++;assert.ok(delegationPolls<=10,'delegation_poll_bound_exceeded');delegationTurn='poll';
+   return {call:{name:'job',args:{poll:[delegationChain.jobId]}}};
+  }
+  if(last.includes(delegationGate)){
+   assert.ok(delegationTurn==='poll','terminal_gate_unexpected_turn:'+delegationTurn);
+   assert.ok(last.includes('## Completed'),'terminal_gate_without_completed_section');
+   delegationChain.terminalGate=true;delegationTurn='loop-gaps';
+   return {call:{name:'verification_loop',args:{}}};
+  }
+  const begin=last.indexOf('{'),end=last.lastIndexOf('}');
+  let parsed=null;if(begin>=0&&end>begin){try{parsed=JSON.parse(last.slice(begin,end+1));}catch{}}
+  if(parsed&&parsed.openGates!==undefined&&parsed.resolvedGates!==undefined){
+   if(parsed.status==='gaps'){assert.ok(parsed.openGates>=1,'first_loop_missing_open_gates');delegationChain.loopStatuses.push('gaps');delegationTurn='run';
+    return {call:{name:'verification_run',args:{files:['feature.mjs','feature.test.mjs']}}};}
+   assert.equal(parsed.status,'clean','second_loop_not_clean:'+JSON.stringify(parsed.gapKinds));
+   assert.ok(parsed.resolvedGates>=1,'second_loop_missing_resolved_gates');delegationChain.loopStatuses.push('clean');delegationTurn='done';
+   return {final:'Delegated slice verified: verification_loop is clean.'};
+  }
+  if(parsed&&parsed.receipt!==undefined){
+   assert.equal(parsed.receipt.execution.status,'passed','delegation_run_not_passed:'+parsed.receipt.execution.status);
+   assert.equal(parsed.persisted,true,'delegation_receipt_not_persisted:'+parsed.reason);
+   assert.deepEqual(parsed.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
+   delegationChain.runStatus=parsed.receipt.execution.status;delegationChain.receiptPersisted=parsed.persisted;delegationTurn='loop-clean';
+   return {call:{name:'verification_loop',args:{}}};
+  }
+  throw Error('unexpected_turn:'+step+':'+last.slice(0,160));
+ }
  const journalLock=()=>path.join(env.HOME,'.gjc-plugin',plugin,'journal','v1','.append.lock');
  const metricsBase=path.join(env.HOME,'.gjc-plugin');
  let metricsBefore;
@@ -124,9 +190,9 @@ for(const [plugin,outcome] of cases){
    assert.ok(['/v1/chat/completions','/v1/responses'].includes(req.url),'unexpected_local_endpoint:'+req.method+':'+req.url);
    const responses=req.url==='/v1/responses';
    let body='';for await(const c of req){body+=c;if(body.length>2e6)throw Error('local_request_cap');}
-   const data=JSON.parse(body);
+   const data=JSON.parse(body);mockHits++;
    if(step===0){discovered=(data.tools??[]).map(t=>t.function?.name??t.name);assert.ok(toolNames.every(n=>discovered.includes(n)),'installed_tool_discovery_failed');}
-   else {
+   else if(!delegationMode){
     const tool=[...(data.messages??data.input)].reverse().find(m=>m.role==='tool'||m.type==='function_call_output');assert.ok(tool,'host_tool_result_missing');
     const content=tool.output??tool.content;
     const text=typeof content==='string'?content:content.map(c=>c.text??'').join('');
@@ -185,34 +251,60 @@ for(const [plugin,outcome] of cases){
     }
    }
    }
+   const decision=delegationMode?(await delegationDecision(data)):(step<calls.length?{call:calls[step]()}:{final:'Installed isolated host smoke finished.'});
    res.writeHead(200,{'content-type':'text/event-stream'});
    if(responses){
     const send=e=>res.write('event: '+e.type+'\ndata: '+JSON.stringify(e)+'\n\n');
     const response={id:'resp_local_'+step,status:'completed',usage:{input_tokens:1,output_tokens:1,total_tokens:2}};
     send({type:'response.created',response:{...response,status:'in_progress'}});
-    if(step<calls.length){const call=calls[step]();const item={id:'fc_local_'+step,type:'function_call',call_id:'local_call_'+step,name:call.name,arguments:JSON.stringify(call.args),status:'completed'};
+    if(decision.call){const item={id:'fc_local_'+step,type:'function_call',call_id:'local_call_'+step,name:decision.call.name,arguments:JSON.stringify(decision.call.args),status:'completed'};
      send({type:'response.output_item.added',output_index:0,item:{...item,arguments:''}});
      send({type:'response.function_call_arguments.delta',output_index:0,item_id:item.id,delta:item.arguments});
      send({type:'response.output_item.done',output_index:0,item});
      send({type:'response.completed',response:{...response,output:[item]}});
-    }else{const item={id:'msg_local',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:'Installed isolated host smoke finished.',annotations:[]}]};
+    }else{const item={id:'msg_local',type:'message',role:'assistant',status:'completed',content:[{type:'output_text',text:decision.final,annotations:[]}]};
      send({type:'response.output_item.added',output_index:0,item:{...item,content:[]}});
-     send({type:'response.output_text.delta',output_index:0,item_id:item.id,content_index:0,delta:item.content[0].text});
+     send({type:'response.output_text.delta',output_index:0,item_id:item.id,content_index:0,delta:decision.final});
      send({type:'response.output_item.done',output_index:0,item});send({type:'response.completed',response:{...response,output:[item]}});
     }
     step++;res.end();return;
    }
    const base={id:'local-'+step,object:'chat.completion.chunk',created:0,model:'gpt-4o'};
-   if(step<calls.length){const call=calls[step]();res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'local_call_'+step,type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}]},finish_reason:null}]})+'\n\n');res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}]})+'\n\n');}
-   else {res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',content:'Installed isolated host smoke finished.'},finish_reason:null}]})+'\n\n');res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\n');}
+   if(decision.call){res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',tool_calls:[{index:0,id:'local_call_'+step,type:'function',function:{name:decision.call.name,arguments:JSON.stringify(decision.call.args)}}]},finish_reason:null}]})+'\n\n');res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'tool_calls'}]})+'\n\n');}
+   else {res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{role:'assistant',content:decision.final},finish_reason:null}]})+'\n\n');res.write('data: '+JSON.stringify({...base,choices:[{index:0,delta:{},finish_reason:'stop'}]})+'\n\n');}
    step++;res.end('data: [DONE]\n\n');
   }catch(error){mockError='step='+step+' '+error.message;res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'local_probe_failed'}}));}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));env.OPENAI_BASE_URL='http://127.0.0.1:'+server.address().port+'/v1';
  if(uiMode){scenario=JSON.parse(await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/scenario.json'),'utf8'));scenario.steps[0].url='http://127.0.0.1:'+server.address().port+'/';}
- const host=await child(['--print','--no-session','--no-title','--no-mcp','--no-lsp','--no-rules','--no-pty','--model','openai/gpt-4o','--thinking','off','--tools',toolNames.join(','),'Execute explicitly authorized non-sensitive local fixture tools selected by the local test provider. Do not assess or use other tools.'],90000);
- assert.equal(mockError,'',mockError);assert.equal(host.code,0,'installed_dispatch_failed');assert.equal(step,calls.length+1,'installed_dispatch_incomplete');assert.equal(submissions,0);
- if(metricsMode){
+ let host,hostTimeout=false;
+ try{host=await child(['--print','--no-session','--no-title','--no-mcp','--no-lsp','--no-rules','--no-pty','--model','openai/gpt-4o','--thinking','off','--tools',toolNames.join(','),'Execute explicitly authorized non-sensitive local fixture tools selected by the local test provider. Do not assess or use other tools.'],delegationMode?180000:90000);}
+ catch(error){if(!(delegationMode&&error.message==='host_timeout'))throw error;hostTimeout=true;host={code:'timeout',output:'',errors:''};}
+ assert.equal(mockError,'',mockError);
+ if(!hostTimeout){assert.equal(host.code,0,'installed_dispatch_failed');if(!delegationMode)assert.equal(step,calls.length+1,'installed_dispatch_incomplete');assert.equal(submissions,0);}
+ if(hostTimeout){
+  report={schemaVersion:1,kind:'package-consumer-report',mode:'delegation',hostMode:'delegation',timedOut:true,lastTurn:delegationTurn,polls:delegationPolls,providerRequests:mockHits,step};
+  process.exitCode=1;
+ }else if(delegationMode){
+  assert.equal(delegationTurn,'done','delegation_incomplete:'+delegationTurn);
+  assert.deepEqual(delegationChain.loopStatuses,['gaps','clean'],'delegation_loop_statuses');
+  assert.equal(delegationChain.terminalGate,true,'delegation_terminal_gate_missing');
+  assert.equal(delegationChain.runStatus,'passed');assert.equal(delegationChain.receiptPersisted,true);
+  await fs.access(path.join(root,'feature.mjs'));await fs.access(path.join(root,'feature.test.mjs'));
+  const loopRoot=path.join(env.HOME,'.gjc-plugin','verification-receipts','loop','v1'),repoDirs=await fs.readdir(loopRoot);assert.equal(repoDirs.length,1,'delegation_loop_state_missing');
+  const sessionFiles=(await fs.readdir(path.join(loopRoot,repoDirs[0]))).filter(name=>name.endsWith('.json'));assert.equal(sessionFiles.length,1,'delegation_loop_session_files');
+  const loopState=JSON.parse(await fs.readFile(path.join(loopRoot,repoDirs[0],sessionFiles[0]),'utf8'));
+  const gateRecord=loopState.gates.find(entry=>entry.trigger==='job_terminal');assert.ok(gateRecord,'delegation_job_terminal_gate_missing');
+  assert.ok(gateRecord.baselineToolCallId,'delegation_gate_missing_baseline_link');assert.equal(gateRecord.resolution,'receipt','delegation_gate_resolution');
+  assert.equal(loopState.pendingAsync.length,1);assert.ok(loopState.pendingAsync[0].consumedAtGateId,'delegation_pending_async_not_consumed');
+  const journal=path.join(env.HOME,'.gjc-plugin','verification-receipts','journal','v1'),inventory=JSON.parse(await fs.readFile(path.join(journal,'inventory.json'),'utf8'));
+  const records=[];for(const segment of inventory.segments){const file=path.join(journal,segment.name),chunk=await fs.readFile(file);assert.equal(chunk.length,segment.bytes);assert.equal(createHash('sha256').update(chunk).digest('hex'),segment.digest);assert.equal((await fs.stat(file)).mode&0o777,0o600);records.push(...chunk.toString().trimEnd().split('\n').map(line=>JSON.parse(line)));}
+  assert.deepEqual(records.map(record=>record.operation),['gate_emitted','loop_run','run','loop_run'],'journal_operation_sequence');
+  assert.equal((await fs.stat(journal)).mode&0o777,0o700);
+  const receipts=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');let receiptCount=0;for(const dir of await fs.readdir(receipts))for(const name of await fs.readdir(path.join(receipts,dir))){assert.ok(JSON.parse(await fs.readFile(path.join(receipts,dir,name),'utf8')).receipt.id);receiptCount++;}
+  assert.equal(receiptCount,1,'delegation_receipt_count');
+  report={schemaVersion:1,kind:'package-consumer-report',mode:'delegation',hostMode:'delegation',delegatedFromHost:true,hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,providerRequests:mockHits,submissions,standalone:false,tools:discovered.filter(n=>toolNames.includes(n)),chain:{launchEnvelope:delegationChain.launchEnvelope,jobId:delegationChain.jobId,polls:delegationPolls,terminalGate:delegationChain.terminalGate,loopStatuses:delegationChain.loopStatuses,run:{status:delegationChain.runStatus,persisted:delegationChain.receiptPersisted}},persistence:{root:'.gjc-plugin',operations:records.map(record=>record.operation),journalIds:records.map(record=>record.id),receiptCount,scratchArtifacts:['feature.mjs','feature.test.mjs'],privateModes:true}};
+ }else if(metricsMode){
   report={schemaVersion:1,kind:'package-consumer-report',isolated:true,installedBundle:installedMode,productionCredentials:false,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,nonmutating:true};
  }else{
  const journal=path.join(env.HOME,'.gjc-plugin',plugin,'journal','v1'),inventory=JSON.parse(await fs.readFile(path.join(journal,'inventory.json'),'utf8'));
@@ -221,6 +313,7 @@ for(const [plugin,outcome] of cases){
  let receiptCount=0;
  if(!advisorMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?2:200);}
  report={schemaVersion:1,kind:'package-consumer-report',hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,submissions,standalone:uiMode,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,persistence:{root:'.gjc-plugin',receiptCount,syntheticCapacityMetadataEntries:capacitySeeds,journalIds,operations:records.map(record=>record.operation),privateModes:true}};
+ }
  }
 } finally {
  try {if(server)await new Promise(resolve=>server.close(resolve));}
