@@ -1016,7 +1016,7 @@ export type LoopCandidate = { id: string; observedAt: string; status: string; fi
 export type LoopGap = { gateId: string; trigger: LoopGateTrigger; kind: LoopGapKindName; detail: string };
 export type LoopEvaluation = {
  status: 'clean' | 'gaps' | 'blocked'; repositoryDigest: string | null; gaps: LoopGap[];
- openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; stateWritten: boolean; budgetExceeded: boolean;
+ openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; stateWritten: boolean; stateWriteAttempted: boolean; budgetExceeded: boolean;
 };
 
 export function sessionDigestOf(sessionId: string): string { return loopDigest(String(sessionId)); }
@@ -1184,6 +1184,9 @@ export async function resolveRepoRoot(cwd: string, budgetMs = BEFORE_BUDGET_MS):
  try { return await loopFs.realpath(top); } catch { return null; }
 }
 
+function loopNoisePath(name: string): boolean {
+ return name.split('/').some(part => part === '.git' || part === '.gjc' || part === '.gjc-plugin');
+}
 function splitPorcelain(bytes: Buffer): { entries: string[]; deleted: string[]; digest: string } {
  const text = bytes.toString('utf8');
  const parts = text.split('\0').filter(Boolean);
@@ -1192,7 +1195,7 @@ function splitPorcelain(bytes: Buffer): { entries: string[]; deleted: string[]; 
  for (const part of parts) {
   const status = part.slice(0, 2);
   const name = part.length > 3 ? part.slice(3) : part;
-  if (!name || name.includes('\u0000')) continue;
+  if (!name || name.includes('\u0000') || loopNoisePath(name)) continue;
   if (status.includes('D')) deleted.push(name); else entries.push(name);
  }
  return { entries, deleted, digest: loopDigest(bytes) };
@@ -1226,9 +1229,9 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
    const rev = await loopRunGit(root, ['rev-list', '--count', baselineHead + '..HEAD'], deadline);
    if (rev) { const parsed = Number.parseInt(rev.bytes.toString('utf8').trim(), 10); if (Number.isSafeInteger(parsed) && parsed >= 0) commits = parsed; }
    const diff = await loopRunGit(root, ['diff', '--name-only', '-z', baselineHead, 'HEAD'], deadline);
-   if (diff) for (const name of diff.bytes.toString('utf8').split('\0')) if (name) names.add(name);
+   if (diff) for (const name of diff.bytes.toString('utf8').split('\0')) if (name && !loopNoisePath(name)) names.add(name);
    const deletedDiff = await loopRunGit(root, ['diff', '--diff-filter=D', '--name-only', '-z', baselineHead, 'HEAD'], deadline);
-   if (deletedDiff) for (const name of deletedDiff.bytes.toString('utf8').split('\0')) if (name) deletedNames.add(name);
+   if (deletedDiff) for (const name of deletedDiff.bytes.toString('utf8').split('\0')) if (name && !loopNoisePath(name)) deletedNames.add(name);
   }
  }
  const changedNames: string[] = [];
@@ -1434,10 +1437,10 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
  let truncated = false;
  try {
   const scan = await scanSessionFiles(repoDigest, sessionDigest);
-  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, budgetExceeded: false };
+  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
   sessions = scan.sessions; scanned = scan.scanned; truncated = scan.truncated;
  } catch {
-  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, budgetExceeded: false };
+  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
  }
  const factsCache = new Map<string, LoopGitFacts>();
  const gateFacts = async (baselineHead: string | null): Promise<LoopGitFacts> => {
@@ -1487,13 +1490,15 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    }
    const kind = gapKindForCandidate(candidates[0], changedTests);
    openGates++;
-   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: kind === 'changed_test_uncovered' ? 'qualifying receipt does not cover changed test files' : 'no covering fresh passed receipt after gate' });
+   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
    if (!gapKinds.includes(kind)) gapKinds.push(kind);
   }
  }
  const ownSession = sessions.find(session => session.own);
  let stateWritten = false;
+ let stateWriteAttempted = false;
  if (ownSession && resolutionsToStamp.length) {
+  stateWriteAttempted = true;
   const status = await withLoopStateWrite(repoDigest, sessionDigest, ownSession.state.repoRoot ?? root, state => {
    for (const stamp of resolutionsToStamp) {
     const gate = state.gates.find(g => g.id === stamp.gateId);
@@ -1508,7 +1513,7 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
   if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
   boundedGaps.push({ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: `evaluation budget reached; ${skippedGates} gate(s) unevaluated` });
  }
- return { status: openGates > 0 || budgetExceeded ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps.slice(0, 16), openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), stateWritten, budgetExceeded };
+ return { status: openGates > 0 || budgetExceeded ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps.slice(0, 16), openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), stateWritten, stateWriteAttempted, budgetExceeded };
 }
 
 export type GateTextView = {
@@ -1599,7 +1604,7 @@ function readSessionId(ctx: unknown): string | null {
 	} catch { return null; }
 }
 function blockedEvaluation(kind: 'not_a_repository' | 'state_unavailable', detail: string): LoopEvaluation {
-	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, budgetExceeded: false };
+	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
 }
 
 export default function verificationLoop(pi: { cwd: string; typebox: { Type: any } }) {
@@ -1636,7 +1641,7 @@ export default function verificationLoop(pi: { cwd: string; typebox: { Type: any
 				if (!journalStorage.persisted) warnings.push('journal_not_persisted');
 				if (!sessionId) warnings.push('session_unattributed');
 				if (evaluation.budgetExceeded) warnings.push('budget_exceeded');
-				if (evaluation.stateWritten === false && evaluation.status !== 'clean' && evaluation.openGates > 0) warnings.push('state_write_dropped');
+				if (evaluation.stateWriteAttempted && !evaluation.stateWritten) warnings.push('state_write_dropped');
 				return text({
 					status: evaluation.status, repositoryDigest: repoDigest, gaps: evaluation.gaps, gapKinds: evaluation.gapKinds, budgetExceeded: evaluation.budgetExceeded,
 					openGates: evaluation.openGates, resolvedGates: evaluation.resolvedGates,

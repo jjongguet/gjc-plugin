@@ -18,7 +18,7 @@ function readSessionId(ctx: unknown): string | null {
 	} catch { return null; }
 }
 function blockedEvaluation(kind: 'not_a_repository' | 'state_unavailable', detail: string): LoopEvaluation {
-	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, budgetExceeded: false };
+	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
 }
 
 export default function verificationLoop(pi: { cwd: string; typebox: { Type: any } }) {
@@ -55,7 +55,7 @@ export default function verificationLoop(pi: { cwd: string; typebox: { Type: any
 				if (!journalStorage.persisted) warnings.push('journal_not_persisted');
 				if (!sessionId) warnings.push('session_unattributed');
 				if (evaluation.budgetExceeded) warnings.push('budget_exceeded');
-				if (evaluation.stateWritten === false && evaluation.status !== 'clean' && evaluation.openGates > 0) warnings.push('state_write_dropped');
+				if (evaluation.stateWriteAttempted && !evaluation.stateWritten) warnings.push('state_write_dropped');
 				return text({
 					status: evaluation.status, repositoryDigest: repoDigest, gaps: evaluation.gaps, gapKinds: evaluation.gapKinds, budgetExceeded: evaluation.budgetExceeded,
 					openGates: evaluation.openGates, resolvedGates: evaluation.resolvedGates,
