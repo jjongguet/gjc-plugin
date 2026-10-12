@@ -191,6 +191,30 @@ test('loop tool blocks outside a repository, rejects parameters and keeps a boun
 	expect(rows.find(row => row.operation === 'loop_run')!.loop.status).toBe('blocked');
 });
 
+test('before hook stays within its wall-clock budget under a hanging git', async () => {
+	const home = await makeHome();
+	const root = await makeRepo();
+	const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+	const shim = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'gate-shim-')));
+	owned.push(shim);
+	await fs.writeFile(path.join(shim, 'git'), '#!/bin/sh\nsleep 6\nexec ' + real + ' "$@"\n', { mode: 0o700 });
+	const originalPath = process.env.PATH;
+	process.env.PATH = shim + ':' + (originalPath ?? '');
+	try {
+		const baseline = collector();
+		registerBaseline(baseline.api as never);
+		const started = performance.now();
+		const result = await baseline.handlers[0].handler({ type: 'tool_call', toolName: 'task', toolCallId: 'hang-1' }, ctxFor('session-hang', root));
+		const elapsed = performance.now() - started;
+		expect(result).toBeUndefined();
+		expect(elapsed).toBeLessThan(3500);
+		const repoDigest = await repositoryDigest(root);
+		const state = await readLoopState(repoDigest, sessionDigestOf('session-hang'));
+		expect(state.status === 'ok' ? state.state!.baselines.length : 0).toBe(0);
+	} finally { process.env.PATH = originalPath; }
+	expect(home.startsWith('/')).toBe(true);
+});
+
 test('loop tool drives a real gate to clean through verification_run and stamps the receipt', async () => {
 	const home = await makeHome();
 	const root = await makeRepo();

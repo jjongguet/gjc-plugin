@@ -342,3 +342,114 @@ test('latest receipt summary classifies none, present, fresh_passed and unavaila
  expect((await latestReceiptSummary(root)).state).toBe('unavailable');
  expect(requiredActionsFor(['no_receipt_after_gate', 'state_unavailable']).length).toBe(2);
 });
+
+async function gitShimDir(sleepSeconds: string): Promise<string> {
+ const dir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'loop-shim-')));
+ owned.push(dir);
+ const real = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+ await fs.writeFile(path.join(dir, 'git'), '#!/bin/sh\nsleep ' + sleepSeconds + '\nexec ' + real + ' "$@"\n', { mode: 0o700 });
+ return dir;
+}
+
+test('evaluation enforces its wall-clock budget and never reports a false clean', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-budget');
+ const base = await captureBaseline(root);
+ await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-b1', { ...base!, toolCallId: '' });
+ const base2 = await captureBaseline(root);
+ await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-b2', { ...base2!, toolCallId: '' });
+ await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('g1'), baselineToolCallId: 'call-b1', changedFiles: 0, commits: 0 }));
+ await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('g2'), baselineToolCallId: 'call-b2', changedFiles: 0, commits: 0, bindingEvidence: 'unknown' }));
+ const shim = await gitShimDir('0.6');
+ const originalPath = process.env.PATH;
+ process.env.PATH = shim + ':' + (originalPath ?? '');
+ try {
+  const started = performance.now();
+  const evaluation = await evaluateRepoGates(root, repoDigest, sessionDigest, { budgetMs: 800 });
+  const elapsed = performance.now() - started;
+  expect(elapsed).toBeLessThan(3000);
+  expect(evaluation.budgetExceeded).toBe(true);
+  expect(evaluation.status).not.toBe('clean');
+  expect(evaluation.gapKinds).toContain('state_unavailable');
+ } finally { process.env.PATH = originalPath; }
+});
+
+test('session scans include the own file under truncation and order by mtime', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const ownDigest = sessionDigestOf('session-own-scan');
+ for (let index = 0; index < 16; index++) {
+  const digest = sessionDigestOf('filler-scan-' + index);
+  await withLoopStateWrite(repoDigest, digest, root, state => { state.gates.push({ id: '00000000-0000-4000-8000-0000000000' + String(70 + index), trigger: 'task', dedupKey: taskDedupKey('filler-' + index), dedupKeyDigest: 'f'.repeat(64), baselineToolCallId: null, emittedAt: new Date().toISOString(), facts: 'available', bindingEvidence: 'absent', changedFiles: 0, commits: 0, receiptState: 'none', stateWrite: 'ok', resolvedAt: null, resolution: null, resolvedReceiptId: null, loopRuns: 0 }); });
+ }
+ const own = await recordGate(repoDigest, ownDigest, root, await gateEmission({ dedupKey: taskDedupKey('own-scan-gate'), changedFiles: 1, commits: 1 }));
+ expect(own.stateWrite).toBe('ok');
+ const evaluation = await evaluateRepoGates(root, repoDigest, ownDigest);
+ expect(evaluation.scannedSessionFiles).toBe(16);
+ expect(evaluation.scanTruncated).toBe(true);
+ expect(evaluation.gaps.some(gap => gap.gateId === own.gateId)).toBe(true);
+ const ownState = (await readLoopState(repoDigest, ownDigest)).state!;
+ expect(ownState.gates.find(gate => gate.id === own.gateId)!.resolvedAt).toBeNull();
+});
+
+test('deleted test files are excluded from coverage demands', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-deleted');
+ await fs.writeFile(path.join(root, 'gone.test.mjs'), 'export const gone = 1;\n');
+ git(root, 'add', '.');
+ git(root, 'commit', '-q', '-m', 'test file');
+ const base = await captureBaseline(root);
+ await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-del', { ...base!, toolCallId: '' });
+ git(root, 'rm', '-q', 'gone.test.mjs');
+ const facts = await gitDeltaFacts(root, base!.head);
+ expect(facts.changedNames).toContain('gone.test.mjs');
+ expect(facts.changedTestFiles).toEqual([]);
+ const gate = await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('del-gate'), baselineToolCallId: 'call-del', changedFiles: 1, commits: 0 }));
+ expect(gate.stateWrite).toBe('ok');
+ expect((await evaluateRepoGates(root, repoDigest, sessionDigest)).gapKinds).toEqual(['no_receipt_after_gate']);
+ await makeReceipt(root, [], 'passed');
+ const resolved = await evaluateRepoGates(root, repoDigest, sessionDigest);
+ expect(resolved.status).toBe('clean');
+ expect(resolved.gapKinds).not.toContain('changed_test_uncovered');
+});
+
+test('ui-regression receipts never resolve verification gates and never surface as the latest receipt', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-uifilter');
+ const specDigest = specFingerprint({ runner: 'ui', files: [] });
+ const before = await fingerprintSource(root, specDigest, []);
+ const uiReceipt = createReceipt({ plugin: 'ui-regression', toolCallId: 'ui-' + Math.random().toString(16).slice(2), repositoryDigest: repoDigest, durationMs: 5, specDigest, before, after: before, freshness: freshnessFor(before, before), execution: { status: 'passed', reason: 'complete', exitCode: 0, signal: null, runnerVersion: null, counts: null, assertions: [{ step: 0, id: 'step-0', kind: 'visible', status: 'passed' }], steps: [{ step: 0, action: 'assert', status: 'passed' }], cleanup: 'confirmed', currentUiState: 'not_reobserved', browserBuildBinding: 'unverified', scenarioDigest: 'b'.repeat(64) }, warnings: [], limitations: ['ui fixture'] });
+ const persisted = await persistReceipt(uiReceipt, receiptStoreBase(), []);
+ expect(persisted.persisted).toBe(true);
+ expect((await latestReceiptSummary(root)).state).toBe('none');
+ const gate = await recordGate(repoDigest, sessionDigest, root, await gateEmission({ dedupKey: taskDedupKey('ui-gate'), changedFiles: 1, commits: 1 }));
+ expect(gate.stateWrite).toBe('ok');
+ const evaluation = await evaluateRepoGates(root, repoDigest, sessionDigest);
+ expect(evaluation.status).toBe('gaps');
+ expect(evaluation.gapKinds).toEqual(['no_receipt_after_gate']);
+ const candidates = await collectReceiptCandidates([root], 0);
+ expect(candidates.some(candidate => candidate.id === uiReceipt.id)).toBe(false);
+});
+
+test('interleaved concurrent state writes never corrupt the file or lose acknowledged entries', async () => {
+ await makeHome();
+ const root = await makeRepo();
+ const repoDigest = await repositoryDigest(root);
+ const sessionDigest = sessionDigestOf('session-interleave');
+ const results = await Promise.all(Array.from({ length: 8 }, (_, index) => withLoopStateWrite(repoDigest, sessionDigest, root, state => {
+  state.pendingAsync.push({ jobId: 'interleave-' + index, baselineToolCallId: null, recordedAt: new Date().toISOString(), consumedAtGateId: null, consumedAt: null });
+ })));
+ const acknowledged = results.filter(status => status === 'ok').length;
+ expect(acknowledged).toBeGreaterThan(0);
+ const state = (await readLoopState(repoDigest, sessionDigest)).state;
+ expect(state).not.toBeNull();
+ expect(state!.pendingAsync.length).toBe(acknowledged);
+ for (const entry of state!.pendingAsync) expect(entry.jobId).toMatch(/^interleave-/);
+});

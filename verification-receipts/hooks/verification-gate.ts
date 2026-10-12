@@ -1016,7 +1016,7 @@ export type LoopCandidate = { id: string; observedAt: string; status: string; fi
 export type LoopGap = { gateId: string; trigger: LoopGateTrigger; kind: LoopGapKindName; detail: string };
 export type LoopEvaluation = {
  status: 'clean' | 'gaps' | 'blocked'; repositoryDigest: string | null; gaps: LoopGap[];
- openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; stateWritten: boolean;
+ openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; stateWritten: boolean; budgetExceeded: boolean;
 };
 
 export function sessionDigestOf(sessionId: string): string { return loopDigest(String(sessionId)); }
@@ -1184,15 +1184,18 @@ export async function resolveRepoRoot(cwd: string, budgetMs = BEFORE_BUDGET_MS):
  try { return await loopFs.realpath(top); } catch { return null; }
 }
 
-function splitPorcelain(bytes: Buffer): { entries: string[]; digest: string } {
+function splitPorcelain(bytes: Buffer): { entries: string[]; deleted: string[]; digest: string } {
  const text = bytes.toString('utf8');
  const parts = text.split('\0').filter(Boolean);
  const entries: string[] = [];
+ const deleted: string[] = [];
  for (const part of parts) {
+  const status = part.slice(0, 2);
   const name = part.length > 3 ? part.slice(3) : part;
-  if (name && !name.includes('\u0000')) entries.push(name);
+  if (!name || name.includes('\u0000')) continue;
+  if (status.includes('D')) deleted.push(name); else entries.push(name);
  }
- return { entries, digest: loopDigest(bytes) };
+ return { entries, deleted, digest: loopDigest(bytes) };
 }
 
 export async function captureBaseline(root: string, budgetMs = BEFORE_BUDGET_MS): Promise<LoopBaseline | null> {
@@ -1213,7 +1216,8 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
  if (!head || !status) return { available: false, head: null, treeClean: false, dirtyFiles: [], changedFiles: 0, changedTestFiles: [], commits: null, changedNames: [], namesOverflow: false };
  const headText = head.bytes.toString('utf8').trim();
  const porcelain = splitPorcelain(status.bytes);
- const names = new Set<string>(porcelain.entries);
+ const names = new Set<string>([...porcelain.entries, ...porcelain.deleted]);
+ const deletedNames = new Set<string>(porcelain.deleted);
  let namesOverflow = false;
  let commits: number | null = null;
  if (baselineHead && loopGitSha.test(baselineHead)) {
@@ -1223,6 +1227,8 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
    if (rev) { const parsed = Number.parseInt(rev.bytes.toString('utf8').trim(), 10); if (Number.isSafeInteger(parsed) && parsed >= 0) commits = parsed; }
    const diff = await loopRunGit(root, ['diff', '--name-only', '-z', baselineHead, 'HEAD'], deadline);
    if (diff) for (const name of diff.bytes.toString('utf8').split('\0')) if (name) names.add(name);
+   const deletedDiff = await loopRunGit(root, ['diff', '--diff-filter=D', '--name-only', '-z', baselineHead, 'HEAD'], deadline);
+   if (deletedDiff) for (const name of deletedDiff.bytes.toString('utf8').split('\0')) if (name) deletedNames.add(name);
   }
  }
  const changedNames: string[] = [];
@@ -1230,8 +1236,9 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
   if (changedNames.length >= 50) { namesOverflow = true; break; }
   changedNames.push(name);
  }
- const changedTestFiles = changedNames.filter(name => /\.(?:js|mjs|cjs)$/.test(name));
- return { available: true, head: headText, treeClean: porcelain.entries.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, commits, changedNames, namesOverflow };
+ // Deleted files are changes but can never be covered by a receipt run; they are excluded from the coverage demand.
+ const changedTestFiles = changedNames.filter(name => /\.(?:js|mjs|cjs)$/.test(name) && !deletedNames.has(name));
+ return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, commits, changedNames, namesOverflow };
 }
 
 export function taskDedupKey(toolCallId: string): string { return 'task:' + toolCallId; }
@@ -1317,27 +1324,37 @@ async function listReceiptEntries(root: string, base: string): Promise<{ ids: { 
 
 export async function repositoryDigestOf(root: string): Promise<string> { return loopDigest(await loopFs.realpath(root)); }
 
-/** Cheap gate-time summary: newest stored receipt only; stored freshness, never a recompute. */
+/** Cheap gate-time summary: newest stored verification receipt only; stored freshness, never a recompute. */
 export async function latestReceiptSummary(root: string, base = receiptStoreBase()): Promise<LoopReceiptSummary> {
  const listed = await listReceiptEntries(root, base);
  if (listed.error) return { state: 'unavailable', id: null, observedAt: null, status: null, freshness: null };
  if (!listed.ids.length) return { state: 'none', id: null, observedAt: null, status: null, freshness: null };
- const newest = listed.ids[0];
- const receipt = await loadReceipt(root, newest.id, base);
- if (!receipt) return { state: 'unavailable', id: null, observedAt: null, status: null, freshness: null };
- const status = typeof receipt.execution.status === 'string' ? receipt.execution.status : 'unavailable';
- const freshPassed = status === 'passed' && receipt.freshness === 'fresh';
- return { state: freshPassed ? 'fresh_passed' : 'present', id: receipt.id, observedAt: receipt.observedAt, status, freshness: receipt.freshness };
+ let sawInvalid = false;
+ let firstCandidate = true;
+ for (const entry of listed.ids.slice(0, MAX_RECEIPT_CANDIDATES)) {
+  const receipt = await loadReceipt(root, entry.id, base);
+  if (!receipt) {
+   if (firstCandidate) return { state: 'unavailable', id: null, observedAt: null, status: null, freshness: null };
+   sawInvalid = true;
+   continue;
+  }
+  if (receipt.plugin !== 'verification-receipts') { firstCandidate = false; continue; }
+  const status = typeof receipt.execution.status === 'string' ? receipt.execution.status : 'unavailable';
+  const freshPassed = status === 'passed' && receipt.freshness === 'fresh';
+  return { state: freshPassed ? 'fresh_passed' : 'present', id: receipt.id, observedAt: receipt.observedAt, status, freshness: receipt.freshness };
+ }
+ return sawInvalid ? { state: 'unavailable', id: null, observedAt: null, status: null, freshness: null } : { state: 'none', id: null, observedAt: null, status: null, freshness: null };
 }
 
 /** R1 candidate collection: newest receipts for the roots, freshness recomputed only for the bounded set. */
-export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs: number, base = receiptStoreBase(), cache?: { freshness: Map<string, string> }): Promise<LoopCandidate[]> {
+export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs: number, base = receiptStoreBase(), cache?: { freshness: Map<string, string> }, deadlineMs?: number): Promise<LoopCandidate[]> {
  const candidates: LoopCandidate[] = [];
  const seen = new Set<string>();
  for (const root of roots) {
   const listed = await listReceiptEntries(root, base);
   if (listed.error) throw new Error('store_unavailable');
   for (const entry of listed.ids) {
+   if (deadlineMs !== undefined && loopClock.now() >= deadlineMs) return candidates;
    const key = root + '\n' + entry.id;
    if (seen.has(key)) continue;
    seen.add(key);
@@ -1385,7 +1402,17 @@ async function scanSessionFiles(repoDigest: string, sessionDigest: string): Prom
  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { sessions: [], scanned: 0, truncated: false, ownCorrupt: false }; throw error; }
  const files = names.filter(name => /^[a-f0-9]{64}\.json$/.test(name));
  const truncated = files.length > MAX_SCAN_SESSION_FILES;
- const ordered = files.slice(0, MAX_SCAN_SESSION_FILES);
+ const ownName = sessionDigest + '.json';
+ const others: { name: string; mtimeMs: number }[] = [];
+ for (const name of files) {
+  if (name === ownName) continue;
+  try { const stat = await loopFs.lstat(loopPath.join(dir, name)); if (stat.isFile() && !stat.isSymbolicLink()) others.push({ name, mtimeMs: stat.mtimeMs }); }
+  catch { /* skip unreadable candidates; bounded scan */ }
+ }
+ others.sort((a, b) => b.mtimeMs - a.mtimeMs);
+ const ownIncluded = files.includes(ownName);
+ const limit = MAX_SCAN_SESSION_FILES - (ownIncluded ? 1 : 0);
+ const ordered = [...(ownIncluded ? [ownName] : []), ...others.slice(0, Math.max(0, limit)).map(entry => entry.name)];
  const sessions: ScannedSession[] = [];
  let ownCorrupt = false;
  for (const name of ordered) {
@@ -1397,24 +1424,25 @@ async function scanSessionFiles(repoDigest: string, sessionDigest: string): Prom
  return { sessions, scanned: ordered.length, truncated, ownCorrupt };
 }
 
-export type LoopEvaluationDeps = { base?: string; now?: number };
+export type LoopEvaluationDeps = { base?: string; now?: number; budgetMs?: number };
 
 export async function evaluateRepoGates(root: string, repoDigest: string, sessionDigest: string, deps: LoopEvaluationDeps = {}): Promise<LoopEvaluation> {
  const now = deps.now ?? Date.now();
+ const deadlineMs = loopClock.now() + Math.max(1, deps.budgetMs ?? LOOP_BUDGET_MS);
  let sessions: ScannedSession[];
  let scanned = 0;
  let truncated = false;
  try {
   const scan = await scanSessionFiles(repoDigest, sessionDigest);
-  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false };
+  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, budgetExceeded: false };
   sessions = scan.sessions; scanned = scan.scanned; truncated = scan.truncated;
  } catch {
-  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false };
+  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, budgetExceeded: false };
  }
  const factsCache = new Map<string, LoopGitFacts>();
  const gateFacts = async (baselineHead: string | null): Promise<LoopGitFacts> => {
   const key = baselineHead ?? 'none';
-  if (!factsCache.has(key)) factsCache.set(key, await gitDeltaFacts(root, baselineHead, BEFORE_BUDGET_MS));
+  if (!factsCache.has(key)) factsCache.set(key, await gitDeltaFacts(root, baselineHead, Math.min(BEFORE_BUDGET_MS, Math.max(1, deadlineMs - loopClock.now()))));
   return factsCache.get(key)!;
  };
  const freshnessCache = { freshness: new Map<string, string>() };
@@ -1423,16 +1451,20 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
  let openGates = 0;
  let resolvedGates = 0;
  let silentPending = 0;
+ let budgetExceeded = false;
+ let skippedGates = 0;
  const gapKinds: LoopGapKindName[] = [];
  for (const session of sessions) {
   for (const pending of session.state.pendingAsync) if (pending.consumedAtGateId === null) silentPending++;
   for (const gate of session.state.gates) {
    if (gate.resolvedAt !== null) { resolvedGates++; continue; }
+   if (budgetExceeded || loopClock.now() >= deadlineMs) { budgetExceeded = true; skippedGates++; continue; }
    const baseline = session.state.baselines.find(b => b.toolCallId === gate.baselineToolCallId) ?? null;
    const roots = [root];
    if (gate.boundRoot && gate.boundRoot !== root) roots.push(gate.boundRoot);
+   const gateDeadline = Math.max(1, deadlineMs - loopClock.now());
    let candidates: LoopCandidate[];
-   try { candidates = await collectReceiptCandidates(roots, Date.parse(gate.emittedAt) || 0, deps.base, freshnessCache); }
+   try { candidates = await collectReceiptCandidates(roots, Date.parse(gate.emittedAt) || 0, deps.base, freshnessCache, loopClock.now() + gateDeadline); }
    catch {
     openGates++; gaps.push({ gateId: gate.id, trigger: gate.trigger, kind: 'state_unavailable', detail: 'receipt store is unreadable' });
     if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
@@ -1472,7 +1504,11 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
   stateWritten = status === 'ok';
  }
  const boundedGaps = gaps.slice(0, 16);
- return { status: openGates > 0 ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps, openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), stateWritten };
+ if (budgetExceeded) {
+  if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
+  boundedGaps.push({ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: `evaluation budget reached; ${skippedGates} gate(s) unevaluated` });
+ }
+ return { status: openGates > 0 || budgetExceeded ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps.slice(0, 16), openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), stateWritten, budgetExceeded };
 }
 
 export type GateTextView = {
@@ -1565,12 +1601,25 @@ function readSessionId(ctx: unknown): string | null {
 }
 
 function bindingEvidenceOf(input: Record<string, any>, details: Record<string, any>): { evidence: LoopBindingEvidence; boundRoot?: string } {
-	const binding = isRecord(input.repositoryBinding) ? input.repositoryBinding : isRecord(details.repositoryBinding) ? details.repositoryBinding : null;
+	const bindings: Record<string, any>[] = [];
+	if (isRecord(input.repositoryBinding)) bindings.push(input.repositoryBinding);
+	if (isRecord(details.repositoryBinding)) bindings.push(details.repositoryBinding);
+	if (Array.isArray(input.tasks)) for (const entry of input.tasks) if (isRecord(entry) && isRecord(entry.repositoryBinding)) bindings.push(entry.repositoryBinding);
+	let persistencePresent = false;
+	let persistenceUnknown = false;
+	if (Array.isArray(details.results)) for (const entry of details.results) {
+		if (!isRecord(entry)) continue;
+		if (isRecord(entry.repositoryBinding)) bindings.push(entry.repositoryBinding);
+		const outcome = isRecord(entry.persistence) && typeof entry.persistence.outcome === 'string' ? entry.persistence.outcome : '';
+		if (outcome === 'applied' || outcome === 'recovery_available') persistencePresent = true;
+		else if (outcome === 'no_changes') persistenceUnknown = true;
+	}
 	const isolated = input.isolated === true || details.isolated === true;
-	if (binding || isolated) {
-		const worktreeRoot = binding && typeof binding.worktreeRoot === 'string' && binding.worktreeRoot.length <= 4096 ? binding.worktreeRoot : undefined;
+	if (bindings.length || isolated || persistencePresent) {
+		const worktreeRoot = typeof bindings[0]?.worktreeRoot === 'string' && bindings[0].worktreeRoot.length <= 4096 ? bindings[0].worktreeRoot : undefined;
 		return { evidence: 'present', ...(worktreeRoot ? { boundRoot: worktreeRoot } : {}) };
 	}
+	if (persistenceUnknown) return { evidence: 'unknown' };
 	return { evidence: 'absent' };
 }
 
