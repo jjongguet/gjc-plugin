@@ -1,0 +1,174 @@
+{
+  "description": "Deterministic probe cases for the gjc-plugin domain. Each case is scored against <repoDir>/jev-advisor/lib/decision.ts without any model or network calls.",
+  "cases": {
+    "extract_coverage": [
+      {
+        "input": {
+          "agent": "executor",
+          "tasks": [
+            { "id": "input-0", "assignment": "Repair a typo", "tier": "fast" }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [0],
+          "rejectedIndexes": [],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "tasks": [
+            { "id": "only-id", "tier": "fast" },
+            null,
+            { "assignment": 12 }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [],
+          "rejectedIndexes": [0, 1, 2],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "assignment": "flat unsupported"
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [],
+          "rejectedIndexes": [-1],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "tasks": [
+            { "id": "a", "assignment": "task 0", "tier": "balanced" },
+            { "id": "b", "assignment": "task 1", "tier": "balanced" },
+            { "id": "c", "assignment": "task 2", "tier": "balanced" }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [0, 1, 2],
+          "rejectedIndexes": [],
+          "omittedCount": 0
+        }
+      },
+      {
+        "input": {
+          "agent": "executor",
+          "context": "Shared acceptance constraint",
+          "tasks": [
+            { "id": "x", "assignment": "Mechanical typo", "tier": "fast" },
+            { "id": "y", "assignment": "Design distributed transaction recovery", "tier": "strong" }
+          ]
+        },
+        "maxPromptChars": 4000,
+        "expected": {
+          "extractedIndexes": [0, 1],
+          "rejectedIndexes": [],
+          "omittedCount": 0
+        }
+      }
+    ],
+    "decision_accuracy": [
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":0.9}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "fast" }
+      },
+      {
+        "raw": "{\"tier\":\"balanced\",\"confidence\":1}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "balanced" }
+      },
+      {
+        "raw": "{\"tier\":\"strong\",\"confidence\":0.5}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "strong" }
+      },
+      {
+        "raw": "{\"tier\":\"unknown\",\"confidence\":1}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":2}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":0.9,\"extra\":\"field\"}",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "```json\n{\"tier\":\"strong\",\"confidence\":0.75}\n```",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": true, "tier": "strong" }
+      },
+      {
+        "raw": "",
+        "confidenceKind": "self_reported",
+        "expected": { "accept": false }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":0.9}",
+        "confidenceKind": "provider_choice",
+        "expected": { "accept": true, "tier": "fast" }
+      }
+    ],
+    "egress_boundary": [
+      {
+        "endpoint": "https://openrouter.ai/api/alpha/decisions",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "https://api.typesafe.ai/v1/systemone",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "http://127.0.0.1:11435/v1/systemone",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "http://[::1]:1234/",
+        "expected": { "allowed": true }
+      },
+      {
+        "endpoint": "https://evil.invalid/",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "http://openrouter.ai/",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "http://192.168.0.2/",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "http://key:secret@localhost/",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "https://key:secret@openrouter.ai/",
+        "expected": { "allowed": false }
+      },
+      {
+        "endpoint": "file:///tmp/a",
+        "expected": { "allowed": false }
+      }
+    ]
+  }
+}

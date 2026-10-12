@@ -1,0 +1,7 @@
+{
+  "schema": "gjc.self-improve.rrsi.v1",
+  "minDelta": 0.01,
+  "cost": { "wallMsBytesIncreaseRatio": 0.15, "gainMultipleOfFloor": 2 },
+  "stall": { "k": 3 },
+  "retention": { "rawCycles": 10 }
+}
