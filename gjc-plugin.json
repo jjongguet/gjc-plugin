@@ -5,6 +5,7 @@
     "jev-advisor/gajae-plugin.json",
     "verification-receipts/gajae-plugin.json",
     "ui-regression/gajae-plugin.json",
-    "wiki/gajae-plugin.json"
+    "wiki/gajae-plugin.json",
+    "rea/gajae-plugin.json"
   ]
 }

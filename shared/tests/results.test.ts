@@ -55,6 +55,14 @@ test('all handled operations and plugins accept missing repository/receipt ident
     for (const operation of operations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
     expect((await records(path.join(baseDir, plugin, 'journal', 'v1'))).map(record => record.operation)).toEqual(operations);
   }
+  const newer: { plugin: 'wiki' | 'rea'; operations: PluginOutcome['operation'][] }[] = [
+    { plugin: 'wiki', operations: ['wiki_query', 'wiki_propose'] },
+    { plugin: 'rea', operations: ['rea_readiness'] },
+  ];
+  for (const { plugin, operations: pluginOperations } of newer) {
+    for (const operation of pluginOperations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
+    expect((await records(path.join(baseDir, plugin, 'journal', 'v1'))).map(record => record.operation)).toEqual(pluginOperations);
+  }
 });
 
 test('strict nested metadata projection permits native assertions and bounded provider choices only', async () => {

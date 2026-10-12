@@ -8,6 +8,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`verification-receipts`](verification-receipts/) | Explicit JavaScript `node:test` execution, native counts, immutable private receipts and source freshness. |
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. |
 | [`wiki`](wiki/) | Read-only personal-wiki lookup and pending-proposal submission (capture + propose). Never approves or publishes; human approval of the exact digest stays outside the plugin. |
+| [`rea`](rea/) | Offline readiness report (`rea_readiness`) and the pinned GJC workflow skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0). The REA MCP server itself is registered with one documented `gjc mcp add` command — GJC 0.18.5 refuses plugin-bundle stdio MCP servers off Linux, so no manifest `mcps` surface is declared. |
 | `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
