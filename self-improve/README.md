@@ -90,6 +90,14 @@ template via `sh -c` inside a fresh `git archive` scratch copy with
 with `sanitizeGuardEnv` filtered through an explicit allowlist. Request files
 and loop logs record env key names only, never values. `cmd` is live mode:
 without `--live-approved` the invocation is recorded `skipped`.
+  - Live template: `--proposer-cmd 'node self-improve/scripts/propose-with-gjc.mjs {request} {response}'`
+    drives the installed `gjc` CLI (`--print`, non-interactive, no tools) with a
+    strict "reply with one JSON object" prompt and writes the first complete JSON
+    object it finds to the response path. Model/binary/timeout overrides are
+    template-prefix env assignments (`GJC_PROPOSER_MODEL=…`, `GJC_PROPOSER_BIN=…`,
+    `GJC_PROPOSER_TIMEOUT_MS=…`); the helper never logs environment values. Live
+    runs still require `--live-approved` and the frozen caps in
+    `rrsi-protocol.json`.
 - **Validation**: schema, budget pre-check, protected-path pre-check,
 hypothesis-novelty pre-check, verbatim held-out value scan over the patch's
 added lines only (probe-corpus vocabulary is not treated as held-out; matches
@@ -105,6 +113,18 @@ by default) — `loop-state.json` (incl. per-cycle `failureClass`:
 `known_flake_suspect` vs `other`), append-only `loop-log.jsonl`, request files,
 proposer scratch copies. Nothing is written into the repository outside the
 engine's own ledger commits.
+- **Pre-registration**: `rrsi-protocol.json` freezes the headroom derivation
+(denominator, per-case delta, required repaired cases), the spec-sourced gap
+clusters, the M2/M4 caps with auto-stop, the dual-floor decision rule, the P2
+validation minimum, the corpus sha256 and the no-post-hoc-edits sentence.
+Headroom cases live in `domains/gjc-plugin/probes/fixtures.json` with a
+`provenance` object naming the documented statement; held-out parallels carry
+`parallelOf`. See `PATTERNS.md` for the procedure.
+
+## Honest evidence boundary (mandated disclosure)
+
+**Establishes:** the Dream-RSI core (trace→replay→dreaming→redeploy) is implemented, real, and functional on this repository's recorded search space; the loop landed real, guard-green, heldout-clean, committed improvements without hand-written proposals; **the loop met the pre-registered P1–P3 thresholds** on the frozen corpus, deterministically and reproducibly; the redeployed policy operates within the safety gates. **Does not establish:** statistical significance (n is tens; one realized corpus; post-hoc counterfactual reuse of recorded outcomes and costs); generalization to other repos/domains; superiority over human choices (baseline is fixed exploration); live-provider equivalence to stub behavior; indefinite improvement. **Session-authored corpus disclosure [F03]:** the probe corpus was expanded *this session* with spec-sourced cases (each carrying a `provenance` field) and session-authored held-out parallels; the P1 adoption deltas are measured on that expanded corpus under the documented best-effort held-out threat model — not on an externally curated benchmark. This full text ships verbatim in `self-improve/README.md` and the v0.0.6 release notes (whose scope is this session's change set only) [F08].
+
 
 ## Runbook
 

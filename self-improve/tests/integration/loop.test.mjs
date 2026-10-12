@@ -3,10 +3,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import DOMAIN from "../../domains/gjc-plugin/adapter.mjs";
 import { runLoop } from "../../lib/loop.mjs";
 import { readLedger } from "../../lib/ledger.mjs";
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
 function git(cwd, args) {
   const proc = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -84,6 +87,7 @@ function loopInput({ root, repo, deps, ...overrides }) {
       runGuards: deps.runGuards,
       evaluateProbes: deps.evaluateProbes,
       scanProbeFailures: () => ({ ok: true, reason: null, failures: [] }),
+      ...(deps.runInstall ? { runInstall: deps.runInstall } : {}),
       ...(deps.proposerEnv ? { proposerEnv: deps.proposerEnv } : {}),
       ...(deps.now ? { now: deps.now } : {}),
     },
@@ -294,6 +298,49 @@ test("live mode refuses without --live-approved and records skipped", async () =
   assert.equal(readLedger(join(repo, "self-improve", "ledger.jsonl")).length, 0);
   const logLines = readFileSync(result.logPath, "utf8").trim().split("\n").map((line) => JSON.parse(line));
   assert.ok(logLines.some((entry) => entry.type === "skipped" && entry.reason === "live_not_approved"));
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("--install flows from the loop into the adopted cycle row", async () => {
+  const { root, repo } = makeFixture();
+  const fake = makeFakeGuards();
+  const result = await runLoop(
+    loopInput({
+      root,
+      repo,
+      deps: {
+        runGuards: fake.runGuards,
+        evaluateProbes: improvingProbes,
+        runInstall: () => ({ install: "upgraded", plugin: "jev-advisor" }),
+      },
+      maxCycles: 1,
+      install: true,
+    }),
+  );
+  assert.equal(result.cycles[0].adoption, "committed");
+  const rows = readLedger(join(repo, "self-improve", "ledger.jsonl"));
+  assert.equal(rows.at(-1).kind, "adoption");
+  assert.equal(rows.at(-1).install, "upgraded");
+  const state = JSON.parse(readFileSync(result.statePath, "utf8"));
+  assert.equal(state.caps.install, true);
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("the loop CLI --install flag reaches the loop caps", () => {
+  const { root, repo } = makeFixture();
+  const runRoot = join(root, "cli-runroot");
+  const cli = join(REPO_ROOT, "self-improve", "scripts", "run.mjs");
+  const proc = spawnSync(
+    process.execPath,
+    [cli, "loop", "--repo", repo, "--proposer", "cmd", "--proposer-cmd", "true {response}", "--install", "--run-root", runRoot, "--json"],
+    { encoding: "utf8", timeout: 60000 },
+  );
+  assert.equal(proc.status, 0, proc.stderr);
+  const out = JSON.parse(proc.stdout);
+  assert.equal(out.status, "skipped");
+  assert.equal(out.reason, "live_not_approved");
+  const state = JSON.parse(readFileSync(out.statePath, "utf8"));
+  assert.equal(state.caps.install, true);
   rmSync(root, { recursive: true, force: true });
 });
 

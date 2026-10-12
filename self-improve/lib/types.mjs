@@ -61,6 +61,12 @@ export function validateScores(scores) {
   assert(isPlainObject(scores.candidate), "scores.candidate object required");
   if (scores.heldout !== undefined) {
     assert(isPlainObject(scores.heldout), "scores.heldout must be an object when present");
+    if (scores.heldout.ok !== undefined) {
+      assert(typeof scores.heldout.ok === "boolean", "scores.heldout.ok must be a boolean when present");
+    }
+    if (scores.heldout.regressions !== undefined) {
+      assert(Array.isArray(scores.heldout.regressions), "scores.heldout.regressions must be an array when present");
+    }
   }
 }
 

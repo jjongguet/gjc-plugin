@@ -128,6 +128,7 @@ export async function runLoop(input) {
     loopId = defaultLoopId(),
     dryRun = false,
     includeSmoke = true,
+    install = false,
     deps = {},
   } = input ?? {};
   if (!repoRoot || !adapter) throw new Error("loop_requires repoRoot and adapter");
@@ -163,7 +164,7 @@ export async function runLoop(input) {
     proposerCmd: proposerCmd ?? null,
     liveApproved: liveApproved === true,
     dryRun: dryRun === true,
-    caps: { maxCycles, maxWallMs, maxProposerCalls, batchSize, stopOnAdopt: stopOnAdopt === true },
+    caps: { maxCycles, maxWallMs, maxProposerCalls, batchSize, stopOnAdopt: stopOnAdopt === true, install: install === true },
     startedAt,
     updatedAt: startedAt,
     status: "running",
@@ -343,6 +344,7 @@ export async function runLoop(input) {
           ledgerPath,
           dryRun: dryRun === true,
           includeSmoke,
+          install: install === true,
           deps: { runGuards: deps.runGuards, evaluateProbes: deps.evaluateProbes, now: deps.cycleNow, runInstall: deps.runInstall },
         });
       } catch (error) {

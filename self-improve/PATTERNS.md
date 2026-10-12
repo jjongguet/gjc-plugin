@@ -47,6 +47,38 @@ never as a runtime-loaded skill surface: the plugin manifest does not register
 `subskills`, the installed bundle does not contain it, and skill loaders scan
 only project `.gjc/skills/` and user `~/.gjc/agent/skills/`.
 
+## Headroom (M2)
+
+Probes start saturated (every metric at 1.0, `delta = 0 < floor`), so the loop
+cannot adopt anything until the corpus contains cases the current
+implementation genuinely misses. Procedure:
+
+- **Source each case from a documented statement**, never from implementation
+  behavior: `provenance = {source, statement, cluster, note}` names the plugin
+  spec line (README / SKILL.md / decision.ts) the expectation comes from. Cases
+  the current code already satisfies create no headroom and are not added for
+  that purpose.
+- **Clusters**: cases that fail for the same reason form one cluster, repaired
+  by one change. Independent clusters are pre-registered in
+  `rrsi-protocol.json` so the live proposer keeps a fallback; each cluster's
+  `cases / denominator` must cross `floor` on its own.
+- **Held-out parallels** mirror each cluster with different values (same
+  behavior class) and carry `parallelOf`, keeping the non-regression gate
+  meaningful. Numeric-boundary clusters use decimal-exact expectations (the
+  documented tolerance is decimal, not binary). Where a cluster has an upper
+  bound (the 64 KiB response cap), the probe suite also carries the at-cap
+  accept case so an over-strict repair cannot adopt.
+- **Derivation** (frozen in `rrsi-protocol.json` before the first live cycle):
+  `delta = repaired/denominator`, `required = ceil(floor x denominator)`; the
+  denominator is the `decision_accuracy` probe case count and `floor` comes from
+  `rrsi.json`.
+- **Disclosure**: the probe corpus was expanded this session and P1 deltas are
+  measured on that expanded corpus (README carries the mandated boundary text).
+  The M2 gap hunt ran as throwaway batteries recorded under
+  `artifacts/dream-rsi-01a130dd-20261013/m2-gap-hunt/` — zero-violation
+  batteries are evidence too. The 64 KiB cap cases make the fixture files large
+  on purpose: the byte size is the contract under test.
+
 ## Partial regularization (limits)
 
 What is deliberately not regularized yet:

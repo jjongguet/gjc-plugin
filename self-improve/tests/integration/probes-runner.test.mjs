@@ -102,8 +102,17 @@ test('failures output lists per-case labels for the three probe metrics only', (
     for (const label of json.failures.baseline.decision_accuracy) {
       assert.match(label, /^decision_accuracy#\d+$/);
     }
-    assert.equal(json.failures.candidate.decision_accuracy.length, 0, 'healthy side must have no decision failures');
-    assert.equal(json.failures.candidate.egress_boundary.length, 0, 'healthy side must have no egress failures');
+    // The corpus is not saturated any more (spec-sourced headroom cases), so the
+    // invariant is that each side's failure list matches its reported score —
+    // never that a side has no failures.
+    for (const side of ['baseline', 'candidate']) {
+      const decisionMisses = Math.round((1 - json[side].decision_accuracy) * json.counts.decision_accuracy);
+      const egressMisses = Math.round((1 - json[side].egress_boundary) * json.counts.egress_boundary);
+      const extractMisses = Math.round((1 - json[side].extract_coverage) * json.counts.extract_coverage);
+      assert.equal(json.failures[side].decision_accuracy.length, decisionMisses, `${side}: decision failures vs score`);
+      assert.equal(json.failures[side].egress_boundary.length, egressMisses, `${side}: egress failures vs score`);
+      assert.equal(json.failures[side].extract_coverage.length, extractMisses, `${side}: extract failures vs score`);
+    }
     assert.equal(JSON.stringify(json.failures).includes('heldout'), false, 'failures must cover probe metrics only');
   } finally {
     rmSync(brokenDir, { recursive: true, force: true });

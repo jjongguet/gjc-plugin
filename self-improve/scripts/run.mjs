@@ -22,7 +22,7 @@ commands:
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
   loop    [--repo <path>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
           [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W]
-          [--stop-on-adopt] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
+          [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
   prune   [--run-root <path>] [--keep <n>] [--json]
   runner  --baseline <dir> --candidate <dir> [--mode local_stub|live] [--k <n>]
@@ -234,6 +234,7 @@ async function runLoopCommand(options) {
     maxProposerCalls: maxProposerCalls ?? LOOP_DEFAULTS.maxProposerCalls,
     batchSize: batchSize ?? LOOP_DEFAULTS.batchSize,
     stopOnAdopt: options.stopOnAdopt === true,
+    install: options.install === true,
     loopId: options["loop-id"],
     runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
     ledgerPath: options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl"),

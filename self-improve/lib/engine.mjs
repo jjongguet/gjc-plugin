@@ -111,6 +111,31 @@ export function countHunks(patchText) {
   return (patchText.match(/^@@ /gm) ?? []).length;
 }
 
+const HELDOUT_SUMMARY_KEYS = 8;
+
+function boundedHeldoutMap(map) {
+  const out = {};
+  for (const key of Object.keys(map ?? {}).sort().slice(0, HELDOUT_SUMMARY_KEYS)) {
+    const value = map[key];
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Bounded held-out summary recorded on the cycle row (`scores.heldout`): the
+ * decision plus at most 8 numeric values per side, so the <=2 KiB ledger row
+ * limit holds even when a probe runner emits a wide held-out map.
+ */
+export function summarizeHeldout({ ok, regressions = [] }, probesHeldout = {}) {
+  return {
+    ok: ok === true,
+    regressions: (regressions ?? []).slice(0, HELDOUT_SUMMARY_KEYS),
+    baseline: boundedHeldoutMap(probesHeldout.baseline),
+    candidate: boundedHeldoutMap(probesHeldout.candidate),
+  };
+}
+
 function treeBytes(dir) {
   let total = 0;
   for (const name of fs.readdirSync(dir)) {
@@ -460,6 +485,7 @@ export async function runCycle(input) {
       heldoutBaseline: probes.heldout?.baseline ?? {},
       heldoutCandidate: probes.heldout?.candidate ?? {},
     });
+    scores.heldout = summarizeHeldout(heldout, probes.heldout ?? {});
     const critic = buildCriticFindings({ patchText, touched, surface, adapter, rung, hunks });
     const decision = decideCycle({
       critic,
