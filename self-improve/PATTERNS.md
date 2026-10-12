@@ -79,6 +79,30 @@ implementation genuinely misses. Procedure:
   batteries are evidence too. The 64 KiB cap cases make the fixture files large
   on purpose: the byte size is the contract under test.
 
+## Replay / dreaming (P2/P3)
+
+- **Epochs**: replay an attempt only at its recorded code state. The boundary is
+  the editable-surface digest; the observable event is an adoption. Ledger-only
+  `chore` commits and concurrent-lane commits are not boundaries, so `baseCommit`
+  is provenance, never the epoch key. Adoption order is preserved; rejects inside
+  an epoch are freely reorderable; attempts recorded before a replayed slice are
+  ex-ante prior knowledge.
+- **Selection features**: objective/gap id, attempt index within the branch,
+  hypothesis-novelty flag, files/hunks, prior *revealed* outcomes of the same
+  branch, prior guard-failure classes, budget rung. Verdicts, deltas and the
+  order/adoption flags of unplayed attempts stay sealed until selection.
+- **Policy space**: order rule (fixed, round_robin, success_greedy,
+  failure_greedy, novelty_first) × batch size 1–3 × stall switch × stop rule;
+  40 deterministic candidates (≤48). π\* is chosen on the train split only; the
+  validation split exists to evaluate the frozen thresholds.
+- **Determinism**: same ledger + seed ⇒ byte-identical receipt (`receiptHash`).
+  No timestamps, randomness or network in the replay/dream path.
+- **Wording**: report a met threshold as "met the pre-registered P2 thresholds";
+  below the pass gate the verdict is the measured insufficient-evidence string;
+  never claim bare "proven". The pinned no-significance/CI caveat sentence lives
+  in `DREAM.md` and `replay-protocol.json` and is reused verbatim in the evidence
+  map.
+
 ## Partial regularization (limits)
 
 What is deliberately not regularized yet:
