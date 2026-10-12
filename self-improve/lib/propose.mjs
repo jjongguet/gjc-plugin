@@ -24,7 +24,7 @@ const SELF_IMPROVE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.ur
 export const PROPOSER_MODES = Object.freeze(["stub", "cmd"]);
 export const PROPOSER_REQUEST_SCHEMA = "gjc.self-improve.proposer-request.v1";
 export const PROBE_EVALUATION_PATH =
-  "probe cases are scored by executing jev-advisor/lib/decision.ts and observing parseDecision(raw) outputs; edit lib/ sources (the generated hooks/ and tools/ bundles are rebuilt by the build guard)";
+  "probe cases are scored by executing jev-advisor/lib/decision.ts and observing parseDecision(raw) outputs, including its JSON/shape parsing helpers; the stored-advice validator (validateStoredAdvice / validProbabilityRecord) is NOT exercised by these cases; edit lib/ sources (the generated hooks/ and tools/ bundles are rebuilt by the build guard)";
 export const CMD_PROPOSER_TIMEOUT_MS = 300000;
 export const MAX_FAILING_CASES = 24;
 export const MAX_SUMMARY_CHARS = 240;
