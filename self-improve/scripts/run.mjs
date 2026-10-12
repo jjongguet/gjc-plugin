@@ -21,7 +21,7 @@ commands:
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
   loop    [--repo <path>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
-          [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W]
+          [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--proposer-timeout-ms <n>]
           [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
   prune   [--run-root <path>] [--keep <n>] [--json]
@@ -52,6 +52,7 @@ const VALUED_FLAGS = new Set([
   "--max-cycles",
   "--max-wall-ms",
   "--max-proposer-calls",
+  "--proposer-timeout-ms",
   "--batch-size",
   "--loop-id",
 ]);
@@ -222,7 +223,8 @@ async function runLoopCommand(options) {
   const maxWallMs = numberFlag("max-wall-ms");
   const maxProposerCalls = numberFlag("max-proposer-calls");
   const batchSize = numberFlag("batch-size");
-  if ([maxCycles, maxWallMs, maxProposerCalls, batchSize].includes(null)) return 2;
+  const proposerTimeoutMs = numberFlag("proposer-timeout-ms");
+  if ([maxCycles, maxWallMs, maxProposerCalls, batchSize, proposerTimeoutMs].includes(null)) return 2;
   const result = await runLoop({
     repoRoot,
     adapter: DOMAIN,
@@ -233,6 +235,7 @@ async function runLoopCommand(options) {
     maxWallMs: maxWallMs ?? LOOP_DEFAULTS.maxWallMs,
     maxProposerCalls: maxProposerCalls ?? LOOP_DEFAULTS.maxProposerCalls,
     batchSize: batchSize ?? LOOP_DEFAULTS.batchSize,
+    cmdProposerTimeoutMs: proposerTimeoutMs ?? undefined,
     stopOnAdopt: options.stopOnAdopt === true,
     install: options.install === true,
     loopId: options["loop-id"],

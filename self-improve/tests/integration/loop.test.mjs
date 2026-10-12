@@ -472,7 +472,7 @@ test("the loop CLI --install flag reaches the loop caps", () => {
   const cli = join(REPO_ROOT, "self-improve", "scripts", "run.mjs");
   const proc = spawnSync(
     process.execPath,
-    [cli, "loop", "--repo", repo, "--proposer", "cmd", "--proposer-cmd", "true {response}", "--install", "--run-root", runRoot, "--json"],
+    [cli, "loop", "--repo", repo, "--proposer", "cmd", "--proposer-cmd", "true {response}", "--install", "--proposer-timeout-ms", "1234", "--run-root", runRoot, "--json"],
     { encoding: "utf8", timeout: 60000 },
   );
   assert.equal(proc.status, 0, proc.stderr);
@@ -481,6 +481,7 @@ test("the loop CLI --install flag reaches the loop caps", () => {
   assert.equal(out.reason, "live_not_approved");
   const state = JSON.parse(readFileSync(out.statePath, "utf8"));
   assert.equal(state.caps.install, true);
+  assert.equal(state.caps.cmdProposerTimeoutMs, 1234);
   rmSync(root, { recursive: true, force: true });
 });
 

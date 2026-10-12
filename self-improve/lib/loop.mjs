@@ -19,6 +19,7 @@ import path from "node:path";
 import { rungFor } from "./budget.mjs";
 import { campaignAcceptedCount, defaultRunRoot, historyState, recoverPendingCycle, runCycle } from "./engine.mjs";
 import {
+  CMD_PROPOSER_TIMEOUT_MS,
   PROPOSER_MODES,
   buildProposerRequest,
   createProposerScratch,
@@ -159,6 +160,7 @@ export async function runLoop(input) {
     maxWallMs = LOOP_DEFAULTS.maxWallMs,
     maxProposerCalls = LOOP_DEFAULTS.maxProposerCalls,
     batchSize = LOOP_DEFAULTS.batchSize,
+    cmdProposerTimeoutMs = CMD_PROPOSER_TIMEOUT_MS,
     stopOnAdopt = false,
     runRoot = defaultRunRoot(),
     ledgerPath = path.join(repoRoot, "self-improve", "ledger.jsonl"),
@@ -201,7 +203,7 @@ export async function runLoop(input) {
     proposerCmd: proposerCmd ?? null,
     liveApproved: liveApproved === true,
     dryRun: dryRun === true,
-    caps: { maxCycles, maxWallMs, maxProposerCalls, batchSize, stopOnAdopt: stopOnAdopt === true, install: install === true },
+    caps: { maxCycles, maxWallMs, maxProposerCalls, batchSize, cmdProposerTimeoutMs, stopOnAdopt: stopOnAdopt === true, install: install === true },
     startedAt,
     updatedAt: startedAt,
     status: "running",
@@ -307,6 +309,7 @@ export async function runLoop(input) {
             scratchDir,
             outDir: loopRoot,
             env: deps.proposerEnv ?? process.env,
+            timeoutMs: cmdProposerTimeoutMs,
           });
         })();
       if (!outcome.ok) {

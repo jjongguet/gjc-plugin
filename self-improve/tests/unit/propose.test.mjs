@@ -448,6 +448,15 @@ test("cmd proposer runs in the scratch with a filtered env and no secret leaks i
     outDir: loopDir,
   });
   assert.equal(failing.reason, "cmd_proposer_failed");
+  const slow = invokeCmdProposer({
+    request,
+    template: "node -e 'setTimeout(() => {}, 5000)' {response}",
+    scratchDir: scratch,
+    outDir: loopDir,
+    timeoutMs: 300,
+  });
+  assert.equal(slow.reason, "cmd_proposer_failed");
+  assert.ok(slow.log.durationMs < 2000, `expected the configured 300ms timeout to kill the call, took ${slow.log.durationMs}ms`);
   rmSync(root, { recursive: true, force: true });
 });
 
