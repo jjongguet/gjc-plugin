@@ -31,6 +31,8 @@ export const MAX_DIRTY_STORED = 32;
 export const MAX_STATE_BYTES = 32 * 1024;
 export const MAX_RECEIPT_CANDIDATES = 8;
 export const MAX_SCAN_SESSION_FILES = 16;
+const FACT_MARGIN_MS = 3000;
+const RECEIPT_RECOMPUTE_MARGIN_MS = 6000;
 const LOOP_GAP_KINDS = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'] as const;
 export type LoopGapKindName = (typeof LOOP_GAP_KINDS)[number];
 export type LoopGateTrigger = 'task' | 'task_async' | 'subagent_terminal' | 'job_terminal';
@@ -409,6 +411,7 @@ export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs:
    if (!receipt || receipt.plugin !== 'verification-receipts') continue;
    const observedAtMs = Date.parse(receipt.observedAt);
    if (!Number.isFinite(observedAtMs) || observedAtMs < gateEmittedAtMs) continue;
+   if (deadlineMs !== undefined && deadlineMs - loopClock.now() < RECEIPT_RECOMPUTE_MARGIN_MS) return candidates;
    let freshness: string;
    if (cache?.freshness.has(key)) freshness = cache.freshness.get(key)!;
    else { freshness = await currentReceiptFreshness(root, receipt, base); cache?.freshness.set(key, freshness); }
@@ -504,7 +507,14 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
   for (const pending of session.state.pendingAsync) if (pending.consumedAtGateId === null) silentPending++;
   for (const gate of session.state.gates) {
    if (gate.resolvedAt !== null) { resolvedGates++; continue; }
-   if (budgetExceeded || loopClock.now() >= deadlineMs) { budgetExceeded = true; skippedGates++; continue; }
+   if (budgetExceeded || deadlineMs - loopClock.now() < FACT_MARGIN_MS) {
+    budgetExceeded = true;
+    skippedGates++;
+    openGates++;
+    gaps.push({ gateId: gate.id, trigger: gate.trigger, kind: 'state_unavailable', detail: 'evaluation budget reached before this gate could be evaluated' });
+    if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
+    continue;
+   }
    const baseline = session.state.baselines.find(b => b.toolCallId === gate.baselineToolCallId) ?? null;
    const roots = [root];
    if (gate.boundRoot && gate.boundRoot !== root) roots.push(gate.boundRoot);
@@ -554,6 +564,8 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
   stateWritten = status === 'ok';
  }
  const boundedGaps = gaps.slice(0, 16);
+ // A single bounded operation may still finish slightly past the deadline; the overrun is reported honestly.
+ if (!budgetExceeded && loopClock.now() > deadlineMs) budgetExceeded = true;
  if (budgetExceeded) {
   if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
   boundedGaps.push({ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: `evaluation budget reached; ${skippedGates} gate(s) unevaluated` });
@@ -627,7 +639,7 @@ export function requiredActionsFor(kinds: LoopGapKindName[]): string[] {
   else if (kind === 'receipt_not_passed' || kind === 'receipt_no_tests' || kind === 'receipt_incomplete') actions.push('Fix the failing or incomplete verification and rerun verification_run, then re-run verification_loop.');
   else if (kind === 'receipt_stale' || kind === 'receipt_changed_during_run' || kind === 'receipt_freshness_unavailable') actions.push('Re-run verification_run against the current source, then re-run verification_loop.');
   else if (kind === 'not_a_repository') actions.push('Run verification_loop from inside the repository that received the delegated work.');
-  else if (kind === 'state_unavailable') actions.push('Inspect the verification-receipts loop state store; do not claim a clean loop while it is unreadable.');
+  else if (kind === 'state_unavailable') actions.push('Loop state or repository facts are unreadable; inspect the verification-receipts store and re-run verification_loop once facts are available.');
  }
  return [...new Set(actions)].slice(0, 4);
 }
