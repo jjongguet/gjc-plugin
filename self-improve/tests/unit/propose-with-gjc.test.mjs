@@ -144,7 +144,7 @@ test("collectEditableContents embeds only editable files with per-file and total
     mkdirSync(join(root, "verification-receipts", "lib"), { recursive: true });
     mkdirSync(join(root, "self-improve", "domains", "gjc-plugin", "heldout"), { recursive: true });
     writeFileSync(join(root, "verification-receipts", "lib", "a.ts"), "export const a = 1;\n");
-    writeFileSync(join(root, "verification-receipts", "lib", "big.ts"), "x".repeat(70000));
+    writeFileSync(join(root, "verification-receipts", "lib", "big.ts"), "x".repeat(PER_FILE_CAP_BYTES + 1024));
     writeFileSync(join(root, "self-improve", "domains", "gjc-plugin", "heldout", "fixtures.json"), '{"sentinel":"heldout-secret"}\n');
     writeFileSync(join(root, "package.json"), "{}\n");
     const collected = collectEditableContents({
