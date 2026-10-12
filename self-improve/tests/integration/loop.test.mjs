@@ -466,6 +466,61 @@ test("a non-applying patch is a soft proposal failure: the loop continues and a 
   rmSync(root, { recursive: true, force: true });
 });
 
+test("an invalid (unparseable) patch is a soft proposal failure: the loop continues and feeds the next request", async () => {
+  const { root, repo } = makeFixture();
+  const scriptPath = join(root, "schema-phase-proposer.mjs");
+  const callsFile = join(root, "schema-calls.txt");
+  writeFileSync(
+    scriptPath,
+    [
+      "import { existsSync, readFileSync, writeFileSync } from 'node:fs';\n",
+      "import { join } from 'node:path';\n",
+      "const [requestPath, responsePath] = process.argv.slice(2);\n",
+      "const request = JSON.parse(readFileSync(requestPath, 'utf8'));\n",
+      "const calls = existsSync(process.env.CALLS_FILE) ? Number(readFileSync(process.env.CALLS_FILE, 'utf8')) : 0;\n",
+      "writeFileSync(process.env.CALLS_FILE, String(calls + 1));\n",
+      "const rel = 'jev-advisor/lib/decision.ts';\n",
+      "let patch;\n",
+      "if (calls === 0) {\n",
+      "  // hunk header with no body: an unparseable / corrupt patch\n",
+      "  patch = ['diff --git a/' + rel + ' b/' + rel, '--- a/' + rel, '+++ b/' + rel, '@@ -1,3 +1,3 @@', ''].join('\\n');\n",
+      "} else {\n",
+      "  const original = readFileSync(join(process.cwd(), rel), 'utf8').replace(/\\n$/, '');\n",
+      "  const lines = original.split('\\n');\n",
+      "  const kept = lines.slice(-3);\n",
+      "  const start = lines.length - kept.length + 1;\n",
+      "  patch = ['diff --git a/' + rel + ' b/' + rel, '--- a/' + rel, '+++ b/' + rel, '@@ -' + start + ',' + kept.length + ' +' + start + ',' + (kept.length + 1) + ' @@', ...kept.map((line) => ' ' + line), '+// invalid-schema fixture proposal', ''].join('\\n');\n",
+      "}\n",
+      "writeFileSync(responsePath, JSON.stringify({ hypothesis: 'schema-phase proposal ' + (calls + 1), objective: request.objective, commitMessage: 'chore(jev-advisor): schema-phase fixture ' + (calls + 1), patch }));\n",
+    ].join(""),
+  );
+  const fake = makeFakeGuards();
+  const result = await runLoop(
+    loopInput({
+      root,
+      repo,
+      deps: { runGuards: fake.runGuards, evaluateProbes: improvingProbes },
+      proposer: "cmd",
+      proposerCmd: `CALLS_FILE=${callsFile} node ${scriptPath} {request} {response}`,
+      liveApproved: true,
+      maxCycles: 1,
+      maxProposerCalls: 2,
+    }),
+  );
+  assert.equal(result.status, "ok");
+  assert.equal(result.stoppedReason, "max_cycles", "an invalid patch must not stop the loop");
+  assert.equal(result.counters.cycles, 1);
+  assert.equal(result.cycles[0].status, "proposal_invalid");
+  assert.ok((result.cycles[0].reasons ?? []).length > 0, "the invalid proposal must carry a reason");
+  const secondRequest = JSON.parse(readFileSync(join(result.loopRoot, "cycle-2.request.json"), "utf8"));
+  assert.equal(
+    secondRequest.priorAttempts.some((entry) => (entry.reasons ?? []).length > 0),
+    true,
+    "the invalid proposal must feed the next request as a prior attempt",
+  );
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("the loop CLI --install flag reaches the loop caps", () => {
   const { root, repo } = makeFixture();
   const runRoot = join(root, "cli-runroot");

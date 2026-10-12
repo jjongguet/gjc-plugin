@@ -215,16 +215,34 @@ export function main(argv = process.argv.slice(2), env = process.env, deps = {})
     extraArgs: env.GJC_PROPOSER_EXTRA_ARGS ?? "",
     prompt: buildProposerPrompt(request, { editableFiles: editableContents.files }),
   });
-  const proc = spawn(command[0], command.slice(1), {
-    encoding: "utf8",
-    timeout: Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS,
-    maxBuffer: 16 * 1024 * 1024,
-    env,
-  });
+  const budgetMs = Number.isInteger(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
+  const startedMs = Date.now();
+  const spawnOnce = () =>
+    spawn(command[0], command.slice(1), {
+      encoding: "utf8",
+      timeout: Math.max(30_000, budgetMs - (Date.now() - startedMs)),
+      maxBuffer: 16 * 1024 * 1024,
+      env,
+    });
+  let proc = spawnOnce();
   if (proc.error || proc.status !== 0) {
-    // Never echo environment values: report only the exit state.
-    process.stderr.write(`propose-with-gjc: gjc exited ${proc.status ?? "error"}${proc.error ? " (spawn error)" : ""}\n`);
-    return 1;
+    // One bounded retry absorbs transient provider/harness failures; the
+    // child's stderr is captured to a sidecar file for diagnosis (env values
+    // are never echoed). The retry only runs with real budget left.
+    try {
+      writeFileSync(`${responsePath}.attempt-1.stderr.log`, String(proc.stderr ?? "").slice(-4096));
+    } catch {}
+    if (Date.now() - startedMs < budgetMs * 0.5) {
+      proc = spawnOnce();
+    }
+    if (proc.error || proc.status !== 0) {
+      try {
+        writeFileSync(`${responsePath}.stderr.log`, String(proc.stderr ?? "").slice(-4096));
+      } catch {}
+      process.stderr.write(`propose-with-gjc: gjc exited ${proc.status ?? "error"}${proc.error ? " (spawn error)" : ""}\n`);
+      return 1;
+    }
+    process.stderr.write("propose-with-gjc: gjc failed once and succeeded on retry\n");
   }
   const parsed = extractProposalJson(proc.stdout ?? "");
   const normalized = normalizeProposal(parsed, request);

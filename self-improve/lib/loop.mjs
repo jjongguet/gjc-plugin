@@ -39,7 +39,6 @@ export const LOOP_DEFAULTS = Object.freeze({
 });
 export const MAX_BATCH_SIZE = 8;
 export const HEAD_MOVE_STOP_LIMIT = 3;
-export const EMPTY_ROUND_LIMIT = 2;
 
 /**
  * Known flake (R7): the `shared/tests/results.test.ts:158` concurrency test.
@@ -291,7 +290,7 @@ export async function runLoop(input) {
         rung,
         failures: scan.failures ?? [],
         history: {
-          priorAttempts: state.cycles.filter((entry) => entry.decision === "reject" || entry.status === "proposal_failed"),
+          priorAttempts: state.cycles.filter((entry) => entry.decision === "reject" || entry.status === "proposal_failed" || entry.status === "proposal_invalid"),
           stalled,
           unexplored,
         },
@@ -337,6 +336,7 @@ export async function runLoop(input) {
           objective: action.objective,
           status: "proposal_invalid",
           reason: validation.reason,
+          reasons: [validation.reason],
           hypothesis: outcome.proposal.hypothesis,
         });
         log({ type: "proposal_invalid", cycleIndex, objective: action.objective, reason: validation.reason, detail: validation });
@@ -366,11 +366,10 @@ export async function runLoop(input) {
     }
     if (stoppedReason !== null) break;
     if (runnable.length === 0) {
+      // Plan §4.2: the loop continues until a cap breaches; a blocked round
+      // is recorded for diagnostics but never stops the campaign.
       emptyRounds += 1;
-      if (emptyRounds >= EMPTY_ROUND_LIMIT) {
-        stoppedReason = lastBlockReason ?? "no_runnable_proposals";
-        break;
-      }
+      persist();
       continue;
     }
     emptyRounds = 0;
@@ -477,6 +476,7 @@ export async function runLoop(input) {
     statePath,
     logPath,
     stoppedReason,
+    lastBlockReason,
     counters: { ...state.counters },
     recovery: state.recovery,
     cycles: state.cycles,

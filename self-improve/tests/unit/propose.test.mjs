@@ -194,6 +194,7 @@ test("buildProposerRequest carries objective, rung caps, failures and constraint
   assert.deepEqual(request.budget, { rung: 1, maxFiles: 2, maxHunks: 8 });
   assert.equal(request.constraints.maxFiles, 2);
   assert.equal(request.constraints.patchMustApplyAt, "HEAD");
+  assert.match(request.evaluationPath, /parseDecision/);
   assert.equal(request.priorAttempts.length, 5);
   assert.equal(request.priorAttempts.at(-1).hypothesis, "attempt 6");
   assert.deepEqual(request.stalledObjectives, ["probe.extract_coverage"]);
