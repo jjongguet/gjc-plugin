@@ -10,6 +10,10 @@ import { fileURLToPath } from "node:url";
 import { dirname, join, resolve } from "node:path";
 
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+// The suite runs with cwd at the repository root: the engine's patch parsing
+// follows git's restriction that `git apply` ignores paths outside the current
+// directory when invoked from a repository subdirectory.
+const REPO_ROOT = resolve(SELF_IMPROVE_DIR, "..");
 const UNIT_DIR = join(SELF_IMPROVE_DIR, "tests", "unit");
 
 const testFiles = readdirSync(UNIT_DIR)
@@ -23,7 +27,7 @@ if (testFiles.length === 0) {
 }
 
 const result = spawnSync(process.execPath, ["--test", "--test-reporter=tap", ...testFiles], {
-  cwd: SELF_IMPROVE_DIR,
+  cwd: REPO_ROOT,
   encoding: "utf8",
 });
 

@@ -1,0 +1,95 @@
+{
+  "schema": "gjc.self-improve.rrsi-protocol.v1",
+  "frozenFrom": "plan stage-02-revision.md §4.1-§4.4 / §9-M2 (M2 caps: --max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000; M4 caps: --max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000)",
+  "primary": "decision_accuracy",
+  "floor": 0.01,
+  "headroom": {
+    "denominator": 16,
+    "denominatorBasis": "decision_accuracy cases in self-improve/domains/gjc-plugin/probes/fixtures.json at the headroom commit",
+    "perCaseDelta": 0.0625,
+    "requiredRepairedCases": 1,
+    "derivation": "delta = hits/denominator; repairing one case adds 1/denominator; required k = smallest integer with k/denominator >= floor=0.01, i.e. k = ceil(0.01 * denominator); frozen here before the first live cycle",
+    "gapClusters": 2,
+    "clusterCountDeviation": "plan R1 mitigation asked for >=4 gap clusters; the M2 gap audit (artifacts/dream-rsi-01a130dd-20261013/m2-gap-hunt/) found exactly two candidates that satisfy both the spec-anchor and metric-visibility requirements, and inventing cases is forbidden — 2 is accepted as the honest final count (parent-conceded). The two clusters map 1:1 onto the P1 goal (>=2 adoptions, minimum 1).",
+    "clusters": [
+      {
+        "id": "probability-sum-tolerance-boundary",
+        "cases": 4,
+        "source": "jev-advisor/README.md:57-58 (distribution must sum to one within 0.001)",
+        "repairSurface": "jev-advisor/lib/decision.ts (parseProbabilityMap)",
+        "class": "decimal |sum-1| == 0.001 exactly, rejected by binary floating-point comparison error",
+        "headroom": 0.25
+      },
+      {
+        "id": "response-size-cap-at-exported-parser",
+        "cases": 1,
+        "source": "jev-advisor/README.md:60-61 (response overflow yields explicit no-decision) + decision.ts:70 MAX_RESPONSE_BYTES",
+        "repairSurface": "jev-advisor/lib/decision.ts (parseDecision)",
+        "class": "64 KiB cap enforced only by the transport reader; the exported parser accepts an over-cap reply",
+        "headroom": 0.0625
+      }
+    ],
+    "measuredBaseline": {
+      "decisionAccuracy": 0.6875,
+      "heldoutCoverage": 0.8275862068965517,
+      "driftCases": 5,
+      "atCapGuardCase": "decision_accuracy#14 (65536 bytes, accepted) rejects over-strict repairs"
+    },
+    "clusterStatus": "frozen-pending-live-run: cases and this file commit before the first live cycle"
+  },
+  "dualFloor": {
+    "pass": ">=2 adoption cycles",
+    "degraded": "exactly 1 adoption cycle with a documented cause (recorded, not proof-grade)",
+    "fail": "0 adoption cycles",
+    "perAdoption": [
+      "all 6 guards pass",
+      "delta >= floor",
+      "held-out non-regression",
+      "adoption row + code commit + adoption-recorded chore commit",
+      ">=1 adoption ran --install"
+    ]
+  },
+  "caps": {
+    "invariant": "proposerCalls >= cycles (a cycle cannot run without a proposer call); if a frozen pair violates it, the conflict is recorded here instead of silently redistributing and effective cycles = min(cycles, proposerCalls)",
+    "m2": {
+      "maxCycles": 20,
+      "maxProposerCalls": 24,
+      "maxWallMs": 9000000,
+      "stopOnAdopt": false,
+      "cli": "--max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000",
+      "invariantHolds": true
+    },
+    "m4": {
+      "maxCycles": 6,
+      "maxProposerCalls": 8,
+      "maxWallMs": 2400000,
+      "stopOnAdopt": false,
+      "cli": "--max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000",
+      "invariantHolds": true
+    }
+  },
+  "autoStop": "A cap breach stops the campaign and records stopped_reason in the loop state; extension requires a re-frozen protocol artifact — no ad-hoc --max-* bump.",
+  "escalation": "Cap breach, repeated HEAD movement, or a second hit on the same proposal stops the campaign; the operator records the measured state and reports the residual gap (plan §14/§16 R7).",
+  "p2": {
+    "passGateN": 20,
+    "train": 14,
+    "validation": 6,
+    "validationRequiresAdoption": true,
+    "insufficientEvidenceVerdict": "insufficient evidence at pass-gate size — thresholds not evaluated"
+  },
+  "live": {
+    "requiresFlag": "--live-approved",
+    "proposerSeam": "cmd",
+    "helper": "self-improve/scripts/propose-with-gjc.mjs",
+    "template": "--proposer-cmd 'node self-improve/scripts/propose-with-gjc.mjs {request} {response}'"
+  },
+  "noPostHocEdits": "No post-hoc threshold edits: thresholds are frozen by this file's commit and re-hashed in the evidence map.",
+  "corpus": {
+    "probes": "self-improve/domains/gjc-plugin/probes/fixtures.json",
+    "heldout": "self-improve/domains/gjc-plugin/heldout/fixtures.json",
+    "sha256": {
+      "probes": "5d81c64d75f1a596fc0251d1b4fb9f2859e9d3296dd8ac66a92a932faf0bf7f6",
+      "heldout": "216de92adeb9f687bcecb54afd5bc6a9bc5682b98ecbf9553f92c81b87c88672"
+    }
+  }
+}

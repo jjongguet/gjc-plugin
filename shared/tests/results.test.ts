@@ -55,15 +55,42 @@ test('all handled operations and plugins accept missing repository/receipt ident
     for (const operation of operations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
     expect((await records(path.join(baseDir, plugin, 'journal', 'v1'))).map(record => record.operation)).toEqual(operations);
   }
-  const newer: { plugin: 'wiki' | 'rea' | 'backplan'; operations: PluginOutcome['operation'][] }[] = [
+  const newer: { plugin: 'wiki' | 'rea' | 'backplan' | 'rrsi'; operations: PluginOutcome['operation'][] }[] = [
     { plugin: 'wiki', operations: ['wiki_query', 'wiki_propose'] },
     { plugin: 'rea', operations: ['rea_readiness'] },
     { plugin: 'backplan', operations: ['backplan_check'] },
+    { plugin: 'rrsi', operations: ['capture', 'import', 'dream', 'status'] },
   ];
   for (const { plugin, operations: pluginOperations } of newer) {
     for (const operation of pluginOperations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
     expect((await records(path.join(baseDir, plugin, 'journal', 'v1'))).map(record => record.operation)).toEqual(pluginOperations);
   }
+});
+
+test('rrsi outcomes round-trip the action counters and reject malformed fields', async () => {
+  const { baseDir } = await fixture();
+  const value: PluginOutcome = {
+    operation: 'dream', repositoryDigest: null, toolCallDigest: 'b'.repeat(64), durationMs: 12,
+    rrsi: { action: 'dream', episodes: 2, attempts: 24, imported: 0, policies: 40, storage: 'ok' },
+  };
+  expect((await appendPluginOutcome('rrsi', value, { baseDir })).persisted).toBe(true);
+  const stored = await records(path.join(baseDir, 'rrsi', 'journal', 'v1'));
+  expect(stored.length).toBe(1);
+  expect(stored[0].operation).toBe('dream');
+  expect(stored[0].rrsi).toEqual({ action: 'dream', episodes: 2, attempts: 24, imported: 0, policies: 40, storage: 'ok' });
+  const minimal: PluginOutcome = { operation: 'status', rrsi: { action: 'status', storage: 'missing' } };
+  expect((await appendPluginOutcome('rrsi', minimal, { baseDir })).persisted).toBe(true);
+  expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1')))[1].rrsi).toEqual({ action: 'status', storage: 'missing' });
+  const rejected: PluginOutcome[] = [
+    { operation: 'capture', rrsi: { action: 'explore' as any, storage: 'ok' } },
+    { operation: 'capture', rrsi: { action: 'capture', storage: 'repaired' as any } },
+    { operation: 'capture', rrsi: { action: 'capture' } as any },
+    { operation: 'capture', rrsi: { action: 'capture', storage: 'ok', extra: true } as any },
+    { operation: 'capture', rrsi: { action: 'capture', storage: 'ok', attempts: -1 } },
+    { operation: 'capture', rrsi: { action: 'capture', storage: 'ok', policies: 1.5 } },
+  ];
+  for (const value of rejected) expect((await appendPluginOutcome('rrsi', value, { baseDir })).persisted).toBe(false);
+  expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1'))).length).toBe(2);
 });
 
 test('gate and loop outcomes round-trip canonical enums and reject malformed or unknown fields', async () => {

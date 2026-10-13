@@ -434,6 +434,72 @@ test("recovery completes a missing adoption chore commit", () => {
   rmSync(root, { recursive: true, force: true });
 });
 
+test("cycle rows carry a bounded held-out summary and held-out regressions reject", async () => {
+  const { root, repo } = makeFixture();
+  const wideSide = () => {
+    const map = {};
+    for (let index = 0; index < 60; index += 1) map[`metric_${String(index).padStart(3, "0")}`] = 0.5;
+    return map;
+  };
+  const wideProbes = async () => ({
+    baseline: { coverage: 0.9 },
+    candidate: { coverage: 0.95 },
+    delta: 0.05,
+    heldout: {
+      baseline: { heldout_coverage: 0.5, ...wideSide() },
+      candidate: { heldout_coverage: 0.5, ...wideSide() },
+    },
+  });
+  const fake = makeFakeGuards();
+  const patchFile = writePatch(root, "heldout-field.patch", cleanPatch);
+  const adopted = await runCycle(
+    cycleInput({
+      root,
+      repo,
+      patchFile,
+      hypothesis: "heldout summary",
+      deps: { runGuards: fake.runner, evaluateProbes: wideProbes },
+    }),
+  );
+  assert.equal(adopted.decision, "adopt");
+  const row = readLedger(join(repo, "self-improve", "ledger.jsonl"))[0];
+  assert.equal(row.scores.heldout.ok, true);
+  assert.deepEqual(row.scores.heldout.regressions, []);
+  assert.equal(Object.keys(row.scores.heldout.baseline).length, 8);
+  assert.equal(Object.keys(row.scores.heldout.candidate).length, 8);
+  assert.ok(Buffer.byteLength(JSON.stringify(row), "utf8") <= 2048, "bounded summary keeps the row under 2 KiB");
+
+  const regressionProbes = async () => ({
+    baseline: { coverage: 0.9 },
+    candidate: { coverage: 0.95 },
+    delta: 0.05,
+    heldout: { baseline: { heldout_coverage: 0.6 }, candidate: { heldout_coverage: 0.4 } },
+  });
+  const fake2 = makeFakeGuards();
+  const rejected = await runCycle(
+    cycleInput({
+      root,
+      repo,
+      patchFile: writePatch(
+        root,
+        "heldout-regression.patch",
+        patchFor("jev-advisor/lib/decision.ts", "export const value = 2;", "export const value = 3;"),
+      ),
+      hypothesis: "heldout regression",
+      deps: { runGuards: fake2.runner, evaluateProbes: regressionProbes },
+    }),
+  );
+  assert.equal(rejected.decision, "reject");
+  assert.ok(rejected.reasons.includes("heldout_regression"), rejected.reasons.join(","));
+  const rows = readLedger(join(repo, "self-improve", "ledger.jsonl"));
+  const regressionRow = rows.filter((entry) => entry.kind === "cycle").at(-1);
+  assert.equal(regressionRow.scores.heldout.ok, false);
+  assert.deepEqual(regressionRow.scores.heldout.regressions, [
+    { key: "heldout_coverage", baselineValue: 0.6, candidateValue: 0.4 },
+  ]);
+  rmSync(root, { recursive: true, force: true });
+});
+
 test("a ledger outside the repository is refused before any side effects", async () => {
   const { root, repo } = makeFixture();
   const fake = makeFakeGuards();

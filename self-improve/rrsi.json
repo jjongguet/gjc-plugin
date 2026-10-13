@@ -3,5 +3,10 @@
   "minDelta": 0.01,
   "cost": { "wallMsBytesIncreaseRatio": 0.15, "gainMultipleOfFloor": 2 },
   "stall": { "k": 3 },
-  "retention": { "rawCycles": 10 }
+  "retention": { "rawCycles": 10 },
+  "policy": {
+    "seed": 1,
+    "maxCandidates": 48,
+    "betas": { "beta1": 0.01, "beta2": 0.005 }
+  }
 }

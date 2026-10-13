@@ -111,6 +111,31 @@ export function countHunks(patchText) {
   return (patchText.match(/^@@ /gm) ?? []).length;
 }
 
+const HELDOUT_SUMMARY_KEYS = 8;
+
+function boundedHeldoutMap(map) {
+  const out = {};
+  for (const key of Object.keys(map ?? {}).sort().slice(0, HELDOUT_SUMMARY_KEYS)) {
+    const value = map[key];
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+  }
+  return out;
+}
+
+/**
+ * Bounded held-out summary recorded on the cycle row (`scores.heldout`): the
+ * decision plus at most 8 numeric values per side, so the <=2 KiB ledger row
+ * limit holds even when a probe runner emits a wide held-out map.
+ */
+export function summarizeHeldout({ ok, regressions = [] }, probesHeldout = {}) {
+  return {
+    ok: ok === true,
+    regressions: (regressions ?? []).slice(0, HELDOUT_SUMMARY_KEYS),
+    baseline: boundedHeldoutMap(probesHeldout.baseline),
+    candidate: boundedHeldoutMap(probesHeldout.candidate),
+  };
+}
+
 function treeBytes(dir) {
   let total = 0;
   for (const name of fs.readdirSync(dir)) {
@@ -237,7 +262,15 @@ export function checkProposalHistory({ ledgerPath, proposal, adapterObjectives =
     const unexplored = adapterObjectives.filter(
       (objective) => !state.objectives.some((entry) => entry.objective === objective),
     );
-    return { ok: false, reason: "forced_exploration", stalled: proposal.objective, unexplored };
+    // Stall redirects exploration only while an unexplored probe exists to
+    // redirect to. Per the frozen campaign contract (§4.2 "continues to n=20
+    // unless a cap breaches"; §16 R1 "per-gap retries bounded by the
+    // proposer-call cap"), a fully stalled objective set stays admissible once
+    // nothing is left unexplored; the retry is flagged for audit.
+    if (unexplored.length > 0) {
+      return { ok: false, reason: "forced_exploration", stalled: proposal.objective, unexplored };
+    }
+    return { ok: true, reason: null, hypothesisHash, forcedExploration: true, stallRetry: true };
   }
   return { ok: true, reason: null, hypothesisHash, forcedExploration: state.stalled.length > 0 };
 }
@@ -460,6 +493,7 @@ export async function runCycle(input) {
       heldoutBaseline: probes.heldout?.baseline ?? {},
       heldoutCandidate: probes.heldout?.candidate ?? {},
     });
+    scores.heldout = summarizeHeldout(heldout, probes.heldout ?? {});
     const critic = buildCriticFindings({ patchText, touched, surface, adapter, rung, hunks });
     const decision = decideCycle({
       critic,

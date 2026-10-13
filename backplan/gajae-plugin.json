@@ -1,7 +1,7 @@
 {
 	"kind": "gajae-code-plugin",
 	"name": "backplan",
-	"version": "0.0.3",
+	"version": "0.0.4",
 	"tools": [
 		{
 			"name": "backplan_check",

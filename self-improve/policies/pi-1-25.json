@@ -1,0 +1,18 @@
+{
+  "schema": "gjc.self-improve.policy.v1",
+  "id": "pi-1-25",
+  "seed": 1,
+  "config": {
+    "order": "failure_greedy",
+    "batchSize": 1,
+    "stopRule": "first_adoption",
+    "stallRedirect": false,
+    "stallK": 3
+  },
+  "source": {
+    "corpus": "6700fb56d668b33e358f7239af7c11a460f32306aeb5754a955c1ace1d263071",
+    "verdict": "insufficient evidence at pass-gate size — thresholds not evaluated",
+    "receiptHash": "e7f987e5dfc0764bf0cb20ddc8e4e0262313a8134f0e7940dd506ee75dc2761c"
+  },
+  "createdAt": "2026-10-12T22:07:34.948Z"
+}
