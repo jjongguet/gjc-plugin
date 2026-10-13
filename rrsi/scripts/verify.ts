@@ -236,6 +236,14 @@ async function runSuite(root) {
 		assert.equal(/require\(["']https?["']\)/.test(generated), false, "no http client");
 	});
 
+	await check("generated surface is in sync with sources (rebuild is a no-op)", () => {
+		const target = path.join(plugin, "tools/rrsi.ts");
+		const before = readFileSync(target, "utf8");
+		const build = spawnSync(process.execPath, [path.join(plugin, "scripts/build.mjs")], { encoding: "utf8", timeout: 60000 });
+		assert.equal(build.status, 0, build.stderr);
+		assert.equal(readFileSync(target, "utf8"), before, "tools/rrsi.ts drifted");
+	});
+
 	await check("the shared results registry accepts rrsi outcomes and rejects malformed ones", async () => {
 		const shared = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
 		for (const action of ["capture", "import", "dream", "status"]) {
