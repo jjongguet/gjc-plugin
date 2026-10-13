@@ -10,6 +10,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`wiki`](wiki/) | Read-only personal-wiki lookup and pending-proposal submission (capture + propose). Never approves or publishes; human approval of the exact digest stays outside the plugin. |
 | [`rea`](rea/) | Offline readiness report (`rea_readiness`) and the pinned GJC workflow skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0). The integration runs the pinned CLI (`npx -y rea-agents@6.4.0 <command>`); an optional `gjc mcp add` registration exists for stateful MCP sessions — GJC 0.18.5 refuses plugin-bundle stdio MCP servers off Linux, so no manifest `mcps` surface is declared. |
 | [`backplan`](backplan/) | Planning gate that fires when execution-bound work arrives: `backplan_check` validates a structured plan (end state, success criteria, issue breakdown, Linear project mapping, policy decisions, automation candidates) and renders Linear-ready payloads plus a stable digest. Deterministic, keyless and offline; registration stays with the agent's Linear MCP / `linear-trace.py` path. |
+| [`rrsi`](rrsi/) | GJC exploration-trace store and Dream-RSI replay surface (`rrsi` tool: capture/import/dream/status). Instrument only: the plugin carries functional acceptance; the performance proof (P1–P3) applies to the `self-improve` loop and its frozen corpus. Keyless and offline; private store under `~/.gjc-plugin/rrsi/`. See [`rrsi/README.md`](rrsi/README.md). |
 | `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
@@ -23,6 +24,7 @@ gjc plugin install ./ui-regression --user
 gjc plugin install ./wiki --user
 gjc plugin install ./rea --user
 gjc plugin install ./backplan --user
+gjc plugin install ./rrsi --user
 gjc plugin list && gjc plugin doctor
 ```
 

@@ -62,6 +62,34 @@ function buildAttempt(row, adoptionRow) {
 }
 
 /**
+ * Build a replay corpus from already-shaped attempts (journal/store callers),
+ * partitioning epochs by recorded adoptions exactly like the ledger path.
+ */
+export function corpusFromAttempts(attempts) {
+  const sorted = [...attempts].sort((left, right) => left.seq - right.seq);
+  const epochs = [];
+  let current = { index: 0, attempts: [] };
+  for (const attempt of sorted) {
+    current.attempts.push(attempt);
+    if (attempt.adoption) {
+      epochs.push(current);
+      current = { index: epochs.length, attempts: [] };
+    }
+  }
+  if (current.attempts.length > 0) {
+    current.index = epochs.length;
+    epochs.push(current);
+  }
+  return {
+    rows: [],
+    attempts: sorted,
+    epochs,
+    adoptionCount: sorted.filter((attempt) => attempt.adoption).length,
+    ledgerSha256: sha256Hex(sorted.map((attempt) => JSON.stringify(attempt)).join("\n")),
+  };
+}
+
+/**
  * Load the recorded corpus: attempts in ledger order, partitioned into epochs by
  * adoption boundaries. Trailing attempts after the last adoption form the open
  * epoch (the pool can keep growing, M4).
@@ -75,29 +103,9 @@ export function loadCorpus({ ledgerPath }) {
   const attempts = rows
     .filter((row) => row.kind === "cycle")
     .map((row) => buildAttempt(row, adoptionsByCycle.get(row.cycleId) ?? null));
-  const epochs = [];
-  let current = { index: 0, attempts: [] };
-  for (const attempt of attempts) {
-    current.attempts.push(attempt);
-    if (attempt.adoption) {
-      epochs.push(current);
-      current = { index: epochs.length, attempts: [] };
-    }
-  }
-  // Trailing attempts after the last adoption form the open epoch (the pool can
-  // keep growing); an empty tail adds no world and is dropped.
-  if (current.attempts.length > 0) {
-    current.index = epochs.length;
-    epochs.push(current);
-  }
-  const adoptionCount = attempts.filter((attempt) => attempt.adoption).length;
-  return {
-    rows,
-    attempts,
-    epochs,
-    adoptionCount,
-    ledgerSha256: sha256Hex(rows.map((row) => JSON.stringify(row)).join("\n")),
-  };
+  const corpus = corpusFromAttempts(attempts);
+  corpus.rows = rows;
+  return { ...corpus, ledgerSha256: sha256Hex(rows.map((row) => JSON.stringify(row)).join("\n")) };
 }
 
 function branchAttemptsBefore(corpus, attempt, history = []) {

@@ -10,10 +10,9 @@ import * as fs from "node:fs";
 import path from "node:path";
 import { appendRow } from "./ledger.mjs";
 import { POLICY_ORDERS, POLICY_STOP_RULES } from "./replay.mjs";
-import { isPlainObject, sha256Hex } from "./types.mjs";
+import { POLICY_DECISIONS, isPlainObject, sha256Hex } from "./types.mjs";
 
 export const POLICY_SCHEMA = "gjc.self-improve.policy.v1";
-export const POLICY_DECISIONS = Object.freeze(["deploy", "retire"]);
 export const DEFAULT_POLICY_DIR = path.join("self-improve", "policies");
 
 export function validatePolicyShape(policy) {
