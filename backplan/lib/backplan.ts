@@ -265,7 +265,7 @@ function renderProjectDescription(plan: BackplanPlan, digest: string): string {
 		lines.push("", "## 비범위", "");
 		for (const item of plan.project.boundaries) lines.push(`* ${item}`);
 	}
-	lines.push("", "## 참조", "", `* 역기획 digest: sha256:${digest}`);
+	lines.push("", "## 참조", "", `* backplan digest: sha256:${digest}`);
 	return lines.join("\n");
 }
 

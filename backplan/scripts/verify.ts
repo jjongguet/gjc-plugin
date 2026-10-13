@@ -151,7 +151,7 @@ async function runSuite(root) {
 		assert.equal(report.status, "ok");
 		assert.match(report.linear.project.description, /## 목표/);
 		assert.match(report.linear.project.description, /## 비범위/);
-		assert.match(report.linear.project.description, /역기획 digest: sha256:[a-f0-9]{64}/);
+		assert.match(report.linear.project.description, /backplan digest: sha256:[a-f0-9]{64}/);
 	});
 
 	await check("plan notes render policy decisions and automation candidates", () => {
