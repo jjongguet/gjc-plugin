@@ -395,14 +395,14 @@ export async function latestReceiptSummary(root: string, base = receiptStoreBase
 }
 
 /** R1 candidate collection: newest receipts for the roots, freshness recomputed only for the bounded set. */
-export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs: number, base = receiptStoreBase(), cache?: { freshness: Map<string, string> }, deadlineMs?: number): Promise<LoopCandidate[]> {
+export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs: number, base = receiptStoreBase(), cache?: { freshness: Map<string, string> }, deadlineMs?: number, stop?: { truncated: boolean }): Promise<LoopCandidate[]> {
  const candidates: LoopCandidate[] = [];
  const seen = new Set<string>();
  for (const root of roots) {
   const listed = await listReceiptEntries(root, base);
   if (listed.error) throw new Error('store_unavailable');
   for (const entry of listed.ids) {
-   if (deadlineMs !== undefined && loopClock.now() >= deadlineMs) return candidates;
+   if (deadlineMs !== undefined && loopClock.now() >= deadlineMs) { if (stop) stop.truncated = true; return candidates; }
    const key = root + '\n' + entry.id;
    if (seen.has(key)) continue;
    seen.add(key);
@@ -411,7 +411,7 @@ export async function collectReceiptCandidates(roots: string[], gateEmittedAtMs:
    if (!receipt || receipt.plugin !== 'verification-receipts') continue;
    const observedAtMs = Date.parse(receipt.observedAt);
    if (!Number.isFinite(observedAtMs) || observedAtMs < gateEmittedAtMs) continue;
-   if (deadlineMs !== undefined && deadlineMs - loopClock.now() < RECEIPT_RECOMPUTE_MARGIN_MS) return candidates;
+   if (deadlineMs !== undefined && deadlineMs - loopClock.now() < RECEIPT_RECOMPUTE_MARGIN_MS) { if (stop) stop.truncated = true; return candidates; }
    let freshness: string;
    if (cache?.freshness.has(key)) freshness = cache.freshness.get(key)!;
    else { freshness = await currentReceiptFreshness(root, receipt, base); cache?.freshness.set(key, freshness); }
@@ -520,7 +520,8 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    if (gate.boundRoot && gate.boundRoot !== root) roots.push(gate.boundRoot);
    const gateDeadline = Math.max(1, deadlineMs - loopClock.now());
    let candidates: LoopCandidate[];
-   try { candidates = await collectReceiptCandidates(roots, Date.parse(gate.emittedAt) || 0, deps.base, freshnessCache, loopClock.now() + gateDeadline); }
+   const scanStop = { truncated: false };
+   try { candidates = await collectReceiptCandidates(roots, Date.parse(gate.emittedAt) || 0, deps.base, freshnessCache, loopClock.now() + gateDeadline, scanStop); }
    catch {
     openGates++; gaps.push({ gateId: gate.id, trigger: gate.trigger, kind: 'state_unavailable', detail: 'receipt store is unreadable' });
     if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
@@ -543,9 +544,13 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    }
    // Coverage can only be judged from available repository facts: a receipt is never treated as covering
    // (and a gap is never classified as receipt-side) while the git delta itself is unreadable.
-   const kind = !current.available ? 'state_unavailable' : gapKindForCandidate(candidates[0], changedTests);
+   // A scan stopped by the budget envelope can no longer prove absence of a covering receipt:
+   // receipts evaluated before the stop stay valid, but the remainder is unknown, so the gap is
+   // reported as a bounded-evaluation state, never as a receipt-side demand.
+   const kind = !current.available || scanStop.truncated ? 'state_unavailable' : gapKindForCandidate(candidates[0], changedTests);
    openGates++;
-   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
+   if (scanStop.truncated) budgetExceeded = true;
+   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : scanStop.truncated ? 'receipt scan stopped at the evaluation budget; coverage could not be fully checked' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
    if (!gapKinds.includes(kind)) gapKinds.push(kind);
   }
  }
