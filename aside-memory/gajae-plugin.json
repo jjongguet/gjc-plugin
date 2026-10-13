@@ -1,0 +1,36 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "aside-memory",
+  "version": "0.0.1",
+  "tools": [
+    {
+      "name": "aside_memory",
+      "path": "tools/aside-memory.ts",
+      "description": "Explicit account-bound read-only Aside memory retrieval and bounded untrusted historical quotations. No implicit profile, writes, hooks or extra model calls. Finite screening is not a privacy guarantee.",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 600,
+            "description": "Non-sensitive task query: 1–300 Unicode scalar values, at most 1200 UTF-8 bytes; no controls or leading option syntax."
+          },
+          "account": {
+            "type": "string",
+            "pattern": "^u?(0|[1-9][0-9]{0,9})$",
+            "description": "Explicit account routing; otherwise only GJC_ASIDE_MEMORY_ACCOUNT is consulted."
+          },
+          "max_results": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 5,
+            "default": 3
+          }
+        },
+        "required": ["query"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

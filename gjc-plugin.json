@@ -8,6 +8,7 @@
     "wiki/gajae-plugin.json",
     "rea/gajae-plugin.json",
     "backplan/gajae-plugin.json",
-    "rrsi/gajae-plugin.json"
+    "rrsi/gajae-plugin.json",
+    "aside-memory/gajae-plugin.json"
   ]
 }

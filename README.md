@@ -11,6 +11,7 @@ Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`). Eac
 | [`rea`](rea/) | Offline readiness report (`rea_readiness`) and the pinned GJC workflow skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0). The integration runs the pinned CLI (`npx -y rea-agents@6.4.0 <command>`); an optional `gjc mcp add` registration exists for stateful MCP sessions — GJC 0.18.5 refuses plugin-bundle stdio MCP servers off Linux, so no manifest `mcps` surface is declared. |
 | [`backplan`](backplan/) | Planning gate that fires when execution-bound work arrives: `backplan_check` validates a structured plan (end state, success criteria, issue breakdown, Linear project mapping, policy decisions, automation candidates) and renders Linear-ready payloads plus a stable digest. Deterministic, keyless and offline; registration stays with the agent's Linear MCP / `linear-trace.py` path. |
 | [`rrsi`](rrsi/) | GJC exploration-trace store and Dream-RSI replay surface (`rrsi` tool: capture/import/dream/status). Instrument only: the plugin carries functional acceptance; the performance proof (P1–P3) applies to the `self-improve` loop and its frozen corpus. Keyless and offline; private store under `~/.gjc-plugin/rrsi/`. See [`rrsi/README.md`](rrsi/README.md). |
+| [`aside-memory`](aside-memory/) | Explicit account-bound Aside memory search (`aside_memory`), returning bounded historical quotations and relative citations. No automatic injection, source-file reads, writes, journal or extra model calls. |
 | `plugin_metrics` (in `jev-advisor`) | Read-only offline aggregate of all three plugins' retained journals and Jev's retained v2 correlation state. See [Plugin metrics](#plugin-metrics). |
 
 ## Install and configure
@@ -25,12 +26,59 @@ gjc plugin install ./wiki --user
 gjc plugin install ./rea --user
 gjc plugin install ./backplan --user
 gjc plugin install ./rrsi --user
+gjc plugin install ./aside-memory --user
 gjc plugin list && gjc plugin doctor
 ```
 
 An existing installation requires the supported replacement/upgrade operation; inspect `gjc plugin install --help` and the recorded source before replacing it. Rebuilding source alone does not update a running GJC session. Verify upgraded surfaces in a fresh GJC process.
 
 Credentials remain outside the replaceable installation tree in `~/.gjc/agent/jev-advisor/.env`, or process environment. `JEV_ADVISOR_API_KEY` takes priority over `OPENROUTER_API_KEY`; process values override same-named file values. Never put credentials in source or result records. See [Jev configuration](jev-advisor/README.md#configuration).
+
+### Aside memory
+
+Use the existing owner-controlled `aside` executable on PATH. Call `aside_memory`
+explicitly with a non-sensitive task query and a canonical numeric account
+(`u` prefix optional, at most ten digits), for example the **synthetic** input
+`{"query":"response preferences","account":"u42","max_results":3}`.
+Omitting `account` consults only owner-set `GJC_ASIDE_MEMORY_ACCOUNT`; missing or
+invalid routing never falls back to the active profile. Invalid explicit input
+never falls back to configuration. `max_results` is 1–5; the query is trimmed,
+1–300 Unicode scalar values and at most 1200 UTF-8 bytes, without controls,
+formatting characters or leading option syntax.
+
+Each invocation captures one account and performs only native `memory path`
+then `memory search --max-results N --json QUERY`, explicitly routing both calls.
+A shared 30-second deadline bounds root lookup (5 seconds) and search (25 seconds).
+Stdout caps are 8192/65536 bytes; stderr is discarded and capped at 4096 bytes.
+Timeout or overflow kills only the owned direct child; cleanup uncertainty is
+reported, not a claim of backend cancellation. No list/show expansion or direct
+memory-file access occurs. Lexical relative-path validation does not attest
+symlinks, and the two calls are not an atomic snapshot.
+
+The single JSON text response distinguishes `ok`, validated `empty`, `withheld`,
+`unavailable` and `error`. Safe ordinary USER prose (e.g. “I prefer concise answers
+with examples.”) and plain structured context can survive the same whole-block
+screen; mixed sensitive/override blocks are withheld. At most two complete
+600-byte blocks per result, five results and 16384 serialized response bytes are
+returned. Excerpts are quotations, never active instructions or inferred facts.
+Source ranges describe CLI matches, not exact snippet coordinates. Relevance is
+not truth; host `retrievedAt` is not authenticated observation time. File-update
+and original-observation times remain unknown (`null`).
+
+Finite English/Korean screening cannot guarantee removal of all credentials,
+PII or prompt injection; relative paths can also reveal sensitive context.
+Nothing authorizes acting on historical text. The plugin makes no offline,
+PII-free or end-to-end no-logging claim: Aside network/retention is unknown,
+query/account argv are visible to local process observers, and GJC/provider
+transcripts may retain returned excerpts. It creates no cache, logs or journal.
+Rollback disables only this plugin and its integration, not memory/profile data.
+
+Verification uses mandatory hermetic synthetic fixtures, never real memory,
+auth or network clients: `bun aside-memory/scripts/build.mjs`,
+`bun aside-memory/scripts/verify.ts`, and
+`bun aside-memory/scripts/build.mjs --check`. Source/generated dispatch tests
+do not prove user-installed fresh-runtime discovery or native Aside retrieval;
+verify installation separately in a fresh session with an isolated fake CLI.
 
 ## Private results
 
@@ -118,7 +166,7 @@ Builds are keyless. Verification/UI builders support `--check`; Jev's suite comp
 
 ## Add a plugin
 
-Declare every installed surface in its manifest, keep generated surfaces keyless, add the distribution-index entry and table row, and reuse the shared private result primitives at build time. Do not serialize arbitrary tool output as evidence.
+Declare every installed surface in its manifest, keep generated surfaces keyless, add the distribution-index entry and table row, and reuse the shared private result primitives when persistence is required. Transient wrappers such as aside-memory intentionally do not journal private payloads. Do not serialize arbitrary tool output as evidence.
 
 ## Workspace standard
 
