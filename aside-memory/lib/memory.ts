@@ -6,9 +6,12 @@ const WARNINGS = ["memory_not_authorization", "relevance_not_truth", "observatio
 const ACCOUNT = /^u?(0|[1-9][0-9]{0,9})$/;
 const FORBIDDEN = /[\p{Cc}\p{Cf}\p{Cs}]/u;
 const ROW_KEYS = ["path", "title", "headings", "excerpt", "line", "lineEnd", "score", "chunkId"];
+// The CLI emits the contract fields and, on some rows, an extra string `date`
+// (observed mixed within one response); both exact shapes are accepted, nothing else.
+const ROW_KEYS_WITH_DATE = [...ROW_KEYS, "date"];
 type Stage = "validation" | "root" | "search" | "parse" | "minimize" | "done";
 type Binding = "parameter" | "configuration" | null;
-type Row = { path: string; title: string; headings: string[]; excerpt: string; line: number; lineEnd: number; score: number; chunkId: string };
+type Row = { path: string; title: string; headings: string[]; excerpt: string; line: number; lineEnd: number; score: number; chunkId: string; date?: string };
 type Source = { sourceId: string; path: string; matchRange: { startLine: number; endLine: number; kind: "cli_match" }; relevanceScore: number; fileUpdatedAt: null; observationTime: null; omittedBlocks: boolean; snippets: string[] };
 export type MemoryResult = {
 	schemaVersion: 1; operation: "aside_memory"; status: "ok" | "empty" | "withheld" | "unavailable" | "error"; reason: string;
@@ -37,6 +40,14 @@ function relativeCitation(root: string, candidate: string) {
 	const relative = path.relative(root, candidate);
 	if (!relative || path.isAbsolute(relative) || relative.split(path.sep).some(part => part === "..") || bytes(relative) > 512) return null;
 	return relative.split(path.sep).join("/");
+}
+
+function validRowShape(row: Record<string, unknown>): boolean {
+	const keys = Object.keys(row);
+	return (keys.length === ROW_KEYS.length || keys.length === ROW_KEYS_WITH_DATE.length) &&
+		ROW_KEYS.every(key => Object.hasOwn(row, key)) &&
+		(keys.length !== ROW_KEYS_WITH_DATE.length || typeof row.date === "string") &&
+		keys.every(key => ROW_KEYS_WITH_DATE.includes(key));
 }
 
 // Finite whole-block screening, not a guarantee against obfuscated secrets or instructions.
@@ -89,7 +100,7 @@ export function memoryBriefing(stdout: string, root: string, limit: number, bind
 	if (!Array.isArray(raw) || raw.length > limit) return envelope("error", "invalid_search_response", "parse", binding);
 	const rows: (Row & { relative: string })[] = [];
 	for (const row of raw) {
-		if (!row || typeof row !== "object" || Array.isArray(row) || Object.keys(row).length !== ROW_KEYS.length || !ROW_KEYS.every(key => Object.hasOwn(row, key)) ||
+		if (!row || typeof row !== "object" || Array.isArray(row) || !validRowShape(row as Record<string, unknown>) ||
 			typeof row.path !== "string" || typeof row.title !== "string" || typeof row.excerpt !== "string" || !Array.isArray(row.headings) || !row.headings.every((h: unknown) => typeof h === "string") ||
 			!Number.isSafeInteger(row.line) || row.line < 1 || !Number.isSafeInteger(row.lineEnd) || row.lineEnd < row.line || typeof row.score !== "number" || !Number.isFinite(row.score) || typeof row.chunkId !== "string" || !/^[a-f0-9]{64}$/i.test(row.chunkId))
 			return envelope("error", "invalid_search_response", "parse", binding);
