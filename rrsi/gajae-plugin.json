@@ -2,7 +2,6 @@
 	"kind": "gajae-code-plugin",
 	"name": "rrsi",
 	"version": "0.0.1",
-	"description": "GJC exploration-trace store and Dream-RSI replay surface (instruments only; the self-improve loop owns the performance proof).",
 	"tools": [
 		{
 			"name": "rrsi",
