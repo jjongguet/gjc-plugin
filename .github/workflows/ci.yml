@@ -33,7 +33,7 @@ jobs:
       # real-gjc trial integration case likewise skips itself when no `gjc`
       # binary is on PATH. The workspace-standard validator guard is planned only
       # where its local tree sits beside the repository (self-improve/lib/guards.mjs).
-      # All boundaries are recorded in the README, never silently passed.
+      # All boundaries are recorded in CONTRIBUTING.md, never silently passed.
       - name: Test (smoke guards skipped - require a local gjc binary)
         env:
           SELF_IMPROVE_SKIP_SMOKE: "1"

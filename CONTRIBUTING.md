@@ -34,6 +34,17 @@ UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smok
 
 Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.
 
+## CI
+
+`.github/workflows/ci.yml` runs `bun run build` plus the full test chain on every push to `main`. Two
+check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke
+guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case self-skips with a
+recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its
+local tree sits beside the repository (`self-improve/lib/guards.mjs`); the test wrapper prints the
+planned guard ids, guard statuses and skip counts, so green runs disclose what was planned out and
+what was skipped instead of hiding it. The workflow also creates an empty, never-committed `AGENTS.md`
+placeholder for the local-only existence contract.
+
 ## Adding a plugin
 
 - Declare every installed surface (tools, hooks, skills) in `gajae-plugin.json`; keep generated surfaces keyless and reproducible from `lib/` + `src/` sources.
