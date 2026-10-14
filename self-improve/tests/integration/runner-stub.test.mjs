@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -9,7 +10,13 @@ import { buildTextFixturePrompt, runStochasticEvaluation } from "../../lib/runne
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const REPO_ROOT = resolve(SELF_IMPROVE_DIR, "..");
 
-test("real gjc trials run against the loopback stub with k>=3 statistics", async () => {
+test("real gjc trials run against the loopback stub with k>=3 statistics", async (t) => {
+  // The local_stub trials drive the locally installed `gjc` binary. Hosted
+  // runners do not have it; skip with a reason instead of failing every run.
+  if (spawnSync("gjc", ["--version"], { encoding: "utf8" }).status !== 0) {
+    t.skip("gjc binary not available (hosted runner); local_stub trials need it");
+    return;
+  }
   const runRoot = mkdtempSync(join(tmpdir(), "self-improve-runner-"));
   let passed = false;
   try {
