@@ -86,8 +86,10 @@ test("runner is deterministic and emits byte-identical stdout for identical inpu
 test("a single damaged case flips only its owning label", () => {
   const root = mkdtempSync(join(tmpdir(), "rules-probe-"));
   try {
-    const clean = makeSide(root, "clean", draft);
-    const damaged = makeSide(root, "damaged", draft.replace("## 목적\n", ""));
+    // Test-owned draft: the check stays valid even if a later editor renames
+    // sections in the live migration draft.
+    const clean = makeSide(root, "clean", MINI_DRAFT);
+    const damaged = makeSide(root, "damaged", MINI_DRAFT.replace("## 목적\n", ""));
     const r = runRunner(clean, damaged);
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);

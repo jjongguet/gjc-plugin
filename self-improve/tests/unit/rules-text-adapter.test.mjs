@@ -42,7 +42,17 @@ test("protected paths still hard-reject engine and manifest edits", () => {
   );
 });
 
-test("every editable path is tracked at HEAD", () => {
+test("every editable path is tracked at HEAD", (t) => {
+  // This contract needs a real git work tree. When the suite itself runs inside
+  // an engine scratch copy (git archive export, no .git) — e.g. as the `test`
+  // guard of a self-improve cycle — the check is skipped with a reason, exactly
+  // like guards-scratch.test.mjs: the scratch is already the artifact of a
+  // tracked commit, so git ls-files cannot answer and the worktree run is the
+  // authoritative check.
+  if (spawnSync("git", ["-C", REPO_ROOT, "rev-parse", "--git-dir"], { encoding: "utf8" }).status !== 0) {
+    t.skip("repository root is not a git work tree (nested scratch copy)");
+    return;
+  }
   for (const rel of RULES_TEXT_DOMAIN.editable) {
     assert.ok(existsSync(join(REPO_ROOT, rel)), `${rel} must exist`);
     const proc = spawnSync("git", ["-C", REPO_ROOT, "ls-files", "--error-unmatch", rel], { encoding: "utf8" });

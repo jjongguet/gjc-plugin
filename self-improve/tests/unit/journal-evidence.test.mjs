@@ -57,3 +57,54 @@ test("no campaign rows yields a null adoption rate (missing is not zero)", () =>
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("a fat loop cycle row with evidence stays within the 2048-byte ledger bound", () => {
+  const root = mkdtempSync(join(tmpdir(), "journal-evidence-"));
+  try {
+    const ledgerPath = join(root, "ledger.jsonl");
+    writeFileSync(ledgerPath, "");
+    const evidence = buildJournalEvidence({ ledgerPath, campaignId: "fat-campaign", cycles: [] });
+    // Worst plausible loop-path shape: 3-file patch, max budget rung, one
+    // critic rule, seven guards, heldout map — measured against the engine's
+    // MAX_LEDGER_ROW_BYTES=2048 constraint (appendRow throws on overflow).
+    const row = {
+      schema: "gjc.self-improve.ledger.v1",
+      kind: "cycle",
+      cycleId: "cyc-20261014090000-abcd",
+      domain: "rules-text",
+      campaignId: "loop-20261014090000-abcd",
+      baseCommit: "abcdef1",
+      budgetRung: 2,
+      proposal: {
+        source: "agent",
+        patchSha256: "a".repeat(64),
+        files: ["docs/portfolio/AGENTS.md", "x/y.md", "z/w.md"],
+        hunks: 12,
+      },
+      hypothesisHash: "b".repeat(64),
+      objective: "probe.rule_text_integrity",
+      scores: {
+        baseline: { rule_text_integrity: 0.625, link_coverage: 1, heldout_rule_text: 1 },
+        candidate: { rule_text_integrity: 0.75, link_coverage: 1, heldout_rule_text: 1 },
+        delta: 0.125,
+        floor: 0.01,
+        heldout: { ok: true, regressions: [], baseline: { heldout_rule_text: 1 }, candidate: { heldout_rule_text: 1 } },
+      },
+      cost: { wallMs: 123456, bytes: 4096, tokens: null },
+      guards: ["build", "test", "validator", "smoke-verification", "smoke-loop", "smoke-advisor", "smoke-metrics"].map(
+        (id) => ({ id, status: "pass" }),
+      ),
+      critic: { verdict: "pass", rules: [{ id: "critic_network", reason: "network or timer addition" }] },
+      verdict: { decision: "adopt", reasons: [] },
+      labels: ["text_fixture"],
+      journalEvidence: evidence,
+      createdAt: "2026-10-14T00:00:00.000Z",
+      seq: 42,
+      prev: "c".repeat(64),
+    };
+    const bytes = Buffer.byteLength(JSON.stringify(row), "utf8");
+    assert.ok(bytes <= 2048, `fat row must fit the ledger bound (got ${bytes} bytes)`);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
