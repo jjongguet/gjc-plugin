@@ -321,7 +321,7 @@ remain unknown. The plugin does not scrape private histories or install itself.
 
 ## Install
 
-See the [repository README](../README.md#install). Installation and activation are
+See the [repository README](../README.md#quick-start). Installation and activation are
 separate operator actions, not part of building or offline verification:
 
 ```sh
