@@ -17,10 +17,11 @@ jobs:
         with:
           bun-version: "1.4.0"
 
-      # AGENTS.md is gitignored (local-only). The workspace-standard validator
-      # checks its mere existence at the repo root, and the self-improve scratch
-      # copy carries local-only files into its copy. The placeholder keeps the
-      # local existence contract on hosted runners; it is never committed.
+      # AGENTS.md is gitignored (local-only). On hosted runners the
+      # workspace-standard validator guard is planned out (no workspace tree
+      # beside the checkout), so this empty placeholder is a local-parity
+      # device for existence-checking consumers (the self-improve scratch copy
+      # carries it over) rather than a CI-enforced contract. Never committed.
       - name: Create local-only AGENTS.md placeholder
         run: touch AGENTS.md
 

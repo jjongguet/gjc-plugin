@@ -42,6 +42,11 @@ const fail = failMatch ? Number.parseInt(failMatch[1], 10) : 0;
 
 if (result.status === 0 && cases > 0) {
   process.stdout.write(`ALL PASS (${cases} cases)\n`);
+  // Carry the boundary diagnostics into green runs: planned guard ids, guard
+  // statuses, and recorded skips must stay visible even when the suite passes.
+  const carried = output.split("\n").filter((line) =>
+    line.startsWith("# plan:") || line.startsWith("# integration guards:") || /^# skipped [1-9]/.test(line) || line.includes("# SKIP "));
+  if (carried.length) process.stdout.write(carried.join("\n") + "\n");
   process.exitCode = 0;
 } else {
   process.stdout.write(output);
