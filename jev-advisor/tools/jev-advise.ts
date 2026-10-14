@@ -11,7 +11,7 @@ import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypt
 import { performance as resultsClock } from 'node:perf_hooks';
 
 export type PluginOutcome = {
-  operation: 'run' | 'status' | 'advise' | 'calibration' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check' | 'gate_emitted' | 'loop_run' | 'capture' | 'import' | 'dream';
+  operation: 'run' | 'status' | 'advise' | 'calibration' | 'check' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check' | 'gate_emitted' | 'loop_run' | 'capture' | 'import' | 'dream';
   repositoryDigest?: string | null;
   receiptId?: string | null;
   toolCallDigest?: string;
@@ -21,6 +21,7 @@ export type PluginOutcome = {
   execution?: { status: string; reason: string; counts?: Record<string, number> | null; assertions?: { step: number; id: string; kind: string; status: string }[]; cleanup?: string };
   assessment?: { status: string; reason: string; answers?: { coverage_alignment: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> }; boundary_evidence: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> } } };
   advice?: { status: string; tier?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
+  check?: { status: string; verdict?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
   taskAdvice?: { index:number; status:string; tier?:string; confidence?:number; basis?:string; reason?:string }[];
   evidenceObservations?: {completed:number;failed:number;cancelled:number;stored:number;unavailable:number};
   receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
@@ -35,7 +36,7 @@ type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' |
 type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
 type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
 const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
-const resultsOperations = ['run', 'status', 'advise', 'calibration', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream'];
+const resultsOperations = ['run', 'status', 'advise', 'calibration', 'check', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream'];
 const resultsRrsiActions = ['capture', 'import', 'dream', 'status'];
 const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'];
 const resultsHex = /^[a-f0-9]{64}$/;
@@ -118,6 +119,20 @@ function resultsAdvice(value:unknown):Record<string,unknown> {
   if (a.reason !== undefined) advice.reason = resultsEnum(a.reason, resultsAdviceReasons);
   return advice;
 }
+const resultsCheckVerdicts = ['correct', 'incorrect', 'unsure'];
+function resultsCheck(value: unknown): Record<string, unknown> {
+  const c = resultsObject(value, ['status', 'verdict', 'confidence', 'confidenceKind', 'probabilities', 'reason'], ['status']);
+  const check: Record<string, unknown> = { status: resultsEnum(c.status, ['decision', 'no_decision']) };
+  if (c.verdict !== undefined) check.verdict = resultsEnum(c.verdict, resultsCheckVerdicts);
+  if (c.confidence !== undefined) check.confidence = resultsProbability(c.confidence);
+  if (c.confidenceKind !== undefined) check.confidenceKind = resultsEnum(c.confidenceKind, ['provider_choice', 'self_reported']);
+  if (c.probabilities !== undefined) {
+    const probabilities = resultsObject(c.probabilities, resultsCheckVerdicts, resultsCheckVerdicts);
+    check.probabilities = Object.fromEntries(Object.entries(probabilities).map(([verdict, probability]) => [verdict, resultsProbability(probability)]));
+  }
+  if (c.reason !== undefined) check.reason = resultsEnum(c.reason, resultsAdviceReasons);
+  return check;
+}
 function resultsGate(value: unknown): Record<string, unknown> {
   const g = resultsObject(value, ['trigger', 'facts', 'baselinePresent', 'binding', 'stateWrite', 'persistence', 'changedFiles', 'commits', 'receiptState'], ['trigger', 'facts', 'baselinePresent', 'binding', 'stateWrite', 'changedFiles', 'receiptState']);
   const gate: Record<string, unknown> = {
@@ -147,7 +162,7 @@ function resultsLoop(value: unknown): Record<string, unknown> {
   return loop;
 }
 function resultsProject(value: unknown): Record<string, unknown> {
-  const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['operation']);
+  const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'check', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['operation']);
   const output: Record<string, unknown> = { operation: resultsEnum(raw.operation, resultsOperations) };
   for (const key of ['repositoryDigest', 'receiptId']) if (raw[key] !== undefined) output[key] = raw[key] === null ? null : resultsPattern(raw[key], key === 'receiptId' ? resultsId : resultsHex);
   if (raw.toolCallDigest !== undefined) output.toolCallDigest = resultsPattern(raw.toolCallDigest, resultsHex);
@@ -184,6 +199,7 @@ function resultsProject(value: unknown): Record<string, unknown> {
     output.assessment = assessment;
   }
   if (raw.advice !== undefined) output.advice = resultsAdvice(raw.advice);
+  if (raw.check !== undefined) output.check = resultsCheck(raw.check);
   if (raw.taskAdvice !== undefined) {
     const seen = new Set<number>();
     output.taskAdvice = resultsArray(raw.taskAdvice,32).map(value=>{
@@ -378,7 +394,7 @@ function resultsDecodeSegment(body: Buffer, plugin: ResultsPlugin, maxRecordByte
   for (const line of text.slice(0, -1).split('\n')) {
     if (Buffer.byteLength(line + '\n') > maxRecordBytes) resultsFail('store_corrupt');
     const raw = JSON.parse(line);
-    const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
+    const record = resultsObject(raw, ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'check', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['schemaVersion', 'plugin', 'id', 'observedAt', 'operation']);
     if (record.schemaVersion !== 1 || record.plugin !== plugin) resultsFail('store_corrupt');
     const id = resultsPattern(record.id, resultsId);
     if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
@@ -709,6 +725,25 @@ export type Advice =
 	  }
 	| { status: "no_decision"; reason: NoDecisionReason; httpStatus?: number };
 
+export const CHECK_VERDICTS = ["correct", "incorrect", "unsure"] as const;
+export type CheckVerdict = (typeof CHECK_VERDICTS)[number];
+
+export type CheckAdvice =
+	| {
+			status: "decision";
+			verdict: CheckVerdict;
+			confidence: number;
+			probabilities?: Record<CheckVerdict, number>;
+			confidenceKind: ConfidenceKind;
+			rationale?: string;
+	  }
+	| { status: "no_decision"; reason: NoDecisionReason; httpStatus?: number };
+
+export interface CheckInput {
+	question: string;
+	artifact: string;
+}
+
 export const DEFAULTS = {
 	model: "typesafe/jev-1.13",
 	timeoutMs: 8000,
@@ -793,6 +828,12 @@ function loadPluginEnv(): Env {
 	}
 }
 
+const CHECK_CRITERIA: Record<CheckVerdict, string> = {
+	correct: "The artifact satisfies the stated check question",
+	incorrect: "The artifact does not satisfy the stated check question",
+	unsure: "The available information is insufficient to judge",
+};
+
 const REQUEST_STYLES = {
 	"openai-chat": {
 		request(cfg: { model: string; apiKey: string }, assignment: string) {
@@ -818,6 +859,29 @@ const REQUEST_STYLES = {
 				}),
 			};
 		},
+		checkRequest(cfg: { model: string; apiKey: string }, check: CheckInput) {
+			return {
+				headers: {
+					"content-type": "application/json",
+					authorization: `Bearer ${cfg.apiKey}`,
+				},
+				body: JSON.stringify({
+					model: cfg.model,
+					temperature: 0,
+					max_tokens: 2048,
+					messages: [
+						{
+							role: "system",
+							content:
+								"You are a checking assistant for a coding agent. Given one check question and one artifact, decide whether the artifact satisfies the question. " +
+								'Reply with ONLY JSON: {"verdict":"correct"|"incorrect"|"unsure","confidence":<number from 0 to 1>,"rationale":"<max 120 chars>"}. ' +
+								"correct = the artifact satisfies the stated check; incorrect = it does not; unsure = the available information is insufficient to judge.",
+						},
+						{ role: "user", content: composeCheckPrompt(check) },
+					],
+				}),
+			};
+		},
 	},
 	systemone: {
 		request(cfg: { model: string; apiKey: string }, assignment: string) {
@@ -837,6 +901,24 @@ const REQUEST_STYLES = {
 								balanced: "Default implementation work",
 								strong: "Multi-file reasoning, architecture decisions, or high blast radius",
 							},
+						},
+					},
+				}),
+			};
+		},
+		checkRequest(cfg: { model: string; apiKey: string }, check: CheckInput) {
+			const headers: Record<string, string> = { "content-type": "application/json" };
+			if (cfg.apiKey) headers.authorization = `Bearer ${cfg.apiKey}`;
+			return {
+				headers,
+				body: JSON.stringify({
+					model: cfg.model,
+					state: check.artifact,
+					questions: {
+						check: {
+							type: "choice",
+							instructions: check.question,
+							criteria: CHECK_CRITERIA,
 						},
 					},
 				}),
@@ -1031,6 +1113,28 @@ export function extractTasks(input: unknown, maxPromptChars: 1900 | 4000): Extra
 		});
 	}
 	return { tasks, rejected, omittedCount };
+}
+
+export function composeCheckPrompt(check: CheckInput): string {
+	return `check question:\n${check.question}\n\nartifact:\n${check.artifact}`;
+}
+
+export type CheckPreparation =
+	| { status: "ok"; check: CheckInput }
+	| { status: "invalid_task" }
+	| { status: "input_too_large" };
+
+/**
+ * Normalize one check request without truncating either field. The composed
+ * prompt is the admission unit, mirroring the tier path's full-prompt bound.
+ */
+export function prepareCheck(question: unknown, artifact: unknown, maxPromptChars: 1900 | 4000): CheckPreparation {
+	if (typeof question !== "string" || typeof artifact !== "string") return { status: "invalid_task" };
+	const normalizedQuestion = normalizeField(question);
+	const normalizedArtifact = normalizeField(artifact);
+	if (!normalizedQuestion || !normalizedArtifact) return { status: "invalid_task" };
+	const check: CheckInput = { question: normalizedQuestion, artifact: normalizedArtifact };
+	return composeCheckPrompt(check).length <= maxPromptChars ? { status: "ok", check } : { status: "input_too_large" };
 }
 
 export interface TaskRef {
@@ -2139,6 +2243,11 @@ export interface JevMetrics {
 		byStatus: MetricsFrequency; byTier: MetricsFrequency;
 		confidenceBasis: MetricsFrequency; byReason: MetricsFrequency;
 	};
+	checkAdvice: {
+		invocations: number; present: number;
+		byStatus: MetricsFrequency; byVerdict: MetricsFrequency;
+		confidenceBasis: MetricsFrequency; byReason: MetricsFrequency;
+	};
 	taskAdvice: {
 		batches: number; batchesWithEntries: number; entries: number;
 		byStatus: MetricsFrequency; byTier: MetricsFrequency;
@@ -2337,11 +2446,12 @@ export function aggregateRunStatusMetrics(
 	return report;
 }
 
-/** Jev journal → JevMetrics. Manual advise vs task_advice buckets, plan S07. */
+/** Jev journal → JevMetrics. Manual advise, task_advice and check buckets stay separate, plan S07. */
 export function aggregateJevMetrics(records: Record<string, unknown>[]): JevMetrics {
 	const report: JevMetrics = {
 		operations: metricsFreq(),
 		manualAdvice: { invocations: 0, present: 0, byStatus: metricsFreq(), byTier: metricsFreq(), confidenceBasis: metricsFreq(), byReason: metricsFreq() },
+		checkAdvice: { invocations: 0, present: 0, byStatus: metricsFreq(), byVerdict: metricsFreq(), confidenceBasis: metricsFreq(), byReason: metricsFreq() },
 		taskAdvice: {
 			batches: 0, batchesWithEntries: 0, entries: 0,
 			byStatus: metricsFreq(), byTier: metricsFreq(), confidenceBasis: metricsFreq(), byReason: metricsFreq(),
@@ -2363,6 +2473,17 @@ export function aggregateJevMetrics(records: Record<string, unknown>[]): JevMetr
 				if (advice.tier !== undefined) metricsBump(report.manualAdvice.byTier, String(advice.tier));
 				if (advice.confidenceKind !== undefined) metricsBump(report.manualAdvice.confidenceBasis, String(advice.confidenceKind));
 				if (advice.reason !== undefined) metricsBump(report.manualAdvice.byReason, String(advice.reason));
+			}
+		}
+		const check = record.check as Record<string, unknown> | undefined;
+		if (op === "check") {
+			report.checkAdvice.invocations++;
+			if (check !== undefined) {
+				report.checkAdvice.present++;
+				metricsBump(report.checkAdvice.byStatus, String(check.status));
+				if (check.verdict !== undefined) metricsBump(report.checkAdvice.byVerdict, String(check.verdict));
+				if (check.confidenceKind !== undefined) metricsBump(report.checkAdvice.confidenceBasis, String(check.confidenceKind));
+				if (check.reason !== undefined) metricsBump(report.checkAdvice.byReason, String(check.reason));
 			}
 		}
 		const taskAdvice = record.taskAdvice as Record<string, unknown>[] | undefined;
@@ -2593,6 +2714,10 @@ export function noDecision(reason: NoDecisionReason, httpStatus?: number): Advic
 	return httpStatus === undefined ? { status: "no_decision", reason } : { status: "no_decision", reason, httpStatus };
 }
 
+export function noCheckDecision(reason: NoDecisionReason, httpStatus?: number): CheckAdvice {
+	return httpStatus === undefined ? { status: "no_decision", reason } : { status: "no_decision", reason, httpStatus };
+}
+
 function parseProbabilityMap(value: unknown): Record<Tier, number> | null {
 	if (!isRecord(value) || Object.keys(value).length !== TIERS.length || !TIERS.every(tier => Object.prototype.hasOwnProperty.call(value, tier))) return null;
 	const probabilities = {} as Record<Tier, number>;
@@ -2642,6 +2767,59 @@ export function parseDecision(raw: string, confidenceKind: ConfidenceKind = "sel
 
 export type FetchLike = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
+function validVerdict(value: unknown): CheckVerdict | null {
+	if (typeof value !== "string") return null;
+	const verdict = value.trim().toLowerCase();
+	return CHECK_VERDICTS.includes(verdict as CheckVerdict) ? (verdict as CheckVerdict) : null;
+}
+
+function parseCheckProbabilityMap(value: unknown): Record<CheckVerdict, number> | null {
+	if (!isRecord(value) || Object.keys(value).length !== CHECK_VERDICTS.length || !CHECK_VERDICTS.every(verdict => Object.prototype.hasOwnProperty.call(value, verdict))) return null;
+	const probabilities = {} as Record<CheckVerdict, number>;
+	for (const verdict of CHECK_VERDICTS) {
+		const probability = value[verdict];
+		if (typeof probability !== "number" || !Number.isFinite(probability) || probability < 0 || probability > 1) return null;
+		probabilities[verdict] = probability;
+	}
+	const sum = CHECK_VERDICTS.reduce((total, verdict) => total + probabilities[verdict], 0);
+	return Math.abs(sum - 1) <= 0.001 + 1e-9 ? probabilities : null;
+}
+
+/** Strict JSON parser for check responses; same fence/document discipline as parseDecision. */
+export function parseCheckDecision(raw: string, confidenceKind: ConfidenceKind = "self_reported"): CheckAdvice {
+	try {
+		let text = String(raw ?? "").trim();
+		if (Buffer.byteLength(text, "utf8") > MAX_RESPONSE_BYTES) return noCheckDecision("invalid_response");
+		const fence = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+		if (fence) text = fence[1].trim();
+		if (!text.startsWith("{") || !text.endsWith("}")) return noCheckDecision("invalid_response");
+		const parsed: unknown = JSON.parse(text);
+		if (!isRecord(parsed) || !hasOnlyKeys(parsed, ["verdict", "confidence", "probabilities", "rationale"])) return noCheckDecision("invalid_response");
+		const verdict = validVerdict(parsed.verdict);
+		if (!verdict || typeof parsed.confidence !== "number" || !Number.isFinite(parsed.confidence) || parsed.confidence < 0 || parsed.confidence > 1) {
+			return noCheckDecision("invalid_response");
+		}
+		let probabilities: Record<CheckVerdict, number> | undefined;
+		if (Object.prototype.hasOwnProperty.call(parsed, "probabilities")) {
+			const candidate = parseCheckProbabilityMap(parsed.probabilities);
+			if (!candidate) return noCheckDecision("invalid_response");
+			probabilities = candidate;
+		}
+		if (Object.prototype.hasOwnProperty.call(parsed, "rationale") && typeof parsed.rationale !== "string") return noCheckDecision("invalid_response");
+		const rationale = typeof parsed.rationale === "string" ? parsed.rationale.slice(0, 120) : undefined;
+		return {
+			status: "decision",
+			verdict,
+			confidence: parsed.confidence,
+			...(probabilities ? { probabilities } : {}),
+			confidenceKind,
+			...(rationale ? { rationale } : {}),
+		};
+	} catch {
+		return noCheckDecision("invalid_response");
+	}
+}
+
 function extractChatFinal(data: unknown): string | null {
 	if (!isRecord(data) || !Array.isArray(data.choices)) return null;
 	const first = data.choices[0];
@@ -2663,6 +2841,16 @@ function extractSystemoneFinal(data: unknown): string | null {
 	const answer = data.answers.tier;
 	if (typeof answer.choice !== "string" || typeof answer.confidence !== "number") return null;
 	const payload: Record<string, unknown> = { tier: answer.choice, confidence: answer.confidence };
+	if (Object.prototype.hasOwnProperty.call(answer, "probabilities")) payload.probabilities = answer.probabilities;
+	if (Object.prototype.hasOwnProperty.call(answer, "rationale")) payload.rationale = answer.rationale;
+	return JSON.stringify(payload);
+}
+
+function extractSystemoneCheckFinal(data: unknown): string | null {
+	if (!isRecord(data) || !isRecord(data.answers) || !isRecord(data.answers.check)) return null;
+	const answer = data.answers.check;
+	if (typeof answer.choice !== "string" || typeof answer.confidence !== "number") return null;
+	const payload: Record<string, unknown> = { verdict: answer.choice, confidence: answer.confidence };
 	if (Object.prototype.hasOwnProperty.call(answer, "probabilities")) payload.probabilities = answer.probabilities;
 	if (Object.prototype.hasOwnProperty.call(answer, "rationale")) payload.rationale = answer.rationale;
 	return JSON.stringify(payload);
@@ -2699,10 +2887,58 @@ async function readBoundedResponse(response: Response): Promise<string | null> {
 	return new TextDecoder().decode(bytes);
 }
 
-function timeoutDecision(signal: AbortSignal | undefined, timeoutSignal: AbortSignal): Advice {
-	if (signal?.aborted) return noDecision("aborted");
-	if (timeoutSignal.aborted) return noDecision("timeout");
-	return noDecision("provider_error");
+type DecisionTransportFailure = { status: "no_decision"; reason: NoDecisionReason; httpStatus?: number };
+
+/**
+ * Shared bounded transport for tier and check questions. Provider resolution,
+ * egress validation, timeout composition and response reading are identical
+ * for both question kinds; only the wire body and the response parser differ.
+ */
+async function requestDecision(
+	cfg: AdvisorConfig,
+	kind: "tier" | "check",
+	payload: string | CheckInput,
+	fetchImpl: FetchLike | undefined,
+	signal: AbortSignal | undefined,
+	timeoutLimitMs: number,
+): Promise<{ status: "ok"; text: string; style: keyof typeof REQUEST_STYLES } | DecisionTransportFailure> {
+	if (typeof fetchImpl !== "function") return { status: "no_decision", reason: "provider_error" };
+	if (cfg.provider === "off") return { status: "no_decision", reason: "disabled" };
+	if (!isConfigured(cfg)) return { status: "no_decision", reason: "unconfigured" };
+	const provider = PROVIDERS[cfg.provider] ?? (cfg.endpoint ? { endpoint: cfg.endpoint, style: "openai-chat" as const } : undefined);
+	if (!provider) return { status: "no_decision", reason: "unconfigured" };
+	const url = cfg.endpoint || provider.endpoint;
+	if (!isAllowedEndpoint(url)) return { status: "no_decision", reason: "invalid_endpoint" };
+	const style = REQUEST_STYLES[provider.style];
+	const timeoutMs = Math.max(1, Math.min(INVOCATION_BUDGET_MS, cfg.timeoutMs, timeoutLimitMs));
+	const timeoutSignal = AbortSignal.timeout(timeoutMs);
+	if (signal?.aborted) return { status: "no_decision", reason: "aborted" };
+	const composedSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
+	const wire = kind === "check"
+		? style.checkRequest({ model: cfg.model, apiKey: cfg.apiKey }, payload as CheckInput)
+		: style.request({ model: cfg.model, apiKey: cfg.apiKey }, payload as string);
+	const headers = new URL(url).origin === "https://openrouter.ai" ? { ...wire.headers, ...ATTRIBUTION_HEADERS } : wire.headers;
+	try {
+		const response = await fetchImpl(url, {
+			method: "POST",
+			redirect: "error",
+			headers,
+			body: wire.body,
+			signal: composedSignal,
+		});
+		if (!response?.ok) {
+			return Number.isInteger(response?.status)
+				? { status: "no_decision", reason: "provider_error", httpStatus: response.status }
+				: { status: "no_decision", reason: "provider_error" };
+		}
+		const text = await readBoundedResponse(response);
+		if (text === null) return { status: "no_decision", reason: "invalid_response" };
+		return { status: "ok", text, style: provider.style };
+	} catch {
+		if (signal?.aborted) return { status: "no_decision", reason: "aborted" };
+		if (timeoutSignal.aborted) return { status: "no_decision", reason: "timeout" };
+		return { status: "no_decision", reason: "provider_error" };
+	}
 }
 
 export async function askDecisionModel(
@@ -2713,39 +2949,29 @@ export async function askDecisionModel(
 	timeoutLimitMs = cfg.timeoutMs,
 ): Promise<Advice> {
 	if (!task.complete) return noDecision("input_too_large");
-	if (typeof fetchImpl !== "function") return noDecision("provider_error");
-	if (cfg.provider === "off") return noDecision("disabled");
-	if (!isConfigured(cfg)) return noDecision("unconfigured");
-	const provider = PROVIDERS[cfg.provider] ?? (cfg.endpoint ? { endpoint: cfg.endpoint, style: "openai-chat" as const } : undefined);
-	if (!provider) return noDecision("unconfigured");
-	const url = cfg.endpoint || provider.endpoint;
-	if (!isAllowedEndpoint(url)) return noDecision("invalid_endpoint");
-	const style = REQUEST_STYLES[provider.style];
-	const timeoutMs = Math.max(1, Math.min(INVOCATION_BUDGET_MS, cfg.timeoutMs, timeoutLimitMs));
-	const timeoutSignal = AbortSignal.timeout(timeoutMs);
-	if (signal?.aborted) return noDecision("aborted");
-	const composedSignal = signal && typeof AbortSignal.any === "function" ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-	const wire = style.request({ model: cfg.model, apiKey: cfg.apiKey }, task.prompt);
-	const headers = new URL(url).origin === "https://openrouter.ai" ? { ...wire.headers, ...ATTRIBUTION_HEADERS } : wire.headers;
-	try {
-		const response = await fetchImpl(url, {
-			method: "POST",
-			redirect: "error",
-			headers,
-			body: wire.body,
-			signal: composedSignal,
-		});
-		if (!response?.ok) return noDecision("provider_error", Number.isInteger(response?.status) ? response.status : undefined);
-		const text = await readBoundedResponse(response);
-		if (text === null) return noDecision("invalid_response");
-		let data: unknown;
-		try { data = JSON.parse(text); } catch { return noDecision("invalid_response"); }
-		const final = provider.style === "systemone" ? extractSystemoneFinal(data) : extractChatFinal(data);
-		if (!final) return noDecision("invalid_response");
-		return parseDecision(final, provider.style === "systemone" ? "provider_choice" : "self_reported");
-	} catch {
-		return timeoutDecision(signal, timeoutSignal);
-	}
+	const result = await requestDecision(cfg, "tier", task.prompt, fetchImpl, signal, timeoutLimitMs);
+	if (result.status === "no_decision") return noDecision(result.reason, result.httpStatus);
+	let data: unknown;
+	try { data = JSON.parse(result.text); } catch { return noDecision("invalid_response"); }
+	const final = result.style === "systemone" ? extractSystemoneFinal(data) : extractChatFinal(data);
+	if (!final) return noDecision("invalid_response");
+	return parseDecision(final, result.style === "systemone" ? "provider_choice" : "self_reported");
+}
+
+export async function askCheckModel(
+	cfg: AdvisorConfig,
+	check: CheckInput,
+	fetchImpl: FetchLike | undefined,
+	signal?: AbortSignal,
+	timeoutLimitMs = cfg.timeoutMs,
+): Promise<CheckAdvice> {
+	const result = await requestDecision(cfg, "check", check, fetchImpl, signal, timeoutLimitMs);
+	if (result.status === "no_decision") return noCheckDecision(result.reason, result.httpStatus);
+	let data: unknown;
+	try { data = JSON.parse(result.text); } catch { return noCheckDecision("invalid_response"); }
+	const final = result.style === "systemone" ? extractSystemoneCheckFinal(data) : extractChatFinal(data);
+	if (!final) return noCheckDecision("invalid_response");
+	return parseCheckDecision(final, result.style === "systemone" ? "provider_choice" : "self_reported");
 }
 
 export function formatSummary(advice: Advice): string {

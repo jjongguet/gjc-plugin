@@ -5,7 +5,7 @@ description: Opt-in delegation-effort advisories for subagent tasks via a remote
 
 # jev-advisor
 
-Advisory only by default. The plugin has three surfaces:
+Advisory only by default. The plugin has four surfaces:
 1. **Automatic hook** (`task` tool, before phase): when a provider and API key are
    configured, every `task` call gets a tier recommendation (`fast` / `balanced` /
    `strong`) from the decision model.
@@ -27,7 +27,16 @@ Advisory only by default. The plugin has three surfaces:
    for descriptive retained correlation coverage (offline, no key needed).
    Manual advice and reports append sanitized operational outcomes, but only
    real delegation observations feed correlation state. Confidence is not quality.
-3. **`plugin_metrics` tool**: read-only offline aggregate of all three plugins'
+3. **`jev_check` tool**: explicit one-shot check. Pass `question` (what must be
+   verified) and `artifact` (what to check); returns a strictly validated
+   `correct` / `incorrect` / `unsure` verdict with confidence (and probabilities
+   when the provider supplies them) or an explicit no-decision reason. The
+   composed prompt is admitted whole under the same 4,000/1,900-character bound
+   as tier prompts. The outcome is journaled as a sanitized `check` operation;
+   correlation state is untouched. A verdict is an advisory decision-model
+   opinion — not verification evidence, correctness proof or acceptance of
+   quality.
+4. **`plugin_metrics` tool**: read-only offline aggregate of all three plugins'
    retained journals and Jev's retained v2 correlation state. Accepts exactly
    `{}` — no paths, filters or config. Never writes, locks, repairs, loads
    credentials or uses the network, and appends no journal record of its own.

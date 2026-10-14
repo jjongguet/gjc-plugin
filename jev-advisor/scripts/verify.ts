@@ -53,6 +53,7 @@ async function runSuite(root: string) {
 	const preModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor.ts")).href);
 	const resultModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-result.ts")).href);
 	const toolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-advise.ts")).href);
+	const checkToolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-check.ts")).href);
 	const sharedResults = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
 	const appendPluginOutcome = sharedResults.appendPluginOutcome as (plugin: any, outcome: any, deps?: any) => Promise<{ persisted: boolean; id?: string; reason?: string }>;
 	assert.ok(core.pluginEnvFile().startsWith(path.join(root, "home") + path.sep));
@@ -119,6 +120,9 @@ async function runSuite(root: string) {
 	const terminal = (entries: any[], extra: any = {}) => ({ type: "tool_result", toolName: "subagent", details: { subagents: entries }, isError: false, ...extra });
 	const entry = (jobId = "job-a", status = "completed", extra = {}) => ({ jobId, id: `allocated-${jobId}`, status, ...extra });
 	const manual = toolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+	const checkTool = checkToolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+	const systemCheck = (value: { verdict?: unknown; confidence?: unknown; probabilities?: unknown; rationale?: unknown } = { verdict: "correct", confidence: 0.9 }) =>
+		new Response(JSON.stringify({ answers: { check: { type: "choice", choice: value.verdict, confidence: value.confidence, ...(value.probabilities !== undefined ? { probabilities: value.probabilities } : {}), ...(value.rationale !== undefined ? { rationale: value.rationale } : {}) } } }));
 	const text = (value: any) => value.content[0].text;
 	const parse = (value: unknown) => core.parseDecision(JSON.stringify(value));
 	const request = (value: any, config = cfg(), input = task()) => core.askDecisionModel(config, input, async (_url: any, init: any) => {
@@ -205,6 +209,60 @@ async function runSuite(root: string) {
 		assert.equal((await pending).reason, "aborted");
 		const keepAlive = setTimeout(() => {}, 100);
 		try { assert.equal((await core.askDecisionModel(cfg(), task(), async (_: any, init: any) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true })), undefined, 5)).reason, "timeout"); }
+		finally { clearTimeout(keepAlive); }
+	});
+
+	await check("check request wire shape, strict verdict/probability parsing and admission bounds", async () => {
+		for (const provider of ["jev", "openrouter"]) {
+			const config = cfg({ JEV_ADVISOR_PROVIDER: provider });
+			const prepared = core.prepareCheck("Is this classification appropriate?", "text: the stadium roared\nlabel: sports", core.providerPromptLimit(config));
+			assert.equal(prepared.status, "ok");
+			let seen = "";
+			const response = await core.askCheckModel(config, prepared.check, async (_: any, init: any) => {
+				if (provider === "openrouter") { seen = JSON.parse(init.body).messages[1].content; return chat({ verdict: "correct", confidence: 0.9 }); }
+				const body = JSON.parse(init.body); seen = JSON.stringify([body.state, body.questions]);
+				assert.equal(body.state, "text: the stadium roared\nlabel: sports");
+				assert.equal(body.questions.check.instructions, "Is this classification appropriate?");
+				assert.deepEqual(Object.keys(body.questions.check.criteria), ["correct", "incorrect", "unsure"]);
+				return systemCheck({ verdict: "correct", confidence: 0.9 });
+			});
+			assert.equal(response.status, "decision", provider); assert.equal(response.verdict, "correct", provider); assert.equal(response.confidence, 0.9, provider);
+			assert.equal(response.confidenceKind, provider === "openrouter" ? "self_reported" : "provider_choice", provider);
+			assert.ok(seen.includes("Is this classification appropriate?"), provider);
+			assert.ok(seen.includes("label: sports"), provider);
+		}
+		for (const bad of [{ verdict: "maybe", confidence: 1 }, { verdict: "correct", confidence: "0.9" }, { verdict: "correct", confidence: -0.1 }, { verdict: "correct", confidence: 1.1 }, { verdict: "correct", confidence: null }, { verdict: "correct", confidence: 1, extra: true }, { verdict: "correct", confidence: 1, probabilities: { correct: 0.5, incorrect: 0.4, unsure: 0.05 } }, { verdict: "correct", confidence: 1, probabilities: { correct: 1, incorrect: 0, unsure: 1 } }, { verdict: "correct", confidence: 1, rationale: 5 }]) {
+			assert.equal(core.parseCheckDecision(JSON.stringify(bad)).status, "no_decision", JSON.stringify(bad));
+		}
+		const fenced = core.parseCheckDecision('```json\n{"verdict":"Incorrect","confidence":0.8,"probabilities":{"correct":0.1,"incorrect":0.8,"unsure":0.1},"rationale":"label mismatch"}\n```');
+		assert.deepEqual(fenced, { status: "decision", verdict: "incorrect", confidence: 0.8, probabilities: { correct: 0.1, incorrect: 0.8, unsure: 0.1 }, confidenceKind: "self_reported", rationale: "label mismatch" });
+		assert.deepEqual(core.parseCheckDecision('{"verdict":"correct","confidence":1,"probabilities":{"correct":1,"incorrect":0,"unsure":0}}').probabilities, { correct: 1, incorrect: 0, unsure: 0 });
+		for (const bad of [undefined, null, 17, ""]) assert.equal(core.prepareCheck(bad, "artifact", 4000).status, "invalid_task", String(bad));
+		assert.equal(core.prepareCheck("  \n", "artifact", 4000).status, "invalid_task");
+		assert.equal(core.prepareCheck("question", " \t ", 4000).status, "invalid_task");
+		const cap = 1900;
+		const base = core.composeCheckPrompt({ question: "q", artifact: "" }).length;
+		assert.equal(core.prepareCheck("q", "a".repeat(cap - base), cap).status, "ok");
+		assert.equal(core.prepareCheck("q", "a".repeat(cap - base + 1), cap).status, "input_too_large");
+	});
+
+	await check("check path fails open with explicit reasons and rejected configurations never reach transport", async () => {
+		const input = core.prepareCheck("Is the artifact acceptable?", "artifact", 4000).check;
+		let calls = 0;
+		const noFetch = async () => { calls++; return systemCheck(); };
+		assert.equal((await core.askCheckModel(cfg({ JEV_ADVISOR_PROVIDER: "off" }), input, noFetch)).reason, "disabled");
+		assert.equal((await core.askCheckModel(core.readConfig({}, {}), input, noFetch)).reason, "unconfigured");
+		assert.equal((await core.askCheckModel(cfg({ JEV_ADVISOR_ENDPOINT: "https://evil.invalid" }), input, noFetch)).reason, "invalid_endpoint");
+		assert.equal(calls, 0, "rejected configurations never call fetch");
+		for (const status of [401, 429, 500]) assert.deepEqual(await core.askCheckModel(cfg(), input, async () => new Response("private", { status })), { status: "no_decision", reason: "provider_error", httpStatus: status });
+		assert.equal((await core.askCheckModel(cfg(), input, async () => { throw new Error("private"); })).reason, "provider_error");
+		assert.equal((await core.askCheckModel(cfg(), input, async () => new Response("x".repeat(65537)))).reason, "invalid_response");
+		assert.equal((await core.askCheckModel(cfg(), input, async () => system(decision()))).reason, "invalid_response", "a tier answer is not a check answer");
+		assert.equal((await core.askCheckModel(cfg({ JEV_ADVISOR_PROVIDER: "openrouter" }), input, async () => new Response(JSON.stringify({ choices: [{ message: { content: null, reasoning: '{"verdict":"correct","confidence":1}' } }] })))).reason, "invalid_response");
+		const before = new AbortController(); before.abort(); let n = 0;
+		assert.equal((await core.askCheckModel(cfg(), input, async () => { n++; return systemCheck(); }, before.signal)).reason, "aborted"); assert.equal(n, 0);
+		const keepAlive = setTimeout(() => {}, 100);
+		try { assert.equal((await core.askCheckModel(cfg(), input, async (_: any, init: any) => new Promise((_resolve, reject) => init.signal.addEventListener("abort", () => reject(new Error("timeout")), { once: true })), undefined, 5)).reason, "timeout"); }
 		finally { clearTimeout(keepAlive); }
 	});
 
@@ -453,6 +511,58 @@ async function runSuite(root: string) {
 		process.env.JEV_ADVISOR_PROVIDER = "ollaya"; const n = fetchCalls; assert.equal(JSON.parse(text(await manual.execute("manual", { assignment: "x".repeat(2500) }))).reason, "input_too_large"); assert.equal(fetchCalls, n);
 		assert.equal(JSON.parse(text(await manual.execute("manual", {}))).reason, "invalid_task");
 		process.env.JEV_ADVISOR_PROVIDER = "off"; responder = undefined; const report = text(await manual.execute("report", { report: "calibration" })); assert.ok(report.includes("No v2 store")); assert.ok(report.includes("not quality"));
+	});
+	await check("generated jev_check surfaces journal sanitized check outcomes and stay strict", async () => {
+		env();
+		responder = (url, init) => {
+			assert.ok(String(url).includes("/decisions"), "check uses the configured provider endpoint");
+			return systemCheck({ verdict: "incorrect", confidence: 0.8, probabilities: { correct: 0.1, incorrect: 0.8, unsure: 0.1 }, rationale: "PRIVATE-CHECK-RATIONALE" });
+		};
+		for (const surface of ["src/check.adapter.ts", "tools/jev-check.ts"]) {
+			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			assert.equal(tool.name, "jev_check", surface);
+			const before = fetchCalls;
+			const invalid = await tool.execute(`check-invalid-${surface}`, { question: "PRIVATE-CHECK-QUESTION" });
+			assert.equal(JSON.parse(text(invalid)).reason, "invalid_task", surface);
+			assert.equal(fetchCalls, before, `${surface}: invalid check input never reaches the provider`);
+			const native = await tool.execute(`check-ok-${surface}`, { question: "Is the label appropriate? PRIVATE-CHECK-QUESTION", artifact: "label: sports" });
+			const body = JSON.parse(text(native));
+			assert.equal(body.status, "decision", surface);
+			assert.equal(body.verdict, "incorrect", surface);
+			assert.equal(body.confidence, 0.8, surface);
+			assert.equal(body.confidenceKind, "provider_choice", surface);
+			assert.deepEqual(body.probabilities, { correct: 0.1, incorrect: 0.8, unsure: 0.1 }, surface);
+			assert.equal(body.journalStorage.persisted, true, surface);
+			assert.equal(body.stateOverrideIgnored, true, surface);
+		}
+		const rows = journalRecords();
+		assert.equal(rows.length, 4, "two surfaces, one invalid and one decided outcome each");
+		assert.deepEqual(rows.map((row: any) => row.operation), ["check", "check", "check", "check"]);
+		assert.equal(rows[0].check.status, "no_decision"); assert.equal(rows[0].check.reason, "invalid_task");
+		assert.equal(rows[2].check.status, "no_decision"); assert.equal(rows[2].check.reason, "invalid_task");
+		for (const row of [rows[1], rows[3]]) {
+			assert.equal(row.check.status, "decision"); assert.equal(row.check.verdict, "incorrect");
+			assert.equal(row.check.confidence, 0.8); assert.equal(row.check.confidenceKind, "provider_choice");
+			assert.deepEqual(row.check.probabilities, { correct: 0.1, incorrect: 0.8, unsure: 0.1 });
+			assert.ok(!("rationale" in row.check), "provider rationale is never journaled");
+			assert.match(row.toolCallDigest, /^[a-f0-9]{64}$/);
+		}
+		const serialized = JSON.stringify(rows);
+		for (const marker of ["PRIVATE-CHECK-QUESTION", "PRIVATE-CHECK-RATIONALE", "synthetic-key"]) assert.ok(!serialized.includes(marker), marker);
+		const snapshot = await sharedResults.readPluginOutcomeSnapshot("jev-advisor");
+		assert.equal(snapshot.status, "ok");
+		assert.equal(snapshot.records.length, 4);
+		assert.ok(snapshot.records.every((record: any) => record.operation === "check"), "canonical reader accepts the check operation");
+		assert.ok(snapshot.records.filter((record: any) => record.check.verdict === "incorrect").length === 2, "canonical reader validates the check outcome shape");
+		assert.equal((await appendPluginOutcome("jev-advisor", { operation: "check", check: { status: "decision", verdict: "maybe" } } as any)).persisted, false, "unknown verdict is rejected at projection");
+		assert.equal((await appendPluginOutcome("jev-advisor", { operation: "check", check: { status: "no_decision", reason: "provider_error" } } as any)).persisted, true);
+		const checkRows = journalRecords().filter((row: any) => row.operation === "check");
+		assert.equal(checkRows.length, 5);
+		const jev = core.aggregateJevMetrics(checkRows);
+		assert.equal(jev.checkAdvice.invocations, 5); assert.equal(jev.checkAdvice.present, 5);
+		assert.deepEqual(jev.checkAdvice.byVerdict, { incorrect: 2 }); assert.deepEqual(jev.checkAdvice.byReason, { invalid_task: 2, provider_error: 1 });
+		assert.equal(jev.manualAdvice.invocations, 0, "check records stay out of the manual-advice bucket");
 	});
 	await check('lock retry rejects ancestor symlink and same-mode directory replacements',async()=>{
 		for(const variant of ['symlink','directory']){
@@ -817,15 +927,15 @@ async function runSuite(root: string) {
 		(globalThis as any)[slotKey] = undefined;
 		core.widgetLifecycleResetForTests();
 	});
-	await check("canonical builder exact bytes for all four surfaces and stale candidate", () => {
+	await check("canonical builder exact bytes for all five surfaces and stale candidate", () => {
 		const fixture = path.join(root, "builder");
 		for (const dir of ["scripts", "lib", "src", "hooks", "tools"]) mkdirSync(path.join(fixture, dir), { recursive: true });
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
-		for (const file of ["scripts/build.mjs", "lib/decision.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/metrics.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "lib/decision.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
-		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/plugin-metrics.ts"]) {
+		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts"]) {
 			const expected = readFileSync(path.join(fixture, file)); const actual = readFileSync(path.join(plugin, file)); assert.deepEqual(actual, expected, file);
 			assert.notDeepEqual(Buffer.concat([actual, Buffer.from(" ")]), expected); console.log(`artifact-sync ${file}: exact`);
 		}
@@ -835,7 +945,8 @@ async function runSuite(root: string) {
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [["tool_call", "task", "before"], ["tool_result", "task", "after"], ["tool_result", "subagent", "after"]]);
 		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 3);
 		const toolNames = manifest.tools.map((t: any) => t.name);
-		assert.deepEqual(toolNames.sort(), ["jev_advise", "plugin_metrics"]);
+		assert.deepEqual(toolNames.sort(), ["jev_advise", "jev_check", "plugin_metrics"]);
+		const checkToolEntry = manifest.tools.find((t: any) => t.name === "jev_check"); assert.equal(checkToolEntry.path, "tools/jev-check.ts");
 		const metricsTool = manifest.tools.find((t: any) => t.name === "plugin_metrics"); assert.equal(metricsTool.path, "tools/plugin-metrics.ts");
 	});
 	await check("no unexpected fetch and no owned transaction residue", () => {
@@ -981,7 +1092,7 @@ async function runSuite(root: string) {
 		assert.equal(txn.status, "ok", "transaction works under its own lock while no foreign lock exists");
 	});
 
-	await check("plugin_metrics counts all seven canonical operations without widening run/status buckets", async () => {
+	await check("plugin_metrics counts canonical operations including check without widening run/status buckets", async () => {
 		env({ JEV_ADVISOR_PROVIDER: "off" });
 		const beforeFetch = fetchCalls, beforeUnexpectedFetches = unexpectedFetches;
 		const operations = ["run", "status", "advise", "calibration", "task_advice", "task_launch", "subagent_terminal"] as const;
@@ -1005,6 +1116,7 @@ async function runSuite(root: string) {
 			}
 		}
 		assert.equal((await appendPluginOutcome("jev-advisor", { operation: "advise" })).persisted, true);
+		assert.equal((await appendPluginOutcome("jev-advisor", { operation: "check", check: { status: "decision", verdict: "correct", confidence: 0.7, confidenceKind: "provider_choice" } } as any)).persisted, true);
 		await seedStateWithZeroDuration(await version2StateFileFixture(process.env.HOME!));
 		for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
 			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
@@ -1034,6 +1146,11 @@ async function runSuite(root: string) {
 					assert.deepEqual(m.run.assertions, { contributingRecords: 1, entries: 2, byKind: { visible: 1, text_exact: 1 }, byStatus: { passed: 1, failed: 1 } });
 				}
 			}
+			const jevMetrics = report.plugins["jev-advisor"].metrics;
+			assert.equal(jevMetrics.checkAdvice.invocations, 1, surface);
+			assert.deepEqual(jevMetrics.checkAdvice.byVerdict, { correct: 1 }, surface);
+			assert.equal(jevMetrics.checkAdvice.confidenceBasis.provider_choice, 1, surface);
+			assert.equal(jevMetrics.manualAdvice.invocations, 1, surface);
 		}
 		assert.equal(fetchCalls, beforeFetch); assert.equal(unexpectedFetches, beforeUnexpectedFetches);
 	});
@@ -1303,7 +1420,7 @@ async function seedStateWithZeroDuration(file: string): Promise<void> {
 	state.jobs[JSON.stringify(["s", "j0"])] = { ref: { sessionId: "s", jobId: "j0" }, status: "completed", statusObservations: ["completed"], durationObservations: [], requestedModelObservations: [], effectiveModelObservations: [], allocatedChildIds: [], actualTier: null, observedAt: Date.now(), taskKey: null, conflicts: [] };
 	writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
 }
-	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 4 }));
+	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 5 }));
 	console.log(failures ? `FAILED ${failures}/${cases}` : `ALL PASS (${cases} cases)`);
 	process.exitCode = failures || cases === 0 ? 1 : 0;
 }

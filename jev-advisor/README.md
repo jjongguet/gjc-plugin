@@ -1,7 +1,8 @@
 # jev-advisor
 
 [GJC](https://github.com/Yeachan-Heo/gajae-code) plugin for task-level
-`fast` / `balanced` / `strong` delegation advice and local execution metadata.
+`fast` / `balanced` / `strong` delegation advice, one-shot `jev_check` artifact
+checks and local execution metadata.
 Advice is not model selection, process completion is not accepted code quality,
 and confidence is not a probability of task success.
 
@@ -20,6 +21,15 @@ and confidence is not a probability of task success.
   `report="calibration"` for an offline descriptive report. Manual advice does
   not create a delegation-correlation record; both paths append sanitized
   operational outcomes under `~/.gjc-plugin/jev-advisor/journal/v1/`.
+- **`jev_check`:** explicitly request one bounded check of one artifact against
+  one check question. The composed prompt (question plus artifact) is admitted
+  under the same 4,000/1,900-character bound as tier prompts and is rejected
+  whole, never sliced. A verdict must be `correct`, `incorrect` or `unsure`
+  with a finite `[0,1]` confidence and optional three-label probabilities
+  summing to one within `0.001`; anything else is an explicit no-decision.
+  The outcome is journaled as a sanitized `check` operation — correlation
+  state is untouched. A verdict is an advisory decision-model opinion, not
+  verification evidence, correctness proof or acceptance of quality.
 - **`plugin_metrics`:** explicitly request one offline descriptive aggregate of
   all three plugins' retained journals and Jev's retained v2 correlation state.
   Accepts exactly `{}`; strictly read-only — creates nothing, appends nothing,
@@ -182,7 +192,7 @@ observations are outside report coverage. No automatic NEXT recommendation,
 prior-outcome prompt injection, accepted-quality or cost-saving claim is made.
 
 ## `plugin_metrics` tool
-The plugin ships one additional explicitly invoked tool, `plugin_metrics`. It is
+The plugin also ships the explicitly invoked `plugin_metrics` tool. It is
 strictly read-only: it accepts exactly `{}` (any other parameter set is rejected
 without touching any store) and aggregates only what is already on disk:
 
@@ -216,10 +226,11 @@ wrote to disk:
   *recorded observations*, overlapping dimensions across records — not
   coverage, not correctness, and not a substitute for reading the underlying
   receipts.
-- **Jev manual advice and task advice**: manual-advice invocations, present
-  statuses, tiers, confidence bases and no-decision reasons; task-advice batch
-  and entry counts with the same breakdowns. These are separate buckets and
-  are never merged.
+- **Jev manual advice, task advice and check outcomes**: manual-advice
+  invocations, present statuses, tiers, confidence bases and no-decision
+  reasons; task-advice batch and entry counts with the same breakdowns; and
+  check invocations broken down by status, verdict, confidence basis and
+  no-decision reason. These are separate buckets and are never merged.
 - **Evidence-observation sightings** per operation (task launch, subagent
   terminal, advice, calibration) — how many retained records report each
   observation kind.
@@ -287,11 +298,13 @@ lib/decision.ts             Config, task inputs, providers, v2 transactions/repo
 src/hook.adapter.ts         Per-task pre-call advice and optional enforcement
 src/result.adapter.ts       Provider-free task/subagent receipt observer
 src/tool.adapter.ts         Explicit advice and offline report
+src/check.adapter.ts        Explicit one-shot artifact check
 src/metrics.adapter.ts      Thin read-only plugin_metrics tool adapter
 scripts/build.mjs           Keyless embedding of shared results, core and adapters
 hooks/jev-advisor.ts         Generated pre-call surface
 hooks/jev-advisor-result.ts  Generated result surface, two manifest targets
 tools/jev-advise.ts          Generated explicit-tool surface
+tools/jev-check.ts           Generated explicit check surface
 tools/plugin-metrics.ts      Generated read-only metrics surface
 ```
 

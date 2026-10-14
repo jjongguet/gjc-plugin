@@ -23,7 +23,7 @@ Credentials stay outside the replaceable installation tree in `~/.gjc/agent/jev-
 
 | Plugin | Purpose | Docs |
 | --- | --- | --- |
-| [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice plus the read-only `plugin_metrics` report. Shadow by default; advice is not model routing or quality proof. | [README](jev-advisor/README.md) |
+| [`jev-advisor`](jev-advisor/) | Task-scoped `fast` / `balanced` / `strong` advice, one-shot `jev_check` artifact checks and the read-only `plugin_metrics` report. Shadow by default; advice is not model routing or quality proof. | [README](jev-advisor/README.md) |
 | [`verification-receipts`](verification-receipts/) | Explicit `node:test` execution, immutable private receipts, source freshness and the post-delegation verification gate (`verification_loop`). | [README](verification-receipts/README.md) |
 | [`ui-regression`](ui-regression/) | One bounded, non-sensitive loopback Aside scenario with literal DOM assertions and historical metadata receipts. No screenshot baselines. | [README](ui-regression/README.md) |
 | [`wiki`](wiki/) | Read-only lookup over the guarded personal wiki and pending-proposal submission. Never approves or publishes. | [README](wiki/README.md) |
@@ -38,7 +38,7 @@ Measured attributes (tiers, counts, durations, journals) are descriptive observa
 
 Each plugin exposes one or two tools, plus session-start hooks for `verification-receipts`. Full contracts, limits and boundaries live in each plugin README.
 
-- **`jev_advise`** — task-scoped tier advice (shadow by default). **`plugin_metrics`** — strictly read-only aggregate of retained journals; accepts exactly `{}`. Details: [`jev-advisor/README.md`](jev-advisor/README.md).
+- **`jev_advise`** — task-scoped tier advice (shadow by default). **`jev_check`** — one bounded artifact check returning a strict `correct` / `incorrect` / `unsure` verdict; advisory only, never verification evidence. **`plugin_metrics`** — strictly read-only aggregate of retained journals; accepts exactly `{}`. Details: [`jev-advisor/README.md`](jev-advisor/README.md).
 - **`verification_run` / `verification_status`** — run explicit repository-relative `.js` / `.mjs` / `.cjs` test files (1–32; no globs or arbitrary commands) and read their private receipts with recomputed source freshness. **`verification_loop`** — bounded (≤15s, offline) recheck of the post-delegation verification ledger; `clean` is a mechanical recheck, not proof of correctness. Details: [`verification-receipts/README.md`](verification-receipts/README.md).
 - **`ui_regression_run` / `ui_regression_status`** — one bounded loopback scenario (explicit ephemeral account, exact loopback origin, first `goto`, at least one assertion) and historical status. Historical success is not current/deployed UI evidence. Details: [`ui-regression/README.md`](ui-regression/README.md).
 - **`wiki_query` / `wiki_propose`** — read-only search over canonical wiki pages; capture an owner-approved source and submit draft pages as a pending proposal with an exact digest. Publication stays a human step outside the plugin. Details: [`wiki/README.md`](wiki/README.md).

@@ -9,13 +9,14 @@ import {createSmokeEnvironment,assertSmokeIsolation} from './smoke-environment.m
 const worktree=process.cwd();
 const uiMode=process.argv.includes('--ui');
 const advisorMode=process.argv.includes('--advisor');
+const checkMode=process.argv.includes('--check');
 const metricsMode=process.argv.includes('--metrics');
 const loopMode=process.argv.includes('--loop');
 const delegationMode=process.argv.includes('--delegation');
-assert.ok([uiMode,advisorMode,metricsMode,loopMode,delegationMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
+assert.ok([uiMode,advisorMode,checkMode,metricsMode,loopMode,delegationMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
 const installedMode=process.argv.includes('--installed');
-const plugin=advisorMode||metricsMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
-const toolNames=delegationMode?['task','subagent','job','verification_run','verification_loop']:metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
+const plugin=advisorMode||checkMode||metricsMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
+const toolNames=delegationMode?['task','subagent','job','verification_run','verification_loop']:metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:checkMode?['jev_check']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
 const account=process.env.UI_REGRESSION_ACCOUNT;
 if(uiMode&&!account)throw Error('explicit_ephemeral_account_required');
 const userAgent=path.resolve(process.env.GJC_CODING_AGENT_DIR || process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(),'.gjc','agent'));
@@ -69,6 +70,10 @@ try {
   ()=>({name:'jev_advise',args:{assignment:'Non-sensitive local fixture advice',role:'executor'}}),
   ()=>({name:'jev_advise',args:{report:'calibration'}}),
   ()=>({name:'jev_advise',args:{}})
+ ]:checkMode?[
+  ()=>({name:'jev_check',args:{question:'Does the label match the primary topic of the artifact? PRIVATE-CHECK-QUESTION',artifact:'text: the stadium roared; label: sports'}}),
+	 ()=>({name:'jev_check',args:{question:'Is this acceptable?',artifact:'   '}}),
+  ()=>({name:'jev_check',args:{question:'q'.repeat(4000),artifact:'a'}})
  ]:uiMode?[
   ()=>({name:toolNames[0],args:{account,scenario}}),
   ()=>({name:toolNames[1],args:{receiptId:passId}}),
@@ -221,12 +226,18 @@ for(const [plugin,outcome] of cases){
       evidence.push({probe:'metrics_seeded',status:'passed',runStatusSeparated:true,measuredZeroPreserved:true,nonmutating:true});
      }
     }else{
-    const expectedJournalFailure=!advisorMode&&!uiMode&&step===11;
+    const expectedJournalFailure=!advisorMode&&!uiMode&&!checkMode&&step===11;
     assert.equal(result.journalStorage.persisted,!expectedJournalFailure,'outcome_journal_confirmation_mismatch');if(!expectedJournalFailure)journalIds.push(result.journalStorage.id);
-    if(!advisorMode)assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
+    if(!advisorMode&&!checkMode)assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
     if(advisorMode){
      if(step===1||step===3){assert.equal(result.status,'no_decision');assert.equal(result.reason,step===1?'disabled':'invalid_task');evidence.push({probe:step===1?'manual_disabled':'manual_invalid',status:result.status,reason:result.reason});}
      if(step===2){assert.ok(text.includes('No v2 store exists yet.'));evidence.push({probe:'calibration',networkFree:true,correlationReadOnly:true});}
+    }else if(checkMode){
+     assert.equal(result.status,'no_decision');
+     if(step===1){assert.equal(result.reason,'disabled');evidence.push({probe:'check_offline',status:result.status,reason:result.reason});}
+     if(step===2){assert.equal(result.reason,'invalid_task');evidence.push({probe:'check_invalid_input',status:result.status,reason:result.reason});}
+     if(step===3){assert.equal(result.reason,'input_too_large');evidence.push({probe:'check_oversized',status:result.status,reason:result.reason});}
+	     assert.ok(!text.includes('PRIVATE-CHECK-QUESTION'),'check_result_leaked_private_text');
     }else if(uiMode){
      assert.equal(result.advisoryOnly,true);
      if(step===1){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.assertions.length,2);assert.equal(result.receipt.execution.cleanup,'confirmed');assert.equal(result.persisted,true);passId=result.receipt.id;evidence.push({probe:'pass',status:'passed',assertions:result.receipt.execution.assertions,cleanup:'confirmed'});}
@@ -311,7 +322,7 @@ for(const [plugin,outcome] of cases){
  const records=[];for(const segment of inventory.segments){const file=path.join(journal,segment.name),body=await fs.readFile(file);assert.equal(body.length,segment.bytes);assert.equal(createHash('sha256').update(body).digest('hex'),segment.digest);assert.equal((await fs.stat(file)).mode&0o777,0o600);records.push(...body.toString().trimEnd().split('\n').map(line=>JSON.parse(line)));}
  assert.deepEqual(records.map(record=>record.id),journalIds);assert.equal((await fs.stat(journal)).mode&0o777,0o700);
  let receiptCount=0;
- if(!advisorMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?2:200);}
+ if(!advisorMode&&!checkMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?2:200);}
  report={schemaVersion:1,kind:'package-consumer-report',hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,submissions,standalone:uiMode,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,persistence:{root:'.gjc-plugin',receiptCount,syntheticCapacityMetadataEntries:capacitySeeds,journalIds,operations:records.map(record=>record.operation),privateModes:true}};
  }
  }

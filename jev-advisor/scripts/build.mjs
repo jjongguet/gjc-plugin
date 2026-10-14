@@ -20,6 +20,7 @@ const resultsCore = await readFile(path.join(pluginRoot, "../shared/lib/results.
 const surfaces = [
 	{ core: "lib/decision.ts", adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
 	{ core: "lib/decision.ts", adapter: "src/tool.adapter.ts", out: "tools/jev-advise.ts" },
+	{ core: "lib/decision.ts", adapter: "src/check.adapter.ts", out: "tools/jev-check.ts" },
 	{ core: "lib/decision.ts", adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
 	{ core: "lib/decision.ts", adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
 ];
