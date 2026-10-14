@@ -118,8 +118,11 @@ test('git delta facts cover dirty, commit, mixed, missing-baseline and non-repos
  const nonGitFacts = await gitDeltaFacts(nonGit, base!.head);
  expect(nonGitFacts.available).toBe(false);
  const started = performance.now();
- expect(await resolveRepoRoot(root, 1)).toBeNull();
- expect(await captureBaseline(root, 1)).toBeNull();
+ // A zero budget deterministically expires before any git call can run; a 1 ms
+ // budget races fast runners (git can legitimately finish inside it) and is not
+ // a stable timeout test.
+ expect(await resolveRepoRoot(root, 0)).toBeNull();
+ expect(await captureBaseline(root, 0)).toBeNull();
  expect(performance.now() - started).toBeLessThan(1000);
 });
 
