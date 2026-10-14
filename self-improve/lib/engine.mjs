@@ -341,6 +341,7 @@ export async function runCycle(input) {
     ledgerPath = path.join(repoRoot, "self-improve", "ledger.jsonl"),
     dryRun = false,
     includeSmoke = true,
+    journalEvidence = null,
     deps = {},
   } = input;
   if (!repoRoot || !adapter || !proposal) throw new Error("run_cycle_requires repoRoot, adapter and proposal");
@@ -537,6 +538,7 @@ export async function runCycle(input) {
       guards: candidateGuards.map(({ id, status }) => ({ id, status })),
       critic: { verdict: critic.verdict, rules: critic.rules.map(({ id, reason }) => ({ id, reason })) },
       verdict: { decision: decision.decision, reasons: decision.reasons },
+      ...(journalEvidence ? { journalEvidence } : {}),
       ...(touched.some((rel) => (adapter.textFixtures ?? []).includes(rel)) ? { labels: ["text_fixture"] } : {}),
       ...(history.forcedExploration ? { forcedExploration: true } : {}),
       createdAt: now(),

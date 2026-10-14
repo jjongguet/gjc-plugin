@@ -86,6 +86,33 @@ function adoptedObjectives(ledgerPath) {
 }
 
 /**
+ * Descriptive journal-evidence block attached to loop cycle rows (never to
+ * standalone `cycle` runs, and never a gate for adoption): the adoption rate
+ * comes from this campaign's self-improve ledger rows; the guard-failure-class
+ * distribution comes from prior loop-state cycles. Counts only, bounded. The
+ * jev-advisor journal is a different corpus (rrsi source tags: jev-journal vs
+ * self-improve-ledger) and is not read here.
+ */
+export function buildJournalEvidence({ ledgerPath, campaignId, cycles = [] }) {
+  const rows = readLedger(ledgerPath).filter((row) => row.kind === "cycle" && row.campaignId === campaignId);
+  const adoptions = campaignAcceptedCount(ledgerPath, campaignId);
+  const guardFailureClasses = { known_flake_suspect: 0, other: 0 };
+  for (const entry of cycles) {
+    if (entry?.failureClass === "known_flake_suspect") guardFailureClasses.known_flake_suspect += 1;
+    else if (entry?.failureClass) guardFailureClasses.other += 1;
+  }
+  return {
+    schema: "gjc.self-improve.journal-evidence.v1",
+    adoptionRate: rows.length > 0 ? Number((adoptions / rows.length).toFixed(4)) : null,
+    cycleAttempts: rows.length,
+    adoptions,
+    guardFailureClasses,
+    sources: { adoptionRate: "self-improve-ledger", guardFailureClasses: "loop-state" },
+    caveat: "Descriptive only; no statistical significance is claimed; never gates adoption.",
+  };
+}
+
+/**
  * Load the deployed current policy for this repository (absent file ⇒ null,
  * i.e. today's behavior). A present-but-unreadable pointer is reported, never
  * silently ignored.
@@ -515,6 +542,7 @@ export async function runLoop(input) {
     emptyRounds = 0;
     for (const item of runnable) {
       if (state.counters.cycles >= maxCycles || nowMs() >= deadline) break;
+      const journalEvidence = buildJournalEvidence({ ledgerPath, campaignId, cycles: state.cycles });
       let result;
       try {
         result = await runCycle({
@@ -530,6 +558,7 @@ export async function runLoop(input) {
           dryRun: dryRun === true,
           includeSmoke,
           install: install === true,
+          journalEvidence,
           deps: { runGuards: deps.runGuards, evaluateProbes: deps.evaluateProbes, now: deps.cycleNow, runInstall: deps.runInstall },
         });
       } catch (error) {

@@ -147,6 +147,42 @@ async function runSuite(root) {
 		assert.equal(episode.attempts.some((attempt) => attempt.decision === "reject"), true, "no-decisions project to reject");
 	});
 
+	await check("journal-dream emits a deterministic receipt over the synthetic journal", async () => {
+		const scriptPath = path.join(plugin, "scripts", "journal-dream.mjs");
+		const outA = path.join(root, "journal-dream-a.json");
+		const outB = path.join(root, "journal-dream-b.json");
+		const run = (out) => spawnSync(process.execPath, ["--no-env-file", scriptPath, "--out", out], { encoding: "utf8", env: process.env, timeout: 120000 });
+		const first = run(outA);
+		assert.equal(first.status, 0, first.stderr);
+		const second = run(outB);
+		assert.equal(second.status, 0, second.stderr);
+		assert.equal(readFileSync(outA, "utf8"), readFileSync(outB, "utf8"), "same journal+seed reruns must be byte-identical");
+		const receipt = JSON.parse(readFileSync(outA, "utf8"));
+		assert.equal(receipt.schema, "gjc.self-improve.journal-dream.v1");
+		assert.equal(receipt.provenance.source, "jev-journal");
+		assert.equal(receipt.provenance.records, 12);
+		assert.equal(receipt.provenance.importedAttempts, 12);
+		assert.equal(receipt.counts.attempts, 12);
+		assert.match(receipt.receiptHash, /^[0-9a-f]{64}$/);
+		assert.equal(statSync(outA).mode & 0o7777, 0o600);
+		assert.equal(receipt.dream.thresholds.evaluated, false, "a small corpus stays below the pass gate");
+	});
+
+	await check("journal-dream fails closed with no_journal and never writes the store", async () => {
+		const scriptPath = path.join(plugin, "scripts", "journal-dream.mjs");
+		const storeBefore = existsSync(storeFile) ? readFileSync(storeFile, "utf8") : null;
+		const neverOut = path.join(root, "journal-dream-never.json");
+		const missing = spawnSync(
+			process.execPath,
+			["--no-env-file", scriptPath, "--journal-dir", path.join(root, "definitely-missing-journal"), "--out", neverOut],
+			{ encoding: "utf8", env: process.env, timeout: 120000 },
+		);
+		assert.equal(missing.status, 1);
+		assert.match(missing.stderr, /no_journal/);
+		assert.equal(existsSync(neverOut), false, "no receipt is written on failure");
+		assert.equal(existsSync(storeFile) ? readFileSync(storeFile, "utf8") : null, storeBefore, "the rrsi store is never touched");
+	});
+
 	await check("import projects a self-improve ledger read-only when a path is given", async () => {
 		const ledgerPath = path.join(root, "ledger.jsonl");
 		const row = (cycleId, decision) => JSON.stringify({ kind: "cycle", cycleId, objective: "probe.decision_accuracy", hypothesisHash: "a".repeat(64), budgetRung: 0, proposal: { files: ["x.ts"], hunks: 1 }, scores: { delta: 0.05, floor: 0.01 }, cost: { wallMs: 1000, bytes: 10, tokens: null }, guards: [{ id: "build", status: "pass" }], critic: { verdict: "pass", rules: [] }, verdict: { decision, reasons: [] }, createdAt: "2026-10-13T00:00:00.000Z" });

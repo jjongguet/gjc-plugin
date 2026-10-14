@@ -1,0 +1,109 @@
+{
+  "description": "Deterministic rule-text integrity cases for the rules-text domain. Each case is a structural contract over <repoDir>/docs/portfolio/AGENTS.md, scored without any model, network or randomness. Cases carry a provenance object naming the documented statement they operationalize. The migration draft intentionally leaves documented gaps (two missing sections, one duplicated canonical fact) so the primary baseline is below 1.0 and one repaired case crosses floor 0.01 (1/caseCount >= 0.01).",
+  "primary": "rule_text_integrity",
+  "target": "docs/portfolio/AGENTS.md",
+  "cases": {
+    "rule_text_integrity": [
+      {
+        "kind": "section_present",
+        "heading": "## 목적",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "프로젝트·모듈 AGENTS.md는 해당 범위의 구조·계약·주의점과 실행/검증 진입점을 담는다.",
+          "note": "operationalized as: the migration draft keeps a 목적 section that names the document's contract role."
+        }
+      },
+      {
+        "kind": "section_present",
+        "heading": "## 저장소 레이아웃",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §시작과 참조 순서",
+          "statement": "작업별 진입점에서 직계 디렉터리와 요청의 작업 종류를 함께 보고 한 곳을 고른다.",
+          "note": "operationalized as: the doc carries a routing section over the repo's plugin subtrees."
+        }
+      },
+      {
+        "kind": "section_present",
+        "heading": "## 빌드·테스트",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "프로젝트 README·docs·런북은 사용법과 상세 절차를 담고, 루트에 명령 목록을 옮겨 적지 않는다.",
+          "note": "operationalized as: the doc carries the build/test entry points for this repository."
+        }
+      },
+      {
+        "kind": "section_present",
+        "heading": "## 안전 경계",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "전역 SYSTEM.md는 행동·권한 경계를 담는다 — 저장소 지침은 적용되는 안전 경계를 명시한다.",
+          "note": "migration gap: the draft has not yet split its authorization notes into a dedicated 안전 경계 section."
+        }
+      },
+      {
+        "kind": "section_present",
+        "heading": "## 기록 규칙",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "완료 로그·버전·계정 현황·테스트 수는 상시 지침에 쌓지 않는다 — 기록은 기록 경로에 둔다.",
+          "note": "migration gap: the draft has not yet added its records/evidence section."
+        }
+      },
+      {
+        "kind": "single_h1",
+        "provenance": {
+          "source": "docs/astra-workspace-guide.md §지침 작성",
+          "statement": "같은 규칙을 여러 계층에 복제하지 않는다.",
+          "note": "operationalized as: exactly one H1 heading and no heading-level gaps."
+        }
+      },
+      {
+        "kind": "exactly_once",
+        "marker": "bun run test",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "같은 사실은 가장 가까운 정본 한 곳에서 관리하고 나머지는 링크한다.",
+          "note": "migration gap: the canonical command currently appears twice in the draft; one occurrence must remain (the 빌드·테스트 entry)."
+        }
+      },
+      {
+        "kind": "exactly_once",
+        "marker": "변경 파일만 스테이징",
+        "provenance": {
+          "source": "rule://branch-flow §1) 작업·커밋",
+          "statement": "이번 세션이 실제로 바꾼 hunk만 스테이징한다. git add -A 금지.",
+          "note": "operationalized as: the staging rule appears exactly once."
+        }
+      }
+    ],
+    "link_coverage": [
+      {
+        "kind": "relative_link_resolves",
+        "target": "package.json",
+        "provenance": {
+          "source": "docs/astra-workspace-guide.md §지침 수정 후 확인",
+          "statement": "로컬 링크와 실제 경로가 일치하는지 검사한다.",
+          "note": "the doc's canonical command definition must be linked as a live local link."
+        }
+      },
+      {
+        "kind": "relative_link_resolves",
+        "target": "self-improve/ledger.jsonl",
+        "provenance": {
+          "source": "docs/astra-workspace-guide.md §지침 수정 후 확인",
+          "statement": "로컬 링크와 실제 경로가 일치하는지 검사한다.",
+          "note": "the records pipeline reference must be linked as a live local link."
+        }
+      },
+      {
+        "kind": "relative_link_resolves",
+        "target": "self-improve/rrsi.json",
+        "provenance": {
+          "source": "docs/astra-workspace-guide.md §지침 수정 후 확인",
+          "statement": "로컬 링크와 실제 경로가 일치하는지 검사한다.",
+          "note": "the loop configuration reference must be linked as a live local link."
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "description": "Held-out rule-text cases for the rules-text domain, kept separate from ../probes/fixtures.json and never shown to the proposer. Parallel checks with distinct phrasing; a candidate edit that games the probe labels while breaking these parallels regresses heldout_rule_text. Scored into heldout_rule_text only — held-out labels and summaries never appear in failures output.",
+  "cases": {
+    "heldout_rule_text": [
+      {
+        "kind": "no_duplicate_heading",
+        "parallelOf": "rule_text_integrity#5",
+        "provenance": {
+          "source": "docs/astra-workspace-guide.md §지침 작성",
+          "statement": "같은 규칙을 여러 계층에 복제하지 않는다.",
+          "note": "held-out parallel: no two headings in the document share the same text."
+        }
+      },
+      {
+        "kind": "section_present",
+        "heading": "## 커밋·검증 규칙",
+        "parallelOf": "rule_text_integrity#2",
+        "provenance": {
+          "source": "rule://branch-flow §1) 작업·커밋",
+          "statement": "변경 파일만 스테이징하고, 검증 없는 머지 금지.",
+          "note": "held-out parallel: the commit/verification section must stay present."
+        }
+      },
+      {
+        "kind": "exactly_once",
+        "marker": "bun run build",
+        "parallelOf": "rule_text_integrity#6",
+        "provenance": {
+          "source": "AGENTS.md (jjongguet 워크스페이스 루트) §문서별 소유권",
+          "statement": "같은 사실은 가장 가까운 정본 한 곳에서 관리하고 나머지는 링크한다.",
+          "note": "held-out parallel: the build command stays single-sourced."
+        }
+      }
+    ]
+  }
+}

@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
+import RULES_TEXT_DOMAIN from "../domains/rules-text/adapter.mjs";
 import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
 import { LOOP_DEFAULTS, runLoop } from "../lib/loop.mjs";
 import { ledgerCounts } from "../lib/ledger.mjs";
@@ -27,17 +28,32 @@ import { buildTextFixturePrompt, runStochasticEvaluation } from "../lib/runner.m
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_LEDGER = join(SELF_IMPROVE_DIR, "ledger.jsonl");
 
+// Domain registry: `--domain <id>` selects an adapter; absent -> gjc-plugin
+// (the historical default, unchanged). Unknown ids fail closed with exit 2.
+const ADAPTERS = new Map([
+  [DOMAIN.id, DOMAIN],
+  [RULES_TEXT_DOMAIN.id, RULES_TEXT_DOMAIN],
+]);
+
+function resolveDomain(options) {
+  if (options.domain === undefined) return { adapter: DOMAIN, error: null };
+  const adapter = ADAPTERS.get(options.domain);
+  return adapter
+    ? { adapter, error: null }
+    : { adapter: null, error: `unknown_domain: ${options.domain} (known: ${[...ADAPTERS.keys()].join(", ")})` };
+}
+
 const USAGE = `usage: node self-improve/scripts/run.mjs <command> [options]
 
 commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
-  loop    [--repo <path>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
+  loop    [--repo <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
           [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--proposer-timeout-ms <n>]
           [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
-  replay  [--corpus ledger] [--policy <id>|B0|B1] [--policy-file <path>] [--policy-dir <path>] [--ledger <path>] [--json]
-  dream   [--seed <n>] [--max-candidates <n>] [--out <path>] [--write-policy <id>] [--policy-dir <path>]
+  replay  [--corpus ledger] [--domain <id>] [--policy <id>|B0|B1] [--policy-file <path>] [--policy-dir <path>] [--ledger <path>] [--json]
+  dream   [--domain <id>] [--seed <n>] [--max-candidates <n>] [--out <path>] [--write-policy <id>] [--policy-dir <path>]
           [--ledger <path>] [--json]
   policy  [--list] [--deploy <id>] [--policy-dir <path>] [--ledger <path>] [--dry-run] [--json]
   recover [--repo <path>] [--run-root <path>] [--json]
@@ -129,8 +145,9 @@ async function runCycleCommand(options) {
     process.stderr.write(`cycle requires --proposal <path>\n\n${USAGE}`);
     return 2;
   }
-  if (options.domain && options.domain !== DOMAIN.id) {
-    process.stderr.write(`unknown_domain: ${options.domain} (adapter id is ${DOMAIN.id})\n`);
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
     return 2;
   }
   const repoRoot = resolve(options.repo ?? process.cwd());
@@ -142,7 +159,7 @@ async function runCycleCommand(options) {
   }
   const result = await runCycle({
     repoRoot,
-    adapter: DOMAIN,
+    adapter,
     proposal,
     runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
     ledgerPath: options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl"),
@@ -202,11 +219,16 @@ function runReplayCommand(options) {
     process.stderr.write(`unknown --corpus: ${options.corpus} (only ledger)\n`);
     return 2;
   }
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
+    return 2;
+  }
   const ledgerPath = ledgerPathFor(options);
   const corpus = loadCorpus({ ledgerPath });
   const betas = selfImproveConfig().policy?.betas ?? DEFAULT_BETAS;
   const policies = options.policy ? [resolveCorpusPolicy(options, policyDirFor(options))] : Object.values(BASELINE_POLICIES);
-  const scores = policies.map((policy) => summarizeScore(scorePolicy({ corpus, policy, adapter: DOMAIN, betas })));
+  const scores = policies.map((policy) => summarizeScore(scorePolicy({ corpus, policy, adapter, betas })));
   const result = {
     schema: "gjc.self-improve.replay.v1",
     corpus: {
@@ -235,6 +257,11 @@ function runReplayCommand(options) {
 }
 
 function runDreamCommand(options) {
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
+    return 2;
+  }
   const config = selfImproveConfig();
   const seed = options.seed === undefined ? (config.policy?.seed ?? 1) : Number.parseInt(options.seed, 10);
   if (!Number.isInteger(seed)) {
@@ -254,7 +281,7 @@ function runDreamCommand(options) {
   const p2 = protocolP2Numbers();
   const receipt = runDream({
     corpus,
-    adapter: DOMAIN,
+    adapter,
     seed,
     maxCandidates,
     passGateN: p2.passGateN,
@@ -409,6 +436,11 @@ async function runRunnerCommand(options) {
 
 async function runLoopCommand(options) {
   const repoRoot = resolve(options.repo ?? process.cwd());
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
+    return 2;
+  }
   const proposer = options.proposer ?? "stub";
   if (proposer !== "stub" && proposer !== "cmd") {
     process.stderr.write(`unknown --proposer: ${proposer} (stub|cmd)\n`);
@@ -435,7 +467,7 @@ async function runLoopCommand(options) {
   if ([maxCycles, maxWallMs, maxProposerCalls, batchSize, proposerTimeoutMs].includes(null)) return 2;
   const result = await runLoop({
     repoRoot,
-    adapter: DOMAIN,
+    adapter,
     proposer,
     proposerCmd: options["proposer-cmd"] ?? null,
     liveApproved: options.liveApproved === true,
