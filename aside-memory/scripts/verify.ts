@@ -197,6 +197,16 @@ if (args[3] === "path") {
 		for (const payload of ["{}", "[null]", "[[]]", JSON.stringify([row()]).replace('"title":', '"__proto__":{},"title":')]) noPayload(memoryBriefing(payload, "/fixture-memory", 3, null), "invalid_search_response");
 		noPayload(brief([row(), row()], 1), "invalid_search_response");
 	});
+	await check("CLI-authored optional date field is accepted typed and never rendered", () => {
+		const accepted = brief([row("Dated preference.", { date: "2026-10-13" })]);
+		assert.equal(accepted.status, "ok");
+		assert.deepEqual(accepted.briefing[0].snippets, ["Dated preference."]);
+		assert.doesNotMatch(JSON.stringify(accepted), /2026-10-13/);
+		const mixed = brief([row("A."), row("B.", { date: "2026-10-13", chunkId: "b".repeat(64) })]);
+		assert.equal(mixed.status, "ok"); assert.equal(mixed.briefing.length, 2);
+		noPayload(brief([row("Bad.", { date: 20261013 })]), "invalid_search_response");
+		noPayload(brief([row("Bad.", { date: "2026-10-13", extra: true })]), "invalid_search_response");
+	});
 	await check("serialized response overflow emits fixed failure without partial snippets", () => {
 		const excerpt = ('"\\'.repeat(300)) + "\n\n" + ('"\\'.repeat(300));
 		const result = brief(Array.from({ length: 5 }, (_, i) => row(excerpt, { path: "/fixture-memory/" + '"'.repeat(490) + i + ".md", chunkId: String(i).repeat(64) })));
