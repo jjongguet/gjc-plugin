@@ -13,8 +13,12 @@ test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized
   const root = tempRoot();
   const scratch = join(root, "repo");
   mkdirSync(scratch, { recursive: true });
+  // A workspace tree beside the repo keeps the validator guard in the plan.
+  const repoRoot = join(root, "repo-src");
+  mkdirSync(join(root, "shared", "workspace-standard", "validator"), { recursive: true });
+  writeFileSync(join(root, "shared", "workspace-standard", "validator", "cli.mjs"), "");
   const plan = buildGuardPlan({
-    repoRoot: join(root, "repo-src"),
+    repoRoot,
     scratchDir: scratch,
     runRoot: join(root, "run"),
     includeSmoke: true,
@@ -30,14 +34,16 @@ test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized
     assert.ok(guard.env.HOME.startsWith(join(root, "run")));
   }
   const validator = plan.find((guard) => guard.id === "validator");
-  assert.equal(validator.command[1], resolveValidatorEntry(join(root, "repo-src")));
+  assert.equal(validator.command[1], resolveValidatorEntry(repoRoot));
+  // Without a workspace tree beside the repo (hosted CI checkout), the
+  // validator guard is planned out instead of failing on a missing entry file.
   const noSmoke = buildGuardPlan({
-    repoRoot: root,
+    repoRoot: join(root, "absent", "deeper", "repo"),
     scratchDir: scratch,
     runRoot: join(root, "run2"),
     includeSmoke: false,
   });
-  assert.deepEqual(noSmoke.map((guard) => guard.id), ["build", "test", "validator"]);
+  assert.deepEqual(noSmoke.map((guard) => guard.id), ["build", "test"]);
   rmSync(root, { recursive: true, force: true });
 });
 

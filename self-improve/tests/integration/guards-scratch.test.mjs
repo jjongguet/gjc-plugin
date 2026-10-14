@@ -47,7 +47,7 @@ test("scratch-copy guards run green and leave the live harness digest unchanged"
       `guard failures: ${summary}`,
     );
     process.stdout.write(
-      `integration guards: ${summary}\nlive digest: ${digestBefore.rootHash}\nlogs: ${join(runRoot, "logs")}\n`,
+      `integration guards: ${summary}\nplan: ${guards.map((guard) => guard.id).join(",")}\nlive digest: ${digestBefore.rootHash}\nlogs: ${join(runRoot, "logs")}\n`,
     );
     passed = true;
   } finally {

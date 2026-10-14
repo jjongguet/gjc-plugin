@@ -21,6 +21,11 @@ function git(cwd, args) {
 function makeFixture() {
   const root = mkdtempSync(join(tmpdir(), "self-improve-loop-"));
   const repo = join(root, "repo");
+  // The workspace-standard validator lives beside the workspace repos; without
+  // it the guard plan omits the validator (self-improve/lib/guards.mjs), so the
+  // fixture models the local workspace layout to keep the 3-guard contract.
+  mkdirSync(join(root, "shared", "workspace-standard", "validator"), { recursive: true });
+  writeFileSync(join(root, "shared", "workspace-standard", "validator", "cli.mjs"), "");
   mkdirSync(join(repo, "jev-advisor", "lib"), { recursive: true });
   mkdirSync(join(repo, "jev-advisor", "src"), { recursive: true });
   mkdirSync(join(repo, "jev-advisor", "tests"), { recursive: true });

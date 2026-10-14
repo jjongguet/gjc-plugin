@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.4.0"
+
+      # AGENTS.md is gitignored (local-only). The workspace-standard validator
+      # checks its mere existence at the repo root, and the self-improve scratch
+      # copy carries local-only files into its copy. The placeholder keeps the
+      # local existence contract on hosted runners; it is never committed.
+      - name: Create local-only AGENTS.md placeholder
+        run: touch AGENTS.md
+
+      - name: Build
+        run: bun run build
+
+      # The four smoke guards (verification-receipts x2, jev-advisor x2) install
+      # and drive a local `gjc` binary that hosted runners do not have. The
+      # workspace-standard validator guard is planned only where its local tree
+      # sits beside the repository (self-improve/lib/guards.mjs). Both boundaries
+      # are recorded in the README, never silently skipped.
+      - name: Test (smoke guards skipped - require a local gjc binary)
+        env:
+          SELF_IMPROVE_SKIP_SMOKE: "1"
+        run: bun run test

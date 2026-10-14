@@ -164,6 +164,12 @@ UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smok
 
 Builds are keyless. Verification/UI builders support `--check`; Jev's suite compares all generated surfaces to its canonical builder. Offline tests use disposable repositories/homes and synthetic or disabled transport. Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events: it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately.
 
+CI (`.github/workflows/ci.yml`) runs `bun run build` plus the full test chain on every push to `main`,
+with the four smoke guards skipped (`SELF_IMPROVE_SKIP_SMOKE=1`): they install and drive a local `gjc`
+binary that hosted runners do not have. The workspace-standard validator guard is planned only where
+its local tree sits beside the repository (`self-improve/lib/guards.mjs`), and the workflow provides an
+empty, never-committed `AGENTS.md` placeholder for the local-only existence contract.
+
 ## Add a plugin
 
 Declare every installed surface in its manifest, keep generated surfaces keyless, add the distribution-index entry and table row, and reuse the shared private result primitives when persistence is required. Transient wrappers such as aside-memory intentionally do not journal private payloads. Do not serialize arbitrary tool output as evidence.

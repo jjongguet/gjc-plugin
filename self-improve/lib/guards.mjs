@@ -28,17 +28,23 @@ export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = t
   const runHome = homeRoot ? path.resolve(homeRoot) : path.join(runRoot, "home");
   fs.mkdirSync(runHome, { recursive: true, mode: 0o700 });
   const guardEnv = { ...sanitizeGuardEnv(env), HOME: runHome, TMPDIR: runHome };
+  const validatorEntry = resolveValidatorEntry(repoRoot);
   const guards = [
     { id: "build", cwd: scratchDir, env: guardEnv, timeoutMs: 300000, command: ["bun", "run", "build"] },
     { id: "test", cwd: scratchDir, env: guardEnv, timeoutMs: 300000, command: ["bun", "run", "test"] },
-    {
+  ];
+  // The workspace-standard validator is a machine-local consumer contract; in a
+  // layout without the workspace tree beside the repository (e.g. a hosted CI
+  // checkout), the guard is planned out instead of failing on a missing entry.
+  if (fs.existsSync(validatorEntry)) {
+    guards.push({
       id: "validator",
       cwd: scratchDir,
       env: guardEnv,
       timeoutMs: 120000,
-      command: ["node", resolveValidatorEntry(repoRoot), "validate", "--root", "."],
-    },
-  ];
+      command: ["node", validatorEntry, "validate", "--root", "."],
+    });
+  }
   if (includeSmoke) {
     for (const [id, args, plugin] of [
       ["smoke-verification", ["--installed"], "verification-receipts"],
