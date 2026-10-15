@@ -41,3 +41,21 @@ jobs:
         env:
           SELF_IMPROVE_SKIP_SMOKE: "1"
         run: bun run test
+
+      # Failure forensics: the self-improve scratch guard writes per-guard logs
+      # under /tmp and only reports the guard id on failure. Surface the tails
+      # when the test step fails so a CI-only failure is diagnosable without a
+      # local repro.
+      - name: Failure forensics (self-improve scratch logs)
+        if: failure()
+        run: |
+          for dir in /tmp/self-improve-integration-*; do
+            [ -d "$dir" ] || continue
+            echo "===== scratch: $dir ====="
+            ls -la "$dir" "$dir/logs" 2>/dev/null || true
+            for log in "$dir"/logs/*.log; do
+              [ -f "$log" ] || continue
+              echo "===== tail -n 150: $log ====="
+              tail -n 150 "$log"
+            done
+          done
