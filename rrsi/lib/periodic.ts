@@ -211,7 +211,7 @@ export function pruneReceipts({ env = process.env, maxCount = RRSI_PERIODIC_DEFA
         }
         return { name, mtimeMs };
       })
-      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+      .sort((a, b) => a.mtimeMs - b.mtimeMs || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const extra = entries.length - maxCount;
     for (let i = 0; i < extra; i += 1) {
       try {

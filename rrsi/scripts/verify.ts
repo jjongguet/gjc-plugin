@@ -505,7 +505,13 @@ async function runSuite(root) {
 		seedJournal(homeI, 12);
 		const paths = periodicPaths(homeI);
 		mkdirSync(paths.receipts, { recursive: true, mode: 0o700 });
-		for (let i = 0; i < 65; i += 1) writeFileSync(path.join(paths.receipts, `seed-${String(i).padStart(3, "0")}.json`), "{}");
+		const seededAt = Date.now() - 65_000;
+		for (let i = 0; i < 65; i += 1) {
+			const seedPath = path.join(paths.receipts, `seed-${String(i).padStart(3, "0")}.json`);
+			writeFileSync(seedPath, "{}");
+			const stamp = new Date(seededAt + i * 1000);
+			utimesSync(seedPath, stamp, stamp);
+		}
 		const result = await withHome(homeI, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
 		assert.equal(result.status, "ran");
 		const remaining = readdirSync(paths.receipts).sort();
