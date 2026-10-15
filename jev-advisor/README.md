@@ -332,6 +332,16 @@ before-task and after-task/after-subagent hooks. Public host source exposes scop
 session identity and structured terminal snapshots; unavailable runtime fields
 remain unknown. The plugin does not scrape private histories or install itself.
 
+## Consumers
+
+- The **rrsi** plugin's due-gated `session_start` refresh replays this journal
+  (read-only) through the bundled Dream-RSI core into its private store and run
+  receipts under `~/.gjc-plugin/rrsi/`; the journal is never modified.
+- `plugin_metrics` aggregates this plugin's retained journal and the v2
+  correlation state strictly read-only. During a live append window a read can
+  transiently report `store_corrupt`; the store is fail-closed and never
+  repaired automatically.
+
 ## Install
 
 See the [repository README](../README.md#quick-start). Installation and activation are

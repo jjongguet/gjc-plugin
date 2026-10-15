@@ -69,6 +69,29 @@ results always use `~/.gjc-plugin`. `JEV_ADVISOR_MEMORY_HEAD_CHARS` is unused.
 Existing `.gjc` results are preserved without migration or lookup. Credential
 and installed-code paths remain GJC-managed and unchanged.
 
+## Workflow usage (advisory)
+
+- **Delegation tiering during multi-lane runs** (autoresearch missions,
+  ultragoal stories, any parallel `task` fan-out): keep the default `shadow`
+  mode; treat the recommendation as one input, not a rule. The retained window
+  and its agreement counts are descriptive — not per-task accuracy — and
+  `enforce` stays behind your own calibrated thresholds.
+- **Artifact checks at review boundaries** (ralplan final, ultragoal boundary
+  gates, autoresearch verdict drafts): `jev_check` may be run on one draft
+  artifact as an extra advisory opinion. Its verdict is **not** verification
+  evidence — the receipt-bearing `verification_run` / `verification_status`
+  chain remains the only acceptance evidence, and a `jev_check` verdict never
+  substitutes for a receipt, test result or boundary-gate verdict.
+- **RSI loop input**: the rrsi plugin reads this journal read-only and, on a
+  due-gated `session_start` refresh, replaces its derived episode set and
+  replays it through the bundled Dream-RSI core (private store and receipts
+  under `~/.gjc-plugin/rrsi/`); repetition never grows the derived set and
+  idle periods without sessions do not refresh.
+- **Measurement first**: use `jev_advise report="calibration"` (offline, no
+  key) and `plugin_metrics` for retained-window descriptions before drawing
+  any conclusion from advice; missing values are not zero and unmeasured
+  values are null.
+
 ## Usage policy
 
 - Do not enable `enforce` mode until the tier thresholds have been validated on
