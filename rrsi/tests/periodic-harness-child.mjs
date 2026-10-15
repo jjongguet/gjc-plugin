@@ -7,8 +7,9 @@
 // with artifact counts and byte-stability of the store across the rerun.
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const plugin = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
+const plugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HOME = process.env.HOME;
 if (!HOME || !HOME.includes("rrsi-periodic-child")) {
   console.error(`refusing to run without an isolated HOME (got: ${HOME ?? "unset"})`);

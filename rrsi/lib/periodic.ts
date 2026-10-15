@@ -19,6 +19,7 @@
  */
 import * as fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 import { appendPluginOutcome } from "../../shared/lib/results";
@@ -259,7 +260,7 @@ function receiptIdFor(now, tag) {
 /** Default detached worker spawn: `bun <installed hook file>` with the worker flag. */
 export async function defaultSpawnWorker({ env = process.env } = {}) {
   try {
-    const hookFile = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "hooks", "rrsi-periodic.ts");
+    const hookFile = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "hooks", "rrsi-periodic.ts");
     const child = spawn("bun", [hookFile], { env: { ...env, RRSI_PERIODIC_WORKER: "1" }, detached: true, stdio: "ignore" });
     const outcome = await new Promise((resolve) => {
       const timer = setTimeout(() => resolve({ ok: true, pid: child.pid ?? null }), 250);
@@ -402,9 +403,11 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return { store: written.persisted ? replaced.store : current.store, replaced, written };
     });
     if (!lockResult.ok) {
-      const stateWrite = writeState({ lastStatus: "error", lastReason: lockResult.reason ?? "store_busy", storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length });
+      const failures = (baseState?.consecutiveFailures ?? 0) + 1;
+      const reason = lockResult.reason ?? "store_busy";
+      const stateWrite = writeState({ lastStatus: "error", lastReason: reason, storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString(), clockSkew });
       const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: projected.attempts.length, policies: 0 }, storage: loaded.status });
-      return await finish({ status: "error", mode, reason: lockResult.reason ?? "store_busy", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
+      return await finish({ status: "error", mode, reason, receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
     }
 
     const { store, replaced, written } = lockResult.result;

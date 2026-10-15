@@ -399,6 +399,13 @@ async function runSuite(root) {
 		const backoff = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
 		assert.equal(backoff.status, "skipped_due");
 		assert.equal(backoff.reason, "backoff");
+		// Binding schedule: an EXPERED nextRetryAt is due even though the last attempt is recent.
+		const expired = JSON.parse(readFileSync(pathsD.state, "utf8"));
+		expired.lastAttemptAt = new Date().toISOString();
+		expired.nextRetryAt = new Date(Date.now() - 60_000).toISOString();
+		writeFileSync(pathsD.state, `${JSON.stringify(expired, null, 2)}\n`);
+		const refire2 = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
+		assert.equal(refire2.status, "unchanged", "an expired nextRetryAt is due despite a recent lastAttemptAt");
 	});
 
 	await check("periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)", async () => {
