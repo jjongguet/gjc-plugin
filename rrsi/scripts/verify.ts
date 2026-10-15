@@ -584,6 +584,49 @@ async function runSuite(root) {
 		assert.equal(typeof defaultSpawn.reason, "string");
 	});
 
+	await check("periodic: a dream failure is a bounded error (no masked success)", async () => {
+		const homeM = path.join(root, "periodic-home-m");
+		mkdirSync(homeM, { mode: 0o700 });
+		seedJournal(homeM, 12);
+		const paths = periodicPaths(homeM);
+		const failed = await withHome(homeM, () => hookModule.runPeriodic({ env: process.env, mode: "inline", dreamer: () => { throw new Error("boom"); } }));
+		assert.equal(failed.status, "error");
+		assert.equal(failed.reason, "dream_failed");
+		assert.equal(failed.receipt, true);
+		const receiptFile = readdirSync(paths.receipts)[0];
+		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, receiptFile), "utf8"));
+		assert.equal(receipt.status, "error");
+		assert.equal(receipt.reason, "dream_failed");
+		assert.equal(receipt.receiptHash, null);
+		const state = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(state.lastStatus, "error");
+		assert.equal(state.lastReason, "dream_failed");
+		assert.equal(state.consecutiveFailures, 1);
+		assert.equal(typeof state.nextRetryAt, "string");
+		assert.equal(readJournalOutcomes(homeM).length, 1);
+	});
+
+	await check("periodic: the worker CLI entry runs, records, and stays inert without the flag", async () => {
+		const homeN = path.join(root, "periodic-home-n");
+		mkdirSync(homeN, { mode: 0o700 });
+		seedJournal(homeN, 12);
+		const paths = periodicPaths(homeN);
+		const hookPath = path.join(plugin, "hooks/rrsi-periodic.ts");
+		const workerRun = spawnSync(process.execPath, [hookPath], { encoding: "utf8", timeout: 120000, env: { ...process.env, HOME: homeN, TMPDIR: root, RRSI_PERIODIC_WORKER: "1" } });
+		assert.equal(workerRun.status, 0, `${workerRun.stdout}\n${workerRun.stderr}`);
+		const workerLine = JSON.parse(workerRun.stdout.trim().split("\n").filter(Boolean).pop());
+		assert.equal(workerLine.worker, true);
+		assert.equal(["ran", "unchanged"].includes(workerLine.status), true, `worker status=${workerLine.status}`);
+		assert.equal(readdirSync(paths.receipts).some((name) => name.includes("-wk-")), true, "a worker receipt is written");
+		assert.equal(readJournalOutcomes(homeN).length, 1);
+		const inertHome = path.join(root, "periodic-home-o");
+		mkdirSync(inertHome, { mode: 0o700 });
+		const inert = spawnSync(process.execPath, [hookPath], { encoding: "utf8", timeout: 60000, env: { ...process.env, HOME: inertHome } });
+		assert.equal(inert.status, 0, inert.stderr);
+		assert.equal(inert.stdout.trim(), "", "without the flag the file is inert");
+		assert.equal(existsSync(path.join(inertHome, ".gjc-plugin", "rrsi", "runs")), false);
+	});
+
 	await check("the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start", async () => {
 		for (const [label, source] of [["tool", generated], ["hook", hookSource]]) {
 			assert.equal(/fetch\s*\(/.test(source), false, `${label}: no fetch path`);

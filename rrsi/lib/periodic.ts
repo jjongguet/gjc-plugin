@@ -131,10 +131,15 @@ export function dueForRun({ state, now, env = process.env }) {
     }
     return ms;
   };
+  // nextRetryAt is a forward stamp by design and is never skew-clamped; only
+  // lastAttemptAt/lastSuccessAt (past observations) carry the skew clamp.
   const lastAttempt = state ? readStamp(state.lastAttemptAt) : null;
   if (state && state.nextRetryAt) {
-    const retry = readStamp(state.nextRetryAt);
-    if (retry !== null && nowMs < retry) return { due: false, status: "skipped_due", clockSkew, reason: "backoff", intervalMs };
+    const retryMs = typeof state.nextRetryAt === "string" ? Date.parse(state.nextRetryAt) : NaN;
+    if (Number.isFinite(retryMs)) {
+      if (nowMs < retryMs) return { due: false, status: "skipped_due", clockSkew, reason: "backoff", intervalMs };
+      return { due: true, status: null, clockSkew, intervalMs };
+    }
   }
   if (lastAttempt !== null && nowMs - lastAttempt < intervalMs) {
     return { due: false, status: "skipped_due", clockSkew, intervalMs };
@@ -299,7 +304,7 @@ async function appendPeriodicRecord({ env, startedMs, summary, storage }) {
  * (skips the due gate — it was spawned because a due run imported — and
  * dreams over the full bounded store). Never throws.
  */
-export async function runPeriodic({ env = process.env, now = new Date().toISOString(), mode = "inline", spawnWorker = defaultSpawnWorker } = {}) {
+export async function runPeriodic({ env = process.env, now = new Date().toISOString(), mode = "inline", spawnWorker = defaultSpawnWorker, dreamer = dreamOverStore } = {}) {
   const startedMs = Date.now();
   const intervalMs = resolveIntervalMs(env);
   let lock = null;
@@ -313,7 +318,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
 
     const stateRead = readPeriodicState(env);
     const state = stateRead.status === "ok" ? stateRead.state : null;
-    if (!state && stateRead.status === "unavailable") return await finish({ status: "error", mode, reason: "state_unavailable", receipt: false, journal: false, stateWrite: false });
+    if (!state && stateRead.status === "unavailable") {
+      const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: 0, policies: 0 }, storage: "unavailable" });
+      return await finish({ status: "error", mode, reason: "state_unavailable", receipt: false, journal: true, stateWrite: false, journalStorage: mapStorage(journalStorage) });
+    }
 
     if (mode !== "worker") {
       const due = dueForRun({ state, now, env });
@@ -394,8 +402,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return { store: written.persisted ? replaced.store : current.store, replaced, written };
     });
     if (!lockResult.ok) {
-      const stateWrite = writeState({ lastStatus: "error", lastReason: "store_busy", storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length });
-      return await finish({ status: "error", mode, reason: "store_busy", receipt: false, journal: false, stateWrite: stateWrite.persisted });
+      const stateWrite = writeState({ lastStatus: "error", lastReason: lockResult.reason ?? "store_busy", storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length });
+      const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: projected.attempts.length, policies: 0 }, storage: loaded.status });
+      return await finish({ status: "error", mode, reason: lockResult.reason ?? "store_busy", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
     }
 
     const { store, replaced, written } = lockResult.result;
@@ -426,9 +435,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           imported: projected.attempts.length,
           policies: 0,
           attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
-          limits: appliedLimits(),
+          limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
-          clockSkew: false,
+          clockSkew,
+          lockTakeover: takeover,
         },
       });
       if (receiptWrite.persisted) pruneReceipts({ env });
@@ -479,12 +489,13 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     }
 
     let dream = null;
+    let dreamFailure = null;
     try {
-      const dreamed = dreamOverStore({ store, seed: 1 });
+      const dreamed = dreamer({ store, seed: 1 });
       const summary = summarizeReceipt(dreamed.receipt);
       dream = { ran: true, verdict: summary.verdict, receiptHash: summary.receiptHash, policies: dreamed.receipt.candidateCount };
     } catch {
-      dream = { ran: false, reason: "dream_failed" };
+      dreamFailure = "dream_failed";
     }
 
     const journalStorage = await appendPeriodicRecord({
@@ -494,6 +505,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       storage: "ok",
     });
     const receiptId = receiptIdFor(now.replace(/\.\d+Z$/, "Z"), mode === "worker" ? "wk" : "in");
+    const failuresAfter = dreamFailure ? (baseState?.consecutiveFailures ?? 0) + 1 : 0;
     const receiptWrite = writeReceipt({
       env,
       receipt: {
@@ -503,8 +515,8 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         startedAt: new Date(startedMs).toISOString(),
         finishedAt: new Date().toISOString(),
         durationMs: Date.now() - startedMs,
-        status,
-        reason: null,
+        status: dreamFailure ? "error" : status,
+        reason: dreamFailure,
         persisted: true,
         mode,
         projectionDigest: digest,
@@ -520,24 +532,26 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
         limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
-        clockSkew: false,
+        clockSkew,
         lockTakeover: takeover,
       },
     });
     if (receiptWrite.persisted) pruneReceipts({ env });
     const stateWrite = writeState({
-      lastStatus: status,
-      lastReason: null,
-      lastSuccessAt: now,
+      lastStatus: dreamFailure ? "error" : status,
+      lastReason: dreamFailure,
+      lastSuccessAt: dreamFailure ? (baseState?.lastSuccessAt ?? null) : now,
       lastReceiptId: receiptWrite.persisted ? receiptId : null,
       lastProjectionDigest: digest,
       storeWrite: replaced.storeWrite,
       derivedChunks: derivedSet.length,
-      nextRetryAt: new Date(Date.parse(now) + intervalMs).toISOString(),
-      consecutiveFailures: 0,
+      nextRetryAt: dreamFailure
+        ? new Date(Date.parse(now) + backoffMs(failuresAfter, intervalMs)).toISOString()
+        : new Date(Date.parse(now) + intervalMs).toISOString(),
+      consecutiveFailures: failuresAfter,
       clockSkew,
     });
-		return await finish({ status, mode, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
+    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
   } catch (error) {
     return await finish({ status: "error", mode, reason: bounded(error && error.message ? error.message : "periodic_failed", 120), receipt: false, journal: false, stateWrite: false });
   }
