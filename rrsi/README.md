@@ -69,8 +69,16 @@ is out of scope and unprovided.
   corpus handed to the detached worker) · `no_input` (journal missing/empty;
   state `lastStatus: "empty"`, next attempt at the interval) · `skipped_due`
   (interval or backoff) · `skipped_locked` · `skipped_disabled` · `error`
-  (bounded reason, exponential backoff `minRetryMs × 2^(n-1)` capped at the
-  interval).
+  (bounded reason, exponential backoff from a 15 min base, capped at the
+  interval). Success runs advance `nextRetryAt` to `lastSuccessAt + interval`;
+  `clockSkew` and `lockTakeover` are recorded in state and receipts when they
+  occur.
+- **Deferred handoffs.** When the corpus exceeds the inline dream budget the
+  hook writes the import, a handoff state (`lastStatus: "deferred"`) and a
+  handoff receipt (`status: "deferred"`), then spawns the detached worker; the
+  worker re-runs under the same locks and writes its own receipt, the single
+  `dream` journal record and the success stamps. A failed spawn is recorded as
+  `worker_spawn_failed` (bounded — no crash) and writes no handoff receipt.
 - **Failure isolation.** A broken run never blocks or fails a session: every
   failure is a bounded result recorded in state (plus one journal record);
   corrupt/oversized stores are reported and never reset or repaired; a

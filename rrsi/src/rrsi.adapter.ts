@@ -132,7 +132,7 @@ export default function rrsi(pi: {
 					return { captured, written };
 				});
 				if (!locked.ok) {
-					return finish({ store: loaded.store, episode: null, counts: storeCounts(loaded.store), wrote: { persisted: false, reason: 'store_busy' } }, 'unavailable');
+					return finish({ store: loaded.store, episode: null, counts: storeCounts(loaded.store), wrote: { persisted: false, reason: locked.reason ?? 'store_busy' } }, 'unavailable');
 				}
 				const { captured, written } = locked.result;
 				return finish(
@@ -181,7 +181,7 @@ export default function rrsi(pi: {
 							imported: 0,
 							journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
 							counts: storeCounts(loaded.store),
-							wrote: { persisted: false, reason: 'store_busy' },
+							wrote: { persisted: false, reason: locked.reason ?? 'store_busy' },
 							storeWrite: 'rejected',
 							projectionDigest,
 						},

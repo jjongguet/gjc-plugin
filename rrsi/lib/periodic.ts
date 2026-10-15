@@ -28,6 +28,7 @@ import {
   derivedEpisodeSetFor,
   projectionDigestFor,
   projectJournalRecords,
+  privateDirSafe,
   readJournalRecords,
   readStore,
   rrsiJournalDir,
@@ -52,8 +53,6 @@ export const RRSI_PERIODIC_DEFAULTS = Object.freeze({
   receiptMaxBytes: 64 * 1024,
   clockSkewMaxMs: 5 * 60 * 1000,
 });
-
-const OUTCOMES = ["ran", "unchanged", "no_input", "skipped_due", "skipped_locked", "skipped_disabled", "deferred", "error"];
 
 function bounded(value, max = 200) {
   return typeof value === "string" ? value.slice(0, max) : "";
@@ -96,7 +95,9 @@ export function readPeriodicState(env = process.env) {
 export function writePeriodicState({ state, env = process.env }) {
   const file = rrsiPeriodicStatePath(env);
   const body = `${JSON.stringify(state, null, 2)}\n`;
-  const temp = path.join(rrsiRoot(env), `.periodic.json.tmp-${process.pid}`);
+  const root = rrsiRoot(env);
+  if (!privateDirSafe(root, { create: true })) return { persisted: false, reason: "unsafe_path" };
+  const temp = path.join(root, `.periodic.json.tmp-${process.pid}`);
   try {
     fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
     fs.writeFileSync(temp, body, { mode: 0o600 });
@@ -148,11 +149,7 @@ export function dueForRun({ state, now, env = process.env }) {
 export function acquirePeriodicLock({ env = process.env, now }) {
   const file = rrsiPeriodicLockPath(env);
   const staleMs = 2 * RRSI_PERIODIC_DEFAULTS.maxWallMs;
-  try {
-    fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
-  } catch {
-    return { ok: false, reason: "lock_unavailable" };
-  }
+  if (!privateDirSafe(rrsiRoot(env), { create: true })) return { ok: false, reason: "unsafe_path" };
   const attempt = (allowTakeover) => {
     try {
       const fd = fs.openSync(file, "wx", 0o600);
@@ -194,6 +191,7 @@ export function acquirePeriodicLock({ env = process.env, now }) {
 /** Keep at most `maxCount` receipts (oldest by mtime pruned on write). */
 export function pruneReceipts({ env = process.env, maxCount = RRSI_PERIODIC_DEFAULTS.receiptMaxCount } = {}) {
   const dir = rrsiReceiptsDir(env);
+  if (!privateDirSafe(dir, { create: false })) return { pruned: 0, skipped: "unsafe_path" };
   try {
     const entries = fs
       .readdirSync(dir)
@@ -232,6 +230,7 @@ export function countReceipts(env = process.env) {
 
 function writeReceipt({ env, receipt }) {
   const dir = rrsiReceiptsDir(env);
+  if (!privateDirSafe(dir, { create: true })) return { persisted: false, reason: "unsafe_path", receiptId: receipt.receiptId };
   const file = path.join(dir, `${receipt.receiptId}.json`);
   let body = `${JSON.stringify(receipt, null, 2)}\n`;
   if (Buffer.byteLength(body, "utf8") > RRSI_PERIODIC_DEFAULTS.receiptMaxBytes) {
@@ -253,12 +252,23 @@ function receiptIdFor(now, tag) {
 }
 
 /** Default detached worker spawn: `bun <installed hook file>` with the worker flag. */
-export function defaultSpawnWorker({ env = process.env } = {}) {
+export async function defaultSpawnWorker({ env = process.env } = {}) {
   try {
     const hookFile = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "hooks", "rrsi-periodic.ts");
     const child = spawn("bun", [hookFile], { env: { ...env, RRSI_PERIODIC_WORKER: "1" }, detached: true, stdio: "ignore" });
-    child.unref();
-    return { ok: true, pid: child.pid ?? null };
+    const outcome = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve({ ok: true, pid: child.pid ?? null }), 250);
+      child.once("error", (error) => {
+        clearTimeout(timer);
+        resolve({ ok: false, reason: bounded(error && (error.code || error.message) ? String(error.code ?? error.message) : "spawn_failed", 80) });
+      });
+      child.once("spawn", () => {
+        clearTimeout(timer);
+        resolve({ ok: true, pid: child.pid ?? null });
+      });
+    });
+    if (outcome.ok) child.unref();
+    return outcome;
   } catch (error) {
     return { ok: false, reason: bounded(error && error.message ? error.message : "spawn_failed", 80) };
   }
@@ -293,6 +303,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
   const startedMs = Date.now();
   const intervalMs = resolveIntervalMs(env);
   let lock = null;
+  let clockSkew = false;
   const finish = async (result) => {
     if (lock && lock.ok) lock.release();
     return result;
@@ -307,6 +318,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     if (mode !== "worker") {
       const due = dueForRun({ state, now, env });
       if (!due.due) return await finish({ status: due.status, mode, reason: due.reason ?? null, receipt: false, journal: false, stateWrite: false });
+      clockSkew = due.clockSkew === true;
     }
 
     const acquired = acquirePeriodicLock({ env, now });
@@ -315,6 +327,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return await finish({ status: "error", mode, reason: acquired.reason, receipt: false, journal: false, stateWrite: false });
     }
     lock = acquired;
+    const takeover = acquired.takeover === true;
 
     // Re-check due under the lock (another session may have completed a run).
     if (mode !== "worker") {
@@ -353,6 +366,12 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     }
 
     const projected = projectJournalRecordsSafe(journal.records, RRSI_PERIODIC_DEFAULTS.projectionLimit);
+    if (projected.failed) {
+      const failures = (baseState?.consecutiveFailures ?? 0) + 1;
+      const stateWrite = writeState({ lastStatus: "error", lastReason: "projection_failed", consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
+      const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: 0, policies: 0 }, storage: "missing" });
+      return await finish({ status: "error", mode, reason: "projection_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
+    }
     const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
     const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
 
@@ -420,15 +439,43 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     const corpusAttempts = counts.attempts;
 
     if (mode === "inline" && corpusAttempts > RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts) {
-      const spawned = spawnWorker({ env, mode: "worker" });
+      const spawned = await spawnWorker({ env, mode: "worker" });
       if (!spawned || !spawned.ok) {
         const failures = (baseState?.consecutiveFailures ?? 0) + 1;
-        const stateWrite = writeState({ lastStatus: "error", lastReason: "worker_spawn_failed", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
+        const stateWrite = writeState({ lastStatus: "error", lastReason: "worker_spawn_failed", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString(), clockSkew });
         const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: "ok" });
         return await finish({ status: "error", mode, reason: "worker_spawn_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
       }
-      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0 });
-      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, stateWrite: stateWrite.persisted });
+      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew });
+      const deferredReceipt = writeReceipt({
+        env,
+        receipt: {
+          schema: RRSI_PERIODIC_RECEIPT_SCHEMA,
+          receiptId: receiptIdFor(now.replace(/\.\d+Z$/, "Z"), "df"),
+          trigger: "session_start",
+          startedAt: new Date(startedMs).toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedMs,
+          status: "deferred",
+          reason: "dream_deferred",
+          persisted: true,
+          mode,
+          projectionDigest: digest,
+          storeWrite: replaced.storeWrite,
+          derivedChunks: derivedSet.length,
+          episodes: counts.episodes,
+          attempts: counts.attempts,
+          imported: projected.attempts.length,
+          policies: 0,
+          attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+          limits: appliedLimits(intervalMs),
+          storage: { store: loaded.status, journalStorage: null },
+          clockSkew,
+          lockTakeover: takeover,
+        },
+      });
+      if (deferredReceipt.persisted) pruneReceipts({ env });
+      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted });
     }
 
     let dream = null;
@@ -471,9 +518,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         receiptHash: dream?.receiptHash ?? null,
         verdict: dream?.verdict ?? null,
         attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
-        limits: appliedLimits(),
+        limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
         clockSkew: false,
+        lockTakeover: takeover,
       },
     });
     if (receiptWrite.persisted) pruneReceipts({ env });
@@ -485,8 +533,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       lastProjectionDigest: digest,
       storeWrite: replaced.storeWrite,
       derivedChunks: derivedSet.length,
-      nextRetryAt: null,
+      nextRetryAt: new Date(Date.parse(now) + intervalMs).toISOString(),
       consecutiveFailures: 0,
+      clockSkew,
     });
 		return await finish({ status, mode, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
   } catch (error) {
@@ -498,7 +547,7 @@ function projectJournalRecordsSafe(records, limit) {
   try {
     return projectJournalRecords(records, { limit });
   } catch {
-    return { attempts: [] };
+    return { attempts: [], failed: true };
   }
 }
 
@@ -508,14 +557,14 @@ function backoffMs(failures, intervalMs) {
   return Math.min(scaled, intervalMs);
 }
 
-function appliedLimits() {
+function appliedLimits(intervalMs = RRSI_PERIODIC_DEFAULTS.intervalMs) {
   return {
     limit: RRSI_PERIODIC_DEFAULTS.projectionLimit,
     maxAttemptsPerEpisode: RRSI_LIMITS.maxAttemptsPerEpisode,
     maxEpisodes: RRSI_LIMITS.maxEpisodes,
     maxStoreBytes: RRSI_LIMITS.maxStoreBytes,
     inlineDreamMaxAttempts: RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts,
-    intervalMs: RRSI_PERIODIC_DEFAULTS.intervalMs,
+    intervalMs,
   };
 }
 

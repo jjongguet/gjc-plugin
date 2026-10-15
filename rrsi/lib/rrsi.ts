@@ -58,6 +58,45 @@ export function rrsiJournalDir(env = process.env) {
 export const RRSI_STORE_LOCK_STALE_MS = 24_000;
 export const RRSI_STORE_LOCK_WAIT_MS = 100;
 
+/**
+ * Walk the private directory chain from the `.gjc-plugin` boundary down to
+ * `target`: every existing component must be a real, owned 0700 directory (no
+ * symlinks); missing components are created with 0700 when `create` is true.
+ * Returns false at the first unsafe component — callers translate that into a
+ * bounded `unsafe_path` result and never write through a symlinked root.
+ */
+export function privateDirSafe(target, { create = false } = {}) {
+  if (typeof target !== "string" || target.length === 0) return false;
+  const absolute = path.resolve(target);
+  const marker = `${path.sep}.gjc-plugin`;
+  const boundary = absolute.indexOf(marker);
+  if (boundary < 0) return false;
+  const root = absolute.slice(0, boundary + marker.length);
+  const rest = absolute.slice(root.length).split(path.sep).filter(Boolean);
+  let current = root;
+  for (const part of [null, ...rest]) {
+    if (part !== null) current = path.join(current, part);
+    let info;
+    try {
+      info = fs.lstatSync(current);
+    } catch (error) {
+      if (!error || error.code !== "ENOENT" || !create) return false;
+      try {
+        fs.mkdirSync(current, { mode: 0o700 });
+      } catch {
+        return false;
+      }
+      try {
+        info = fs.lstatSync(current);
+      } catch {
+        return false;
+      }
+    }
+    if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o700) return false;
+  }
+  return true;
+}
+
 function projectionDigestHex(text) {
   return createHash("sha256").update(text).digest("hex");
 }
@@ -157,6 +196,7 @@ export function writeStore({ store, env = process.env }) {
   const body = `${JSON.stringify(store, null, 2)}\n`;
   if (Buffer.byteLength(body, "utf8") > RRSI_LIMITS.maxStoreBytes) return { persisted: false, reason: "resource_limit" };
   const root = rrsiRoot(env);
+  if (!privateDirSafe(root, { create: true })) return { persisted: false, reason: "unsafe_path" };
   const file = rrsiStorePath(env);
   const temp = `${file}.tmp`;
   try {
@@ -371,7 +411,9 @@ export function replaceDerivedSet({ store, sourceClass, derivedSet }) {
  * `{ ok:false, reason:"store_busy" }` — no throw, no retry, no partial write.
  */
 export function withStoreLock(env, fn) {
-  const file = path.join(rrsiRoot(env), "store.lock");
+  const root = rrsiRoot(env);
+  if (!privateDirSafe(root, { create: true })) return { ok: false, reason: "unsafe_path" };
+  const file = path.join(root, "store.lock");
   const deadline = Date.now() + RRSI_STORE_LOCK_WAIT_MS;
   const tryAcquire = () => {
     try {

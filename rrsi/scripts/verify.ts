@@ -387,7 +387,7 @@ async function runSuite(root) {
 		const stateD = JSON.parse(readFileSync(pathsD.state, "utf8"));
 		assert.equal(stateD.intervalMs, 60000);
 		const receiptD = JSON.parse(readFileSync(path.join(pathsD.receipts, readdirSync(pathsD.receipts)[0]), "utf8"));
-		assert.equal(receiptD.limits.intervalMs, 24 * 60 * 60 * 1000, "applied-limits block keeps the built-in default; state carries the override");
+		assert.equal(receiptD.limits.intervalMs, 60000, "applied-limits records the configured interval override");
 		backdateState(homeD, 61_000);
 		const refire = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
 		assert.equal(refire.status, "unchanged");
@@ -517,6 +517,72 @@ async function runSuite(root) {
 		assert.equal(readFileSync(paths.state, "utf8"), before, "status must not mutate the periodic state");
 	});
 
+
+	await check("periodic: unsafe symlinked roots are never written through", async () => {
+		const homeJ = path.join(root, "periodic-home-j");
+		mkdirSync(homeJ, { mode: 0o700 });
+		const realDir = path.join(homeJ, ".gjc-plugin-real");
+		mkdirSync(realDir, { mode: 0o700 });
+		symlinkSync(realDir, path.join(homeJ, ".gjc-plugin"));
+		seedJournal(homeJ, 12);
+		const run = await withHome(homeJ, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(run.status, "error");
+		assert.equal(run.reason, "unsafe_path");
+		assert.equal(existsSync(path.join(realDir, "rrsi")), false, "nothing may be written through a symlinked root");
+		const capture = await withHome(homeJ, () => call({ action: "capture", goal: "symlink probe", attempts: "[]" }));
+		assert.equal(capture.wrote.persisted, false);
+		assert.equal(capture.wrote.reason, "unsafe_path");
+	});
+
+	await check("periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record", async () => {
+		const homeK = path.join(root, "periodic-home-k");
+		mkdirSync(homeK, { mode: 0o700 });
+		seedJournal(homeK, 12);
+		const paths = periodicPaths(homeK);
+		mkdirSync(paths.root, { recursive: true, mode: 0o700 });
+		const filler = (prefix) => (i) => ({ id: `ep-${prefix}-${i}`, source: "capture", goal: `${prefix} filler ${i}`, createdAt: "2026-10-13T00:00:00.000Z", attempts: Array.from({ length: 40 }, (_, j) => ({ index: j, objective: `${prefix}-${i}-${j}`, hypothesisNovelty: true, decision: "reject", wallMs: 5, guardFailures: [], budgetRung: 0, files: 0, hunks: 0 })) });
+		writeFileSync(paths.store, `${JSON.stringify({ schema: "gjc.rrsi.store.v1", updatedAt: "2026-10-13T00:00:00.000Z", episodes: [0, 1, 2, 3, 4].map(filler("k")) }, null, 2)}\n`);
+		let spawnCalls = 0;
+		const deferred = await withHome(homeK, () => hookModule.runPeriodic({ env: process.env, mode: "inline", spawnWorker: () => { spawnCalls += 1; return { ok: true, pid: 4242 }; } }));
+		assert.equal(deferred.status, "deferred");
+		assert.equal(spawnCalls, 1);
+		assert.equal(deferred.receipt, true);
+		const receiptsAfterHandoff = readdirSync(paths.receipts);
+		assert.equal(receiptsAfterHandoff.length, 1);
+		const handoff = JSON.parse(readFileSync(path.join(paths.receipts, receiptsAfterHandoff[0]), "utf8"));
+		assert.equal(handoff.status, "deferred");
+		assert.equal(readJournalOutcomes(homeK).length, 0, "the handoff writes no record; the worker records completion");
+		const stateAfterHandoff = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(stateAfterHandoff.lastStatus, "deferred");
+		const worker = await withHome(homeK, () => hookModule.runPeriodic({ env: process.env, mode: "worker" }));
+		assert.equal(worker.status, "unchanged", "the worker completes over identical derived content");
+		assert.equal(readdirSync(paths.receipts).length, 2);
+		assert.equal(readJournalOutcomes(homeK).length, 1);
+		const stateAfterWorker = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(stateAfterWorker.lastStatus, "unchanged");
+		assert.equal(typeof stateAfterWorker.lastSuccessAt, "string");
+		assert.equal(typeof stateAfterWorker.nextRetryAt, "string", "success advances the next-due stamp");
+	});
+
+	await check("periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)", async () => {
+		const homeL = path.join(root, "periodic-home-l");
+		mkdirSync(homeL, { mode: 0o700 });
+		seedJournal(homeL, 12);
+		const paths = periodicPaths(homeL);
+		mkdirSync(paths.root, { recursive: true, mode: 0o700 });
+		const filler = (i) => ({ id: `ep-l-${i}`, source: "capture", goal: `l filler ${i}`, createdAt: "2026-10-13T00:00:00.000Z", attempts: Array.from({ length: 40 }, (_, j) => ({ index: j, objective: `l-${i}-${j}`, hypothesisNovelty: true, decision: "reject", wallMs: 5, guardFailures: [], budgetRung: 0, files: 0, hunks: 0 })) });
+		writeFileSync(paths.store, `${JSON.stringify({ schema: "gjc.rrsi.store.v1", updatedAt: "2026-10-13T00:00:00.000Z", episodes: [0, 1, 2, 3, 4].map(filler) }, null, 2)}\n`);
+		const failed = await withHome(homeL, () => hookModule.runPeriodic({ env: process.env, mode: "inline", spawnWorker: () => ({ ok: false, reason: "spawn_failed" }) }));
+		assert.equal(failed.status, "error");
+		assert.equal(failed.reason, "worker_spawn_failed");
+		assert.equal(failed.receipt, false);
+		const state = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(state.lastStatus, "error");
+		assert.equal(readJournalOutcomes(homeL).length, 1);
+		const defaultSpawn = await hookModule.defaultSpawnWorker({ env: { ...process.env, PATH: "/nonexistent" } });
+		assert.equal(defaultSpawn.ok, false);
+		assert.equal(typeof defaultSpawn.reason, "string");
+	});
 
 	await check("the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start", async () => {
 		for (const [label, source] of [["tool", generated], ["hook", hookSource]]) {
