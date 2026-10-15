@@ -11,13 +11,36 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const plugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const bun = process.env.BUN_BIN || "bun";
+
+// Resolve bun even under a restricted runner PATH (verification_run): env
+// override, common install locations, then a shell lookup, then PATH default.
+function resolveBun() {
+	if (process.env.BUN_BIN) return process.env.BUN_BIN;
+	const candidates = [
+		path.join(os.homedir(), ".bun", "bin", "bun"),
+		"/opt/homebrew/bin/bun",
+		"/usr/local/bin/bun",
+		"/usr/bin/bun",
+	];
+	for (const candidate of candidates) {
+		try {
+			if (statSync(candidate).isFile()) return candidate;
+		} catch {
+			/* keep looking */
+		}
+	}
+	const found = spawnSync("sh", ["-c", "command -v bun"], { encoding: "utf8" });
+	const line = (found.stdout || "").trim().split("\n")[0];
+	return line || "bun";
+}
+
+const bun = resolveBun();
 
 test("hermetic rrsi acceptance (incl. periodic invariants) passes under bun", () => {
 	const result = spawnSync(bun, [path.join(plugin, "scripts/verify.ts")], { encoding: "utf8", timeout: 300000, env: { ...process.env } });
