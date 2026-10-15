@@ -1,5 +1,5 @@
 import { afterEach, expect, spyOn, test } from 'bun:test';
-import { promises as fs } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
@@ -219,6 +219,33 @@ test('concurrent appenders serialize without stealing and preserve every reporte
   const stored = await records(journal);
   expect(stored.map(record => record.id).sort()).toEqual(results.filter(result => result.persisted).map(result => result.id).sort());
   expect(await missing(path.join(journal, '.append.lock'))).toBe(true);
+});
+
+test('a lock generation replaced during the bounded wait is contention, not substitution', async () => {
+  const { baseDir, journal } = await fixture();
+  await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+  const lockPath = path.join(journal, '.append.lock');
+  const next = path.join(journal, '.append.lock.next');
+  await fs.writeFile(lockPath, 'FOREIGN_1', { mode: 0o600 });
+  await fs.writeFile(next, 'FOREIGN_2', { mode: 0o600 });
+  const original = fs.open;
+  let armed = true;
+  const probe = spyOn(fs, 'open').mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+    const flags = args[1];
+    if (armed && String(args[0]) === lockPath && typeof flags === 'number' && (flags & fsConstants.O_WRONLY) === 0) {
+      // The holder releases and the next waiter atomically recreates the lock
+      // while this probe is between its observations of the path.
+      armed = false;
+      await fs.rename(next, lockPath);
+    }
+    return original(...args);
+  }) as typeof fs.open);
+  try {
+    expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 20 })).toEqual({ persisted: false, reason: 'store_busy' });
+  } finally { probe.mockRestore(); }
+  expect(await fs.readFile(lockPath, 'utf8')).toBe('FOREIGN_2');
+  expect(await missing(next)).toBe(true);
+  expect((await records(journal)).length).toBe(1);
 });
 
 test('record and dependency resource limits reject without allocating journal files', async () => {

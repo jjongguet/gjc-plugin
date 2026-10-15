@@ -320,6 +320,18 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
     return handle;
   } catch (error) { await handle.close(); throw error; }
 }
+// Read-only probe of a foreign lock during the bounded wait. A generation change
+// between observations is ordinary contention — the holder released and the next
+// waiter recreated the lock — so this probe never re-validates the live path:
+// it adopts and mutates nothing, and identity is enforced strictly only once this
+// process actually holds the lock. Unsafe plants (symlink, foreign owner, wrong
+// mode, extra links) still fail closed before any generation consideration.
+async function resultsProbeBusyLock(file: string): Promise<void> {
+  resultsPrivateFile(await resultsFs.lstat(file));
+  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
+  try { resultsPrivateFile(await handle.stat()); }
+  finally { await handle.close(); }
+}
 export async function readPrivateResultFile(file: string, maxBytes: number): Promise<Buffer> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 16 * 1024 * 1024) resultsFail('resource_limit');
   const directories = await resultsDirectories(resultsDirname(file), false);
@@ -441,7 +453,7 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
       try { lock = await resultsFs.open(lockPath, resultsConstants.O_WRONLY | resultsConstants.O_CREAT | resultsConstants.O_EXCL | resultsConstants.O_NOFOLLOW, 0o600); }
       catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        try { const busy = await resultsOpenChecked(lockPath, resultsConstants.O_RDONLY, directories); await busy.close(); }
+        try { await resultsProbeBusyLock(lockPath); }
         catch (checkError) { if ((checkError as NodeJS.ErrnoException).code !== 'ENOENT') throw checkError; }
         if (resultsClock.now() >= deadline) resultsFail('store_busy');
         await new Promise(resolve => setTimeout(resolve, Math.min(5, Math.max(0, deadline - resultsClock.now()))));
