@@ -1629,8 +1629,10 @@ export function applyPolicyDeploy({ plan, ledgerPath }) {
  * the self-improve loop and its frozen corpus, not to this plugin; no accuracy,
  * savings or routing claim is made here.
  *
- * Keyless and offline: no network, no credentials, no timers. The store lives at
- * `~/.gjc-plugin/rrsi/store.json` (0700 dir, 0600 file) and is never committed.
+ * Keyless and offline: no network, no credentials, no timer process. The
+ * only automatic invocation is the due-gated `session_start` refresh in
+ * `lib/periodic.ts`. The store lives at `~/.gjc-plugin/rrsi/store.json`
+ * (0700 dir, 0600 file) and is never committed.
  */
 import os from "node:os";
 
@@ -1666,6 +1668,16 @@ export function rrsiStorePath(env = process.env) {
 
 export function rrsiJournalDir(env = process.env) {
   return path.join(rrsiRoot(env), "..", "jev-advisor", "journal", "v1");
+}
+
+// Shared store-lock bounds: stale takeover after 2 × the 12 s periodic inline
+// budget so a crashed writer cannot hold the lock forever; the contended wait
+// is bounded at 100 ms (bounded result, no throw).
+export const RRSI_STORE_LOCK_STALE_MS = 24_000;
+export const RRSI_STORE_LOCK_WAIT_MS = 100;
+
+function projectionDigestHex(text) {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 function boundedText(value, max = RRSI_LIMITS.maxTextChars) {
@@ -1913,6 +1925,117 @@ export function mergeEpisodes({ store, episodes, now }) {
   return { schema: RRSI_STORE_SCHEMA, updatedAt: now, episodes: merged };
 }
 
+/** Content-keyed digest of one bounded projection (read order + applied limit). */
+export function projectionDigestFor(attempts, limit) {
+  const bounded = Array.isArray(attempts) ? attempts.slice(0, 4000) : [];
+  return projectionDigestHex(JSON.stringify({ limit, attempts: bounded }));
+}
+
+/**
+ * Chunked derived episode set for one source class (no clock value enters any
+ * episode, so identical content yields a byte-identical set). Ids:
+ * `ep-jev-<digest12>-<n>` for `jev-journal`, `ep-ledger-<digest12>-<n>` for
+ * the self-improve ledger.
+ */
+export function derivedEpisodeSetFor({ digest, attempts, source = "jev-journal", maxPerEpisode = RRSI_LIMITS.maxAttemptsPerEpisode, goalPrefix = "periodic projection" }) {
+  const digest12 = String(digest ?? "").slice(0, 12);
+  const idPrefix = source === "self-improve-ledger" ? "ep-ledger" : "ep-jev";
+  const input = Array.isArray(attempts) ? attempts : [];
+  const episodes = [];
+  for (let k = 0, n = 0; k < input.length; k += maxPerEpisode, n += 1) {
+    const chunk = input.slice(k, k + maxPerEpisode).map((attempt, index) => normalizeAttempt(attempt, index));
+    episodes.push({
+      id: `${idPrefix}-${digest12}-${n}`,
+      source,
+      goal: boundedText(`${goalPrefix} ${digest12} chunk ${n}`, 200),
+      createdAt: `derived:${digest12}`,
+      attempts: chunk,
+    });
+  }
+  return { episodes, digest12 };
+}
+
+/**
+ * One slot per source class: replace the whole derived set for `sourceClass`
+ * (never accumulate), or skip the write entirely when the existing set for
+ * that class is byte-identical to the newly derived set. User `capture`
+ * episodes are never selected by the filter. Returns a bounded result; never
+ * throws.
+ */
+export function replaceDerivedSet({ store, sourceClass, derivedSet }) {
+  const base = store && store.schema === RRSI_STORE_SCHEMA ? store : emptyStore();
+  const set = Array.isArray(derivedSet) ? derivedSet : [];
+  const prior = base.episodes.filter((episode) => episode && episode.source === sourceClass);
+  const identical = prior.length === set.length && prior.every((episode, index) => JSON.stringify(episode) === JSON.stringify(set[index]));
+  const priorAttempts = prior.reduce((sum, episode) => sum + (Array.isArray(episode.attempts) ? episode.attempts.length : 0), 0);
+  const nextAttempts = set.reduce((sum, episode) => sum + (Array.isArray(episode.attempts) ? episode.attempts.length : 0), 0);
+  if (identical) {
+    return { store: base, storeWrite: "unchanged", episodesDelta: 0, attemptsDelta: 0 };
+  }
+  const episodes = [...base.episodes.filter((episode) => episode && episode.source !== sourceClass), ...set].slice(-RRSI_LIMITS.maxEpisodes);
+  return {
+    store: { schema: RRSI_STORE_SCHEMA, updatedAt: base.updatedAt, episodes },
+    storeWrite: prior.length === 0 ? "added" : "replaced",
+    episodesDelta: episodes.length - base.episodes.length,
+    attemptsDelta: nextAttempts - priorAttempts,
+  };
+}
+
+/**
+ * Exclusive plugin-local store lock used by `capture`, `import` and the
+ * periodic writer to serialize their read-modify-write sequences (not a
+ * cross-process guarantee for foreign writers). Bounded 100 ms wait; stale
+ * takeover by age; released in `finally`. Contended wait returns
+ * `{ ok:false, reason:"store_busy" }` — no throw, no retry, no partial write.
+ */
+export function withStoreLock(env, fn) {
+  const file = path.join(rrsiRoot(env), "store.lock");
+  const deadline = Date.now() + RRSI_STORE_LOCK_WAIT_MS;
+  const tryAcquire = () => {
+    try {
+      fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
+    } catch {
+      /* reported by the write path */
+    }
+    try {
+      const fd = fs.openSync(file, "wx", 0o600);
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+      fs.closeSync(fd);
+      return true;
+    } catch (error) {
+      if (error && error.code !== "EEXIST") return false;
+      try {
+        const stat = fs.lstatSync(file);
+        if (Date.now() - stat.mtimeMs > RRSI_STORE_LOCK_STALE_MS) {
+          fs.unlinkSync(file);
+          return tryAcquire();
+        }
+      } catch {
+        /* raced */
+      }
+      return false;
+    }
+  };
+  while (Date.now() < deadline) {
+    if (tryAcquire()) {
+      try {
+        return { ok: true, result: fn() };
+      } finally {
+        try {
+          fs.unlinkSync(file);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+    const until = Date.now() + 10;
+    while (Date.now() < until) {
+      /* bounded wait */
+    }
+  }
+  return { ok: false, reason: "store_busy" };
+}
+
 /** Store attempts -> the replay corpus (epochs partition at adopted attempts). */
 export function corpusFromStore(store) {
   const attempts = [];
@@ -1990,9 +2113,543 @@ export function summarizeReceipt(receipt) {
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);
 
+/**
+ * rrsi periodic runner: a due-gated, bounded session-start refresh of the
+ * exploration store. NO timer process: the only trigger is the plugin's
+ * `session_start` hook (src/periodic.adapter.ts), which awaits one bounded
+ * inline attempt; large corpora are completed by a detached worker that
+ * executes this same module through the generated hook file
+ * (`RRSI_PERIODIC_WORKER=1 bun <plugin>/hooks/rrsi-periodic.ts`).
+ *
+ * Scope: functional acceptance only (see RRSI_SCOPE_SENTENCE); no accuracy,
+ * savings or routing claim. Keyless and offline: no network, no credentials,
+ * no model calls. Every failure path is a bounded result — this module never
+ * throws. The store and its lock are shared with capture/import through
+ * `withStoreLock`; the periodic lock is this module's own.
+ *
+ * Measured basis (M0, 2026-10-15): dream replay cost is super-linear in corpus
+ * size (40 attempts ≈ 59 ms; 160 ≈ 0.8 s; 480 ≈ 18.6 s), so the inline fast
+ * path dreams only when the corpus is at or below INLINE_DREAM_MAX_ATTEMPTS;
+ * larger corpora take the detached-worker path (plan A1b fallback).
+ */
+import { randomBytes } from "node:crypto";
+import { spawn } from "node:child_process";
+
+export const RRSI_PERIODIC_SCHEMA = "gjc.rrsi.periodic.v1";
+export const RRSI_PERIODIC_RECEIPT_SCHEMA = "gjc.rrsi.periodic.run.v1";
+
+export const RRSI_PERIODIC_DEFAULTS = Object.freeze({
+  intervalMs: 24 * 60 * 60 * 1000,
+  minRetryMs: 15 * 60 * 1000,
+  maxWallMs: 12_000,
+  inlineDreamMaxAttempts: 160,
+  projectionLimit: 40,
+  receiptMaxCount: 60,
+  receiptMaxBytes: 64 * 1024,
+  clockSkewMaxMs: 5 * 60 * 1000,
+});
+
+const OUTCOMES = ["ran", "unchanged", "no_input", "skipped_due", "skipped_locked", "skipped_disabled", "deferred", "error"];
+
+function bounded(value, max = 200) {
+  return typeof value === "string" ? value.slice(0, max) : "";
+}
+
+export function rrsiPeriodicStatePath(env = process.env) {
+  return path.join(rrsiRoot(env), "periodic.json");
+}
+
+export function rrsiPeriodicLockPath(env = process.env) {
+  return path.join(rrsiRoot(env), "periodic.lock");
+}
+
+export function rrsiReceiptsDir(env = process.env) {
+  return path.join(rrsiRoot(env), "runs", "v1");
+}
+
+export function resolveIntervalMs(env = process.env) {
+  const raw = env && env.RRSI_PERIODIC_INTERVAL_MS;
+  const parsed = typeof raw === "string" && /^\d+$/.test(raw) ? Number.parseInt(raw, 10) : NaN;
+  if (!Number.isSafeInteger(parsed) || parsed < 60_000) return RRSI_PERIODIC_DEFAULTS.intervalMs;
+  return Math.min(parsed, 30 * 24 * 60 * 60 * 1000);
+}
+
+/** Read the periodic state: absent/invalid/unavailable reported, never repaired. */
+export function readPeriodicState(env = process.env) {
+  const file = rrsiPeriodicStatePath(env);
+  try {
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) return { status: "invalid", state: null, reason: "unsafe_or_oversized" };
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!parsed || parsed.schema !== RRSI_PERIODIC_SCHEMA) return { status: "invalid", state: null, reason: "corrupt" };
+    return { status: "ok", state: parsed, reason: null };
+  } catch (error) {
+    if (error && error.code === "ENOENT") return { status: "missing", state: null, reason: null };
+    return { status: "unavailable", state: null, reason: "io_error" };
+  }
+}
+
+export function writePeriodicState({ state, env = process.env }) {
+  const file = rrsiPeriodicStatePath(env);
+  const body = `${JSON.stringify(state, null, 2)}\n`;
+  const temp = path.join(rrsiRoot(env), `.periodic.json.tmp-${process.pid}`);
+  try {
+    fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temp, body, { mode: 0o600 });
+    fs.renameSync(temp, file);
+    return { persisted: true, reason: "stored" };
+  } catch {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best effort */
+    }
+    return { persisted: false, reason: "state_unavailable" };
+  }
+}
+
+/**
+ * Pure due decision. Returns { due, status, clockSkew } where status is the
+ * taxonomy value when not due. `skipped_locked` is decided by the caller.
+ */
+export function dueForRun({ state, now, env = process.env }) {
+  if (env && env.RRSI_PERIODIC === "off") return { due: false, status: "skipped_disabled", clockSkew: false };
+  const intervalMs = resolveIntervalMs(env);
+  const nowMs = Date.parse(now);
+  let clockSkew = false;
+  const readStamp = (value) => {
+    const ms = typeof value === "string" ? Date.parse(value) : NaN;
+    if (!Number.isFinite(ms)) return null;
+    if (ms > nowMs + RRSI_PERIODIC_DEFAULTS.clockSkewMaxMs) {
+      clockSkew = true;
+      return nowMs;
+    }
+    return ms;
+  };
+  const lastAttempt = state ? readStamp(state.lastAttemptAt) : null;
+  if (state && state.nextRetryAt) {
+    const retry = readStamp(state.nextRetryAt);
+    if (retry !== null && nowMs < retry) return { due: false, status: "skipped_due", clockSkew, reason: "backoff", intervalMs };
+  }
+  if (lastAttempt !== null && nowMs - lastAttempt < intervalMs) {
+    return { due: false, status: "skipped_due", clockSkew, intervalMs };
+  }
+  return { due: true, status: null, clockSkew, intervalMs };
+}
+
+/**
+ * Acquire the periodic lock (0600, `wx`, stale takeover by age = 2 × maxWallMs
+ * once). Returns { ok:true, release, takeover } or { ok:false, reason }.
+ */
+export function acquirePeriodicLock({ env = process.env, now }) {
+  const file = rrsiPeriodicLockPath(env);
+  const staleMs = 2 * RRSI_PERIODIC_DEFAULTS.maxWallMs;
+  try {
+    fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
+  } catch {
+    return { ok: false, reason: "lock_unavailable" };
+  }
+  const attempt = (allowTakeover) => {
+    try {
+      const fd = fs.openSync(file, "wx", 0o600);
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: now }));
+      fs.closeSync(fd);
+      return { ok: true };
+    } catch (error) {
+      if (error && error.code !== "EEXIST") return { ok: false, reason: "lock_unavailable" };
+      if (!allowTakeover) return { ok: false, reason: "locked" };
+      try {
+        const stat = fs.lstatSync(file);
+        if (Date.now() - stat.mtimeMs > staleMs) {
+          fs.unlinkSync(file);
+          const retry = attempt(false);
+          return retry.ok ? { ok: true, takeover: true } : retry;
+        }
+      } catch {
+        const retry = attempt(false);
+        return retry.ok ? { ok: true, takeover: true } : retry;
+      }
+      return { ok: false, reason: "locked" };
+    }
+  };
+  const acquired = attempt(true);
+  if (!acquired.ok) return acquired;
+  return {
+    ok: true,
+    takeover: acquired.takeover === true,
+    release: () => {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        /* best effort */
+      }
+    },
+  };
+}
+
+/** Keep at most `maxCount` receipts (oldest by mtime pruned on write). */
+export function pruneReceipts({ env = process.env, maxCount = RRSI_PERIODIC_DEFAULTS.receiptMaxCount } = {}) {
+  const dir = rrsiReceiptsDir(env);
+  try {
+    const entries = fs
+      .readdirSync(dir)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => {
+        let mtimeMs = 0;
+        try {
+          mtimeMs = fs.statSync(path.join(dir, name)).mtimeMs;
+        } catch {
+          /* raced */
+        }
+        return { name, mtimeMs };
+      })
+      .sort((a, b) => a.mtimeMs - b.mtimeMs);
+    const extra = entries.length - maxCount;
+    for (let i = 0; i < extra; i += 1) {
+      try {
+        fs.unlinkSync(path.join(dir, entries[i].name));
+      } catch {
+        /* best effort */
+      }
+    }
+    return { pruned: Math.max(0, extra) };
+  } catch {
+    return { pruned: 0 };
+  }
+}
+
+export function countReceipts(env = process.env) {
+  try {
+    return fs.readdirSync(rrsiReceiptsDir(env)).filter((name) => name.endsWith(".json")).length;
+  } catch {
+    return 0;
+  }
+}
+
+function writeReceipt({ env, receipt }) {
+  const dir = rrsiReceiptsDir(env);
+  const file = path.join(dir, `${receipt.receiptId}.json`);
+  let body = `${JSON.stringify(receipt, null, 2)}\n`;
+  if (Buffer.byteLength(body, "utf8") > RRSI_PERIODIC_DEFAULTS.receiptMaxBytes) {
+    const trimmed = { ...receipt, limits: undefined };
+    body = `${JSON.stringify(trimmed, null, 2)}\n`;
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(file, body, { mode: 0o600 });
+    return { persisted: true, reason: "stored", receiptId: receipt.receiptId };
+  } catch {
+    return { persisted: false, reason: "receipt_unavailable", receiptId: receipt.receiptId };
+  }
+}
+
+function receiptIdFor(now, tag) {
+  const compact = now.replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  return `${compact}-${tag}-${randomBytes(3).toString("hex")}`;
+}
+
+/** Default detached worker spawn: `bun <installed hook file>` with the worker flag. */
+export function defaultSpawnWorker({ env = process.env } = {}) {
+  try {
+    const hookFile = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "hooks", "rrsi-periodic.ts");
+    const child = spawn("bun", [hookFile], { env: { ...env, RRSI_PERIODIC_WORKER: "1" }, detached: true, stdio: "ignore" });
+    child.unref();
+    return { ok: true, pid: child.pid ?? null };
+  } catch (error) {
+    return { ok: false, reason: bounded(error && error.message ? error.message : "spawn_failed", 80) };
+  }
+}
+
+async function appendPeriodicRecord({ env, startedMs, summary, storage }) {
+  try {
+    return await appendPluginOutcome("rrsi", {
+      operation: "dream",
+      durationMs: Date.now() - startedMs,
+      rrsi: {
+        action: "dream",
+        episodes: summary.episodes ?? 0,
+        attempts: summary.attempts ?? 0,
+        imported: summary.imported ?? 0,
+        policies: summary.policies ?? 0,
+        storage,
+      },
+    });
+  } catch {
+    return { persisted: false, reason: "store_unavailable" };
+  }
+}
+
+/**
+ * One periodic attempt. `mode:"inline"` is the hook path (bounded; may hand a
+ * large dream to the detached worker); `mode:"worker"` is the detached path
+ * (skips the due gate — it was spawned because a due run imported — and
+ * dreams over the full bounded store). Never throws.
+ */
+export async function runPeriodic({ env = process.env, now = new Date().toISOString(), mode = "inline", spawnWorker = defaultSpawnWorker } = {}) {
+  const startedMs = Date.now();
+  const intervalMs = resolveIntervalMs(env);
+  let lock = null;
+  const finish = async (result) => {
+    if (lock && lock.ok) lock.release();
+    return result;
+  };
+  try {
+    if (env && env.RRSI_PERIODIC === "off") return await finish({ status: "skipped_disabled", mode, receipt: false, journal: false, stateWrite: false });
+
+    const stateRead = readPeriodicState(env);
+    const state = stateRead.status === "ok" ? stateRead.state : null;
+    if (!state && stateRead.status === "unavailable") return await finish({ status: "error", mode, reason: "state_unavailable", receipt: false, journal: false, stateWrite: false });
+
+    if (mode !== "worker") {
+      const due = dueForRun({ state, now, env });
+      if (!due.due) return await finish({ status: due.status, mode, reason: due.reason ?? null, receipt: false, journal: false, stateWrite: false });
+    }
+
+    const acquired = acquirePeriodicLock({ env, now });
+    if (!acquired.ok) {
+      if (acquired.reason === "locked") return await finish({ status: "skipped_locked", mode, receipt: false, journal: false, stateWrite: false });
+      return await finish({ status: "error", mode, reason: acquired.reason, receipt: false, journal: false, stateWrite: false });
+    }
+    lock = acquired;
+
+    // Re-check due under the lock (another session may have completed a run).
+    if (mode !== "worker") {
+      const recheck = dueForRun({ state: readPeriodicState(env).state, now, env });
+      if (!recheck.due) return await finish({ status: recheck.status, mode, receipt: false, journal: false, stateWrite: false });
+    }
+
+    const journal = readJournalRecords({ journalDir: rrsiJournalDir(env) });
+    const baseState = stateRead.status === "ok" ? stateRead.state : null;
+    const writeState = (patch) => {
+      const next = {
+        schema: RRSI_PERIODIC_SCHEMA,
+        intervalMs,
+        lastAttemptAt: now,
+        lastSuccessAt: baseState?.lastSuccessAt ?? null,
+        lastStatus: null,
+        lastReason: null,
+        nextRetryAt: null,
+        consecutiveFailures: baseState?.consecutiveFailures ?? 0,
+        lastReceiptId: baseState?.lastReceiptId ?? null,
+        lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
+        storeWrite: baseState?.storeWrite ?? null,
+        derivedChunks: baseState?.derivedChunks ?? null,
+        clockSkew: false,
+        updatedAt: now,
+        ...patch,
+      };
+      return writePeriodicState({ state: next, env });
+    };
+
+    if (journal.status !== "ok" || journal.records.length === 0) {
+      const reason = journal.reason ?? "no_records";
+      const stateWrite = writeState({ lastStatus: "empty", lastReason: reason, nextRetryAt: new Date(Date.parse(now) + intervalMs).toISOString(), consecutiveFailures: 0 });
+		const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: 0, policies: 0 }, storage: "missing" });
+		return await finish({ status: "no_input", mode, reason, receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
+    }
+
+    const projected = projectJournalRecordsSafe(journal.records, RRSI_PERIODIC_DEFAULTS.projectionLimit);
+    const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
+    const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
+
+    const loaded = readStore(env);
+    if (loaded.status === "invalid" || loaded.status === "unavailable") {
+      const reason = loaded.status === "invalid" ? `store_${loaded.reason ?? "invalid"}` : "store_unavailable";
+      const failures = (baseState?.consecutiveFailures ?? 0) + 1;
+      const stateWrite = writeState({ lastStatus: "error", lastReason: reason, storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
+      const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: 0, attempts: 0, imported: projected.attempts.length, policies: 0 }, storage: loaded.status });
+      return await finish({ status: "error", mode, reason, receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
+    }
+
+    const lockResult = withStoreLock(env, () => {
+      const current = readStore(env);
+      const replaced = replaceDerivedSet({ store: current.store, sourceClass: "jev-journal", derivedSet });
+      if (replaced.storeWrite === "unchanged") {
+        return { store: current.store, replaced, written: { persisted: true, reason: "unchanged", bytes: 0 } };
+      }
+      const written = writeStore({ store: replaced.store, env });
+      return { store: written.persisted ? replaced.store : current.store, replaced, written };
+    });
+    if (!lockResult.ok) {
+      const stateWrite = writeState({ lastStatus: "error", lastReason: "store_busy", storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length });
+      return await finish({ status: "error", mode, reason: "store_busy", receipt: false, journal: false, stateWrite: stateWrite.persisted });
+    }
+
+    const { store, replaced, written } = lockResult.result;
+    const counts = storeCounts(store);
+    if (!written.persisted && written.reason !== "unchanged") {
+      const failures = (baseState?.consecutiveFailures ?? 0) + 1;
+      const reason = written.reason;
+      const stateWrite = writeState({ lastStatus: "error", lastReason: reason, storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
+      const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: loaded.status });
+      const receiptWrite = writeReceipt({
+        env,
+        receipt: {
+          schema: RRSI_PERIODIC_RECEIPT_SCHEMA,
+          receiptId: receiptIdFor(now.replace(/\.\d+Z$/, "Z"), "er"),
+          trigger: "session_start",
+          startedAt: new Date(startedMs).toISOString(),
+          finishedAt: new Date().toISOString(),
+          durationMs: Date.now() - startedMs,
+          status: "error",
+          reason,
+          persisted: false,
+          mode,
+          projectionDigest: digest,
+          storeWrite: "rejected",
+          derivedChunks: derivedSet.length,
+          episodes: counts.episodes,
+          attempts: counts.attempts,
+          imported: projected.attempts.length,
+          policies: 0,
+          attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+          limits: appliedLimits(),
+          storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
+          clockSkew: false,
+        },
+      });
+      if (receiptWrite.persisted) pruneReceipts({ env });
+      return await finish({ status: "error", mode, reason, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted });
+    }
+
+    const status = replaced.storeWrite === "unchanged" ? "unchanged" : "ran";
+    const corpusAttempts = counts.attempts;
+
+    if (mode === "inline" && corpusAttempts > RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts) {
+      const spawned = spawnWorker({ env, mode: "worker" });
+      if (!spawned || !spawned.ok) {
+        const failures = (baseState?.consecutiveFailures ?? 0) + 1;
+        const stateWrite = writeState({ lastStatus: "error", lastReason: "worker_spawn_failed", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
+        const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: "ok" });
+        return await finish({ status: "error", mode, reason: "worker_spawn_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
+      }
+      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0 });
+      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, stateWrite: stateWrite.persisted });
+    }
+
+    let dream = null;
+    try {
+      const dreamed = dreamOverStore({ store, seed: 1 });
+      const summary = summarizeReceipt(dreamed.receipt);
+      dream = { ran: true, verdict: summary.verdict, receiptHash: summary.receiptHash, policies: dreamed.receipt.candidateCount };
+    } catch {
+      dream = { ran: false, reason: "dream_failed" };
+    }
+
+    const journalStorage = await appendPeriodicRecord({
+      env,
+      startedMs,
+      summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: dream?.policies ?? 0 },
+      storage: "ok",
+    });
+    const receiptId = receiptIdFor(now.replace(/\.\d+Z$/, "Z"), mode === "worker" ? "wk" : "in");
+    const receiptWrite = writeReceipt({
+      env,
+      receipt: {
+        schema: RRSI_PERIODIC_RECEIPT_SCHEMA,
+        receiptId,
+        trigger: "session_start",
+        startedAt: new Date(startedMs).toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - startedMs,
+        status,
+        reason: null,
+        persisted: true,
+        mode,
+        projectionDigest: digest,
+        storeWrite: replaced.storeWrite,
+        derivedChunks: derivedSet.length,
+        episodes: counts.episodes,
+        attempts: counts.attempts,
+        imported: projected.attempts.length,
+        policies: dream?.policies ?? 0,
+        corpusAttempts,
+        receiptHash: dream?.receiptHash ?? null,
+        verdict: dream?.verdict ?? null,
+        attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+        limits: appliedLimits(),
+        storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
+        clockSkew: false,
+      },
+    });
+    if (receiptWrite.persisted) pruneReceipts({ env });
+    const stateWrite = writeState({
+      lastStatus: status,
+      lastReason: null,
+      lastSuccessAt: now,
+      lastReceiptId: receiptWrite.persisted ? receiptId : null,
+      lastProjectionDigest: digest,
+      storeWrite: replaced.storeWrite,
+      derivedChunks: derivedSet.length,
+      nextRetryAt: null,
+      consecutiveFailures: 0,
+    });
+		return await finish({ status, mode, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
+  } catch (error) {
+    return await finish({ status: "error", mode, reason: bounded(error && error.message ? error.message : "periodic_failed", 120), receipt: false, journal: false, stateWrite: false });
+  }
+}
+
+function projectJournalRecordsSafe(records, limit) {
+  try {
+    return projectJournalRecords(records, { limit });
+  } catch {
+    return { attempts: [] };
+  }
+}
+
+function backoffMs(failures, intervalMs) {
+  const base = RRSI_PERIODIC_DEFAULTS.minRetryMs;
+  const scaled = base * Math.pow(2, Math.max(0, failures - 1));
+  return Math.min(scaled, intervalMs);
+}
+
+function appliedLimits() {
+  return {
+    limit: RRSI_PERIODIC_DEFAULTS.projectionLimit,
+    maxAttemptsPerEpisode: RRSI_LIMITS.maxAttemptsPerEpisode,
+    maxEpisodes: RRSI_LIMITS.maxEpisodes,
+    maxStoreBytes: RRSI_LIMITS.maxStoreBytes,
+    inlineDreamMaxAttempts: RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts,
+    intervalMs: RRSI_PERIODIC_DEFAULTS.intervalMs,
+  };
+}
+
+function mapStorage(storage) {
+  return storage && typeof storage === "object" ? { persisted: storage.persisted === true, reason: bounded(storage.reason, 40) } : { persisted: false, reason: "unknown" };
+}
+
+/** Bounded summary for the `rrsi status` tool action. */
+export function summarizePeriodicState({ state, env = process.env, now = new Date().toISOString() }) {
+  const due = dueForRun({ state: state ?? null, now, env });
+  return {
+    lastAttemptAt: state?.lastAttemptAt ?? null,
+    lastSuccessAt: state?.lastSuccessAt ?? null,
+    lastStatus: state?.lastStatus ?? null,
+    lastReason: state?.lastReason ?? null,
+    nextRetryAt: state?.nextRetryAt ?? null,
+    storeWrite: state?.storeWrite ?? null,
+    lastProjectionDigest: state?.lastProjectionDigest ?? null,
+    due: due.due,
+    dueStatus: due.status ?? null,
+    receiptCount: countReceipts(env),
+    intervalMs: resolveIntervalMs(env),
+    disabled: env && env.RRSI_PERIODIC === "off",
+  };
+}
+
+/** Worker entry used by the generated hook file when executed directly. */
+export async function runPeriodicWorker({ env = process.env, now = new Date().toISOString() } = {}) {
+  return await runPeriodic({ env, now, mode: "worker" });
+}
+
 // rrsi tool adapter: one explicitly invoked tool with actions capture | import | dream | status.
-// No hook registrations. Keyless and offline: the tool never reads credentials and makes no network call.
+// The only automatic invocation is the session_start hook (src/periodic.adapter.ts, generated as
+// hooks/rrsi-periodic.ts): a due-gated, bounded refresh — no timer process. Keyless and offline:
+// the tool never reads credentials and makes no network call.
 // Every handled invocation appends exactly one sanitized rrsi outcome to the shared journal.
+// capture/import read-modify-write sequences are serialized by the shared store lock
+// (store_busy on contention; see lib/rrsi.ts withStoreLock).
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
 const ACTIONS = ['capture', 'import', 'dream', 'status'] as const;
@@ -2077,15 +2734,31 @@ export default function rrsi(pi: {
 			const loaded = readStore();
 			const storage: RrsiStorage = loaded.status === 'ok' ? 'ok' : loaded.status === 'missing' ? 'missing' : loaded.status === 'invalid' ? 'invalid' : 'unavailable';
 			if (action === 'status') {
+				const periodicState = readPeriodicState();
 				return finish(
-					{ store: loaded.store, storageStatus: loaded.status, storageReason: loaded.reason, counts: storeCounts(loaded.store), journalDir: rrsiJournalDir() },
+					{
+						store: loaded.store,
+						storageStatus: loaded.status,
+						storageReason: loaded.reason,
+						counts: storeCounts(loaded.store),
+						journalDir: rrsiJournalDir(),
+						periodic: summarizePeriodicState({ state: periodicState.status === 'ok' ? periodicState.state : null }),
+					},
 					storage,
 				);
 			}
 
 			if (action === 'capture') {
-				const captured = captureEpisode({ store: loaded.store, goal: params?.goal, attempts: parseAttempts(params?.attempts), now });
-				const written = writeStore({ store: captured.store });
+				const locked = withStoreLock(process.env, () => {
+					const current = readStore();
+					const captured = captureEpisode({ store: current.store, goal: params?.goal, attempts: parseAttempts(params?.attempts), now });
+					const written = writeStore({ store: captured.store });
+					return { captured, written };
+				});
+				if (!locked.ok) {
+					return finish({ store: loaded.store, episode: null, counts: storeCounts(loaded.store), wrote: { persisted: false, reason: 'store_busy' } }, 'unavailable');
+				}
+				const { captured, written } = locked.result;
 				return finish(
 					{
 						store: written.persisted ? captured.store : loaded.store,
@@ -2100,28 +2773,55 @@ export default function rrsi(pi: {
 			if (action === 'import') {
 				const journal = readJournalRecords({ journalDir: rrsiJournalDir() });
 				const projected = projectJournalRecords(journal.records, { limit });
-				const episodes = [];
-				if (projected.attempts.length > 0) {
-					episodes.push(normalizeEpisode({ source: 'jev-journal', goal: `jev-advisor journal (${journal.segments} segment(s))`, attempts: projected.attempts }, now));
-				}
+				const projectionDigest = projectionDigestFor(projected.attempts, limit);
+				const derived = derivedEpisodeSetFor({ digest: projectionDigest, attempts: projected.attempts });
 				let ledgerCount = 0;
+				let ledgerDerived = { episodes: [] as Array<{ id: string }> };
 				if (typeof params?.ledgerPath === 'string' && params.ledgerPath.length > 0) {
 					const ledger = readLedgerRows({ ledgerPath: params.ledgerPath });
 					const ledgerProjection = projectLedgerRows(ledger.rows, { limit });
 					ledgerCount = ledgerProjection.attempts.length;
-					if (ledgerCount > 0) {
-						episodes.push(normalizeEpisode({ source: 'self-improve-ledger', goal: 'self-improve ledger projection', attempts: ledgerProjection.attempts }, now));
-					}
+					const ledgerDigest = projectionDigestFor(ledgerProjection.attempts, limit);
+					ledgerDerived = derivedEpisodeSetFor({ digest: ledgerDigest, attempts: ledgerProjection.attempts, source: 'self-improve-ledger', goalPrefix: 'ledger projection' });
 				}
-				const merged = mergeEpisodes({ store: loaded.store, episodes, now });
-				const written = writeStore({ store: merged });
+				const locked = withStoreLock(process.env, () => {
+					const current = readStore();
+					const replacedJournal = replaceDerivedSet({ store: current.store, sourceClass: 'jev-journal', derivedSet: derived.episodes });
+					const replacedLedger =
+						ledgerDerived.episodes.length > 0
+							? replaceDerivedSet({ store: replacedJournal.store, sourceClass: 'self-improve-ledger', derivedSet: ledgerDerived.episodes })
+							: { store: replacedJournal.store, storeWrite: 'none' as const, episodesDelta: 0, attemptsDelta: 0 };
+					const storeWrite = replacedLedger.storeWrite === 'none' ? replacedJournal.storeWrite : replacedLedger.storeWrite;
+					if (storeWrite === 'unchanged') {
+						return { store: current.store, storeWrite, written: { persisted: true, reason: 'unchanged', bytes: 0 } };
+					}
+					const written = writeStore({ store: replacedLedger.store });
+					return { store: written.persisted ? replacedLedger.store : current.store, storeWrite, written };
+				});
+				if (!locked.ok) {
+					return finish(
+						{
+							store: loaded.store,
+							imported: 0,
+							journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
+							counts: storeCounts(loaded.store),
+							wrote: { persisted: false, reason: 'store_busy' },
+							storeWrite: 'rejected',
+							projectionDigest,
+						},
+						storage,
+					);
+				}
+				const { store, storeWrite, written } = locked.result;
 				return finish(
 					{
-						store: written.persisted ? merged : loaded.store,
+						store,
 						imported: projected.attempts.length + ledgerCount,
 						journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
-						counts: storeCounts(merged),
+						counts: storeCounts(store),
 						wrote: written,
+						storeWrite,
+						projectionDigest,
 					},
 					written.persisted ? 'ok' : 'unavailable',
 				);

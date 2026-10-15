@@ -1,24 +1,31 @@
 // rrsi tool adapter: one explicitly invoked tool with actions capture | import | dream | status.
-// No hook registrations. Keyless and offline: the tool never reads credentials and makes no network call.
+// The only automatic invocation is the session_start hook (src/periodic.adapter.ts, generated as
+// hooks/rrsi-periodic.ts): a due-gated, bounded refresh — no timer process. Keyless and offline:
+// the tool never reads credentials and makes no network call.
 // Every handled invocation appends exactly one sanitized rrsi outcome to the shared journal.
+// capture/import read-modify-write sequences are serialized by the shared store lock
+// (store_busy on contention; see lib/rrsi.ts withStoreLock).
 import { appendPluginOutcome } from '../../shared/lib/results';
 import {
 	RRSI_LIMITS,
 	RRSI_SCOPE_SENTENCE,
 	captureEpisode,
+	derivedEpisodeSetFor,
 	dreamOverStore,
-	mergeEpisodes,
-	normalizeEpisode,
+	projectionDigestFor,
 	projectJournalRecords,
 	projectLedgerRows,
 	readJournalRecords,
 	readLedgerRows,
 	readStore,
+	replaceDerivedSet,
 	rrsiJournalDir,
 	storeCounts,
 	summarizeReceipt,
+	withStoreLock,
 	writeStore,
 } from '../lib/rrsi';
+import { readPeriodicState, summarizePeriodicState } from '../lib/periodic';
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
 const ACTIONS = ['capture', 'import', 'dream', 'status'] as const;
@@ -103,15 +110,31 @@ export default function rrsi(pi: {
 			const loaded = readStore();
 			const storage: RrsiStorage = loaded.status === 'ok' ? 'ok' : loaded.status === 'missing' ? 'missing' : loaded.status === 'invalid' ? 'invalid' : 'unavailable';
 			if (action === 'status') {
+				const periodicState = readPeriodicState();
 				return finish(
-					{ store: loaded.store, storageStatus: loaded.status, storageReason: loaded.reason, counts: storeCounts(loaded.store), journalDir: rrsiJournalDir() },
+					{
+						store: loaded.store,
+						storageStatus: loaded.status,
+						storageReason: loaded.reason,
+						counts: storeCounts(loaded.store),
+						journalDir: rrsiJournalDir(),
+						periodic: summarizePeriodicState({ state: periodicState.status === 'ok' ? periodicState.state : null }),
+					},
 					storage,
 				);
 			}
 
 			if (action === 'capture') {
-				const captured = captureEpisode({ store: loaded.store, goal: params?.goal, attempts: parseAttempts(params?.attempts), now });
-				const written = writeStore({ store: captured.store });
+				const locked = withStoreLock(process.env, () => {
+					const current = readStore();
+					const captured = captureEpisode({ store: current.store, goal: params?.goal, attempts: parseAttempts(params?.attempts), now });
+					const written = writeStore({ store: captured.store });
+					return { captured, written };
+				});
+				if (!locked.ok) {
+					return finish({ store: loaded.store, episode: null, counts: storeCounts(loaded.store), wrote: { persisted: false, reason: 'store_busy' } }, 'unavailable');
+				}
+				const { captured, written } = locked.result;
 				return finish(
 					{
 						store: written.persisted ? captured.store : loaded.store,
@@ -126,28 +149,55 @@ export default function rrsi(pi: {
 			if (action === 'import') {
 				const journal = readJournalRecords({ journalDir: rrsiJournalDir() });
 				const projected = projectJournalRecords(journal.records, { limit });
-				const episodes = [];
-				if (projected.attempts.length > 0) {
-					episodes.push(normalizeEpisode({ source: 'jev-journal', goal: `jev-advisor journal (${journal.segments} segment(s))`, attempts: projected.attempts }, now));
-				}
+				const projectionDigest = projectionDigestFor(projected.attempts, limit);
+				const derived = derivedEpisodeSetFor({ digest: projectionDigest, attempts: projected.attempts });
 				let ledgerCount = 0;
+				let ledgerDerived = { episodes: [] as Array<{ id: string }> };
 				if (typeof params?.ledgerPath === 'string' && params.ledgerPath.length > 0) {
 					const ledger = readLedgerRows({ ledgerPath: params.ledgerPath });
 					const ledgerProjection = projectLedgerRows(ledger.rows, { limit });
 					ledgerCount = ledgerProjection.attempts.length;
-					if (ledgerCount > 0) {
-						episodes.push(normalizeEpisode({ source: 'self-improve-ledger', goal: 'self-improve ledger projection', attempts: ledgerProjection.attempts }, now));
-					}
+					const ledgerDigest = projectionDigestFor(ledgerProjection.attempts, limit);
+					ledgerDerived = derivedEpisodeSetFor({ digest: ledgerDigest, attempts: ledgerProjection.attempts, source: 'self-improve-ledger', goalPrefix: 'ledger projection' });
 				}
-				const merged = mergeEpisodes({ store: loaded.store, episodes, now });
-				const written = writeStore({ store: merged });
+				const locked = withStoreLock(process.env, () => {
+					const current = readStore();
+					const replacedJournal = replaceDerivedSet({ store: current.store, sourceClass: 'jev-journal', derivedSet: derived.episodes });
+					const replacedLedger =
+						ledgerDerived.episodes.length > 0
+							? replaceDerivedSet({ store: replacedJournal.store, sourceClass: 'self-improve-ledger', derivedSet: ledgerDerived.episodes })
+							: { store: replacedJournal.store, storeWrite: 'none' as const, episodesDelta: 0, attemptsDelta: 0 };
+					const storeWrite = replacedLedger.storeWrite === 'none' ? replacedJournal.storeWrite : replacedLedger.storeWrite;
+					if (storeWrite === 'unchanged') {
+						return { store: current.store, storeWrite, written: { persisted: true, reason: 'unchanged', bytes: 0 } };
+					}
+					const written = writeStore({ store: replacedLedger.store });
+					return { store: written.persisted ? replacedLedger.store : current.store, storeWrite, written };
+				});
+				if (!locked.ok) {
+					return finish(
+						{
+							store: loaded.store,
+							imported: 0,
+							journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
+							counts: storeCounts(loaded.store),
+							wrote: { persisted: false, reason: 'store_busy' },
+							storeWrite: 'rejected',
+							projectionDigest,
+						},
+						storage,
+					);
+				}
+				const { store, storeWrite, written } = locked.result;
 				return finish(
 					{
-						store: written.persisted ? merged : loaded.store,
+						store,
 						imported: projected.attempts.length + ledgerCount,
 						journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
-						counts: storeCounts(merged),
+						counts: storeCounts(store),
 						wrote: written,
+						storeWrite,
+						projectionDigest,
 					},
 					written.persisted ? 'ok' : 'unavailable',
 				);

@@ -8,12 +8,15 @@
  * the self-improve loop and its frozen corpus, not to this plugin; no accuracy,
  * savings or routing claim is made here.
  *
- * Keyless and offline: no network, no credentials, no timers. The store lives at
- * `~/.gjc-plugin/rrsi/store.json` (0700 dir, 0600 file) and is never committed.
+ * Keyless and offline: no network, no credentials, no timer process. The
+ * only automatic invocation is the due-gated `session_start` refresh in
+ * `lib/periodic.ts`. The store lives at `~/.gjc-plugin/rrsi/store.json`
+ * (0700 dir, 0600 file) and is never committed.
  */
 import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createHash } from "node:crypto";
 
 export const RRSI_STORE_SCHEMA = "gjc.rrsi.store.v1";
 
@@ -47,6 +50,16 @@ export function rrsiStorePath(env = process.env) {
 
 export function rrsiJournalDir(env = process.env) {
   return path.join(rrsiRoot(env), "..", "jev-advisor", "journal", "v1");
+}
+
+// Shared store-lock bounds: stale takeover after 2 × the 12 s periodic inline
+// budget so a crashed writer cannot hold the lock forever; the contended wait
+// is bounded at 100 ms (bounded result, no throw).
+export const RRSI_STORE_LOCK_STALE_MS = 24_000;
+export const RRSI_STORE_LOCK_WAIT_MS = 100;
+
+function projectionDigestHex(text) {
+  return createHash("sha256").update(text).digest("hex");
 }
 
 function boundedText(value, max = RRSI_LIMITS.maxTextChars) {
@@ -292,6 +305,117 @@ export function mergeEpisodes({ store, episodes, now }) {
   const base = store && store.schema === RRSI_STORE_SCHEMA ? store : emptyStore(now);
   const merged = [...base.episodes, ...episodes].slice(-RRSI_LIMITS.maxEpisodes);
   return { schema: RRSI_STORE_SCHEMA, updatedAt: now, episodes: merged };
+}
+
+/** Content-keyed digest of one bounded projection (read order + applied limit). */
+export function projectionDigestFor(attempts, limit) {
+  const bounded = Array.isArray(attempts) ? attempts.slice(0, 4000) : [];
+  return projectionDigestHex(JSON.stringify({ limit, attempts: bounded }));
+}
+
+/**
+ * Chunked derived episode set for one source class (no clock value enters any
+ * episode, so identical content yields a byte-identical set). Ids:
+ * `ep-jev-<digest12>-<n>` for `jev-journal`, `ep-ledger-<digest12>-<n>` for
+ * the self-improve ledger.
+ */
+export function derivedEpisodeSetFor({ digest, attempts, source = "jev-journal", maxPerEpisode = RRSI_LIMITS.maxAttemptsPerEpisode, goalPrefix = "periodic projection" }) {
+  const digest12 = String(digest ?? "").slice(0, 12);
+  const idPrefix = source === "self-improve-ledger" ? "ep-ledger" : "ep-jev";
+  const input = Array.isArray(attempts) ? attempts : [];
+  const episodes = [];
+  for (let k = 0, n = 0; k < input.length; k += maxPerEpisode, n += 1) {
+    const chunk = input.slice(k, k + maxPerEpisode).map((attempt, index) => normalizeAttempt(attempt, index));
+    episodes.push({
+      id: `${idPrefix}-${digest12}-${n}`,
+      source,
+      goal: boundedText(`${goalPrefix} ${digest12} chunk ${n}`, 200),
+      createdAt: `derived:${digest12}`,
+      attempts: chunk,
+    });
+  }
+  return { episodes, digest12 };
+}
+
+/**
+ * One slot per source class: replace the whole derived set for `sourceClass`
+ * (never accumulate), or skip the write entirely when the existing set for
+ * that class is byte-identical to the newly derived set. User `capture`
+ * episodes are never selected by the filter. Returns a bounded result; never
+ * throws.
+ */
+export function replaceDerivedSet({ store, sourceClass, derivedSet }) {
+  const base = store && store.schema === RRSI_STORE_SCHEMA ? store : emptyStore();
+  const set = Array.isArray(derivedSet) ? derivedSet : [];
+  const prior = base.episodes.filter((episode) => episode && episode.source === sourceClass);
+  const identical = prior.length === set.length && prior.every((episode, index) => JSON.stringify(episode) === JSON.stringify(set[index]));
+  const priorAttempts = prior.reduce((sum, episode) => sum + (Array.isArray(episode.attempts) ? episode.attempts.length : 0), 0);
+  const nextAttempts = set.reduce((sum, episode) => sum + (Array.isArray(episode.attempts) ? episode.attempts.length : 0), 0);
+  if (identical) {
+    return { store: base, storeWrite: "unchanged", episodesDelta: 0, attemptsDelta: 0 };
+  }
+  const episodes = [...base.episodes.filter((episode) => episode && episode.source !== sourceClass), ...set].slice(-RRSI_LIMITS.maxEpisodes);
+  return {
+    store: { schema: RRSI_STORE_SCHEMA, updatedAt: base.updatedAt, episodes },
+    storeWrite: prior.length === 0 ? "added" : "replaced",
+    episodesDelta: episodes.length - base.episodes.length,
+    attemptsDelta: nextAttempts - priorAttempts,
+  };
+}
+
+/**
+ * Exclusive plugin-local store lock used by `capture`, `import` and the
+ * periodic writer to serialize their read-modify-write sequences (not a
+ * cross-process guarantee for foreign writers). Bounded 100 ms wait; stale
+ * takeover by age; released in `finally`. Contended wait returns
+ * `{ ok:false, reason:"store_busy" }` — no throw, no retry, no partial write.
+ */
+export function withStoreLock(env, fn) {
+  const file = path.join(rrsiRoot(env), "store.lock");
+  const deadline = Date.now() + RRSI_STORE_LOCK_WAIT_MS;
+  const tryAcquire = () => {
+    try {
+      fs.mkdirSync(rrsiRoot(env), { recursive: true, mode: 0o700 });
+    } catch {
+      /* reported by the write path */
+    }
+    try {
+      const fd = fs.openSync(file, "wx", 0o600);
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+      fs.closeSync(fd);
+      return true;
+    } catch (error) {
+      if (error && error.code !== "EEXIST") return false;
+      try {
+        const stat = fs.lstatSync(file);
+        if (Date.now() - stat.mtimeMs > RRSI_STORE_LOCK_STALE_MS) {
+          fs.unlinkSync(file);
+          return tryAcquire();
+        }
+      } catch {
+        /* raced */
+      }
+      return false;
+    }
+  };
+  while (Date.now() < deadline) {
+    if (tryAcquire()) {
+      try {
+        return { ok: true, result: fn() };
+      } finally {
+        try {
+          fs.unlinkSync(file);
+        } catch {
+          /* best effort */
+        }
+      }
+    }
+    const until = Date.now() + 10;
+    while (Date.now() < until) {
+      /* bounded wait */
+    }
+  }
+  return { ok: false, reason: "store_busy" };
 }
 
 /** Store attempts -> the replay corpus (epochs partition at adopted attempts). */

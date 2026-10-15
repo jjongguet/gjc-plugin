@@ -2,20 +2,19 @@
 /**
  * Build rrsi plugin surface files.
  *
- *   node scripts/build.mjs   →  tools/rrsi.ts  (one generated, committed file)
+ *   bun scripts/build.mjs           → tools/rrsi.ts + hooks/rrsi-periodic.ts (generated, committed)
+ *   bun scripts/build.mjs --check   → non-mutating drift check (no writes; exit 1 on drift)
  *
- * Bundling decision (M5): the shared journaling core
- * (../shared/lib/results.ts) plus the Dream-RSI core modules
- * (../self-improve/lib/{types,ledger,replay,dream,policy}.mjs) and this plugin's
- * own lib/src files are inlined into ONE tool file, exactly like the sibling
- * plugins inline their cores. Local imports are stripped because every local
- * binding is declared earlier in the same bundle; the self-improve modules are
- * plain Node ESM (no type annotations), so they transpile unchanged and the
- * generated file stays a single self-contained surface (no runtime file
- * resolution outside the plugin). The fallback recorded in the plan (vendoring
- * the modules as separate files) is unnecessary.
+ * Both surfaces are self-contained single files, exactly like the sibling
+ * plugins: the shared journaling core (../shared/lib/results.ts), the Dream-RSI
+ * core modules (../self-improve/lib/{types,ledger,replay,dream,policy}.mjs) and
+ * this plugin's own lib/src files are inlined (local imports stripped, builtin
+ * imports de-duplicated) because the installer copies only manifest-declared
+ * files — the generated hook must not resolve anything outside itself. The
+ * hook file also doubles as the detached worker CLI
+ * (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`).
  *
- * ALWAYS keyless: no credentials are read and the generated surface has no
+ * ALWAYS keyless: no credentials are read and the generated surfaces have no
  * network path (no fetch, no provider client).
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -24,6 +23,7 @@ import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const repoRoot = path.resolve(pluginRoot, "..");
+const check = process.argv.includes("--check");
 
 const stripLocalImports = (text) => {
 	const lines = text.split("\n");
@@ -63,31 +63,52 @@ const dreamRsiModules = [
 	"self-improve/lib/policy.mjs",
 ];
 
-const parts = [sharedCore.trimEnd()];
+const dreamParts = [];
 for (const relative of dreamRsiModules) {
 	const text = await readFile(path.join(repoRoot, relative), "utf8");
-	parts.push(`// ---- inlined from ${relative} (Dream-RSI core, keyless plain ESM) ----\n${stripLocalImports(text).trimEnd()}`);
+	dreamParts.push(`// ---- inlined from ${relative} (Dream-RSI core, keyless plain ESM) ----\n${stripLocalImports(text).trimEnd()}`);
 }
-parts.push(stripLocalImports(await readFile(path.join(pluginRoot, "lib/rrsi.ts"), "utf8")).trimEnd());
-parts.push(stripLocalImports(await readFile(path.join(pluginRoot, "src/rrsi.adapter.ts"), "utf8")).trimStart());
+
+const pluginPart = async (relative, { trimStart = false } = {}) => {
+	const stripped = stripLocalImports(await readFile(path.join(pluginRoot, relative), "utf8"));
+	return trimStart ? stripped.trimStart() : stripped.trimEnd();
+};
+
+// Detached worker entry, appended to the hook bundle only. Inert when the
+// loader imports the module; active only when bun executes the file directly
+// with the worker flag.
+const workerTail = [
+	"",
+	"// Worker entry: executed directly (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`) for",
+	"// the detached large-corpus dream; imported by the plugin loader it stays inert.",
+	"if (import.meta.main && process.env.RRSI_PERIODIC_WORKER === \"1\") {",
+	"  const result = await runPeriodicWorker({ env: process.env });",
+	"  process.stdout.write(`${JSON.stringify({ worker: true, status: result?.status ?? \"error\", reason: result?.reason ?? null, durationMs: result?.durationMs ?? null })}\\n`);",
+	"  process.exit(result && (result.status === \"ran\" || result.status === \"unchanged\") ? 0 : 1);",
+	"}",
+	"",
+].join("\n");
 
 // Identical builtin import statements (e.g. `import * as fs from "node:fs";`
 // declared by both the Dream-RSI core and this plugin) would collide as
 // duplicate top-level bindings once inlined; keep the first occurrence.
-const seenBuiltinImports = new Set();
-const dedupeBuiltins = (text) =>
-	text
-		.split("\n")
-		.filter((line) => {
-			if (!/^import\s/.test(line) || !/^import\s.*from\s+["'][^"'.]/.test(line)) return true;
-			const key = line.trim();
-			if (seenBuiltinImports.has(key)) return false;
-			seenBuiltinImports.add(key);
-			return true;
-		})
-		.join("\n");
+const compose = (bannerText, parts, tail = "") => {
+	const seenBuiltinImports = new Set();
+	const dedupeBuiltins = (text) =>
+		text
+			.split("\n")
+			.filter((line) => {
+				if (!/^import\s/.test(line) || !/^import\s.*from\s+["'][^"'.]/.test(line)) return true;
+				const key = line.trim();
+				if (seenBuiltinImports.has(key)) return false;
+				seenBuiltinImports.add(key);
+				return true;
+			})
+			.join("\n");
+	return dedupeBuiltins(`${bannerText}\n${parts.join("\n\n")}\n${tail}`);
+};
 
-const banner = [
+const toolBanner = [
 	"// GENERATED FILE — do not edit by hand.",
 	"// Core: lib/rrsi.ts + adapter: src/rrsi.adapter.ts",
 	"// Inlined: shared/lib/results.ts and self-improve/lib/{types,ledger,replay,dream,policy}.mjs",
@@ -95,7 +116,47 @@ const banner = [
 	"",
 ].join("\n");
 
-const out = path.join(pluginRoot, "tools/rrsi.ts");
-await mkdir(path.dirname(out), { recursive: true });
-await writeFile(out, dedupeBuiltins(`${banner}\n${parts.join("\n\n")}\n`), "utf8");
-console.log(`built tools/rrsi.ts (keyless; ${dreamRsiModules.length} core modules inlined)`);
+const hookBanner = [
+	"// GENERATED FILE — do not edit by hand.",
+	"// Core: lib/rrsi.ts + lib/periodic.ts + adapter: src/periodic.adapter.ts",
+	"// Inlined: shared/lib/results.ts and self-improve/lib/{types,ledger,replay,dream,policy}.mjs",
+	"// Rebuild with: bun scripts/build.mjs",
+	"// One session_start registration; doubles as the detached worker CLI (RRSI_PERIODIC_WORKER=1).",
+	"",
+].join("\n");
+
+const toolText = compose(toolBanner, [sharedCore.trimEnd(), ...dreamParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/rrsi.adapter.ts", { trimStart: true })]);
+const hookText = compose(
+	hookBanner,
+	[sharedCore.trimEnd(), ...dreamParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/periodic.adapter.ts", { trimStart: true })],
+	workerTail,
+);
+
+const outputs = [
+	{ file: path.join(pluginRoot, "tools/rrsi.ts"), text: toolText, label: `tools/rrsi.ts (keyless; ${dreamRsiModules.length} core modules inlined)` },
+	{ file: path.join(pluginRoot, "hooks/rrsi-periodic.ts"), text: hookText, label: "hooks/rrsi-periodic.ts (keyless; one session_start registration + worker tail)" },
+];
+
+if (check) {
+	let drift = false;
+	for (const output of outputs) {
+		let existing = null;
+		try {
+			existing = await readFile(output.file, "utf8");
+		} catch {
+			existing = null;
+		}
+		if (existing !== output.text) {
+			drift = true;
+			process.stderr.write(`generated_out_of_sync:${path.relative(repoRoot, output.file)}\n`);
+		}
+	}
+	if (drift) process.exit(1);
+	console.log("generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts");
+} else {
+	for (const output of outputs) {
+		await mkdir(path.dirname(output.file), { recursive: true });
+		await writeFile(output.file, output.text, "utf8");
+		console.log(`built ${output.label}`);
+	}
+}

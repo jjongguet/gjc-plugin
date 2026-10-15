@@ -79,3 +79,51 @@ test("capture -> import -> dream over >=10 real jev-advisor journal attempts (he
 		rmSync(home, { recursive: true, force: true });
 	}
 });
+
+test("periodic refresh over the real-journal slice: one derived set per source, unchanged rerun keeps bytes and receiptHash identical (hermetic store)", async () => {
+	const { records } = realJournalRecords();
+	expect(records.length >= 10).toBe(true);
+
+	const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rrsi-periodic-real-")));
+	const previous = process.env.HOME;
+	process.env.HOME = home;
+	try {
+		const journalDir = path.join(home, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		mkdirSync(journalDir, { recursive: true, mode: 0o700 });
+		const slice = records.slice(-40);
+		writeFileSync(path.join(journalDir, "seg-real.jsonl"), `${slice.map((record) => JSON.stringify(record)).join("\n")}\n`);
+
+		const hook = await import(pathToFileURL(path.join(plugin, "hooks/rrsi-periodic.ts")).href);
+		const root = path.join(home, ".gjc-plugin", "rrsi");
+		const storePath = path.join(root, "store.json");
+		const first = await hook.runPeriodic({ env: process.env, mode: "inline" });
+		expect(first.status).toBe("ran");
+		expect(first.storeWrite).toBe("added");
+		const receiptsA = readdirSync(path.join(root, "runs", "v1"));
+		expect(receiptsA.length).toBe(1);
+		const receiptA = JSON.parse(readFileSync(path.join(root, "runs", "v1", receiptsA[0]), "utf8"));
+		expect(receiptA.projectionDigest.length).toBe(64);
+		expect(typeof receiptA.receiptHash).toBe("string");
+		const storeA = JSON.parse(readFileSync(storePath, "utf8"));
+		expect(storeA.episodes.filter((episode) => episode.source === "jev-journal").length).toBe(1);
+		expect(storeA.episodes.filter((episode) => episode.id.startsWith("ep-jev-")).length).toBe(1);
+
+		const state = JSON.parse(readFileSync(path.join(root, "periodic.json"), "utf8"));
+		state.lastAttemptAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+		state.nextRetryAt = null;
+		writeFileSync(path.join(root, "periodic.json"), `${JSON.stringify(state, null, 2)}\n`);
+		const bytesBefore = readFileSync(storePath, "utf8");
+		const second = await hook.runPeriodic({ env: process.env, mode: "inline" });
+		expect(second.status).toBe("unchanged");
+		expect(readFileSync(storePath, "utf8")).toBe(bytesBefore);
+		const receiptsB = readdirSync(path.join(root, "runs", "v1")).filter((name) => !receiptsA.includes(name));
+		expect(receiptsB.length).toBe(1);
+		const receiptB = JSON.parse(readFileSync(path.join(root, "runs", "v1", receiptsB[0]), "utf8"));
+		expect(receiptB.projectionDigest).toBe(receiptA.projectionDigest);
+		expect(receiptB.receiptHash).toBe(receiptA.receiptHash);
+		console.log(`periodic real-journal slice: records=${slice.length} storeWrite=${first.storeWrite} rerun=${second.status} digest=${receiptA.projectionDigest.slice(0, 12)}`);
+	} finally {
+		process.env.HOME = previous;
+		rmSync(home, { recursive: true, force: true });
+	}
+});

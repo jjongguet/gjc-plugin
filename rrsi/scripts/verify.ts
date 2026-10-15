@@ -9,7 +9,7 @@
  * network, no model calls.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -87,13 +87,20 @@ async function runSuite(root) {
 			advice: index % 3 === 0 ? { status: "decision", tier: ["fast", "balanced", "strong"][index % 3] } : { status: "no_decision", reason: "provider_error" },
 		}));
 
-	await check("manifest declares one tool, no hooks, and the four actions", async () => {
+	await check("manifest declares one tool, one session_start hook (no target/phase), and the four actions", async () => {
 		assert.equal(manifest.name, "rrsi");
 		assert.equal(manifest.version, "0.0.1");
-		assert.equal(manifest.hooks, undefined);
 		assert.equal(manifest.tools.length, 1);
 		assert.equal(manifest.tools[0].path, "tools/rrsi.ts");
 		assert.equal(typeof tool.execute, "function");
+		assert.equal(Array.isArray(manifest.hooks), true);
+		assert.equal(manifest.hooks.length, 1);
+		assert.deepEqual(Object.keys(manifest.hooks[0]).sort(), ["event", "name", "path"]);
+		assert.equal(manifest.hooks[0].name, "rrsi-periodic");
+		assert.equal(manifest.hooks[0].event, "session_start");
+		assert.equal(manifest.hooks[0].path, "hooks/rrsi-periodic.ts");
+		assert.equal(manifest.hooks[0].target, undefined);
+		assert.equal(manifest.hooks[0].phase, undefined);
 	});
 
 	await check("status on an empty store reports missing storage without creating one", async () => {
@@ -266,18 +273,274 @@ async function runSuite(root) {
 		assert.equal(badAttempts.episode.attempts, 0);
 	});
 
-	await check("the generated surface is keyless and offline", async () => {
-		assert.equal(/fetch\s*\(/.test(generated), false, "no fetch path");
-		assert.equal(/process\.env\.[A-Za-z_]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/.test(generated), false, "no credential environment reads");
-		assert.equal(/require\(["']https?["']\)/.test(generated), false, "no http client");
+	// ---- periodic refresh (session_start hook core) ----
+	const hookModule = await import(pathToFileURL(path.join(plugin, "hooks/rrsi-periodic.ts")).href);
+	const hookSource = readFileSync(path.join(plugin, "hooks/rrsi-periodic.ts"), "utf8");
+	const seedJournal = (homeDir, count, name = "seg-1.jsonl") => {
+		const dir = path.join(homeDir, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		writeFileSync(path.join(dir, name), `${syntheticRecords(count).map((record) => JSON.stringify(record)).join("\n")}\n`);
+	};
+	const periodicPaths = (homeDir) => {
+		const rootDir = path.join(homeDir, ".gjc-plugin", "rrsi");
+		return { root: rootDir, state: path.join(rootDir, "periodic.json"), store: path.join(rootDir, "store.json"), receipts: path.join(rootDir, "runs", "v1"), journal: path.join(rootDir, "journal", "v1") };
+	};
+	const withHome = async (homeDir, fn) => {
+		const previous = process.env.HOME;
+		process.env.HOME = homeDir;
+		try {
+			return await fn();
+		} finally {
+			process.env.HOME = previous;
+		}
+	};
+	const backdateState = (homeDir, ms) => {
+		const { state } = periodicPaths(homeDir);
+		const parsed = JSON.parse(readFileSync(state, "utf8"));
+		parsed.lastAttemptAt = new Date(Date.now() - ms).toISOString();
+		parsed.lastSuccessAt = parsed.lastAttemptAt;
+		parsed.nextRetryAt = null;
+		writeFileSync(state, `${JSON.stringify(parsed, null, 2)}\n`);
+	};
+	const readJournalOutcomes = (homeDir) => {
+		const { journal } = periodicPaths(homeDir);
+		if (!existsSync(journal)) return [];
+		return readdirSync(journal).filter((name) => name.endsWith(".jsonl")).flatMap((name) => readFileSync(path.join(journal, name), "utf8").split("\n")).filter(Boolean).map((line) => JSON.parse(line));
+	};
+	const homeA = path.join(root, "periodic-home-a");
+
+	await check("periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing", async () => {
+		mkdirSync(homeA, { mode: 0o700 });
+		seedJournal(homeA, 12);
+		const paths = periodicPaths(homeA);
+		const result = await withHome(homeA, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(result.status, "ran");
+		assert.equal(result.storeWrite, "added");
+		assert.equal(result.receipt, true);
+		const receiptFiles = readdirSync(paths.receipts);
+		assert.equal(receiptFiles.length, 1);
+		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, receiptFiles[0]), "utf8"));
+		assert.equal(receipt.schema, "gjc.rrsi.periodic.run.v1");
+		assert.equal(receipt.trigger, "session_start");
+		assert.equal(receipt.status, "ran");
+		assert.equal(receipt.storeWrite, "added");
+		assert.equal(receipt.mode, "inline");
+		assert.equal(receipt.persisted, true);
+		assert.match(receipt.projectionDigest, /^[0-9a-f]{64}$/);
+		const outcomes = readJournalOutcomes(homeA);
+		assert.equal(outcomes.length, 1);
+		assert.equal(outcomes[0].operation, "dream");
+		const stateBytes = readFileSync(paths.state, "utf8");
+		const second = await withHome(homeA, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(second.status, "skipped_due");
+		assert.equal(second.receipt, false);
+		assert.equal(second.journal, false);
+		assert.equal(readFileSync(paths.state, "utf8"), stateBytes, "skipped_due must not advance state");
+		assert.equal(readdirSync(paths.receipts).length, 1);
 	});
 
-	await check("generated surface is in sync with sources (rebuild is a no-op)", () => {
-		const target = path.join(plugin, "tools/rrsi.ts");
-		const before = readFileSync(target, "utf8");
-		const build = spawnSync(process.execPath, [path.join(plugin, "scripts/build.mjs")], { encoding: "utf8", timeout: 60000 });
-		assert.equal(build.status, 0, build.stderr);
-		assert.equal(readFileSync(target, "utf8"), before, "tools/rrsi.ts drifted");
+	await check("periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class", async () => {
+		const paths = periodicPaths(homeA);
+		const interval = 24 * 60 * 60 * 1000;
+		backdateState(homeA, interval + 60_000);
+		const storeBefore = readFileSync(paths.store, "utf8");
+		const unchanged = await withHome(homeA, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(unchanged.status, "unchanged");
+		assert.equal(unchanged.storeWrite, "unchanged");
+		assert.equal(readFileSync(paths.store, "utf8"), storeBefore, "unchanged content must not rewrite the store");
+		assert.equal(readdirSync(paths.receipts).length, 2);
+
+		seedJournal(homeA, 12, "seg-2.jsonl");
+		backdateState(homeA, interval + 60_000);
+		const replaced = await withHome(homeA, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(replaced.status, "ran");
+		assert.equal(replaced.storeWrite, "replaced");
+		let store = JSON.parse(readFileSync(paths.store, "utf8"));
+		assert.equal(store.episodes.filter((episode) => episode.source === "jev-journal").length, 1, "one slot per source class");
+		assert.equal(store.episodes.filter((episode) => episode.id.startsWith("ep-jev-")).length, 1);
+
+		store.episodes.push({ id: "ep-legacy-clock", source: "jev-journal", goal: "legacy manual import", createdAt: new Date().toISOString(), attempts: [{ index: 0, objective: "legacy", hypothesisNovelty: true, decision: "reject", wallMs: 1, guardFailures: [], budgetRung: 0, files: 0, hunks: 0 }] });
+		store.episodes.push({ id: "ep-user-capture", source: "capture", goal: "user capture must survive", createdAt: new Date().toISOString(), attempts: [{ index: 0, objective: "user", hypothesisNovelty: true, decision: "reject", wallMs: 1, guardFailures: [], budgetRung: 0, files: 0, hunks: 0 }] });
+		writeFileSync(paths.store, `${JSON.stringify(store, null, 2)}\n`);
+		backdateState(homeA, interval + 60_000);
+		const closure = await withHome(homeA, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(closure.storeWrite, "replaced");
+		store = JSON.parse(readFileSync(paths.store, "utf8"));
+		assert.equal(store.episodes.some((episode) => episode.id === "ep-legacy-clock"), false, "legacy clock-seeded episodes are superseded as a class");
+		assert.equal(store.episodes.some((episode) => episode.id === "ep-user-capture"), true, "user captures are never selected by the filter");
+	});
+
+	await check("periodic: disabled consumes nothing, interval override fires per override, backoff is honored", async () => {
+		const paths = periodicPaths(homeA);
+		const stateBytes = readFileSync(paths.state, "utf8");
+		const disabled = await withHome(homeA, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC: "off" }, mode: "inline" }));
+		assert.equal(disabled.status, "skipped_disabled");
+		assert.equal(disabled.receipt, false);
+		assert.equal(readFileSync(paths.state, "utf8"), stateBytes, "disabled must not consume the interval");
+
+		const homeD = path.join(root, "periodic-home-d");
+		mkdirSync(homeD, { mode: 0o700 });
+		seedJournal(homeD, 12);
+		const pathsD = periodicPaths(homeD);
+		const override = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
+		assert.equal(override.status, "ran");
+		const stateD = JSON.parse(readFileSync(pathsD.state, "utf8"));
+		assert.equal(stateD.intervalMs, 60000);
+		const receiptD = JSON.parse(readFileSync(path.join(pathsD.receipts, readdirSync(pathsD.receipts)[0]), "utf8"));
+		assert.equal(receiptD.limits.intervalMs, 24 * 60 * 60 * 1000, "applied-limits block keeps the built-in default; state carries the override");
+		backdateState(homeD, 61_000);
+		const refire = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
+		assert.equal(refire.status, "unchanged");
+
+		const backoffState = JSON.parse(readFileSync(pathsD.state, "utf8"));
+		backoffState.lastAttemptAt = new Date(Date.now() - 10 * 60 * 60 * 1000).toISOString();
+		backoffState.nextRetryAt = new Date(Date.now() + 60_000).toISOString();
+		writeFileSync(pathsD.state, `${JSON.stringify(backoffState, null, 2)}\n`);
+		const backoff = await withHome(homeD, () => hookModule.runPeriodic({ env: { ...process.env, RRSI_PERIODIC_INTERVAL_MS: "60000" }, mode: "inline" }));
+		assert.equal(backoff.status, "skipped_due");
+		assert.equal(backoff.reason, "backoff");
+	});
+
+	await check("periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)", async () => {
+		const homeE = path.join(root, "periodic-home-e");
+		mkdirSync(homeE, { mode: 0o700 });
+		seedJournal(homeE, 12);
+		const paths = periodicPaths(homeE);
+		mkdirSync(paths.root, { recursive: true, mode: 0o700 });
+		writeFileSync(path.join(paths.root, "periodic.lock"), JSON.stringify({ pid: 999_999, startedAt: new Date().toISOString() }));
+		const locked = await withHome(homeE, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(locked.status, "skipped_locked");
+		assert.equal(locked.receipt, false);
+		assert.equal(existsSync(paths.state), false, "skipped_locked writes no state");
+		const old = new Date(Date.now() - 10 * 60 * 1000);
+		utimesSync(path.join(paths.root, "periodic.lock"), old, old);
+		const takeover = await withHome(homeE, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(takeover.status, "ran");
+		assert.equal(existsSync(path.join(paths.root, "periodic.lock")), false, "the stale lock is removed and released");
+
+		writeFileSync(path.join(paths.root, "store.lock"), JSON.stringify({ pid: 999_999, startedAt: new Date().toISOString() }));
+		const busy = await withHome(homeE, () => call({ action: "capture", goal: "busy probe", attempts: "[]" }));
+		assert.equal(busy.wrote.persisted, false);
+		assert.equal(busy.wrote.reason, "store_busy");
+		utimesSync(path.join(paths.root, "store.lock"), old, old);
+		const reclaimed = await withHome(homeE, () => call({ action: "capture", goal: "reclaimed probe", attempts: "[]" }));
+		assert.equal(reclaimed.wrote.persisted, true);
+		assert.equal(existsSync(path.join(paths.root, "store.lock")), false);
+	});
+
+	await check("periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes", async () => {
+		const homeF = path.join(root, "periodic-home-f");
+		mkdirSync(homeF, { mode: 0o700 });
+		seedJournal(homeF, 12);
+		const paths = periodicPaths(homeF);
+		mkdirSync(paths.root, { recursive: true, mode: 0o700 });
+		writeFileSync(paths.store, "{not json");
+		const corrupt = await withHome(homeF, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(corrupt.status, "error");
+		assert.equal(corrupt.reason, "store_corrupt");
+		assert.equal(corrupt.receipt, false);
+		assert.equal(readFileSync(paths.store, "utf8"), "{not json", "a corrupt store is never reset");
+		const stateF = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(stateF.lastStatus, "error");
+		assert.equal(typeof stateF.nextRetryAt, "string");
+		backdateState(homeF, 25 * 60 * 60 * 1000);
+		writeFileSync(paths.store, "x".repeat(600 * 1024));
+		const oversized = await withHome(homeF, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(oversized.status, "error");
+		assert.equal(oversized.reason, "store_oversized");
+		assert.equal(readFileSync(paths.store, "utf8").length, 600 * 1024, "an oversized store is never touched");
+
+		const homeG = path.join(root, "periodic-home-g");
+		mkdirSync(homeG, { mode: 0o700 });
+		seedJournal(homeG, 40);
+		const pathsG = periodicPaths(homeG);
+		mkdirSync(pathsG.root, { recursive: true, mode: 0o700 });
+		const fillerAttempts = (base) => Array.from({ length: 40 }, (_, index) => ({ index, objective: `filler ${base}-${index}`, hypothesisNovelty: true, decision: "reject", wallMs: 5, guardFailures: [], budgetRung: 0, files: 0, hunks: 0, provenance: `p-${base}-${index}` }));
+		const capBytes = 512 * 1024;
+		let episodes = [];
+		for (let i = 0; i < 128; i += 1) {
+			const candidate = [...episodes, { id: `ep-fill-${i}`, source: "capture", goal: `filler ${i}`, createdAt: "2026-10-13T00:00:00.000Z", attempts: fillerAttempts(i) }];
+			const size = Buffer.byteLength(`${JSON.stringify({ schema: "gjc.rrsi.store.v1", updatedAt: "2026-10-13T00:00:00.000Z", episodes: candidate }, null, 2)}\n`, "utf8");
+			if (size > capBytes - 2048) break;
+			episodes = candidate;
+		}
+		const fixture = { schema: "gjc.rrsi.store.v1", updatedAt: "2026-10-13T00:00:00.000Z", episodes };
+		writeFileSync(pathsG.store, `${JSON.stringify(fixture, null, 2)}\n`);
+		const fixtureBytes = readFileSync(pathsG.store, "utf8");
+		const limited = await withHome(homeG, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(limited.status, "error");
+		assert.equal(limited.reason, "resource_limit");
+		assert.equal(limited.receipt, true, "the resource_limit path writes an error receipt");
+		assert.equal(readFileSync(pathsG.store, "utf8"), fixtureBytes, "never prune or repair");
+		const stateG = JSON.parse(readFileSync(pathsG.state, "utf8"));
+		assert.equal(stateG.storeWrite, "rejected");
+		assert.equal(stateG.lastReason, "resource_limit");
+	});
+
+	await check("periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)", async () => {
+		const homeH = path.join(root, "periodic-home-h");
+		mkdirSync(homeH, { mode: 0o700 });
+		const paths = periodicPaths(homeH);
+		const empty = await withHome(homeH, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(empty.status, "no_input");
+		assert.equal(empty.receipt, false);
+		const state = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.equal(state.lastStatus, "empty");
+		assert.equal(typeof state.nextRetryAt, "string");
+		assert.equal(existsSync(paths.store), false, "no_input writes no store");
+		assert.equal(existsSync(paths.receipts), false, "no_input writes no receipt");
+		assert.equal(readJournalOutcomes(homeH).length, 1);
+	});
+
+	await check("periodic: receipt retention prunes to the newest 60", async () => {
+		const homeI = path.join(root, "periodic-home-i");
+		mkdirSync(homeI, { mode: 0o700 });
+		seedJournal(homeI, 12);
+		const paths = periodicPaths(homeI);
+		mkdirSync(paths.receipts, { recursive: true, mode: 0o700 });
+		for (let i = 0; i < 65; i += 1) writeFileSync(path.join(paths.receipts, `seed-${String(i).padStart(3, "0")}.json`), "{}");
+		const result = await withHome(homeI, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(result.status, "ran");
+		const remaining = readdirSync(paths.receipts).sort();
+		assert.equal(remaining.length, 60);
+		assert.equal(remaining.some((name) => /-in-[0-9a-f]{6}\.json$/.test(name)), true, "the newest receipt survives");
+		assert.equal(existsSync(path.join(paths.receipts, "seed-000.json")), false, "the oldest receipt is pruned");
+	});
+
+	await check("periodic summary is exposed by the tool status and status stays read-only", async () => {
+		const paths = periodicPaths(homeA);
+		const before = readFileSync(paths.state, "utf8");
+		const status = await withHome(homeA, () => call({ action: "status" }));
+		assert.equal(status.periodic.lastStatus, "ran");
+		assert.equal(status.periodic.due, false);
+		assert.equal(status.periodic.receiptCount >= 3, true);
+		assert.equal(readFileSync(paths.state, "utf8"), before, "status must not mutate the periodic state");
+	});
+
+
+	await check("the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start", async () => {
+		for (const [label, source] of [["tool", generated], ["hook", hookSource]]) {
+			assert.equal(/fetch\s*\(/.test(source), false, `${label}: no fetch path`);
+			assert.equal(/process\.env\.[A-Za-z_]*(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/.test(source), false, `${label}: no credential environment reads`);
+			assert.equal(/require\(["']https?["']\)/.test(source), false, `${label}: no http client`);
+			assert.equal(/^import\s.*from\s+["']\.\.?\//m.test(source), false, `${label}: no local relative imports remain`);
+		}
+		const registrations = [];
+		const fakeApi = { on: (event, handler) => registrations.push([event, typeof handler]), logger: { warn: () => {} } };
+		hookModule.default(fakeApi);
+		assert.deepEqual(registrations, [["session_start", "function"]]);
+	});
+
+	await check("generated surfaces are in sync with sources (non-mutating --check drift gate)", () => {
+		const toolTarget = path.join(plugin, "tools/rrsi.ts");
+		const hookTarget = path.join(plugin, "hooks/rrsi-periodic.ts");
+		const toolBefore = readFileSync(toolTarget, "utf8");
+		const hookBefore = readFileSync(hookTarget, "utf8");
+		const build = spawnSync(process.execPath, [path.join(plugin, "scripts/build.mjs"), "--check"], { encoding: "utf8", timeout: 60000 });
+		assert.equal(build.status, 0, `${build.stderr}${build.stdout}`);
+		assert.match(build.stdout, /generated surfaces are in sync/);
+		assert.equal(readFileSync(toolTarget, "utf8"), toolBefore, "tools/rrsi.ts must not be mutated by --check");
+		assert.equal(readFileSync(hookTarget, "utf8"), hookBefore, "hooks/rrsi-periodic.ts must not be mutated by --check");
 	});
 
 	await check("the shared results registry accepts rrsi outcomes and rejects malformed ones", async () => {

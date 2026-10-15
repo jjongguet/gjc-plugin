@@ -10,6 +10,9 @@ All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJ
 | `verification-receipts/receipts/v1/<repository-digest>/<receipt-id>.json` | Shared immutable verification/UI storage envelopes: public receipt and private selected-input binding |
 | `verification-receipts/loop/v1/<repository-digest>/<session-digest>.json` | Per-session delegation-gate state (baselines, pending async launches, gates and resolutions). Writer-owned: a session writes only its own file and read-merges at most 16 other session files |
 | `<plugin>/journal/v1/` | Sanitized handled-outcome records, including run/status/manual/advice/observation failures and assessment/storage results |
+| `rrsi/periodic.json` | Bounded periodic-refresh state (last attempt/success, outcome, reason, backoff, projection digest, applied limits) |
+| `rrsi/runs/v1/<receiptId>.json` | Periodic run receipts; ≤ 64 KiB each, ≤ 60 retained, oldest pruned on write |
+| `rrsi/{periodic.lock,store.lock}` | Exclusive plugin-local locks for the periodic writer and for capture/import read-modify-write sequences |
 | `ui-regression/locks/` | Private owned browser-run coordination lock |
 
 Directories are owned `0700`; files are owned single-link regular `0600`. Symlinks, unsafe owners/modes, hard links and corrupt/unknown inventory fail closed without permission repair, lock stealing or legacy fallback. `JEV_ADVISOR_STATE` does not select the result path; a supplied value is ignored and reported as `state_override_ignored`, and is never recorded.
@@ -28,4 +31,4 @@ Responses separate observed execution, adequacy assessment, receipt/evidence sto
 
 Immutable receipt admission is bounded to **200 receipts / 2 MiB per repository / 32 KiB per complete envelope**. `count`, `bytes` and `nearCapacity` are returned when measurable; warning starts at 180 receipts or 90% bytes. `store_full` preserves history and does not advertise a rejected receipt as durable. The independent outcome journal can continue recording while receipts are full.
 
-Each plugin journal has **4 KiB records, 1 MiB segments and eight retained segments**, with a 100 ms lock-wait bound. Marker-bound rotation retires only validated owned closed segments. `rotated` and `retainedSegments` describe the retention boundary; indefinite history is not promised. Unknown files or interrupted/corrupt publication are not adopted or repaired automatically.
+Each plugin journal has **4 KiB records, 1 MiB segments and eight retained segments**, with a 100 ms lock-wait bound. Marker-bound rotation retires only validated owned closed segments. `rotated` and `retainedSegments` describe the retention boundary; indefinite history is not promised. Unknown files or interrupted/corrupt publication are not adopted or repaired automatically. `rrsi/periodic.json` is reported like the store (`missing`/`invalid`, never repaired) and `rrsi/runs/v1/` receipts are bounded to 60 files with oldest-first pruning.

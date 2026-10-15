@@ -29,14 +29,14 @@ Credentials stay outside the replaceable installation tree in `~/.gjc/agent/jev-
 | [`wiki`](wiki/) | Read-only lookup over the guarded personal wiki and pending-proposal submission. Never approves or publishes. | [README](wiki/README.md) |
 | [`rea`](rea/) | Offline `rea_readiness` report and the pinned workflow-skill payload for [REA](https://github.com/morluto/rea) (rea-agents 6.4.0); optional `gjc mcp add` registration for stateful sessions. | [README](rea/README.md) |
 | [`backplan`](backplan/) | `backplan_check` planning gate: validates a structured plan against the fixed contract and renders Linear-ready payloads plus a stable digest. Deterministic, keyless and offline. | [README](backplan/README.md) |
-| [`rrsi`](rrsi/) | Exploration-trace store and Dream-RSI replay surface (capture/import/dream/status), private store under `~/.gjc-plugin/rrsi/`. Instrument only: performance proof belongs to `self-improve/`. | [README](rrsi/README.md) |
+| [`rrsi`](rrsi/) | Exploration-trace store and Dream-RSI replay surface (capture/import/dream/status) with a due-gated `session_start` refresh, private store under `~/.gjc-plugin/rrsi/`. No timer process. Instrument only: performance proof belongs to `self-improve/`. | [README](rrsi/README.md) |
 | [`aside-memory`](aside-memory/) | Explicit account-bound Aside memory search (`aside_memory`) returning bounded historical quotations with relative citations. Read-only: no injection, writes, cache or extra model calls. | [README](aside-memory/README.md) |
 
 Measured attributes (tiers, counts, durations, journals) are descriptive observations, not quality, routing or causal proof.
 
 ## Usage
 
-Each plugin exposes one or two tools, plus session-start hooks for `verification-receipts`. Full contracts, limits and boundaries live in each plugin README.
+Each plugin exposes one or two tools, plus session-start hooks for `verification-receipts` and `rrsi`. Full contracts, limits and boundaries live in each plugin README.
 
 - **`jev_advise`** — task-scoped tier advice (shadow by default). **`jev_check`** — one bounded artifact check returning a strict `correct` / `incorrect` / `unsure` verdict; advisory only, never verification evidence. **`plugin_metrics`** — strictly read-only aggregate of retained journals; accepts exactly `{}`. Details: [`jev-advisor/README.md`](jev-advisor/README.md).
 - **`verification_run` / `verification_status`** — run explicit repository-relative `.js` / `.mjs` / `.cjs` test files (1–32; no globs or arbitrary commands) and read their private receipts with recomputed source freshness. **`verification_loop`** — bounded (≤15s, offline) recheck of the post-delegation verification ledger; `clean` is a mechanical recheck, not proof of correctness. Details: [`verification-receipts/README.md`](verification-receipts/README.md).
@@ -44,7 +44,7 @@ Each plugin exposes one or two tools, plus session-start hooks for `verification
 - **`wiki_query` / `wiki_propose`** — read-only search over canonical wiki pages; capture an owner-approved source and submit draft pages as a pending proposal with an exact digest. Publication stays a human step outside the plugin. Details: [`wiki/README.md`](wiki/README.md).
 - **`rea_readiness`** — offline readiness report for the pinned REA integration (Node/npx or Bun/bunx availability, optional MCP registration state, loose-skill payload). Details: [`rea/README.md`](rea/README.md).
 - **`backplan_check`** — validates one backward-derived work plan (end state, success criteria, per-issue scope, Linear mapping, policy decisions, automation candidates) and renders Linear-ready payloads. Registration stays with the agent's Linear path. Details: [`backplan/README.md`](backplan/README.md).
-- **`rrsi`** — capture / import / dream / status over the private exploration store. Keyless and offline. Details: [`rrsi/README.md`](rrsi/README.md).
+- **`rrsi`** — capture / import / dream / status over the private exploration store, plus a due-gated `session_start` refresh (no timer process; large corpora complete through a detached worker). Keyless and offline. Details: [`rrsi/README.md`](rrsi/README.md).
 - **`aside_memory`** — explicit account-bound Aside memory search (`{query, account?, max_results?}`) returning bounded quotations with relative citations, screened states (`ok` / `empty` / `withheld` / `unavailable` / `error`) and trust warnings. Details: [`aside-memory/README.md`](aside-memory/README.md).
 
 Both verification tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured; missing or weak context never establishes sufficient verification. No automatic repairs are added.
