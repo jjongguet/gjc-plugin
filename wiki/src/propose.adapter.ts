@@ -3,8 +3,9 @@ import { appendPluginOutcome } from "../../shared/lib/results";
 import { WIKI_PAGE_PATH, WIKI_SOURCE_ID, WIKI_TEXT_LIMIT, wikiProposeRun } from "../lib/wiki";
 
 // Capture one owner-approved source and submit draft pages as a pending
-// proposal. Never approves, never publishes: the returned digest exists so a
-// human can approve that exact digest via wiki.py on the configured writer.
+// proposal. Never approves, never publishes: the returned digest exists so the
+// writer can act on that exact digest via wiki.py — after a per-digest human
+// approval, or under the owner standing approval recorded in REVIEW.md.
 const WIKI_MAX_PAGES = 8;
 const WIKI_MAX_TITLE = 200;
 
@@ -14,7 +15,7 @@ export default function wikiPropose(pi: {
 	return {
 		name: "wiki_propose",
 		label: "Wiki Propose",
-		description: "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest for human approval. This tool never approves or publishes — publication happens only after the human approves that digest via wiki.py on the configured writer. Owner-approved personal/public inputs only; employer sources are refused.",
+		description: "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest. This tool never approves or publishes — publication happens on the configured writer via wiki.py — after a per-digest human approval, or under the owner standing approval recorded in the wiki's REVIEW.md. Owner-approved personal/public inputs only; employer sources are refused.",
 		parameters: pi.typebox.Type.Object({
 			id: pi.typebox.Type.String({ description: "Stable lowercase source id (letters, digits, hyphens), e.g. 'jev-advisor-efficacy-20261008'" }),
 			title: pi.typebox.Type.String({ description: "Human-readable source title" }),
@@ -67,7 +68,7 @@ export default function wikiPropose(pi: {
 				changes: changes as Record<string, string>,
 			});
 			if (result.status !== "submitted") return finish(`wiki_propose: ${result.stage} failed (${result.reason}) — ${result.stderr || "no stderr"}`, true, { status: "failed", reason: result.reason === "timeout" ? "timeout" : "runtime_error" });
-			return finish(`wiki_propose: submitted. digest=${result.digest}\nPending until the human approves this exact digest via wiki.py approve; this tool cannot publish.`, false, { status: "passed", reason: "complete" });
+			return finish(`wiki_propose: submitted. digest=${result.digest}\nPending until the writer's approval evidence covers this exact digest (per-digest human approval, or the owner standing approval in REVIEW.md); this tool cannot publish.`, false, { status: "passed", reason: "complete" });
 		},
 	};
 }

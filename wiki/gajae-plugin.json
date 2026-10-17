@@ -11,7 +11,7 @@
 		{
 			"name": "wiki_propose",
 			"path": "tools/wiki-propose.ts",
-			"description": "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest for human approval. Never approves or publishes: publication happens only after the human approves that digest via wiki.py on the configured writer."
+			"description": "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest. Never approves or publishes: publication happens on the configured writer via wiki.py — after a per-digest human approval, or under the owner standing approval recorded in the wiki's REVIEW.md."
 		}
 	]
 }
