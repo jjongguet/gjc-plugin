@@ -83,8 +83,12 @@ class GateTests(unittest.TestCase):
     def test_deterministic_bad_and_good_fixtures(self):
         cfg = dict(gate.DEFAULTS)
         for path in sorted((HERE / "fixtures" / "precision" / "bad").glob("*.txt")):
+            if path.name.startswith("._"):
+                continue
             self.assertIsNotNone(gate.deterministic_hold(path.read_text(encoding="utf-8"), cfg), path.name)
         for path in sorted((HERE / "fixtures" / "precision" / "good").glob("*.txt")):
+            if path.name.startswith("._"):
+                continue
             self.assertIsNone(gate.deterministic_hold(path.read_text(encoding="utf-8"), cfg), path.name)
 
     def test_prepare_check_normalization_and_oversize(self):
@@ -129,6 +133,8 @@ class GateTests(unittest.TestCase):
         receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
         self.assertNotIn("I stopped retrying", receipts)
         self.assertIn("artifact_sha256", receipts)
+        self.assertIn('"alert_type": "job_notice"', receipts)
+        self.assertIn('"alert_delivery": "replacement"', receipts)
 
     def test_allow_returns_none(self):
         result = gate.handle_turn(GOOD, execution(), config_path=self.config, check_fn=lambda q, a, c, k: {"status": "decision", "verdict": "correct", "confidence": 0.9})
@@ -162,6 +168,9 @@ class GateTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(self.alerts), 1)
         self.assertIn("unconfigured", self.alerts[0])
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
+        self.assertIn('"alert_type": "home"', receipts)
+        self.assertIn('"alert_delivery": "sent"', receipts)
 
     def test_manual_direct_run_does_not_consume_retry(self):
         gate.handle_turn(ABORT, execution(), config_path=self.config)
@@ -173,6 +182,12 @@ class GateTests(unittest.TestCase):
         self.assertEqual(after["attempt"], before["attempt"])
         receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
         self.assertTrue(any('"join_status": "manual"' in line for line in receipts))
+
+    def test_manual_hold_notice_does_not_claim_retry(self):
+        result = gate.handle_turn(ABORT, execution(source="direct", execution_id="exec-manual"), config_path=self.config)
+        self.assertIsNotNone(result)
+        self.assertIn("No replacement was requested for this manual run", result)
+        self.assertNotIn("A replacement generation was requested", result)
 
     def test_force_fixture_requires_guard_and_records_receipt(self):
         self.write_config(force_fixture="abort_217")

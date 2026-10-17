@@ -1,7 +1,7 @@
 # jev-gate — Hermes cron pre-delivery gate
 
-A Python 3.9+ standard-library Hermes plugin. It registers one
-`transform_llm_output` hook and evaluates final cron output before delivery:
+A Python 3.9+ standard-library Hermes plugin (`__init__.py` entry point). It
+registers one `transform_llm_output` hook and evaluates final cron output before delivery:
 
 1. deterministic detection of empty/abort/truncated output;
 2. a strict, bounded JEV check (`typesafe/jev-1.13` through OpenRouter);
@@ -17,7 +17,7 @@ The plugin lives at `integrations/hermes/jev-gate/` in this repository and is
 copied to the Hermes host:
 
 ```sh
-tar -C integrations/hermes -czf - jev-gate \
+COPYFILE_DISABLE=1 tar -C integrations/hermes -czf - jev-gate \
   | ssh gw-kmg 'mkdir -p ~/.hermes/plugins && tar -xzf - -C ~/.hermes/plugins'
 ssh gw-kmg '~/.hermes/plugins/jev-gate/install.sh --install'
 ```

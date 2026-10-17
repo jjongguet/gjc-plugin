@@ -429,9 +429,14 @@ def _clear_marker(profile: str, job_id: str):
 # -------------------------------------------------------------------- notices
 
 
-def _notice(job_name: str, job_id: str, attempt: int, max_attempts: int, stage: str, reason: str, sha: str, chars: int, exhausted: bool = False) -> str:
+def _notice(job_name: str, job_id: str, attempt: int, max_attempts: int, stage: str, reason: str, sha: str, chars: int, exhausted: bool = False, retry_requested: bool = True) -> str:
     state = "exhausted" if exhausted else "held"
-    tail = "Retry budget exhausted; no replacement was sent." if exhausted else "A replacement generation was requested."
+    if exhausted:
+        tail = "Retry budget exhausted; no replacement was sent."
+    elif retry_requested:
+        tail = "A replacement generation was requested."
+    else:
+        tail = "No replacement was requested for this manual run."
     return (
         f"JEV gate {state} this cron output: job={job_name} ({job_id}), attempt={attempt}/{max_attempts}, "
         f"stage={stage}, reason={reason}, artifact_sha={sha[:12]}, chars={chars}. "
@@ -559,12 +564,17 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
     lock_fd = _acquire(lock_path)
     if lock_fd is None:
         decision = _evaluate(job_id, text, cfg, check_fn)
-        receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable")
+        if decision["decision"] == "hold":
+            alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
+        elif decision.get("gate_alert"):
+            alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
+            alert_delivery = _send_home_alert(_notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+        else:
+            alert_type = alert_target = alert_delivery = None
+        receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable", alert_type=alert_type, alert_target=alert_target, alert_delivery=alert_delivery)
         append_receipt(profile, job_id, receipt)
         if decision["decision"] == "hold":
-            return _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"])
-        if decision.get("gate_alert"):
-            _send_home_alert(_notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+            return _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], retry_requested=False)
         return None
 
     try:
@@ -662,10 +672,17 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
 
     lock_fd = _acquire(lock_path)
     if lock_fd is None:
-        receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable")
+        if decision["decision"] == "hold":
+            alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
+        elif decision.get("gate_alert"):
+            alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
+            alert_delivery = _send_home_alert(_notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+        else:
+            alert_type = alert_target = alert_delivery = None
+        receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable", alert_type=alert_type, alert_target=alert_target, alert_delivery=alert_delivery)
         append_receipt(profile, job_id, receipt)
         if decision["decision"] == "hold":
-            return _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"])
+            return _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], retry_requested=False)
         return None
     try:
         state = load_state(state_path)
@@ -699,7 +716,7 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
             replacement = None
         elif hold:
             if manual:
-                replacement = _notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"])
+                replacement = _notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], retry_requested=False)
                 if pending:
                     pending["last_manual_at"] = now
                 else:
@@ -744,6 +761,13 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
     finally:
         _release(lock_fd)
 
+    if hold:
+        alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
+    elif decision.get("gate_alert"):
+        alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
+        alert_delivery = _send_home_alert(_notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+    else:
+        alert_type = alert_target = alert_delivery = None
     receipt = _receipt(
         cfg,
         execution,
@@ -757,14 +781,15 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
         exhausted=exhausted,
         lock_status="ok",
         forced_fixture=forced_fixture,
+        alert_type=alert_type,
+        alert_target=alert_target,
+        alert_delivery=alert_delivery,
     )
     append_receipt(profile, job_id, receipt)
-    if decision.get("gate_alert") and not hold:
-        _send_home_alert(_notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
     return replacement
 
 
-def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, stage, join_status="new", enqueue_status="not_requested", exhausted=False, lock_status="ok", forced_fixture=None):
+def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, stage, join_status="new", enqueue_status="not_requested", exhausted=False, lock_status="ok", forced_fixture=None, alert_type=None, alert_target=None, alert_delivery=None):
     return {
         "schema": SCHEMA_RECEIPT,
         "observed_at": _now(),
@@ -796,6 +821,9 @@ def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, s
         "enqueue_status": enqueue_status,
         "lock_status": lock_status,
         "gate_alert": bool(decision.get("gate_alert")),
+        "alert_type": alert_type,
+        "alert_target": alert_target,
+        "alert_delivery": alert_delivery,
         "http_status": decision.get("http_status"),
         "forced_fixture": forced_fixture,
     }
@@ -879,7 +907,8 @@ def retry_helper(job_id: str, execution_id: str, profile: str, config_path: Path
 
 
 def _read_fixture_dir(path: Path):
-    return sorted(p for p in path.glob("*.txt") if p.is_file())
+    # macOS tar can add AppleDouble ._* siblings; they are not fixtures.
+    return sorted(p for p in path.glob("*.txt") if p.is_file() and not p.name.startswith("._"))
 
 
 def self_test(config_path=None) -> int:

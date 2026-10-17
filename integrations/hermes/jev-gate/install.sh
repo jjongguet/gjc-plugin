@@ -17,7 +17,7 @@ check() {
   python3 - "$HERE" <<'PY'
 import sys, pathlib
 here = pathlib.Path(sys.argv[1])
-required = ["plugin.yaml", "plugin.py", "gate.py", "config.example.json", "README.md"]
+required = ["plugin.yaml", "__init__.py", "gate.py", "config.example.json", "README.md"]
 missing = [name for name in required if not (here / name).exists()]
 if missing:
     print("missing: " + ", ".join(missing), file=sys.stderr); sys.exit(1)
@@ -31,7 +31,7 @@ PY
   else
     echo "config absent: $CONFIG (install will copy config.example.json)"
   fi
-  shasum -a 256 "$HERE/gate.py" "$HERE/plugin.py" 2>/dev/null || sha256sum "$HERE/gate.py" "$HERE/plugin.py"
+  shasum -a 256 "$HERE/gate.py" "$HERE/__init__.py" 2>/dev/null || sha256sum "$HERE/gate.py" "$HERE/__init__.py"
 }
 
 install_config() {
