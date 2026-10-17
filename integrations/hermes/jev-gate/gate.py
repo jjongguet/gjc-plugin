@@ -58,6 +58,7 @@ DEFAULTS = {
     "timeout_ms": 8000,
     "abort_patterns": DEFAULT_ABORT_PATTERNS,
     "allow_force_fixture": False,
+    "force_fixture": None,
     "alert_cooldown_ms": 3600000,
 }
 
@@ -147,6 +148,12 @@ def load_config(path=None) -> dict:
             raise GateError(f"invalid abort pattern: {exc}") from None
     if not isinstance(cfg["allow_force_fixture"], bool):
         raise GateError("allow_force_fixture must be a boolean")
+    forced = cfg.get("force_fixture")
+    if forced is not None:
+        if not isinstance(forced, str) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,64}", forced):
+            raise GateError("force_fixture must be a fixture name")
+        if not cfg["allow_force_fixture"]:
+            raise GateError("force_fixture requires allow_force_fixture=true")
     for job_id in cfg["allowlist"]:
         if job_id not in cfg["questions"]:
             raise GateError(f"missing question for allowlisted job {job_id}")
@@ -538,6 +545,14 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
     if cfg["mode"] == "off" or job_id not in cfg["allowlist"]:
         return None
     now = now if now is not None else _now()
+    forced_fixture = None
+    forced = cfg.get("force_fixture")
+    if forced:
+        fixture = Path(__file__).resolve().parent / "fixtures" / "precision" / "bad" / f"{forced}.txt"
+        if not fixture.exists():
+            raise GateError(f"force_fixture not found: {forced}")
+        text = fixture.read_text(encoding="utf-8")
+        forced_fixture = forced
     base, state_path, lock_path, _ = _paths(profile)
     _ensure_dir(base)
 
@@ -741,6 +756,7 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
         enqueue_status=enqueue_status,
         exhausted=exhausted,
         lock_status="ok",
+        forced_fixture=forced_fixture,
     )
     append_receipt(profile, job_id, receipt)
     if decision.get("gate_alert") and not hold:
@@ -748,7 +764,7 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
     return replacement
 
 
-def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, stage, join_status="new", enqueue_status="not_requested", exhausted=False, lock_status="ok"):
+def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, stage, join_status="new", enqueue_status="not_requested", exhausted=False, lock_status="ok", forced_fixture=None):
     return {
         "schema": SCHEMA_RECEIPT,
         "observed_at": _now(),
@@ -781,6 +797,7 @@ def _receipt(cfg, execution, decision, *, attempt, max_attempts, run_group_id, s
         "lock_status": lock_status,
         "gate_alert": bool(decision.get("gate_alert")),
         "http_status": decision.get("http_status"),
+        "forced_fixture": forced_fixture,
     }
 
 

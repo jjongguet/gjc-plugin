@@ -52,6 +52,7 @@ receipts: `~/.hermes/plugins/jev-gate-data/<profile>/` (0700; files 0600).
 | `timeout_ms` | `8000` | provider timeout |
 | `abort_patterns` | see example | first-line deterministic patterns |
 | `allow_force_fixture` | `false` | allow `force_fixture` only in self-test/canary |
+| `force_fixture` | `null` | canary-only fixture name under `fixtures/precision/bad/`; requires the guard |
 
 Only enabled assistant-output jobs are gated. In the current host, the agent
 jobs are `e7298ea4d715`, `840f05bef0a4`, `ca1ed67badbb`; the `no_agent` script

@@ -174,6 +174,17 @@ class GateTests(unittest.TestCase):
         receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
         self.assertTrue(any('"join_status": "manual"' in line for line in receipts))
 
+    def test_force_fixture_requires_guard_and_records_receipt(self):
+        self.write_config(force_fixture="abort_217")
+        with self.assertRaises(gate.GateError):
+            gate.load_config(self.config)
+        self.write_config(force_fixture="abort_217", allow_force_fixture=True, max_attempts=1)
+        result = gate.handle_turn(GOOD, execution(), config_path=self.config)
+        self.assertIsNotNone(result)
+        self.assertIn("exhausted", result)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
+        self.assertIn('"forced_fixture": "abort_217"', receipts)
+
     def test_exhausted_budget(self):
         self.write_config(max_attempts=1)
         result = gate.handle_turn(ABORT, execution(), config_path=self.config)
