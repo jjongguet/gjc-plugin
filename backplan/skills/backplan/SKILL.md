@@ -37,16 +37,23 @@ the workspace rule forbids tickets for those. Preserve the request verbatim in
    per-issue checks live in `completion_criteria`.
 3. **Backward decomposition.** From the end state, what must exist immediately
    before it? Recurse until each leaf is an independently completable,
-   verifiable result — that leaf is an issue. Stop when an item can be
-   finished and checked in one session.
+   verifiable result — that leaf is an issue. A leaf that only makes sense as
+   a step of a parent issue is a sub-issue (`parentId`) instead; mechanical
+   file/command-level steps stay checklists. Stop when an item can be finished
+   and checked in one session.
 4. **Brownfield (역공학).** When the target already exists, measure it first:
    repo/branch/deployment state, current behavior, receipts. Derive from
    artifacts, reuse first, do not rebuild what already works.
-5. **Project mapping.** Every issue belongs to a project. Reuse the closest
-   active project for the product/track (Linear `list_projects`, reuse-first);
-   create a new project only when this is a finite, end-able goal. A one-off
-   fix still attaches to the track's project — orphan tickets are not created.
-   `project.reason` records why this mapping is correct.
+5. **Project mapping.** Every issue belongs to a project. One standing
+   project per topic (product/repo/area): reuse it for all later work, and
+   when a topic's work returns after its project completed, reopen that
+   project instead of spawning a sibling. Create a project only for (a) a
+   topic's first registration, or (b) a finite goal spanning several topics.
+   Never one project per task or session; orphan tickets are not created.
+   Before creating an issue, search the topic for similar ones and link
+   similar/prerequisite/duplicate issues via relations
+   (`relatedTo`/`blocks`/`blockedBy`/`duplicateOf`) — no unlinked drifting
+   issues. `project.reason` records why this mapping is correct.
 6. **Policy decisions.** What must be decided before or during, and where is
    the decision recorded (project description, rule file, ADR)?
    `needs_user_decision: true` only when the choice materially changes
@@ -127,7 +134,7 @@ plan says). `backplan_check: invalid` → do not register anything; fix all
 ## Anti-patterns
 
 - Starting work before the ticket exists ("기록은 나중에" — there is no later).
-- Orphan issues, or a new project per small fix.
+- Orphan issues, or a new project per task, session, or small fix.
 - Completion criteria that cannot be checked.
 - Automation quietly folded into current scope.
 - Paraphrasing the request so scope shifts without a `scope-change`.
