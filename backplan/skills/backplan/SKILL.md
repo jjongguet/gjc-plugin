@@ -43,7 +43,9 @@ the workspace rule forbids tickets for those. Preserve the request verbatim in
    and checked in one session.
 4. **Brownfield (역공학).** When the target already exists, measure it first:
    repo/branch/deployment state, current behavior, receipts. Derive from
-   artifacts, reuse first, do not rebuild what already works.
+   artifacts, reuse first, do not rebuild what already works. For shipped
+   artifacts, the measuring instrument is REA — see "Brownfield measurement
+   with REA" below.
 5. **Project mapping.** Every issue belongs to a project. One standing
    project per topic (product/repo/area): reuse it for all later work, and
    when a topic's work returns after its project completed, reopen that
@@ -62,6 +64,23 @@ the workspace rule forbids tickets for those. Preserve the request verbatim in
    recorded as `backlog`/`out_of_scope`. Never silently pull automation into
    current scope: promote it to a real issue only with explicit scope and
    approval.
+
+## Brownfield measurement with REA
+
+When the target already exists as a shipped artifact — native binary, app or
+Electron/JavaScript bundle, website runtime, HAR capture, APK, firmware —
+measure it with REA through the `rea` skill (`npx -y rea-agents@6.4.0`)
+instead of guessing what source availability cannot establish:
+
+- Cite the saved report path and its evidence ids in the issue `context`.
+- Turn REA unknowns (`record_unknown`) into `policy_decisions` — they are the
+  plan's open questions, each naming the authority still required to close
+  it.
+- Phrase completion criteria as declared finite claims (the
+  `verify_reconstruction` shape): a pass covers only the declared comparable
+  claims, never global equivalence.
+- Missing coverage is unknown, not absence — never write a criterion that
+  depends on an absence a limited read cannot establish.
 
 ## Register, then execute
 

@@ -79,6 +79,35 @@ setup steps before every investigation.
 - Runtime actions stay within the user's requested target and scope; the
   workspace authorization boundaries still apply.
 
+## Carry the evidence onward (wiki, backplan, rrsi)
+
+A finished investigation is durable evidence — three documented destinations,
+none of them automatic:
+
+- **Wiki capture (personal wiki).** Save the report (`--format md`, or the
+  CLI JSON) beside the investigation artifacts, then submit it as a pending
+  proposal with `wiki_propose`: source text = a short header note (date,
+  target version or SHA-256, pinned CLI, scope) plus the report body; one
+  draft page (`concepts/<target>-<feature>.md`, or `entities/<target>.md` for
+  a tool inventory) that keeps evidence ids, limitations and unknowns, citing
+  `[[_raw/<capture-id>/original]]`. Approval and publication stay with the
+  human — never approve your own capture. Capture only owner-authorized
+  targets; never employer-confidential material.
+- **Plan input (backplan).** When a plan will reconstruct or extend a
+  measured target, cite the report path and evidence ids in the issue
+  `context`, turn unresolved REA unknowns into `policy_decisions`, phrase
+  completion criteria as declared finite claims (the `verify_reconstruction`
+  shape, never global equivalence), and grade the draft with
+  `backplan_check` before registering.
+- **rrsi trace.** Capture a bounded episode when the investigation is worth
+  remembering (`rrsi` `capture`): per attempt, `objective` = the question
+  asked, `decision` = the route/detail choice made (first command, summary vs
+  full, export vs inline), `hypothesisNovelty` = new question vs repeat,
+  `guardFailures` = blocker classes seen (resource_constraint, truncated
+  preview, missing provider), `wallMs` = rough duration. `dream` replays
+  ranked investigation policies off-policy — descriptive evidence, not
+  performance proof.
+
 ## Readiness and recovery
 
 1. `rea_readiness` (from the `rea` gjc-plugin) gives the offline report:
