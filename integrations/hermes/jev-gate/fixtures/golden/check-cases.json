@@ -1,0 +1,60 @@
+[
+  {
+    "name": "valid_correct",
+    "question": "Does the artifact contain three dated items with links?",
+    "artifact": "2026-10-17 item A https://example.com/a; 2026-10-16 item B https://example.com/b; 2026-10-15 item C https://example.com/c",
+    "response": {
+      "answers": {
+        "check": {
+          "choice": "correct",
+          "confidence": 0.86,
+          "probabilities": {"correct": 0.86, "incorrect": 0.14, "unsure": 0.0}
+        }
+      }
+    },
+    "expected": {"status": "decision", "verdict": "correct", "confidence": 0.86}
+  },
+  {
+    "name": "abort_incorrect",
+    "question": "Does the artifact contain three dated items with links?",
+    "artifact": "I stopped retrying because the terminal kept failing.",
+    "response": {
+      "answers": {
+        "check": {
+          "choice": "incorrect",
+          "confidence": 0.98,
+          "probabilities": {"correct": 0.0, "incorrect": 0.99, "unsure": 0.01}
+        }
+      }
+    },
+    "expected": {"status": "decision", "verdict": "incorrect", "confidence": 0.98}
+  },
+  {
+    "name": "bad_probability_sum",
+    "question": "Does the artifact contain three dated items with links?",
+    "artifact": "A short artifact.",
+    "response": {
+      "answers": {
+        "check": {
+          "choice": "correct",
+          "confidence": 0.5,
+          "probabilities": {"correct": 0.5, "incorrect": 0.5, "unsure": 1.0}
+        }
+      }
+    },
+    "expected": {"status": "no_decision", "reason": "invalid_response"}
+  },
+  {
+    "name": "missing_answers",
+    "question": "Does the artifact contain three dated items with links?",
+    "artifact": "A short artifact.",
+    "response": {},
+    "expected": {"status": "no_decision", "reason": "invalid_response"}
+  },
+  {
+    "name": "oversize",
+    "question": "Does the artifact contain three dated items with links?",
+    "artifact_oversize": true,
+    "expected": {"status": "no_decision", "reason": "input_too_large"}
+  }
+]

@@ -299,8 +299,15 @@ async function runSuite(root: string) {
 			env({ JEV_ADVISOR_MODE: "enforce", JEV_ADVISOR_MIN_CONFIDENCE: "0.9" }); responder = () => system(decision("balanced", variant === "low" ? 0.89 : 0.9));
 			const b: any = batch([variant === "oversize" ? "x".repeat(5000) : "work"], [variant === "over" ? "strong" : "fast"]);
 			if (variant === "missing") delete b.tasks[0].tier;
-			assert.equal(await hook(preModule)(call("edge", b), context()), undefined);
-			if (variant === "oversize") assert.equal(records()[0].advice.reason, "input_too_large");
+			const widget: string[] = [];
+			const ctx = { ...context(), ui: { notify() {}, setWidget: (_: string, rows: string[]) => widget.push(rows.join("\n")) } };
+			const beforeFetch = fetchCalls;
+			assert.equal(await hook(preModule)(call("edge", b), ctx), undefined);
+			if (variant === "oversize") {
+				assert.equal(records()[0].advice.reason, "input_too_large");
+				assert.equal(fetchCalls, beforeFetch, "oversize makes no provider call");
+				assert.match(widget.join("\n"), /input_too_large: \d+ > 4000 chars/, widget.join("\n"));
+			}
 		}
 	});
 	await check("cooldown first-zero/exact boundary/failed reservation and deadline", async () => {

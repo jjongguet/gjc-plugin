@@ -1,0 +1,34 @@
+{
+  "mode": "off",
+  "allowlist": [
+    "e7298ea4d715",
+    "840f05bef0a4",
+    "ca1ed67badbb"
+  ],
+  "questions": {
+    "e7298ea4d715": "Does this daily technology digest contain concrete, dated items with source links and no abort/retry/empty placeholder?",
+    "840f05bef0a4": "Does this weekly startup signals brief contain dated, sourced investment or growth signals with concrete names?",
+    "ca1ed67badbb": "Does this startup daily analysis contain the requested sections with concrete, sourced evidence?"
+  },
+  "channels": {
+    "e7298ea4d715": "1557970957585481838",
+    "840f05bef0a4": "1557970957585481838",
+    "ca1ed67badbb": "1557970957585481838"
+  },
+  "home_channel": "1557381856909988001",
+  "max_attempts": 3,
+  "wall_clock_ms": 900000,
+  "hold_confidence": 0.9,
+  "max_artifact_chars": 4000,
+  "timeout_ms": 8000,
+  "alert_cooldown_ms": 3600000,
+  "allow_force_fixture": false,
+  "abort_patterns": [
+    "^\\s*i stopped retrying\\b",
+    "^\\s*\\[CRON_FAILURE\\]",
+    "^\\s*error:",
+    "^\\s*traceback \\(most recent call last\\)",
+    "^\\s*failed to produce\\b",
+    "^\\s*gave up\\b"
+  ]
+}

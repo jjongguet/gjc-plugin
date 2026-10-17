@@ -1,0 +1,16 @@
+# Weekly Startup Signals - 2026-10-12 (KST)
+
+Observed window: October 5-12, 2026.
+
+## Y Combinator
+- Two new Launch posts focused on agent memory and evaluation. Sources: https://www.ycombinator.com/launches (2026-10-08, 2026-10-10)
+- One batch company published a developer tool for deterministic replay of agent runs. Source: https://www.ycombinator.com/companies (2026-10-09)
+
+## a16z speedrun
+- SR008 applications opened with a stated focus on AI-native consumer and enterprise tools. Source: https://a16z.com/applications-for-a16z-speedrun-sr008-are-now-open/ (2026-10-10)
+- A portfolio company announced a seed extension; the public post did not disclose the round size. Source: https://a16z.com (2026-10-07)
+
+## Market signals
+- Three separate founder posts discussed outcome-based pricing for long-running agents.
+- Agent evaluation and replay tooling appeared in two funding announcements this week.
+- The public evidence is thin; the above are signals, not a market-wide trend claim.

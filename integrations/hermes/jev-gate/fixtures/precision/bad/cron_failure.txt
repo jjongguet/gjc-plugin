@@ -1,0 +1,1 @@
+[CRON_FAILURE] provider error before any report was generated.

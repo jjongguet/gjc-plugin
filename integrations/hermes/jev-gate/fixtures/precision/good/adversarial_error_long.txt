@@ -1,0 +1,5 @@
+Analysis: error rates and model reliability.
+
+This brief covers three public reliability reports. The first compares provider error rates across a week of production traffic and notes that timeout handling matters more than raw model quality for long-running jobs. The second describes a team that failed to produce a stable evaluation harness until it moved to fixed fixtures; the failure is the subject of the report, not the state of this digest. The third documents a rollback after a bad prompt change and the checks that caught it.
+
+All three items include dates and source links. The brief does not claim that any provider is universally reliable, and it does not generalize from a small sample. A short limitations section explains that the evidence is observational.

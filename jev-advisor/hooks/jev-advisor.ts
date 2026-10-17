@@ -3363,7 +3363,7 @@ export default function register(api: {
 			}
 
 			for (const rejected of extraction.rejected) adviceByIndex.set(rejected.index, noDecision(rejected.reason));
-			const summary = summarizeTasks(extraction, adviceByIndex);
+			const summary = summarizeTasks(extraction, adviceByIndex, providerPromptLimit(cfg));
 			if (storageUnavailable) summary.push(storageWarning(storageUnavailable));
 			if (summary.length) {
 				try {
@@ -3503,6 +3503,7 @@ function isHookRecord(value: unknown): value is Record<string, any> {
 function summarizeTasks(
 	extraction: Extraction,
 	advice: Map<number, Advice>,
+	limit: number,
 ): string[] {
 	const lines: string[] = [];
 	for (const task of extraction.tasks.slice(0, 20)) {
@@ -3511,7 +3512,9 @@ function summarizeTasks(
 		const requested = task.requestedTier ? `requested=${task.requestedTier}` : "requested=unspecified";
 		const outcome = result.status === "decision"
 			? `recommended=${result.tier} confidence=${result.confidence.toFixed(2)}`
-			: `no decision (${result.reason})`;
+			: result.reason === "input_too_large"
+				? `no decision (input_too_large: ${task.prompt.length} > ${limit} chars)`
+				: `no decision (${result.reason})`;
 		lines.push(`task ${task.index}${label}: ${requested}; ${outcome}`.slice(0, 180));
 	}
 	for (const rejected of extraction.rejected.slice(0, Math.max(0, 20 - lines.length))) {

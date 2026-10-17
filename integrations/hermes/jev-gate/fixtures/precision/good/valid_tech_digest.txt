@@ -1,0 +1,21 @@
+# Global Tech Digest - 2026-10-17 (KST)
+
+## 1) Hacker News front page
+- FLUX 3 image model release discussion, with benchmark comparisons and community notes. Source: https://news.ycombinator.com/item?id=0000001 (2026-10-17)
+- A long-running agent orchestration retrospective covering retries, tool budgets and failure recovery. Source: https://news.ycombinator.com/item?id=0000002 (2026-10-17)
+- A database internals write-up on vector index maintenance. Source: https://news.ycombinator.com/item?id=0000003 (2026-10-16)
+
+## 2) Product and platform updates
+- Anthropic published a model card update with context and safety notes. Source: https://www.anthropic.com/news (2026-10-16)
+- OpenRouter added a new routing endpoint for decision models. Source: https://openrouter.ai/announcements (2026-10-16)
+
+## 3) Funding and company news
+- Scimplify raised $25M for AI-enabled specialty chemicals. Source: https://techcrunch.com/2026/10/14/scimplify (2026-10-14)
+- Zenzap raised $44M for workplace messaging with AI automation. Source: https://techcrunch.com/2026/10/14/zenzap (2026-10-14)
+
+## 4) Signals to watch
+- Agent reliability and retry budgets appeared in three separate discussions this week; the common theme is bounded failure handling rather than unbounded retries.
+- Tool-call observability and per-task receipts are becoming a standard part of production agent stacks.
+
+## Collection note
+All items above were retrieved from the listed sources; no item relies on an unverified snippet.

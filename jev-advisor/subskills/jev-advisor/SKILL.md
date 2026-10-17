@@ -82,6 +82,11 @@ and installed-code paths remain GJC-managed and unchanged.
   evidence — the receipt-bearing `verification_run` / `verification_status`
   chain remains the only acceptance evidence, and a `jev_check` verdict never
   substitutes for a receipt, test result or boundary-gate verdict.
+- **Scheduled-output gate (Hermes cron)**: `integrations/hermes/jev-gate/` is a
+  Python `transform_llm_output` plugin. On hold it replaces the original with a
+  metadata-only notice (the job-channel alert) and requests a bounded retry.
+  Gate receipts are advisory metadata, separate from
+  `plugin_metrics.checkAdvice`, and are never verification evidence.
 - **RSI loop input**: the rrsi plugin reads this journal read-only and, on a
   due-gated `session_start` refresh, replaces its derived episode set and
   replays it through the bundled Dream-RSI core (private store and receipts

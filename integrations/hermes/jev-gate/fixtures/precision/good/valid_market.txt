@@ -1,0 +1,9 @@
+# Market brief - 2026-10-14
+
+Three dated items were confirmed in the observation window.
+
+1. A seed-stage company announced a developer tool for agent observability. Source: https://example.com/observability (2026-10-13). The announcement includes pricing and a public changelog.
+2. A growth-stage company disclosed a $44M round for workplace messaging with AI automation. Source: https://example.com/zenzap (2026-10-14). The report names the investors and the intended use of funds.
+3. A public research note compared tool-call retry policies across three agent frameworks. Source: https://example.com/retry-policy (2026-10-12). The note includes a limitations section and does not claim a universal winner.
+
+The evidence is limited to public announcements; no private metrics were used. The brief does not infer market-wide growth from three items.

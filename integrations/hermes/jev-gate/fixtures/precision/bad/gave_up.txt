@@ -1,0 +1,1 @@
+Gave up after the provider returned the same error three times and no report was produced.

@@ -1,0 +1,23 @@
+# Startup Daily Analysis - 2026-10-15 (KST)
+
+## Y Combinator
+Analysis: one YC Launch item about AI agent execution infrastructure was confirmed.
+- Y Combinator - [Maritime: Fully managed cloud for running AI agents at scale](https://www.ycombinator.com/launches/VQm-maritime-fully-managed-cloud-for-running-ai-agents-at-scale) - provides isolated persistent VMs per agent for large-scale agent execution.
+
+## a16z
+Analysis: two posts dated October 14 were confirmed.
+- a16z - [Winning the Relay Race: Long-Running Agents in High-Value Customer Journeys](https://a16z.com/winning-the-relay-race-long-running-agents-in-high-value-customer-journeys/) - discusses handoff loss in multi-week work and outcome-based pricing.
+- a16z - [Applications for speedrun SR008 Are Now Open](https://a16z.com/applications-for-a16z-speedrun-sr008-are-now-open/) - opens the SR008 accelerator application.
+
+## Founder and operator insight
+Analysis: a review tested a new model across roughly 20 agent and design tasks.
+- Lenny's Newsletter - [Meta's new 'Muse Wonder' model: good for AI agents, bad for design](https://www.lennysnewsletter.com/p/metas-new-muse-wonder-model-good) - separates strengths and limits across agent work and design output.
+
+## New funding
+- TechCrunch - [Scimplify raises $25M to challenge China's grip on critical materials with AI](https://techcrunch.com/2026/10/14/scimplify-raises-25m-to-challenge-chinas-grip-on-critical-materials-with-ai/) - Indian startup raises a strategic round for AI-enabled specialty chemicals.
+- TechCrunch - [Zenzap raises $44M for its AI chat app that aims to replace WhatsApp in the workplace](https://techcrunch.com/2026/10/14/zenzap-raises-44m-for-its-ai-chat-app-that-aims-to-replace-whatsapp-in-the-workplace/) - workplace messaging and AI automation funding.
+
+## Collection limits
+Publication times and summaries were confirmed from search results. Full-text extraction failed due to a search-tool configuration error, so details are limited to the retrieved snippets. No new posts were confirmed from Paul Graham or First Round Review in this window.
+
+fetch: YC 1 / a16z 2 / founders 1 / funding 2

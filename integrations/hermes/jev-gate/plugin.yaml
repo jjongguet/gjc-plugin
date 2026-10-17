@@ -1,0 +1,6 @@
+name: jev-gate
+version: 0.1.0
+description: "Pre-delivery gate for Hermes cron output: deterministic abort/empty detection plus a bounded JEV artifact check, replacement notices, retry requests and metadata-only receipts."
+author: "jjongguet"
+provides_hooks:
+  - transform_llm_output

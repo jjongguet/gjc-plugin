@@ -1,0 +1,18 @@
+# Gajae release digest - 2026-10-17
+
+Version 0.18.11 is the current release in this window.
+
+## Changes
+- Added a bounded artifact-check surface and a read-only metrics report.
+- Fixed a correlation conflict flag and clarified the unknown-tier text.
+- Updated the plugin doctor output and the workspace validator boundary.
+- Added post-merge CI documentation and a runner boundary note.
+
+## Verification
+- `bun run test` passed for the shared library and all plugin suites.
+- The workspace validator reported green at the release commit.
+- A fresh-session smoke test confirmed tool loading and plugin health.
+
+## Notes
+- No model routing or enforcement settings changed in this release.
+- The release is a local integration release; deployment remains a separate step.

@@ -1,0 +1,16 @@
+# Market notes - 2026-10-17
+
+The market notes below are complete for the stated window. Each item includes a date and a source link. The collection window closed at 08:00 KST and no later items were included. We verified the links before delivery and removed one duplicate.
+
+- A public launch discussed agent memory retention with a dated post and a working link.
+- A funding announcement covered a $25M round in specialty materials with a dated source.
+- A developer tool release described deterministic replay for agent runs with a changelog.
+- A platform update documented a routing change for decision models with an announcement link.
+- A research note compared timeout handling across providers with a dated preprint.
+- A founder essay discussed outcome-based pricing for long-running work with a dated post.
+- A security advisory described a dependency fix with a dated bulletin.
+- A product update described a new evaluation dashboard with a release note.
+- A conference talk covered bounded retries with a dated schedule entry.
+- A community thread summarized the week's reliability discussions with a dated link.
+
+The brief ends with a short note that the next update will cover the following week...

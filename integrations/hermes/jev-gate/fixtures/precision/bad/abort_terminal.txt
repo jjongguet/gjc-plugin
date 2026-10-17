@@ -1,0 +1,1 @@
+I stopped retrying because the same terminal command kept failing after five attempts. The job did not produce a report.

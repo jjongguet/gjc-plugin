@@ -1,0 +1,5 @@
+Reliability notes for the weekly digest.
+
+This week we stopped retrying the old fetch pipeline after it repeatedly returned empty pages, and replaced it with a two-stage collector that records the source URL and retrieval time for every item. The change is described in the operations note, not in the digest body. We kept the retry budget bounded at three attempts and added a receipt for every attempt, so the next run can distinguish a transient failure from a permanent one. The digest itself contains ten dated items with links and a short note about the collection window.
+
+The phrase "kept running without making progress" appears here only as a description of the old pipeline, not as the output of this run. The final report is complete and was reviewed before delivery.

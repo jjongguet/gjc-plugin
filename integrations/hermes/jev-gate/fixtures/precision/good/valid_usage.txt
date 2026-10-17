@@ -1,0 +1,12 @@
+# GLM usage - last 2 hours
+
+Window: 2026-10-17 06:00-08:00 KST.
+
+- API calls: 486
+- Input tokens: 5,079
+- Output tokens: 177,914
+- Cache reads: 0
+- Estimated cost: not available from the provider response
+- Errors: 3 provider 400s, all classified as request-shape errors and retried once by the caller
+
+The figures above are a direct read of the usage ledger for the window, not an estimate. The cost line is intentionally marked unavailable because the provider did not return a priced response. No account identifiers or keys are included in this report.

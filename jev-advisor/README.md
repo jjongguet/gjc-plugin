@@ -54,6 +54,20 @@ rate-limited task has no new recommendation and fails open. Manual requests are
 independent of this hook cooldown. Storage/provider errors fail open and are
 reported as unavailable/no-decision, not successful observations.
 
+## Hermes cron gate (scheduled-output boundary)
+
+The repository also ships `integrations/hermes/jev-gate/`, a Python 3 stdlib
+Hermes plugin that uses `transform_llm_output` to catch empty/abort/truncated
+cron output before delivery. It applies the deterministic + strict check
+contract to allowlisted jobs; a hold replaces the original with a metadata-only
+notice (the job-channel alert), requests one detached `hermes cron run`
+replacement, and stops at 3 generations / 15 minutes. Gate receipts live under
+`~/.hermes/plugins/jev-gate-data/<profile>/` and are separate from
+`plugin_metrics.checkAdvice`. The key is read only from
+`~/.gjc/agent/jev-advisor/.env`; `~/.hermes/.env` is never read. Rollback is
+`mode=off` or `hermes plugins disable jev-gate` plus a gateway reload. The gate
+verdict is advisory, never verification evidence.
+
 ## Complete inputs and provider responses
 
 Complete encoded prompts are bounded to **4,000 characters** for hosted Jev,
