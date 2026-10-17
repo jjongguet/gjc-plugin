@@ -49,7 +49,7 @@ export const RRSI_PERIODIC_DEFAULTS = Object.freeze({
   minRetryMs: 15 * 60 * 1000,
   maxWallMs: 12_000,
   inlineDreamMaxAttempts: 160,
-  projectionLimit: 40,
+  projectionLimit: 160,
   receiptMaxCount: 60,
   receiptMaxBytes: 64 * 1024,
   clockSkewMaxMs: 5 * 60 * 1000,
@@ -357,8 +357,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         nextRetryAt: null,
         consecutiveFailures: baseState?.consecutiveFailures ?? 0,
         lastReceiptId: baseState?.lastReceiptId ?? null,
-        lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
-        storeWrite: baseState?.storeWrite ?? null,
+		lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
+		lastProjection: baseState?.lastProjection ?? null,
+		storeWrite: baseState?.storeWrite ?? null,
         derivedChunks: baseState?.derivedChunks ?? null,
         clockSkew: false,
         updatedAt: now,
@@ -382,6 +383,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return await finish({ status: "error", mode, reason: "projection_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
     }
     const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
+    const coverage = projectionCoverage(journal.records, projected.attempts);
     const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
 
     const loaded = readStore(env);
@@ -437,7 +439,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attempts: counts.attempts,
           imported: projected.attempts.length,
           policies: 0,
-          attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+          attemptsOmitted: coverage.omitted,
+          projection: coverage,
+          limited_projection: coverage.limited,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
           clockSkew,
@@ -480,7 +484,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attempts: counts.attempts,
           imported: projected.attempts.length,
           policies: 0,
-          attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+          attemptsOmitted: coverage.omitted,
+          projection: coverage,
+          limited_projection: coverage.limited,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: null },
           clockSkew,
@@ -532,7 +538,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         corpusAttempts,
         receiptHash: dream?.receiptHash ?? null,
         verdict: dream?.verdict ?? null,
-        attemptsOmitted: Math.max(0, journal.records.length - projected.attempts.length),
+        attemptsOmitted: coverage.omitted,
+        projection: coverage,
+        limited_projection: coverage.limited,
         limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
         clockSkew,
@@ -545,10 +553,11 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       lastReason: dreamFailure,
       lastSuccessAt: dreamFailure ? (baseState?.lastSuccessAt ?? null) : now,
       lastReceiptId: receiptWrite.persisted ? receiptId : null,
-      lastProjectionDigest: digest,
-      storeWrite: replaced.storeWrite,
-      derivedChunks: derivedSet.length,
-      nextRetryAt: dreamFailure
+	      lastProjectionDigest: digest,
+	      lastProjection: coverage,
+	      storeWrite: replaced.storeWrite,
+	      derivedChunks: derivedSet.length,
+	      nextRetryAt: dreamFailure
         ? new Date(Date.parse(now) + backoffMs(failuresAfter, intervalMs)).toISOString()
         : new Date(Date.parse(now) + intervalMs).toISOString(),
       consecutiveFailures: failuresAfter,
@@ -572,6 +581,13 @@ function backoffMs(failures, intervalMs) {
   const base = RRSI_PERIODIC_DEFAULTS.minRetryMs;
   const scaled = base * Math.pow(2, Math.max(0, failures - 1));
   return Math.min(scaled, intervalMs);
+}
+
+function projectionCoverage(records, attempts) {
+  const total = Array.isArray(records) ? records.length : 0;
+  const projected = Array.isArray(attempts) ? attempts.length : 0;
+  const omitted = Math.max(0, total - projected);
+  return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
 }
 
 function appliedLimits(intervalMs = RRSI_PERIODIC_DEFAULTS.intervalMs) {
@@ -600,6 +616,7 @@ export function summarizePeriodicState({ state, env = process.env, now = new Dat
     nextRetryAt: state?.nextRetryAt ?? null,
     storeWrite: state?.storeWrite ?? null,
     lastProjectionDigest: state?.lastProjectionDigest ?? null,
+    lastProjection: state?.lastProjection ?? null,
     due: due.due,
     dueStatus: due.status ?? null,
     receiptCount: countReceipts(env),

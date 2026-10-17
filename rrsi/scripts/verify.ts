@@ -123,12 +123,12 @@ async function runSuite(root) {
 	});
 
 	await check("capture clamps attempts, coerces unknown decisions and truncates labels", async () => {
-		const attempts = Array.from({ length: 60 }, (_, index) => ({ objective: `x`.repeat(400) + index, decision: "exploded", wallMs: -5 }));
+		const attempts = Array.from({ length: 200 }, (_, index) => ({ objective: `x`.repeat(400) + index, decision: "exploded", wallMs: -5 }));
 		const captured = await call({ action: "capture", goal: "y".repeat(500), attempts: JSON.stringify(attempts) });
-		assert.equal(captured.episode.attempts, 40, "attempts per episode are capped at 40");
+		assert.equal(captured.episode.attempts, 160, "attempts per episode are capped at 160");
 		const stored = JSON.parse(readFileSync(storeFile, "utf8"));
 		const episode = stored.episodes.at(-1);
-		assert.equal(episode.attempts.length, 40);
+		assert.equal(episode.attempts.length, 160);
 		assert.equal(episode.attempts[0].decision, "inconclusive");
 		assert.equal(episode.attempts[0].wallMs, 0);
 		assert.equal(episode.goal.length, 200);
@@ -327,6 +327,10 @@ async function runSuite(root) {
 		assert.equal(receipt.mode, "inline");
 		assert.equal(receipt.persisted, true);
 		assert.match(receipt.projectionDigest, /^[0-9a-f]{64}$/);
+		assert.deepEqual(receipt.projection, { records: 12, projected: 12, omitted: 0, ratio: 1, limited: false });
+		assert.equal(receipt.limited_projection, false);
+		assert.equal(receipt.limits.limit, 160);
+		assert.equal(receipt.limits.maxAttemptsPerEpisode, 160);
 		const outcomes = readJournalOutcomes(homeA);
 		assert.equal(outcomes.length, 1);
 		assert.equal(outcomes[0].operation, "dream");
@@ -337,6 +341,23 @@ async function runSuite(root) {
 		assert.equal(second.journal, false);
 		assert.equal(readFileSync(paths.state, "utf8"), stateBytes, "skipped_due must not advance state");
 		assert.equal(readdirSync(paths.receipts).length, 1);
+	});
+
+	await check("periodic: 160 projection and limited_projection label", async () => {
+		const homeLimit = path.join(root, "periodic-home-limit");
+		mkdirSync(homeLimit, { mode: 0o700 });
+		seedJournal(homeLimit, 200);
+		const paths = periodicPaths(homeLimit);
+		const result = await withHome(homeLimit, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(result.status, "ran");
+		const receiptFile = readdirSync(paths.receipts)[0];
+		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, receiptFile), "utf8"));
+		assert.deepEqual(receipt.projection, { records: 200, projected: 160, omitted: 40, ratio: 0.8, limited: true });
+		assert.equal(receipt.limited_projection, true);
+		assert.equal(receipt.attemptsOmitted, 40);
+		assert.equal(receipt.limits.limit, 160);
+		const state = JSON.parse(readFileSync(paths.state, "utf8"));
+		assert.deepEqual(state.lastProjection, receipt.projection);
 	});
 
 	await check("periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class", async () => {

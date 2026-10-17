@@ -25,7 +25,7 @@ export const RRSI_SCOPE_SENTENCE =
 
 export const RRSI_LIMITS = Object.freeze({
   maxEpisodes: 128,
-  maxAttemptsPerEpisode: 40,
+  maxAttemptsPerEpisode: 160,
   maxStoreBytes: 512 * 1024,
   maxJournalSegments: 8,
   maxJournalRecordsPerSegment: 4096,

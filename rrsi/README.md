@@ -25,7 +25,7 @@ periodic refresh described below.
 | `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |
 | `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`) and `projectionDigest`, and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
 | `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |
-| `status` | — | Store counts (episodes/attempts/adoptions), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `due`, `receiptCount`, `intervalMs`). Read-only. |
+| `status` | — | Store counts (episodes/attempts/adoptions), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
 
 Every handled invocation appends exactly one sanitized `rrsi` outcome to the
 shared plugin journal (`~/.gjc-plugin/rrsi/journal/v1/`, retained-window
@@ -44,15 +44,19 @@ is out of scope and unprovided.
   `RRSI_PERIODIC_INTERVAL_MS` (milliseconds, ≥ 60 000) overrides it.
   `RRSI_PERIODIC=off` disables the refresh without consuming the interval.
 - **Bounded work (one slot per source).** The hook reads the jev-advisor
-  journal, projects the newest `limit = 40` records into one content-keyed
+  journal, projects the newest `limit = 160` records into one content-keyed
   derived episode (`ep-jev-<digest12>-0`; a larger configured limit chunks at
-  40 attempts per episode with the same digest rules) and replaces that source
+  160 attempts per episode with the same digest rules) and replaces that source
   class as a whole; byte-identical content skips the write entirely. It then
   dreams over the store. Dream cost grows super-linearly with corpus size
   (measured at implementation time: 40 attempts ≈ 59 ms; 160 ≈ 0.8 s; 480 ≈
   18.6 s), so corpora above 160 attempts are completed by a detached worker
   (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`, spawned by the hook,
   re-running under the same locks) instead of inside the session.
+- **Coverage labels.** The periodic receipt carries `projection`
+  `{records, projected, omitted, ratio, limited}` and `limited_projection`;
+  omitted records are labeled, never silently dropped. The same projection is
+  stored as `lastProjection` for `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
@@ -97,7 +101,7 @@ is out of scope and unprovided.
 ## Storage
 
 `~/.gjc-plugin/rrsi/store.json` — private `0700` directory, `0600` single-link
-file, written atomically (temp + rename). Bounded: 128 episodes, 40 attempts per
+file, written atomically (temp + rename). Bounded: 128 episodes, 160 attempts per
 episode, 512 KiB store, 4 MiB source reads, 40-char identifiers, 280-char text
 fields. Absent, corrupt, symlinked or oversized stores are **reported** as
 `missing` / `invalid` and never reset or repaired; the store is never committed
