@@ -414,7 +414,7 @@ async function runSuite(root: string) {
 		await result(terminal([entry("job-a", "completed", { durationMs: 12000, requestedModel: "requested", effectiveModel: "actual" })]), context());
 		await result(terminal([entry("job-a", "completed", { durationMs: 12000, requestedModel: "requested", effectiveModel: "actual" })]), context());
 		assert.equal(fetchCalls, start); const s = core.calibrationSummary(state()).json;
-		assert.equal(s.terminalJobs.count, 1); assert.equal(s.terminalJobs.joined, 1); assert.equal(s.terminalJobs.actualTier, null); assert.equal(s.terminalJobs.quality, null);
+		assert.equal(s.terminalJobs.count, 1); assert.equal(s.terminalJobs.joined, 1); assert.deepEqual(s.terminalJobs.actualTier, { known: 0, unknown: 1, byTier: { fast: 0, balanced: 0, strong: 0 } }); assert.equal(s.terminalJobs.quality, null);
 		assert.equal(s.terminalJobs.effectiveModel.known, 1);
 	});
 	await check("nonterminal statuses, missing identity and outer failures remain unknown", async () => {
@@ -663,6 +663,27 @@ async function runSuite(root: string) {
 		assert.deepEqual(json.terminalJobs.byRecommendation.fast, { jobs: 2, byStatus: { completed: 1, failed: 1, cancelled: 0 }, durationMs: { sum: 12000, measured: 1, average: 12000 } });
 		assert.deepEqual(json.terminalJobs.byRecommendation.strong.durationMs, { sum: 0, measured: 0, average: null });
 		assert.ok(report.includes("strong recommendation (exactly joined): 1 jobs")); assert.ok(report.includes("duration unknown"));
+	});
+	await check("actualTier is host-only, conflict-flagged, and byEffectiveModel is bounded", async () => {
+		const file = core.version2StateFile(base()); const t = task();
+		const p = await core.prepareTaskRecords(file, limits, "s", "call", [t], 1);
+		await core.updateTaskAdvice(file, limits, { sessionId: "s", toolCallId: "call", taskIndex: 0 }, p.value[0].token, advice("strong"), 2);
+		await core.observeTaskLaunch(file, limits, "s", "call", true, 0, { sessionId: "s", jobId: "a" }, 3);
+		await core.observeTerminalJob(file, limits, { sessionId: "s", jobId: "a" }, { status: "completed", durationMs: 12000, effectiveModel: "model-x", actualTier: "strong" }, 4);
+		let { json, text } = core.calibrationSummary(core.readEvidenceV2(file).value);
+		assert.deepEqual(json.terminalJobs.actualTier, { known: 1, unknown: 0, byTier: { fast: 0, balanced: 0, strong: 1 } });
+		assert.equal(json.terminalJobs.exactJoin, 1); assert.equal(json.terminalJobs.batchMapped, 0);
+		assert.deepEqual(json.terminalJobs.byEffectiveModel["model-x"], { jobs: 1, byStatus: { completed: 1, failed: 0, cancelled: 0 }, durationMs: { sum: 12000, measured: 1, average: 12000 } });
+		assert.ok(text.includes("actual tier known/unknown 1/0"));
+		await core.observeTerminalJob(file, limits, { sessionId: "s", jobId: "a" }, { status: "completed", actualTier: "balanced" }, 5);
+		({ json } = core.calibrationSummary(core.readEvidenceV2(file).value));
+		assert.deepEqual(json.terminalJobs.actualTier, { known: 0, unknown: 1, byTier: { fast: 0, balanced: 0, strong: 0 } });
+		assert.ok(core.readEvidenceV2(file).value.jobs[JSON.stringify(["s", "a"])].conflicts.includes("actual_tier_conflict"));
+		await core.observeTerminalJob(file, limits, { sessionId: "s", jobId: "b" }, { status: "completed", effectiveModel: "model-y" }, 6);
+		({ json } = core.calibrationSummary(core.readEvidenceV2(file).value));
+		assert.equal(core.readEvidenceV2(file).value.jobs[JSON.stringify(["s", "b"])].actualTier, null);
+		assert.equal(json.terminalJobs.actualTier.unknown, 2);
+		assert.equal(json.terminalJobs.byEffectiveModel["model-y"].jobs, 1);
 	});
 	// --- widget-lifecycle checks (V1-V8) ---
 	core.widgetLifecycleResetForTests();
@@ -1072,7 +1093,7 @@ async function runSuite(root: string) {
 		const withState = JSON.parse(text(await metricsTool.execute("m5", {})));
 		assert.equal(withState.correlation.status, "ok", `correlation unavailable: ${withState.correlation.reason}`);
 		assert.deepEqual(withState.correlation.metrics.terminalJobs.durationMs, { measured: 0, sum: null, average: null }, "measured=0 → sum/average null in report view");
-		assert.equal(withState.correlation.metrics.terminalJobs.actualTier, null); assert.equal(withState.correlation.metrics.terminalJobs.quality, null);
+		assert.deepEqual(withState.correlation.metrics.terminalJobs.actualTier, { known: 0, unknown: 1, byTier: { fast: 0, balanced: 0, strong: 0 } }); assert.equal(withState.correlation.metrics.terminalJobs.quality, null);
 		assert.equal(fetchCalls, pluginMetricsFetchCalls, "plugin_metrics invocations must not add fetch calls");
 		assert.equal(unexpectedFetches, pluginMetricsUnexpectedFetches, "plugin_metrics invocations must not attempt network access");
 		// 2MiB+1 bounded state read: exact cap passes, cap+1 fails oversized before decode

@@ -153,9 +153,15 @@ data remains untouched and is not counted as new-root evidence.
   terminal-before-launch delivery. Missing correlation stays unjoined. Missing
   session/job identity cannot be counted as a distinct retained execution.
 - Requested tier, advisor recommendation, requested model, observed effective
-  model and terminal status remain separate. Actual tier and independent quality
-  remain unknown. Contradictory observations are flagged, not overwritten into a
+  model and terminal status remain separate. Actual tier is host-supplied only;
+  when the host does not expose it, it remains unknown. Task quality remains
+  unknown. Contradictory observations are flagged, not overwritten into a
   success story. Conflicted measurements are excluded from their aggregates.
+- The report separates `batchMapped` (batch-level coverage; currently 0 because
+  the plugin does not infer per-child mappings) from `exactJoin` (singleton exact
+  task/job joins), reports `actualTier` known/unknown/byTier with conflicted jobs
+  excluded, and includes a bounded `byEffectiveModel` status/duration table
+  (observational, not causal).
 - The store contains bounded metadata, fingerprints and validated advice, not
   assignment/context/result prose, rationale, provider payloads or credentials.
   Retention and eviction limit deduplication to the retained window.

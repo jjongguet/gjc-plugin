@@ -131,12 +131,14 @@ export default function register(api: {
 				const jobId = boundedEventId(rawEntry.jobId);
 				if (!jobId) continue;
 				observations[status]++;
+				const actualTier = boundedTier(rawEntry.actualTier) ?? boundedTier(rawEntry.tier);
 				const observation: TerminalObservation = {
 					status,
 					...(boundedEventId(rawEntry.id) ? { childId: boundedEventId(rawEntry.id)! } : {}),
 					...(typeof rawEntry.durationMs === "number" ? { durationMs: rawEntry.durationMs } : {}),
 					...(boundedModelValue(rawEntry.requestedModel) ? { requestedModel: boundedModelValue(rawEntry.requestedModel)! } : {}),
 					...(boundedModelValue(rawEntry.effectiveModel) ? { effectiveModel: boundedModelValue(rawEntry.effectiveModel)! } : {}),
+					...(actualTier ? { actualTier } : {}),
 				};
 				try {
 					const stored = await observeTerminalJob(file, limits, { sessionId, jobId }, observation);
@@ -189,4 +191,8 @@ function boundedModelValue(value: unknown): string | null {
 	if (typeof value !== "string") return null;
 	const model = value.trim();
 	return model && model.length <= 128 && !/[\u0000-\u001f\u007f]/.test(model) ? model : null;
+}
+
+function boundedTier(value: unknown): "fast" | "balanced" | "strong" | null {
+	return value === "fast" || value === "balanced" || value === "strong" ? value : null;
 }

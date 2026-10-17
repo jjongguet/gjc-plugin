@@ -531,7 +531,7 @@ export interface JobRecord {
 	effectiveModel?: string;
 	effectiveModelObservations: string[];
 	allocatedChildIds: string[];
-	actualTier: null;
+	actualTier: Tier | null;
 	observedAt: number;
 	taskKey: string | null;
 	conflicts: string[];
@@ -631,6 +631,7 @@ const CONFLICT_FLAGS = new Set([
 	"identity_input_conflict",
 	"launch_mapping_evicted",
 	"multiple_job_associations",
+	"actual_tier_conflict",
 	"multiple_task_associations",
 	"status_conflict",
 	"duration_conflict",
@@ -686,7 +687,7 @@ function validateStore(value: unknown): value is EvidenceV2 {
 			(rawJob.requestedModel !== undefined && (typeof rawJob.requestedModel !== "string" || rawJob.requestedModel.length > 128)) ||
 			(rawJob.effectiveModel !== undefined && (typeof rawJob.effectiveModel !== "string" || rawJob.effectiveModel.length > 128)) ||
 			!validStringArray(rawJob.requestedModelObservations, 4, 128) || !validStringArray(rawJob.effectiveModelObservations, 4, 128) ||
-			!validStringArray(rawJob.allocatedChildIds, 4, MAX_ID_CHARS) || rawJob.actualTier !== null || !validTime(rawJob.observedAt) ||
+			!validStringArray(rawJob.allocatedChildIds, 4, MAX_ID_CHARS) || (rawJob.actualTier !== null && !validTier(rawJob.actualTier)) || !validTime(rawJob.observedAt) ||
 			(rawJob.childId !== undefined && boundedIdentity(rawJob.childId) === null) ||
 			(rawJob.taskKey !== null && typeof rawJob.taskKey !== "string") || !validConflictArray(rawJob.conflicts)) return false;
 	}
@@ -1271,6 +1272,7 @@ export interface TerminalObservation {
 	durationMs?: number;
 	requestedModel?: string;
 	effectiveModel?: string;
+	actualTier?: Tier;
 }
 
 function addDistinct<T>(values: T[], value: T, limit: number): void {
@@ -1312,7 +1314,7 @@ function applyTerminal(state: EvidenceV2, ref: JobRef, observation: TerminalObse
 			...(effectiveModel ? { effectiveModel } : {}),
 			effectiveModelObservations: effectiveModel ? [effectiveModel] : [],
 			allocatedChildIds: observation.childId && boundedIdentity(observation.childId) ? [boundedIdentity(observation.childId)!] : [],
-			actualTier: null,
+			actualTier: observation.actualTier && validTier(observation.actualTier) ? observation.actualTier : null,
 			observedAt: now,
 			taskKey: null,
 			conflicts: [],
@@ -1348,6 +1350,10 @@ function applyTerminal(state: EvidenceV2, ref: JobRef, observation: TerminalObse
 		addDistinct(job.allocatedChildIds, childId, 4);
 		if (job.allocatedChildIds.length > 1) appendConflict(job.conflicts, "child_id_conflict");
 		if (job.childId === undefined) job.childId = childId;
+	}
+	if (observation.actualTier && validTier(observation.actualTier)) {
+		if (job.actualTier === null) job.actualTier = observation.actualTier;
+		else if (job.actualTier !== observation.actualTier) appendConflict(job.conflicts, "actual_tier_conflict");
 	}
 	const mappings = findMappedTasks(state, key);
 	if (mappings.length > 1) appendConflict(job.conflicts, "multiple_task_associations");
@@ -1386,12 +1392,15 @@ export interface CalibrationSummary {
 		joined: number;
 		unjoined: number;
 		conflicted: number;
+		batchMapped: number;
+		exactJoin: number;
 		byStatus: Record<TerminalStatus, number>;
 		byRecommendation: Record<string, { jobs: number; byStatus: Record<TerminalStatus, number>; durationMs: { sum: number; measured: number; average: number | null } }>;
+		byEffectiveModel: Record<string, { jobs: number; byStatus: Record<TerminalStatus, number>; durationMs: { sum: number; measured: number; average: number | null } }>;
 		effectiveModel: { known: number; unknown: number };
 		requestedModel: { known: number; unknown: number };
 		durationMs: { sum: number; measured: number; average: number | null };
-		actualTier: null;
+		actualTier: { known: number; unknown: number; byTier: Record<Tier, number> };
 		quality: null;
 	};
 	coverage: { unknownIdentityObservationsNotRetained: true; unobservedTerminalsOutsideCoverage: true };
@@ -1422,12 +1431,15 @@ export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummar
 			joined: 0,
 			unjoined: 0,
 			conflicted: 0,
+			batchMapped: 0,
+			exactJoin: 0,
 			byStatus: emptyStatusCounts(),
 			byRecommendation: {},
+			byEffectiveModel: {},
 			effectiveModel: { known: 0, unknown: 0 },
 			requestedModel: { known: 0, unknown: 0 },
 			durationMs: { sum: 0, measured: 0, average: null },
-			actualTier: null,
+			actualTier: { known: 0, unknown: 0, byTier: { fast: 0, balanced: 0, strong: 0 } },
 			quality: null,
 		},
 		coverage: { unknownIdentityObservationsNotRetained: true, unobservedTerminalsOutsideCoverage: true },
@@ -1471,10 +1483,24 @@ export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummar
 		const requestedConflict = job.conflicts.includes("requested_model_conflict");
 		if (job.requestedModel && !requestedConflict) summary.terminalJobs.requestedModel.known++;
 		else summary.terminalJobs.requestedModel.unknown++;
+		const tierConflict = job.conflicts.includes("actual_tier_conflict");
+		if (job.actualTier && !tierConflict) {
+			summary.terminalJobs.actualTier.known++;
+			summary.terminalJobs.actualTier.byTier[job.actualTier]++;
+		} else summary.terminalJobs.actualTier.unknown++;
 		const durationConflict = job.conflicts.includes("duration_conflict");
 		if (!durationConflict && job.durationMs !== undefined) {
 			summary.terminalJobs.durationMs.sum += job.durationMs;
 			summary.terminalJobs.durationMs.measured++;
+		}
+		if (job.effectiveModel && !effectiveConflict) {
+			const modelStats = (summary.terminalJobs.byEffectiveModel[job.effectiveModel] ??= emptyTierStats());
+			modelStats.jobs++;
+			if (!statusConflict) modelStats.byStatus[job.status]++;
+			if (!durationConflict && job.durationMs !== undefined) {
+				modelStats.durationMs.sum += job.durationMs;
+				modelStats.durationMs.measured++;
+			}
 		}
 		if (!joined || !task?.advice || task.advice.status !== "decision") continue;
 		const tier = task.advice.tier;
@@ -1488,7 +1514,8 @@ export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummar
 	}
 	const totalDuration = summary.terminalJobs.durationMs;
 	if (totalDuration.measured) totalDuration.average = totalDuration.sum / totalDuration.measured;
-	for (const stats of Object.values(summary.terminalJobs.byRecommendation)) {
+	summary.terminalJobs.exactJoin = summary.terminalJobs.joined;
+	for (const stats of [...Object.values(summary.terminalJobs.byRecommendation), ...Object.values(summary.terminalJobs.byEffectiveModel)]) {
 		if (stats.durationMs.measured) stats.durationMs.average = stats.durationMs.sum / stats.durationMs.measured;
 	}
 	const textLines = [
@@ -1496,15 +1523,21 @@ export function calibrationSummary(state: EvidenceV2): { json: CalibrationSummar
 		`retained task records: ${summary.retainedTaskRecords} across ${summary.retainedGroups} semantic groups; conflicted task records: ${summary.conflictedTaskRecords}; decisions: ${summary.advice.decisions}; no-decisions: ${JSON.stringify(summary.advice.noDecisions)}.`,
 		`task-call launch invocations: ${summary.launch.observed} observed, ${summary.launch.blocked} blocked, ${summary.launch.notObserved} not observed; observations do not attribute batch children or establish terminal outcomes.`,
 		`requested/recommended agreement: ${summary.agreement.agree}/${summary.agreement.denominator}${summary.agreement.rate === null ? " (no comparable records)" : ` (${Math.round(summary.agreement.rate * 100)}%; not correctness)`}.`,
-		`terminal jobs: ${summary.terminalJobs.count}, joined by exact session+job mapping: ${summary.terminalJobs.joined}, unjoined: ${summary.terminalJobs.unjoined}, conflicted: ${summary.terminalJobs.conflicted}; status counts exclude conflicts: ${JSON.stringify(summary.terminalJobs.byStatus)}.`,
-		`duration: ${totalDuration.measured ? `${totalDuration.sum} ms across ${totalDuration.measured} measured jobs; average ${totalDuration.average} ms` : "unknown (no positive non-conflicted measurements)"}; effective model known/unknown ${summary.terminalJobs.effectiveModel.known}/${summary.terminalJobs.effectiveModel.unknown}; requested model known/unknown ${summary.terminalJobs.requestedModel.known}/${summary.terminalJobs.requestedModel.unknown}.`,
-		"Actual tier and task quality are unknown. Missing-identity observations are not retained, and unobserved terminals are outside coverage. This report describes only the bounded retained window.",
+		`terminal jobs: ${summary.terminalJobs.count}, joined by exact session+job mapping: ${summary.terminalJobs.joined}, batchMapped: ${summary.terminalJobs.batchMapped}, exactJoin: ${summary.terminalJobs.exactJoin}, unjoined: ${summary.terminalJobs.unjoined}, conflicted: ${summary.terminalJobs.conflicted}; status counts exclude conflicts: ${JSON.stringify(summary.terminalJobs.byStatus)}.`,
+		`duration: ${totalDuration.measured ? `${totalDuration.sum} ms across ${totalDuration.measured} measured jobs; average ${totalDuration.average} ms` : "unknown (no positive non-conflicted measurements)"}; effective model known/unknown ${summary.terminalJobs.effectiveModel.known}/${summary.terminalJobs.effectiveModel.unknown}; requested model known/unknown ${summary.terminalJobs.requestedModel.known}/${summary.terminalJobs.requestedModel.unknown}; actual tier known/unknown ${summary.terminalJobs.actualTier.known}/${summary.terminalJobs.actualTier.unknown} (${JSON.stringify(summary.terminalJobs.actualTier.byTier)}).`,
+		"Task quality is unknown. Actual tier is host-supplied only; the plugin never infers it from a model or a requested tier. Batch-level mapping is not inferred. Missing-identity observations are not retained, and unobserved terminals are outside coverage. This report describes only the bounded retained window.",
 	];
 	for (const [tier, stats] of Object.entries(summary.terminalJobs.byRecommendation)) {
 		const duration = stats.durationMs.measured
 			? `${stats.durationMs.sum} ms across ${stats.durationMs.measured} measured jobs; average ${stats.durationMs.average} ms`
 			: "duration unknown";
 		textLines.push(`${tier} recommendation (exactly joined): ${stats.jobs} jobs, statuses ${JSON.stringify(stats.byStatus)}, ${duration}.`);
+	}
+	for (const [model, stats] of Object.entries(summary.terminalJobs.byEffectiveModel)) {
+		const duration = stats.durationMs.measured
+			? `${stats.durationMs.sum} ms across ${stats.durationMs.measured} measured jobs; average ${stats.durationMs.average} ms`
+			: "duration unknown";
+		textLines.push(`effective model ${model}: ${stats.jobs} jobs, statuses ${JSON.stringify(stats.byStatus)}, ${duration} (observational, not causal).`);
 	}
 	const text = textLines.join("\n");
 	return { json: summary, text };
@@ -1604,9 +1637,10 @@ export interface JournalSource<T> {
 }
 
 export type CalibrationReport = Omit<CalibrationSummary, "terminalJobs"> & {
-	terminalJobs: Omit<CalibrationSummary["terminalJobs"], "durationMs" | "byRecommendation"> & {
+	terminalJobs: Omit<CalibrationSummary["terminalJobs"], "durationMs" | "byRecommendation" | "byEffectiveModel"> & {
 		durationMs: MetricsDuration;
 		byRecommendation: Record<string, Omit<CalibrationSummary["terminalJobs"]["byRecommendation"][string], "durationMs"> & { durationMs: MetricsDuration }>;
+		byEffectiveModel: Record<string, Omit<CalibrationSummary["terminalJobs"]["byEffectiveModel"][string], "durationMs"> & { durationMs: MetricsDuration }>;
 	};
 };
 
@@ -1859,7 +1893,8 @@ export function projectCalibrationForReport(summary: CalibrationSummary): StoreR
 		Number.isFinite(d.sum) && (!Number.isInteger(d.sum) || Number.isSafeInteger(d.sum)) &&
 		(d.average === null || Number.isFinite(d.average));
 	if (!durationIsRepresentable(summary.terminalJobs.durationMs) ||
-		Object.values(summary.terminalJobs.byRecommendation).some(stats => !durationIsRepresentable(stats.durationMs))) {
+		Object.values(summary.terminalJobs.byRecommendation).some(stats => !durationIsRepresentable(stats.durationMs)) ||
+		Object.values(summary.terminalJobs.byEffectiveModel).some(stats => !durationIsRepresentable(stats.durationMs))) {
 		return { status: "unavailable", reason: "corrupt" };
 	}
 	const project = (d: CalibrationSummary["terminalJobs"]["durationMs"]): MetricsDuration =>
@@ -1874,6 +1909,12 @@ export function projectCalibrationForReport(summary: CalibrationSummary): StoreR
 				byRecommendation: Object.fromEntries(
 					Object.entries(summary.terminalJobs.byRecommendation).map(([tier, stats]) => [
 						tier,
+						{ ...stats, durationMs: project(stats.durationMs) },
+					]),
+				),
+				byEffectiveModel: Object.fromEntries(
+					Object.entries(summary.terminalJobs.byEffectiveModel).map(([model, stats]) => [
+						model,
 						{ ...stats, durationMs: project(stats.durationMs) },
 					]),
 				),
