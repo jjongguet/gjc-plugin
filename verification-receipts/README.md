@@ -25,6 +25,33 @@ The gate is fail-open and bounded: the before-hook baseline capture shares a sin
 
 `silentPending` is an upper-bound proxy for launches without an observed terminal (it may include still-running or cancelled jobs), not a count of missed gates; `scanTruncated` marks bounded cross-session scans.
 
+## Adequacy context
+
+`verification_run` and `verification_status` automatically attempt a warning-only
+JEV adequacy assessment. Supply `assessment` only with a non-sensitive summary:
+absolute paths, URLs, logs, diffs, source lines, secrets and long digests are
+rejected as `invalid_context` and no request is sent. A scored result needs both
+choices (`aligned`/`present` or `gap`/`missing`), confidence and the full
+probability map; confidence without full probabilities is
+`unscored`/`optional_scores_missing`.
+
+Safe template (the `caseNotes` id must be a real case id, `run` for a run):
+
+```json
+{
+  "changeSummary": "Budget guard tests cover clamp and over-budget behavior.",
+  "expectedBehavior": "Rung and reset decisions match the documented boundaries.",
+  "caseNotes": [{ "id": "run", "note": "Boundary: clamp, over-budget and invalid-input assertions." }]
+}
+```
+
+Reason breakdown: `missing_context` (no assessment), `invalid_context`
+(unsafe or rejected), `insufficient_evidence` (execution not passed or source
+stale), `unknown_choice` (neither choice decided), `optional_scores_missing`
+(confidence without full probabilities), `off`/`missing_key` (provider
+unavailable), and `invalid_response` (provider shape). A scored adequacy result
+is advisory, never verification evidence.
+
 ## Boundaries
 
 Both this plugin's tools and the UI tools automatically attempt warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured; only validated supplied summaries/notes and bounded host facts leave, and missing or weak context never establishes sufficient verification. The gate is a requirement appended to a completed result, never a hard block. Private storage layout, journal contents and retention: [`../docs/private-results.md`](../docs/private-results.md).
