@@ -1,0 +1,40 @@
+{
+  "schema": "gjc.self-improve.replay.v1",
+  "corpus": {
+    "ledgerPath": "/Users/kyeongminkim/jjongguet/lanes/gjc-plugin-jjo213-p2p3-20261019/self-improve/ledger.jsonl",
+    "attempts": 22,
+    "adoptions": 2,
+    "epochs": 2,
+    "ledgerSha256": "9fc5668d4542fd1e6e410edd6bcee53d968e13d7e3c9294fb88aa82daf211638"
+  },
+  "betas": {
+    "beta1": 0.01,
+    "beta2": 0.005
+  },
+  "scores": [
+    {
+      "policyId": "B0",
+      "attemptsToFirstAdoption": 12,
+      "costMsToFirstAdoption": 873652,
+      "adoptionReached": true,
+      "attemptsPlayed": 12,
+      "costMs": 873652,
+      "rounds": 12,
+      "parallelism": 1,
+      "value": 0.94,
+      "scoreHash": "3189eda6c8b90dcee5c81baba8c30fec09ada98fc6498c395fb8bd71ce947ad9"
+    },
+    {
+      "policyId": "B1",
+      "attemptsToFirstAdoption": 12,
+      "costMsToFirstAdoption": 873652,
+      "adoptionReached": true,
+      "attemptsPlayed": 12,
+      "costMs": 873652,
+      "rounds": 12,
+      "parallelism": 1,
+      "value": 0.94,
+      "scoreHash": "28c58467532ec254ef5dfbcd564ff675fb1602cb8898d7c47f6cf53f9fddfa35"
+    }
+  ]
+}
