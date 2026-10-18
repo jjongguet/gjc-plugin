@@ -278,6 +278,19 @@
           "cluster": "response-size-cap-at-exported-parser",
           "note": "one byte past the cap: documented response overflow must yield no-decision"
         }
+      },
+      {
+        "raw": "{\"tier\":\"fast\",\"confidence\":0.9,\"probabilities\":{\"fast\":0.4,\"balanced\":0.3010000000005,\"strong\":0.3}}",
+        "confidenceKind": "self_reported",
+        "expected": {
+          "accept": false
+        },
+        "provenance": {
+          "source": "jev-advisor/README.md:82",
+          "statement": "A supplied probability distribution must contain exactly the three tiers, finite probabilities in [0,1], and sum to one within 0.001.",
+          "cluster": "probability-sum-tolerance-fp-slack",
+          "note": "sum 1.0010000000005 deviates from one by 0.0010000000005, above the documented 0.001 bound but below the code's undocumented 0.001 + 1e-9 slack; expected no_decision"
+        }
       }
     ],
     "egress_boundary": [

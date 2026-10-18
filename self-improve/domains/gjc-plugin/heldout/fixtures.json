@@ -235,6 +235,14 @@
           "accept": false
         },
         "parallelOf": "response-size-cap-at-exported-parser"
+      },
+      {
+        "raw": "{\"tier\":\"balanced\",\"confidence\":0.8,\"probabilities\":{\"fast\":0.3,\"balanced\":0.4010000000005,\"strong\":0.3}}",
+        "confidenceKind": "self_reported",
+        "expected": {
+          "accept": false
+        },
+        "parallelOf": "probability-sum-tolerance-fp-slack"
       }
     ],
     "egress_boundary": [
