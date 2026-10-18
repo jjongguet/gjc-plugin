@@ -36,8 +36,11 @@ reader contract forbids mutating the wiki's Git state; it reads `rev-parse` and
 - `/usr/bin/python3` (3.9 or newer; the script uses only the standard library).
 - `git` on `PATH`.
 - `bun` on `PATH` for `rrsi/scripts/journal-dream.mjs` (the plist adds
-  `/opt/homebrew/bin` and `/usr/local/bin` so a Homebrew bun is found under
-  launchd).
+  `/Users/kyeongminkim/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` so
+  Homebrew bun and the `gh` credential helper are found under launchd).
+- `gh` on `PATH`: the HTTPS git credential helper for the private-wiki fetch and
+  the digest push invokes `gh`; without it launchd records a fetch skip and the
+  digest push fails.
 - A private digest repository checkout, with a committed `digests/.gitignore`
   containing `.lock` and `*.tmp.*`.
 - The canonical checkout at `/Users/kyeongminkim/jjongguet/gjc-plugin` (or pass a
