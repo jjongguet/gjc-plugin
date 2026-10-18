@@ -2771,6 +2771,16 @@ export function noCheckDecision(reason: NoDecisionReason, httpStatus?: number): 
 	return httpStatus === undefined ? { status: "no_decision", reason } : { status: "no_decision", reason, httpStatus };
 }
 
+/**
+ * A probability map is valid only when its sum stays within the documented
+ * 0.001 bound. The added tolerance is a few ulps of 1.0 to absorb decimal
+ * rounding noise, not an admission margin: a deviation of 1e-12 or more over
+ * the bound is still rejected.
+ */
+function probabilitySumWithinBound(sum: number): boolean {
+	return Math.abs(sum - 1) <= 0.001 + Number.EPSILON * 4;
+}
+
 function parseProbabilityMap(value: unknown): Record<Tier, number> | null {
 	if (!isRecord(value) || Object.keys(value).length !== TIERS.length || !TIERS.every(tier => Object.prototype.hasOwnProperty.call(value, tier))) return null;
 	const probabilities = {} as Record<Tier, number>;
@@ -2780,7 +2790,7 @@ function parseProbabilityMap(value: unknown): Record<Tier, number> | null {
 		probabilities[tier] = probability;
 	}
 	const sum = TIERS.reduce((total, tier) => total + probabilities[tier], 0);
-	return Math.abs(sum - 1) <= 0.001 + 1e-9 ? probabilities : null;
+	return probabilitySumWithinBound(sum) ? probabilities : null;
 }
 
 /** Strict JSON parser. It accepts a whole JSON document or one complete JSON fence, never a partial object. */
@@ -2835,7 +2845,7 @@ function parseCheckProbabilityMap(value: unknown): Record<CheckVerdict, number> 
 		probabilities[verdict] = probability;
 	}
 	const sum = CHECK_VERDICTS.reduce((total, verdict) => total + probabilities[verdict], 0);
-	return Math.abs(sum - 1) <= 0.001 + 1e-9 ? probabilities : null;
+	return probabilitySumWithinBound(sum) ? probabilities : null;
 }
 
 /** Strict JSON parser for check responses; same fence/document discipline as parseDecision. */
