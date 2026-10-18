@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -134,15 +134,30 @@ test("dream/replay/policy CLI run end-to-end over a synthetic corpus with a byte
   }
 });
 
-test("the repository ledger at this commit is below the pass gate, so P2 reports insufficient evidence", () => {
-  const run = runCli(["dream", "--json"]);
-  assert.equal(run.status, 0, run.stderr);
-  const receipt = JSON.parse(run.stdout);
-  assert.equal(receipt.gate.ok, false);
-  assert.equal(receipt.gate.reason, "corpus_below_pass_gate");
-  assert.equal(receipt.verdict, "insufficient evidence at pass-gate size — thresholds not evaluated");
-  assert.equal(receipt.corpus.attempts < receipt.gate.passGateN, true);
-  assert.equal(receipt.thresholds.evaluated, false, "the frozen insufficient-evidence path must not present evaluated thresholds");
-  assert.equal(typeof receipt.thresholds.advisory?.attemptsOk, "boolean", "advisory numbers are still reported");
-  assert.match(receipt.caveat, /no statistical significance is claimed/);
+test("a pinned below-gate corpus reports insufficient evidence", () => {
+  // The live ledger grows as campaigns run, so pin the M2 freeze prefix
+  // (13 cycle rows + 1 adoption row) instead of reading the live corpus.
+  const root = mkdtempSync(join(tmpdir(), "dream-below-gate-"));
+  try {
+    const lines = readFileSync(join(REPO_ROOT, "self-improve", "ledger.jsonl"), "utf8").trim().split("\n");
+    const prefix = lines.slice(0, 14);
+    const kinds = prefix.map((line) => JSON.parse(line).kind);
+    assert.equal(kinds.filter((kind) => kind === "cycle").length, 13);
+    assert.equal(kinds.filter((kind) => kind === "adoption").length, 1);
+    const ledgerPath = join(root, "ledger.jsonl");
+    writeFileSync(ledgerPath, `${prefix.join("\n")}\n`);
+    const run = runCli(["dream", "--ledger", ledgerPath, "--json"]);
+    assert.equal(run.status, 0, run.stderr);
+    const receipt = JSON.parse(run.stdout);
+    assert.equal(receipt.corpus.attempts, 13);
+    assert.equal(receipt.gate.ok, false);
+    assert.equal(receipt.gate.reason, "corpus_below_pass_gate");
+    assert.equal(receipt.verdict, "insufficient evidence at pass-gate size — thresholds not evaluated");
+    assert.equal(receipt.corpus.attempts < receipt.gate.passGateN, true);
+    assert.equal(receipt.thresholds.evaluated, false, "the frozen insufficient-evidence path must not present evaluated thresholds");
+    assert.equal(typeof receipt.thresholds.advisory?.attemptsOk, "boolean", "advisory numbers are still reported");
+    assert.match(receipt.caveat, /no statistical significance is claimed/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
