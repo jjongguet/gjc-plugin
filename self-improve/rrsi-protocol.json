@@ -1,12 +1,12 @@
 {
   "schema": "gjc.self-improve.rrsi-protocol.v1",
-  "frozenFrom": "plan stage-02-revision.md §4.1-§4.4 / §9-M2 (M2 caps: --max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000; M4 caps: --max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000)",
+  "frozenFrom": "plan stage-02-revision.md §4.1-§4.4 / §9-M2 (M2 caps: --max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000; M4 caps: --max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000) + JJO-213 approved headroom extension (2026-10-19)",
   "primary": "decision_accuracy",
   "floor": 0.01,
   "headroom": {
-    "denominator": 16,
-    "denominatorBasis": "decision_accuracy cases in self-improve/domains/gjc-plugin/probes/fixtures.json at the headroom commit",
-    "perCaseDelta": 0.0625,
+    "denominator": 17,
+    "denominatorBasis": "decision_accuracy cases in self-improve/domains/gjc-plugin/probes/fixtures.json after the JJO-213 headroom extension",
+    "perCaseDelta": 0.058823529411764705,
     "requiredRepairedCases": 1,
     "derivation": "delta = hits/denominator; repairing one case adds 1/denominator; required k = smallest integer with k/denominator >= floor=0.01, i.e. k = ceil(0.01 * denominator); frozen here before the first live cycle",
     "gapClusters": 2,
@@ -14,11 +14,11 @@
     "clusters": [
       {
         "id": "probability-sum-tolerance-boundary",
-        "cases": 4,
+        "cases": 5,
         "source": "jev-advisor/README.md:57-58 (distribution must sum to one within 0.001)",
         "repairSurface": "jev-advisor/lib/decision.ts (parseProbabilityMap)",
-        "class": "decimal |sum-1| == 0.001 exactly, rejected by binary floating-point comparison error",
-        "headroom": 0.25
+        "class": "decimal |sum-1| == 0.001 boundary rejected by binary comparison; and sums above the documented 0.001 bound by up to 1e-9 accepted by the undocumented 0.001 + 1e-9 slack",
+        "headroom": 0.29411764705882354
       },
       {
         "id": "response-size-cap-at-exported-parser",
@@ -26,16 +26,16 @@
         "source": "jev-advisor/README.md:60-61 (response overflow yields explicit no-decision) + decision.ts:70 MAX_RESPONSE_BYTES",
         "repairSurface": "jev-advisor/lib/decision.ts (parseDecision)",
         "class": "64 KiB cap enforced only by the transport reader; the exported parser accepts an over-cap reply",
-        "headroom": 0.0625
+        "headroom": 0.058823529411764705
       }
     ],
     "measuredBaseline": {
-      "decisionAccuracy": 0.6875,
-      "heldoutCoverage": 0.8275862068965517,
-      "driftCases": 5,
+      "decisionAccuracy": 0.6470588235294118,
+      "heldoutCoverage": 0.8,
+      "driftCases": 6,
       "atCapGuardCase": "decision_accuracy#14 (65536 bytes, accepted) rejects over-strict repairs"
     },
-    "clusterStatus": "frozen-pending-live-run: cases and this file commit before the first live cycle"
+    "clusterStatus": "re-frozen for JJO-213 on 2026-10-19 before the new measurement; the M2 freeze remains in git history at 7f2f97f"
   },
   "dualFloor": {
     "pass": ">=2 adoption cycles",
@@ -88,8 +88,17 @@
     "probes": "self-improve/domains/gjc-plugin/probes/fixtures.json",
     "heldout": "self-improve/domains/gjc-plugin/heldout/fixtures.json",
     "sha256": {
-      "probes": "5d81c64d75f1a596fc0251d1b4fb9f2859e9d3296dd8ac66a92a932faf0bf7f6",
-      "heldout": "216de92adeb9f687bcecb54afd5bc6a9bc5682b98ecbf9553f92c81b87c88672"
+      "probes": "59ade9279061b15ca4c0cededfe167de755ab097b5bf2ecf8248bd80a4b9e768",
+      "heldout": "2efdd9c250192c5446aba416f942aed5b1ff7204d4a38a21a1bc84910b0f7508"
     }
+  },
+  "refreeze": {
+    "issue": "JJO-213",
+    "approvedAt": "2026-10-19T00:25:00+09:00",
+    "approvedBudgetUsd": 5,
+    "supersedes": "M2 freeze at commit 7f2f97f (rrsi-protocol.json v1)",
+    "reason": "add one spec-sourced probability-bound headroom case and its heldout parallel; no threshold, pass-gate or cap change",
+    "caseAdded": "probability-sum-tolerance-fp-slack (appended to the probability-sum-tolerance-boundary cluster)",
+    "preRegistration": "this file is committed before the adoption measurement; the M2 thresholds and dual-floor rule are unchanged"
   }
 }
