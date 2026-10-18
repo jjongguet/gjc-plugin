@@ -58,8 +58,12 @@ export default function register(api: {
 								clearWidget();
 							} else {
 								// Batch backgrounded and still in flight: mark it as
-								// awaiting async and pin the primary job id.
-								widgetMarkAwaitingAsync(sessionId, callId, envelopeJobId);
+								// awaiting async and pin the primary job id. Structured
+								// per-child progress can confirm the pre-hook task labels.
+								const progress = Array.isArray(details.progress)
+									? details.progress.filter(isResultRecord).map(rawEntry => ({ index: rawEntry.index, id: rawEntry.id }))
+									: [];
+								widgetMarkAwaitingAsync(sessionId, callId, envelopeJobId, progress);
 							}
 						} else {
 							// No usable async job envelope: the call returned without a
@@ -71,13 +75,25 @@ export default function register(api: {
 			}
 
 			if (result.toolName === "subagent") {
-				// Fold the snapshot into the lifecycle, then apply the CLEAR predicate.
+				// Fold the snapshot into the lifecycle, remove each terminal child's
+				// row, then apply the existing closure predicate first. When closure
+				// is not met but every drawn row is gone, clear instead of leaving an
+				// empty widget behind.
 				const subagents = Array.isArray(details.subagents) ? details.subagents : [];
 				const snapshot = subagents
 					.filter(isResultRecord)
-					.map(rawEntry => ({ jobId: rawEntry.jobId, status: rawEntry.status }));
-				widgetFoldSnapshot(sessionId, snapshot);
-				if (widgetShouldClear(sessionId, snapshot)) clearWidget();
+					.map(rawEntry => ({ jobId: rawEntry.jobId, status: rawEntry.status, id: rawEntry.id, label: rawEntry.label }));
+				const rowUpdate = widgetFoldSnapshot(sessionId, snapshot);
+				if (widgetShouldClear(sessionId, snapshot)) {
+					clearWidget();
+				} else if (rowUpdate.removedRows > 0) {
+					if (rowUpdate.remainingText === null) clearWidget();
+					else {
+						try {
+							if (typeof ui?.setWidget === "function") ui.setWidget("jev-advisor", [rowUpdate.remainingText]);
+						} catch {}
+					}
+				}
 			}
 
 			if (isResultRecord(ctx) && isResultRecord(ctx.signal) && ctx.signal.aborted === true) return undefined;

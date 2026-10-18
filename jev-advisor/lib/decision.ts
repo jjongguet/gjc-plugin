@@ -2362,7 +2362,7 @@ export const ENFORCE_GUIDANCE =
  * per-generated-file and would not be shared across the two surfaces.
  */
 export const WIDGET_LIFECYCLE_SLOT = "gjc.jev-advisor.widget-lifecycle";
-export const WIDGET_LIFECYCLE_VERSION = 1;
+export const WIDGET_LIFECYCLE_VERSION = 2;
 /** Session entries kept at once; the oldest session is evicted past this. */
 export const WIDGET_LIFECYCLE_MAX_SESSIONS = 8;
 /**
@@ -2372,12 +2372,26 @@ export const WIDGET_LIFECYCLE_MAX_SESSIONS = 8;
  * so the map bound is deliberately 2x the admission clamp (64).
  */
 export const WIDGET_LIFECYCLE_MAX_JOB_IDS = 64;
+/** Bound for the rendered widget text; mirrors the pre-hook summary bound. */
+export const WIDGET_SUMMARY_MAX_CHARS = 2200;
+/** Bound for one stored task row; the pre-hook renders each row at 180 chars. */
+export const WIDGET_ROW_MAX_CHARS = 240;
+/** Bound for non-row summary lines kept across redraws. */
+export const WIDGET_TAIL_MAX_LINES = 32;
 
 export type WidgetJobStatus = "terminal" | "nonTerminal" | "unknown";
 
 export interface WidgetJobState {
 	status: WidgetJobStatus;
 	everNonTerminal: boolean;
+}
+
+/** One per-task widget row; only valid task rows are removable. */
+export interface WidgetRow {
+	index: number;
+	/** Task id (input.tasks[].id) when bounded; null makes the row unmappable. */
+	label: string | null;
+	text: string;
 }
 
 export interface WidgetBatchState {
@@ -2387,6 +2401,33 @@ export interface WidgetBatchState {
 	awaitingAsync: boolean;
 	primaryJobId: string | null;
 	jobs: Record<string, WidgetJobState>;
+	/** Remaining per-task rows; terminal observations remove them. */
+	rows: WidgetRow[];
+	/** Non-row summary lines (rejected/omitted/storage) preserved on redraw. */
+	tail: string[];
+	/** jobId -> task index. null pins a contradictory/ambiguous job out of removal. */
+	jobRows: Record<string, number | null>;
+	/**
+	 * Allocation counter expected for task index 0, anchored from the primary
+	 * job id (`${counter}-${taskId}`). null means no structured anchor; row
+	 * removals then require a unique id/label match only.
+	 */
+	counterBase: number | null;
+}
+
+export interface WidgetSnapshotEntry {
+	jobId: unknown;
+	status: unknown;
+	/** Allocated task id from a subagent snapshot (structured match only). */
+	id?: unknown;
+	/** Job label from a subagent snapshot; same allocated id when present. */
+	label?: unknown;
+}
+
+export interface WidgetSnapshotOutcome {
+	removedRows: number;
+	/** Redraw text when at least one row was removed and rows remain; null otherwise. */
+	remainingText: string | null;
 }
 
 interface WidgetLifecycleState {
@@ -2431,6 +2472,139 @@ function boundedJobId(value: unknown): string | null {
 	return boundedIdentity(value);
 }
 
+function boundedWidgetText(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const text = value.trim();
+	return text && text.length <= WIDGET_ROW_MAX_CHARS && !/[\u0000-\u001f\u007f]/.test(text) ? text : null;
+}
+
+/** Copy bounded rows from the pre-hook; duplicate indexes keep the first. */
+function boundedWidgetRows(value: unknown): WidgetRow[] {
+	if (!Array.isArray(value)) return [];
+	const rows: WidgetRow[] = [];
+	const seen = new Set<number>();
+	for (const raw of value.slice(0, MAX_TASKS_PER_INVOCATION)) {
+		if (!isRecord(raw)) continue;
+		const index = typeof raw.index === "number" && Number.isInteger(raw.index) && raw.index >= 0 && raw.index < MAX_TASKS_PER_INVOCATION
+			? raw.index
+			: null;
+		if (index === null || seen.has(index)) continue;
+		const text = boundedWidgetText(raw.text);
+		if (!text) continue;
+		seen.add(index);
+		rows.push({ index, label: boundedIdentity(raw.label), text });
+	}
+	return rows;
+}
+
+function boundedWidgetTail(value: unknown): string[] {
+	if (!Array.isArray(value)) return [];
+	const tail: string[] = [];
+	for (const raw of value.slice(0, WIDGET_TAIL_MAX_LINES)) {
+		const text = boundedWidgetText(raw);
+		if (text) tail.push(text);
+	}
+	return tail;
+}
+
+/** Single bounded renderer for the pre-hook draw and every per-row redraw. */
+export function renderWidgetLines(rows: { text: string }[], tail: string[]): string {
+	return [...rows.map(row => row.text), ...tail].join("\n").slice(0, WIDGET_SUMMARY_MAX_CHARS);
+}
+
+/**
+ * Match a subagent snapshot's allocated id/label to a task id without
+ * trusting free-form text. The host allocates `${counter}-${taskId}` (nested
+ * prefixes join with dots), so a suffix match is accepted only when the
+ * remaining prefix is purely numeric.
+ */
+function allocatedIdMatchesTaskId(candidate: string, taskId: string): boolean {
+	if (candidate === taskId) return true;
+	const suffix = `-${taskId}`;
+	if (!candidate.endsWith(suffix)) return false;
+	return /^\d+(?:\.\d+)*$/.test(candidate.slice(0, candidate.length - suffix.length));
+}
+
+/** Split an allocated id (`${counter}-${taskId}`) for batch-generation checks. */
+function parseAllocatedId(value: string): { counter: number; taskId: string } | null {
+	const match = /^([\d.]+)-(.+)$/.exec(value);
+	if (!match) return null;
+	const parts = match[1].split(".");
+	const counter = Number(parts[parts.length - 1]);
+	return Number.isSafeInteger(counter) && counter >= 0 ? { counter, taskId: match[2] } : null;
+}
+
+interface WidgetEntryMatch {
+	row: WidgetRow;
+	counter: number | null;
+}
+
+/** Unique row for one snapshot entry across its structured job id/id/label. */
+function uniqueWidgetRowForEntry(batch: WidgetBatchState, entry: WidgetSnapshotEntry): WidgetEntryMatch | null {
+	const matches = new Map<number, WidgetEntryMatch>();
+	for (const raw of [entry.id, entry.label, entry.jobId]) {
+		const candidate = boundedIdentity(raw);
+		if (!candidate) continue;
+		const matched = batch.rows.filter(row => row.label !== null && allocatedIdMatchesTaskId(candidate, row.label));
+		if (matched.length > 1) return null; // duplicate label: retention is safer
+		if (matched.length !== 1) continue;
+		const row = matched[0];
+		const counter = parseAllocatedId(candidate)?.counter ?? null;
+		const existing = matches.get(row.index);
+		if (existing && existing.counter !== null && counter !== null && existing.counter !== counter) return null;
+		matches.set(row.index, { row, counter: counter ?? existing?.counter ?? null });
+	}
+	return matches.size === 1 ? [...matches.values()][0] : null;
+}
+
+/** The counter must agree with the primary-anchored batch generation when known. */
+function counterMatchesBatch(batch: WidgetBatchState, match: WidgetEntryMatch): boolean {
+	const base = batch.counterBase ?? null;
+	if (base === null || match.counter === null) return true;
+	return match.counter === base + match.row.index;
+}
+
+function pruneWidgetJobRows(batch: WidgetBatchState): void {
+	const ids = Object.keys(batch.jobRows);
+	if (ids.length <= WIDGET_LIFECYCLE_MAX_JOB_IDS) return;
+	for (const id of ids.slice(0, ids.length - WIDGET_LIFECYCLE_MAX_JOB_IDS)) delete batch.jobRows[id];
+}
+
+/**
+ * Bind one observed job to a task index. Existing bindings win until a
+ * contradictory snapshot pins the job out of removal; a row can belong to
+ * only one job, and an ambiguous/unknown match returns null (retention).
+ */
+function bindWidgetJobRow(batch: WidgetBatchState, jobId: string, entry: WidgetSnapshotEntry): number | null {
+	const existing = batch.jobRows[jobId];
+	if (existing === null) return null;
+	const derived = uniqueWidgetRowForEntry(batch, entry);
+	if (existing !== undefined) {
+		if (derived && (derived.row.index !== existing || !counterMatchesBatch(batch, derived))) {
+			batch.jobRows[jobId] = null; // contradiction: never remove on either claim
+			return null;
+		}
+		return batch.rows.some(row => row.index === existing) ? existing : null;
+	}
+	if (!derived || !counterMatchesBatch(batch, derived)) return null;
+	for (const [otherJob, mapped] of Object.entries(batch.jobRows)) {
+		if (otherJob !== jobId && mapped === derived.row.index) return null;
+	}
+	batch.jobRows[jobId] = derived.row.index;
+	pruneWidgetJobRows(batch);
+	return derived.row.index;
+}
+
+function removeWidgetRow(batch: WidgetBatchState, rowIndex: number): boolean {
+	const before = batch.rows.length;
+	batch.rows = batch.rows.filter(row => row.index !== rowIndex);
+	if (batch.rows.length === before) return false;
+	for (const [mappedJob, mappedRow] of Object.entries(batch.jobRows)) {
+		if (mappedRow === rowIndex) delete batch.jobRows[mappedJob];
+	}
+	return true;
+}
+
 function clampTaskCount(raw: number): number {
 	return Math.min(Math.max(raw, 1), MAX_TASKS_PER_INVOCATION);
 }
@@ -2455,11 +2629,15 @@ export function widgetLifecycleResetForTests(): void {
 /**
  * Record the batch the pre-hook just drew. Replaces any prior entry for the
  * session (supersede); the new entry owns the widget from this point on.
+ * `rows` are the per-task lines that can be removed one by one; `tail` keeps
+ * non-row lines across redraws.
  */
 export function widgetRecordBatch(
 	sessionId: string,
 	toolCallId: string,
 	taskCount: number,
+	rows: unknown = [],
+	tail: unknown = [],
 ): void {
 	const session = boundedIdentity(sessionId);
 	const call = boundedIdentity(toolCallId);
@@ -2471,6 +2649,10 @@ export function widgetRecordBatch(
 		awaitingAsync: false,
 		primaryJobId: null,
 		jobs: {},
+		rows: boundedWidgetRows(rows),
+		tail: boundedWidgetTail(tail),
+		jobRows: {},
+		counterBase: null,
 	};
 	evictOldestSessions(slot.state.sessions);
 }
@@ -2480,27 +2662,41 @@ export function widgetRecordBatch(
  * never undone by a later non-terminal or unknown sighting; running/paused/
  * queued set nonTerminal + everNonTerminal; unknown/absent statuses record
  * `unknown` (blocks a clear, contributes nothing to the terminal count).
+ *
+ * The same pass binds observed job ids to task rows using structured snapshot
+ * job-id/id/label fields only. A terminal child removes its row immediately; an
+ * unknown, unmappable, or contradictory observation never removes one.
  * Excess job ids past the map bound evict the oldest entries (bounded memory);
  * a dropped ever-non-terminal id can weaken the closure check in extreme
  * corners (advisory-only residual).
  */
 export function widgetFoldSnapshot(
 	sessionId: unknown,
-	entries: { jobId: unknown; status: unknown }[],
-): void {
+	entries: WidgetSnapshotEntry[],
+): WidgetSnapshotOutcome {
 	const session = boundedIdentity(sessionId);
-	if (!session) return;
+	if (!session) return { removedRows: 0, remainingText: null };
 	const state = lifecycleState();
 	const batch = state.sessions[session];
-	if (!batch) return;
+	if (!batch) return { removedRows: 0, remainingText: null };
+	const removed = new Set<number>();
+	// Rows belong to the async batch only after its launch receipt establishes
+	// ownership; a snapshot observed before that point is never this widget's
+	// child and must not remove a row.
+	const canRemoveRows = batch.awaitingAsync === true;
 	for (const item of entries) {
 		const jobId = boundedJobId(item.jobId);
 		if (!jobId) continue;
 		const existing = batch.jobs[jobId];
 		const status = typeof item.status === "string" ? item.status.trim().toLowerCase() : "";
-		if (status === "completed" || status === "failed" || status === "cancelled") {
+		const terminal = status === "completed" || status === "failed" || status === "cancelled";
+		const nonTerminal = status === "running" || status === "paused" || status === "queued";
+		let rowIndex: number | null = null;
+		if (canRemoveRows && (terminal || nonTerminal)) rowIndex = bindWidgetJobRow(batch, jobId, item);
+		if (terminal) {
 			batch.jobs[jobId] = { status: "terminal", everNonTerminal: existing?.everNonTerminal ?? false };
-		} else if (status === "running" || status === "paused" || status === "queued") {
+			if (canRemoveRows && rowIndex !== null && removeWidgetRow(batch, rowIndex)) removed.add(rowIndex);
+		} else if (nonTerminal) {
 			if (existing?.status === "terminal") continue; // no regression
 			batch.jobs[jobId] = { status: "nonTerminal", everNonTerminal: true };
 		} else if (existing?.status === "terminal") {
@@ -2514,15 +2710,31 @@ export function widgetFoldSnapshot(
 	}
 	const ids = Object.keys(batch.jobs);
 	if (ids.length > WIDGET_LIFECYCLE_MAX_JOB_IDS) {
-		for (const id of ids.slice(0, ids.length - WIDGET_LIFECYCLE_MAX_JOB_IDS)) delete batch.jobs[id];
+		for (const id of ids.slice(0, ids.length - WIDGET_LIFECYCLE_MAX_JOB_IDS)) {
+			delete batch.jobs[id];
+			delete batch.jobRows[id];
+		}
 	}
+	if (removed.size === 0) return { removedRows: 0, remainingText: null };
+	return {
+		removedRows: removed.size,
+		remainingText: batch.rows.length > 0 ? renderWidgetLines(batch.rows, batch.tail) : null,
+	};
 }
 
-/** Mark the batch as waiting on an async envelope and pin the primary job. */
+/**
+ * Mark the batch as waiting on an async envelope and pin the primary job.
+ * `progress` is the launch receipt's structured per-child list; it can confirm
+ * or invalidate the task-id labels drawn by the pre-hook. When the envelope
+ * job id carries the host's `${counter}-${taskId}` allocation label, it also
+ * anchors the batch generation used to reject stale jobs from older batches;
+ * a plain job id falls back to mapping only a singleton batch to index 0.
+ */
 export function widgetMarkAwaitingAsync(
 	sessionId: string,
 	toolCallId: string,
 	jobId: string,
+	progress: { index: unknown; id: unknown }[] = [],
 ): void {
 	const session = boundedIdentity(sessionId);
 	const call = boundedIdentity(toolCallId);
@@ -2532,6 +2744,37 @@ export function widgetMarkAwaitingAsync(
 	if (!batch || batch.toolCallId !== call) return;
 	batch.awaitingAsync = true;
 	batch.primaryJobId = job;
+	if (Array.isArray(progress)) {
+		for (const raw of progress.slice(0, MAX_TASKS_PER_INVOCATION)) {
+			if (!isRecord(raw)) continue;
+			const index = typeof raw.index === "number" && Number.isInteger(raw.index) && raw.index >= 0 && raw.index < MAX_TASKS_PER_INVOCATION
+				? raw.index
+				: null;
+			if (index === null) continue;
+			const id = boundedIdentity(raw.id);
+			if (!id) continue;
+			const row = batch.rows.find(candidate => candidate.index === index);
+			if (!row) continue;
+			// Conflicting structured signals make this row unmappable (retention);
+			// an allocated-id progress value still confirms the same task id.
+			if (row.label === null) row.label = id;
+			else if (row.label !== id && !allocatedIdMatchesTaskId(id, row.label)) row.label = null;
+		}
+	}
+	// The primary job id carries the allocated `${counter}-${taskId}` label in
+	// the host, which anchors the counter expected for every row in this batch.
+	const anchor = parseAllocatedId(job);
+	const anchorRows = anchor
+		? batch.rows.filter(row => row.label !== null && allocatedIdMatchesTaskId(job, row.label))
+		: [];
+	if (anchor && anchorRows.length === 1) {
+		batch.counterBase = anchor.counter - anchorRows[0].index;
+		if (batch.jobRows[job] === undefined) batch.jobRows[job] = anchorRows[0].index;
+		else if (batch.jobRows[job] !== anchorRows[0].index) batch.jobRows[job] = null;
+	} else if (batch.rows.length === 1 && batch.taskCount === 1 && batch.rows[0].index === 0) {
+		if (batch.jobRows[job] === undefined) batch.jobRows[job] = 0;
+		else if (batch.jobRows[job] !== 0) batch.jobRows[job] = null;
+	}
 }
 
 /** Drop a session entry without touching the widget (caller clears the UI). */

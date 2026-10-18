@@ -128,10 +128,11 @@ export default function register(api: {
 
 			for (const rejected of extraction.rejected) adviceByIndex.set(rejected.index, noDecision(rejected.reason));
 			const summary = summarizeTasks(extraction, adviceByIndex, providerPromptLimit(cfg));
-			if (storageUnavailable) summary.push(storageWarning(storageUnavailable));
-			if (summary.length) {
+			if (storageUnavailable) summary.tail.push(storageWarning(storageUnavailable));
+			const widgetText = renderWidgetLines(summary.rows, summary.tail);
+			if (widgetText) {
 				try {
-					if (typeof ui?.setWidget === "function") ui.setWidget("jev-advisor", summary);
+					if (typeof ui?.setWidget === "function") ui.setWidget("jev-advisor", [widgetText]);
 				} catch {}
 			}
 			// Record the batch this widget describes so the result hook can own
@@ -140,10 +141,11 @@ export default function register(api: {
 			// previous batch's receipts would stop matching. taskCount is the raw
 			// bounded count (tasks attempted plus rejected entries); it is clamped
 			// to the same 32-task admission limit, which is half the 64-id bound
-			// of the per-batch job map.
-			if (summary.length && sessionId !== null && callId !== null) {
+			// of the per-batch job map. Rows stay bounded and carry the task id
+			// used to bind observed child jobs for per-row removal.
+			if (widgetText && sessionId !== null && callId !== null) {
 				const rawCount = extraction.tasks.length + extraction.rejected.length + extraction.omittedCount;
-				widgetRecordBatch(sessionId, callId, rawCount);
+				widgetRecordBatch(sessionId, callId, rawCount, summary.rows, summary.tail);
 			}
 			if (storageUnavailable) notifyStorageUnavailable(ui, storageUnavailable);
 
@@ -165,7 +167,9 @@ export default function register(api: {
 					if (storageUnavailable) {
 						try {
 							if (typeof ui?.setWidget === "function") {
-								ui.setWidget("jev-advisor", [...summary.filter(line => !line.startsWith("Evidence storage unavailable (")), storageWarning(storageUnavailable)]);
+								const tail = summary.tail.filter(line => !line.startsWith("Evidence storage unavailable ("));
+								const text = renderWidgetLines(summary.rows, [...tail, storageWarning(storageUnavailable)]);
+								if (text) ui.setWidget("jev-advisor", [text]);
 							}
 						} catch {}
 						notifyStorageUnavailable(ui, storageUnavailable);
@@ -183,7 +187,7 @@ export default function register(api: {
 					};
 				}
 			}
-			if (cfg.mode !== "shadow" && summary.length) {
+			if (cfg.mode !== "shadow" && widgetText) {
 				// Single bounded metadata-only line: notify appends a permanent
 				// chat entry, so multi-line payloads are never emitted.
 				let topTier = "";
@@ -268,8 +272,8 @@ function summarizeTasks(
 	extraction: Extraction,
 	advice: Map<number, Advice>,
 	limit: number,
-): string[] {
-	const lines: string[] = [];
+): { rows: { index: number; label: string | null; text: string }[]; tail: string[] } {
+	const rows: { index: number; label: string | null; text: string }[] = [];
 	for (const task of extraction.tasks.slice(0, 20)) {
 		const result = advice.get(task.index) ?? noDecision("already_pending");
 		const label = task.callerId ? ` [${task.callerId.slice(0, 32)}]` : "";
@@ -279,14 +283,19 @@ function summarizeTasks(
 			: result.reason === "input_too_large"
 				? `no decision (input_too_large: ${task.prompt.length} > ${limit} chars)`
 				: `no decision (${result.reason})`;
-		lines.push(`task ${task.index}${label}: ${requested}; ${outcome}`.slice(0, 180));
+		rows.push({ index: task.index, label: task.callerId, text: `task ${task.index}${label}: ${requested}; ${outcome}`.slice(0, 180) });
 	}
-	for (const rejected of extraction.rejected.slice(0, Math.max(0, 20 - lines.length))) {
-		lines.push(`task ${rejected.index}: no decision (${rejected.reason})`);
+	const tail: string[] = [];
+	let tailLinesAdded = 0;
+	for (const rejected of extraction.rejected.slice(0, Math.max(0, 20 - rows.length))) {
+		tail.push(`task ${rejected.index}: no decision (${rejected.reason})`);
+		tailLinesAdded++;
 	}
-	if (extraction.omittedCount > 0) lines.push(`${extraction.omittedCount} additional tasks omitted (batch_limit)`);
-	const remaining = Math.max(0, extraction.tasks.length + extraction.rejected.length - lines.length);
-	if (remaining > 0) lines.push(`${remaining} task results omitted from this bounded summary`);
-	const bounded = lines.join("\n").slice(0, 2200);
-	return bounded ? [bounded] : [];
+	if (extraction.omittedCount > 0) {
+		tail.push(`${extraction.omittedCount} additional tasks omitted (batch_limit)`);
+		tailLinesAdded++;
+	}
+	const remaining = Math.max(0, extraction.tasks.length + extraction.rejected.length - rows.length - tailLinesAdded);
+	if (remaining > 0) tail.push(`${remaining} task results omitted from this bounded summary`);
+	return { rows, tail };
 }

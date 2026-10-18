@@ -698,12 +698,16 @@ async function runSuite(root: string) {
 			} }),
 			notifies: () => calls.filter(c => c.op === "notify").map(c => String(c.arg)),
 			clears: () => calls.filter(c => c.op === "setWidget" && c.arg === undefined),
+			widgets: () => calls.filter(c => c.op === "setWidget" && c.arg !== undefined).map(c => Array.isArray(c.arg) ? c.arg.join("\n") : String(c.arg)),
 		};
 	};
 	const tasksN = (n: number) => batch(Array.from({ length: n }, (_, i) => `child ${i}`));
 	const syncReceipt = (id: string, input: unknown) => ({ type: "tool_result", toolName: "task", toolCallId: id, input, details: {}, isError: false });
-	const snapshotEntries = (specs: [string, string][]) => specs.map(([jobId, status]) => ({ jobId, id: `allocated-${jobId}`, status }));
-	const snapshotFor = (specs: [string, string][], extra: any = {}) => ({ type: "tool_result", toolName: "subagent", toolCallId: "snap", details: { subagents: snapshotEntries(specs) }, isError: false, ...extra });
+	const snapshotEntries = (specs: [string, string, string?][]) => specs.map(([jobId, status, allocatedId]) => {
+		const id = allocatedId ?? `allocated-${jobId}`;
+		return { jobId, id, label: id, status };
+	});
+	const snapshotFor = (specs: [string, string, string?][], extra: any = {}) => ({ type: "tool_result", toolName: "subagent", toolCallId: "snap", details: { subagents: snapshotEntries(specs) }, isError: false, ...extra });
 	await check("V1 matching-receipt classification is total: sync/async/terminal/isError/blocked/non-matching", async () => {
 		// 1. sync receipt (no async envelope) -> CLEAR
 		core.widgetLifecycleResetForTests();
@@ -828,6 +832,128 @@ async function runSuite(root: string) {
 		await res(snapshotFor([["j0", "completed"], ["j1", "completed"], ["j2", "cancelled"]]), rec.ctx("session-a"));
 		assert.equal(rec.clears().length, before + 1, "clear fires once unknown resolves");
 	});
+	await check("V4b per-row removal: each terminal child row disappears, last row clears", async () => {
+		core.widgetLifecycleResetForTests();
+		env(); responder = () => system();
+		const rec = recording();
+		const input = tasksN(2);
+		await hook(preModule)(call("v4b", input), rec.ctx("session-a"));
+		responder = undefined;
+		const res = hook(resultModule);
+		const progress = [{ index: 0, id: "input-0" }, { index: 1, id: "input-1" }];
+		await res(launch("v4b", input, "1-input-0", { progress }), rec.ctx("session-a"));
+		assert.equal(rec.widgets().length, 1, "pre-hook drew the batch widget");
+		assert.ok(rec.widgets()[0].includes("task 0") && rec.widgets()[0].includes("task 1"), "initial widget carries every per-task row");
+		assert.equal(core.widgetSessionEntry("session-a")?.counterBase, 1, "primary job id anchors the batch counter");
+		// Structured allocated ids match the task ids drawn by the pre-hook.
+		await res(snapshotFor([["1-input-0", "running", "1-input-0"], ["2-input-1", "completed", "2-input-1"]]), rec.ctx("session-a"));
+		const widgets = rec.widgets();
+		assert.equal(widgets.length, 2, "one redraw after a terminal child");
+		assert.ok(widgets[1].includes("task 0"), "in-progress row remains");
+		assert.ok(!widgets[1].includes("task 1"), "terminal child row removed");
+		assert.equal(rec.clears().length, 0, "one remaining row does not clear");
+		const entry = core.widgetSessionEntry("session-a");
+		assert.ok(entry && entry.rows.length === 1 && entry.rows[0].index === 0, "only the in-progress row is tracked");
+		await res(snapshotFor([["1-input-0", "completed", "1-input-0"]]), rec.ctx("session-a"));
+		assert.equal(rec.clears().length, 1, "last-row removal clears the widget");
+		assert.equal(core.widgetSessionEntry("session-a"), null, "last-row clear drops the lifecycle entry");
+	});
+	await check("V4e batch counter anchor rejects an old-batch job with the same task id", async () => {
+		core.widgetLifecycleResetForTests();
+		env(); responder = () => system();
+		const rec = recording();
+		const input = tasksN(2);
+		await hook(preModule)(call("v4e", input), rec.ctx("session-a"));
+		responder = undefined;
+		const res = hook(resultModule);
+		await res(launch("v4e", input, "5-input-0"), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.counterBase, 5, "counter base derived from primary index 0");
+		const before = rec.widgets().length;
+		// Counter 4 belongs to an earlier allocation batch; expected counter for index 1 is 6.
+		await res(snapshotFor([["4-input-1", "completed", "4-input-1"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 2, "old-batch job keeps the row");
+		assert.equal(rec.widgets().length, before, "old-batch job does not redraw");
+		assert.equal(core.widgetSessionEntry("session-a")?.jobRows["4-input-1"], undefined, "old-batch job is not bound");
+		// The current batch's index 1 job has counter 6 and removes its row.
+		await res(snapshotFor([["6-input-1", "completed", "6-input-1"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 1, "current-batch job removes its row");
+		assert.ok(rec.widgets().at(-1)?.includes("task 0") && !rec.widgets().at(-1)?.includes("task 1"), "redraw keeps only the in-progress row");
+	});
+	await check("V4c last-row clear fires even when the closure predicate is still false", async () => {
+		core.widgetLifecycleResetForTests();
+		env(); responder = () => system();
+		const rec = recording();
+		const input = { agent: "executor", tasks: [
+			{ id: "input-0", assignment: "child 0", tier: "balanced" },
+			{ id: "input-1", assignment: 42, tier: "balanced" },
+		] };
+		await hook(preModule)(call("v4c", input), rec.ctx("session-a"));
+		responder = undefined;
+		const res = hook(resultModule);
+		await res(launch("v4c", input, "v4c-j0"), rec.ctx("session-a"));
+		const entry = core.widgetSessionEntry("session-a");
+		assert.ok(entry && entry.rows.length === 1 && entry.taskCount === 2, "one valid row plus one rejected entry in the raw count");
+		await res(snapshotFor([["v4c-j0", "completed", "1-input-0"]]), rec.ctx("session-a"));
+		assert.equal(rec.clears().length, 1, "exhausted rows clear without closure");
+		assert.equal(core.widgetSessionEntry("session-a"), null, "entry cleaned after last-row clear");
+	});
+	await check("V4d retention boundary: unmapped, unknown, duplicate-label, and contradictory observations never remove rows", async () => {
+		core.widgetLifecycleResetForTests();
+		env(); responder = () => system();
+		const rec = recording();
+		const input = tasksN(2);
+		await hook(preModule)(call("v4d", input), rec.ctx("session-a"));
+		responder = undefined;
+		const res = hook(resultModule);
+		await res(launch("v4d", input, "v4d-j0"), rec.ctx("session-a"));
+		const before = rec.widgets().length;
+		// Foreign/unmapped terminal job: no row label match, so retention.
+		await res(snapshotFor([["foreign-job", "completed", "foreign-alloc"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 2, "unmapped terminal job keeps rows");
+		assert.equal(rec.widgets().length, before, "unmapped terminal job does not redraw");
+		// Duplicate task id: two rows share the label, so the match is ambiguous.
+		const duplicate = { agent: "executor", tasks: [
+			{ id: "dup-0", assignment: "first duplicate", tier: "balanced" },
+			{ id: "dup-0", assignment: "second duplicate", tier: "balanced" },
+		] };
+		responder = () => system();
+		await hook(preModule)(call("v4d-dup", duplicate), rec.ctx("session-a"));
+		responder = undefined;
+		await res(launch("v4d-dup", duplicate, "dup-j0"), rec.ctx("session-a"));
+		const duplicateWidgets = rec.widgets().length;
+		await res(snapshotFor([["dup-j0", "completed", "1-dup-0"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 2, "duplicate label retains both rows");
+		assert.equal(rec.widgets().length, duplicateWidgets, "ambiguous match does not redraw");
+		// Contradictory structured signals for one job pin it out of removal.
+		const contradiction = tasksN(2);
+		responder = () => system();
+		await hook(preModule)(call("v4d-c", contradiction), rec.ctx("session-a"));
+		responder = undefined;
+		await res(launch("v4d-c", contradiction, "c-j0"), rec.ctx("session-a"));
+		await res(snapshotFor([["c-j0", "running", "1-input-0"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.jobRows["c-j0"], 0, "first structured match binds the row");
+		await res(snapshotFor([["c-j0", "completed", "2-input-1"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.jobRows["c-j0"], null, "contradictory match is pinned");
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 2, "contradiction retains both rows");
+		assert.equal(rec.clears().length, 0, "retention boundary never clears");
+	});
+	await check("V4f pre-launch snapshot cannot remove a row before async ownership", async () => {
+		core.widgetLifecycleResetForTests();
+		env(); responder = () => system();
+		const rec = recording();
+		const input = tasksN(3);
+		await hook(preModule)(call("v4f", input), rec.ctx("session-a"));
+		responder = undefined;
+		const res = hook(resultModule);
+		const before = rec.widgets().length;
+		await res(snapshotFor([["stranger", "completed", "1-input-0"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 3, "pre-launch snapshot removes nothing");
+		assert.equal(rec.widgets().length, before, "pre-launch snapshot does not redraw");
+		assert.equal(core.widgetSessionEntry("session-a")?.awaitingAsync, false, "batch is not async-owned yet");
+		await res(launch("v4f", input, "1-input-0"), rec.ctx("session-a"));
+		await res(snapshotFor([["1-input-0", "completed", "1-input-0"]]), rec.ctx("session-a"));
+		assert.equal(core.widgetSessionEntry("session-a")?.rows.length, 2, "owned terminal child removes its row");
+	});
 	await check("V5 memory off / provider off still clear (zero store writes)", async () => {
 		responder = () => system();
 		for (const variant of [{ JEV_ADVISOR_MEMORY: "off" }, { JEV_ADVISOR_PROVIDER: "off" }]) {
@@ -948,8 +1074,31 @@ async function runSuite(root: string) {
 		core.widgetFoldSnapshot("s3", [{ jobId: "p3", status: "completed" }]);
 		assert.equal(core.widgetShouldClear("s3", [{ jobId: "p3", status: "completed" }, { jobId: undefined, status: "running" }]), false, "unbounded-jobId non-terminal entry blocks the clear");
 		assert.equal(core.widgetShouldClear("s3", [{ jobId: "p3", status: "completed" }, { jobId: undefined, status: "completed" }]), true, "unbounded-jobId terminal entry does not block");
+		// per-row binding: progress fills a missing label, singleton primary maps to index 0
+		core.widgetLifecycleResetForTests();
+		core.widgetRecordBatch("s4", "c4", 1, [{ index: 0, label: null, text: "task 0: requested=fast; no decision (disabled)" }], []);
+		core.widgetMarkAwaitingAsync("s4", "c4", "p4", [{ index: 0, id: "input-0" }]);
+		assert.equal(core.widgetSessionEntry("s4")?.rows[0].label, "input-0", "launch progress confirms the task label");
+		assert.equal(core.widgetSessionEntry("s4")?.jobRows.p4, 0, "singleton primary maps to the sole row");
+		const lastRow = core.widgetFoldSnapshot("s4", [{ jobId: "p4", status: "completed" }]);
+		assert.equal(lastRow.removedRows, 1, "terminal singleton removes its row");
+		assert.equal(lastRow.remainingText, null, "no rows remain to redraw");
+		assert.equal(core.widgetSessionEntry("s4")?.rows.length, 0, "row removed from the batch state");
+		// duplicate label in the pure helper: ambiguous match never removes
+		core.widgetLifecycleResetForTests();
+		core.widgetRecordBatch("s5", "c5", 2, [
+			{ index: 0, label: "dup", text: "task 0: duplicate a" },
+			{ index: 1, label: "dup", text: "task 1: duplicate b" },
+		], []);
+		core.widgetMarkAwaitingAsync("s5", "c5", "p5");
+		const ambiguous = core.widgetFoldSnapshot("s5", [{ jobId: "j5", status: "completed", id: "1-dup", label: "1-dup" }]);
+		assert.equal(ambiguous.removedRows, 0, "duplicate label is not removed");
+		assert.equal(core.widgetSessionEntry("s5")?.rows.length, 2, "both duplicate rows retained");
 		// malformed slot version reads empty (fail toward keeping)
 		const slotKey = Symbol.for("gjc.jev-advisor.widget-lifecycle");
+		assert.equal(core.WIDGET_LIFECYCLE_VERSION, 2, "row-aware lifecycle schema version");
+		(globalThis as any)[slotKey] = { state: { version: 1, sessions: { old: { toolCallId: "old" } } } };
+		assert.equal(core.widgetSessionEntry("old"), null, "version 1 state is not adopted after the schema change");
 		(globalThis as any)[slotKey] = { state: { version: 99, sessions: {} } };
 		assert.equal(core.widgetSessionEntry("s2"), null, "version mismatch yields empty registry");
 		(globalThis as any)[slotKey] = undefined;

@@ -12,9 +12,11 @@ Advisory only by default. The plugin has four surfaces:
    - Every batch with a non-empty summary draws one keyed widget (`jev-advisor`)
      listing its advisories. The widget is batch-scoped and event-driven: cleared
      when the call ends (sync/error/abort/block) or when the batch's observed
-     children reach terminal closure; replaced by the next batch; disposed by
-     `/new`, `/drop`, fork/session switch, or restart (`/clear` keeps the session
-     id and the widget). Lifecycle state is in-process only.
+     children reach terminal closure; async children remove their rows as they
+     become terminal (removing the last row clears the widget), while unknown,
+     unmappable, or duplicate-label jobs retain their rows; replaced by the next
+     batch; disposed by `/new`, `/drop`, fork/session switch, or restart (`/clear`
+     keeps the session id and the widget). Lifecycle state is in-process only.
    - `JEV_ADVISOR_MODE=shadow` (default): draws the widget, never notifies or blocks.
    - `JEV_ADVISOR_MODE=hint`: adds one bounded single-line notification (multi-line
      payloads are never emitted: a printed chat entry cannot be removed).
