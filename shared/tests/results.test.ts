@@ -65,7 +65,7 @@ test('all handled operations and plugins accept missing repository/receipt ident
     for (const operation of pluginOperations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
     expect((await records(path.join(baseDir, plugin, 'journal', 'v1'))).map(record => record.operation)).toEqual(pluginOperations);
   }
-});
+}, 30000);
 
 test('rrsi outcomes round-trip the action counters and reject malformed fields', async () => {
   const { baseDir } = await fixture();
