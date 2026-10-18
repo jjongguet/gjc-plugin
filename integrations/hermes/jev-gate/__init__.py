@@ -1,13 +1,10 @@
-"""Hermes plugin entry point for jev-gate.
+"""jev-gate Hermes plugin entry point.
 
-The plugin registers one transform_llm_output hook. Hermes v2026.9.24 builds
-cron agent sessions as ``cron_<job_id>_<YYYYMMDD_HHMMSS>`` and does not expose a
-``ctx.current_cron_execution()`` helper, so the hook derives the job execution
-from the session id. It returns None (deliver the original) or a metadata-only
-replacement notice. See gate.py for the policy and state.
+The cron agent session id has the form ``cron_<job_id>_<YYYYMMDD_HHMMSS>``.
+The hook parses it instead of relying on a host context helper that this
+Hermes version does not expose.
 """
 from __future__ import annotations
-
 import re
 import sqlite3
 import sys
@@ -17,7 +14,6 @@ from pathlib import Path
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
-
 import gate  # noqa: E402
 
 _CRON_SESSION = re.compile(r"^cron_([0-9a-f]{6,})_(\d{8}_\d{6})$")
