@@ -69,6 +69,8 @@ All plugin-owned result/state writes use **`~/.gjc-plugin/`** (owned `0700` dire
 
 [`self-improve/`](self-improve/) is a repo-native harness self-improvement loop over this repository's own plugin surfaces (regularized recursive self-improvement, inspired by the RRSI design): declared `editable` sources only, deterministic checkers, every decision in a committed append-only ledger, candidates in `git archive` scratch copies. Keyless; the live `~/.gjc/agent` is never modified. See [`self-improve/README.md`](self-improve/README.md).
 
+[Harness² relationship and staged adoption](self-improve/HARNESS2.md) compares the existing loop with execution-evidence-driven harness refinement. It is a research proposal and follow-up roadmap, not an installed capability or measured performance gain.
+
 ## Contributing
 
 Development setup, the full test and smoke matrix, add-a-plugin conventions, install ordering and the workspace standard: [CONTRIBUTING.md](CONTRIBUTING.md).
