@@ -229,6 +229,15 @@ async function runSuite(root) {
 		plan.issues[0].scope_out = [];
 		const nested = core.checkBackplanPlan(plan);
 		assert.deepEqual(nested.errors, ["issues[0].delivery: required", "issues[0].scope_out: needs at least 1 item(s)"]);
+		const modeless = validPlan();
+		delete modeless.project.mode;
+		assert.deepEqual(core.checkBackplanPlan(modeless).errors, ["project.mode: required"]);
+		const candidate = validPlan();
+		candidate.automation_candidates = [{ candidate: "Auto-run the smoke check in CI" }];
+		assert.deepEqual(core.checkBackplanPlan(candidate).errors, ["automation_candidates[0].disposition: required"]);
+		const badMode = validPlan();
+		badMode.project.mode = "keep";
+		assert.deepEqual(core.checkBackplanPlan(badMode).errors, ["project.mode: expected reuse or create"]);
 	});
 
 	await check("repeated criteria warn while the plan still passes", () => {

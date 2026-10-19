@@ -16,7 +16,7 @@
         "heading": "## Commit and verification rules",
         "parallelOf": "rule_text_integrity#2",
         "provenance": {
-          "source": "CONTRIBUTING.md",
+          "source": "docs/agent-rules.md §Commit and verification rules",
           "statement": "Stage only changed files; do not adopt unverified changes.",
           "note": "held-out parallel: the commit/verification section must stay present."
         }

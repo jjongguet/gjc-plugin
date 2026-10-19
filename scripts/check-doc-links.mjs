@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// Fails when a relative Markdown link in a tracked .md file does not resolve.
-// External (http/https/mailto) links and pure #anchors are not checked.
+// Fails when a relative Markdown link in a tracked .md file does not resolve
+// inside the repository. Inline links, images and reference definitions are
+// checked; external (scheme:, //host) links, pure #anchors, fenced code
+// (including inside block quotes), indented code and inline code are not.
 //
 //   node scripts/check-doc-links.mjs [--root <dir>]
 import { execFileSync } from "node:child_process";
@@ -18,23 +20,48 @@ try {
 	process.exit(2);
 }
 
-const LINK = /!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+const INLINE = /!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)/g;
+const REFERENCE = /^\s{0,3}\[[^\]]+\]:\s*<?([^\s>]+)>?/;
+const FENCE = /^\s{0,3}(?:>\s?)*(```|~~~)/;
+const INDENTED_CODE = /^(?: {4}|\t)/;
+const EXTERNAL = /^([a-z][a-z0-9+.-]*:|\/\/|#)/i;
+
 const broken = [];
 let checked = 0;
+
+function check(file, lineNumber, href) {
+	if (EXTERNAL.test(href)) return;
+	let target = href.split("#")[0];
+	if (target === "") return;
+	try {
+		target = decodeURIComponent(target);
+	} catch {
+		broken.push(`${file}:${lineNumber}: ${href} (malformed percent-encoding)`);
+		return;
+	}
+	checked += 1;
+	const resolved = path.resolve(path.dirname(path.join(root, file)), target);
+	const relative = path.relative(root, resolved);
+	if (relative.startsWith("..") || path.isAbsolute(relative) || !existsSync(resolved)) broken.push(`${file}:${lineNumber}: ${href}`);
+}
+
 for (const file of files) {
 	let inFence = false;
+	let previousBlank = true;
 	readFileSync(path.join(root, file), "utf8").split("\n").forEach((line, index) => {
-		if (/^\s*(```|~~~)/.test(line)) inFence = !inFence;
-		if (inFence) return;
-		for (const match of line.replace(/`[^`]*`/g, "").matchAll(LINK)) {
-			const href = match[1];
-			if (/^(https?:|mailto:|#)/i.test(href)) continue;
-			const target = decodeURIComponent(href.split("#")[0]);
-			if (target === "") continue;
-			checked += 1;
-			const resolved = path.resolve(path.dirname(path.join(root, file)), target);
-			if (!resolved.startsWith(root) || !existsSync(resolved)) broken.push(`${file}:${index + 1}: ${href}`);
+		const lineNumber = index + 1;
+		if (FENCE.test(line)) {
+			inFence = !inFence;
+			return;
 		}
+		const blank = line.trim() === "";
+		const indentedCode = !inFence && previousBlank && INDENTED_CODE.test(line) && !/^\s*([-*+]|\d+\.)\s/.test(line);
+		previousBlank = blank || (indentedCode && previousBlank);
+		if (inFence || indentedCode) return;
+		const text = line.replace(/`[^`]*`/g, "");
+		const reference = REFERENCE.exec(text);
+		if (reference) check(file, lineNumber, reference[1]);
+		for (const match of text.matchAll(INLINE)) check(file, lineNumber, match[1]);
 	});
 }
 

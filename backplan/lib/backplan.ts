@@ -170,9 +170,9 @@ function normalizePlan(raw: unknown, errors: string[], warnings: string[]): Back
 
 	const projectRecord = collectObject(root.project, "project", projectKeys, ["name", "mode", "reason"], errors);
 	let projectMode: "reuse" | "create" = "reuse";
-	if (projectRecord.mode === undefined) errors.push("project.mode: required");
-	else if (projectRecord.mode !== "reuse" && projectRecord.mode !== "create") errors.push("project.mode: expected reuse or create");
-	else projectMode = projectRecord.mode;
+	// A missing mode is reported once by collectObject.
+	if (projectRecord.mode === "reuse" || projectRecord.mode === "create") projectMode = projectRecord.mode;
+	else if (projectRecord.mode !== undefined) errors.push("project.mode: expected reuse or create");
 	const project = {
 		name: collectString(projectRecord.name, "project.name", errors, BACKPLAN_TITLE_LIMIT),
 		mode: projectMode,
@@ -230,9 +230,9 @@ function normalizePlan(raw: unknown, errors: string[], warnings: string[]): Back
 		const path = `automation_candidates[${index}]`;
 		const record = collectObject(entry, path, candidateKeys, candidateKeys, errors);
 		let disposition: "backlog" | "out_of_scope" = "backlog";
-		if (record.disposition === undefined) errors.push(`${path}.disposition: required`);
-		else if (record.disposition !== "backlog" && record.disposition !== "out_of_scope") errors.push(`${path}.disposition: must be backlog or out_of_scope — promote in-scope automation to an issue instead`);
-		else disposition = record.disposition;
+		// A missing disposition is reported once by collectObject.
+		if (record.disposition === "backlog" || record.disposition === "out_of_scope") disposition = record.disposition;
+		else if (record.disposition !== undefined) errors.push(`${path}.disposition: must be backlog or out_of_scope — promote in-scope automation to an issue instead`);
 		return {
 			candidate: collectString(record.candidate, `${path}.candidate`, errors, BACKPLAN_STRING_LIMIT),
 			disposition,

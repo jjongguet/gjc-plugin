@@ -115,7 +115,7 @@ The `rea_readiness` lines depend on the Node/npx/Bun found on your machine. A tw
 ```sh
 bun run build            # keyless builds for every plugin
 bun run build:check      # generated surfaces are in sync with sources (non-mutating)
-bun run test             # shared tests, every plugin suite, self-improve unit + integration
+bun run test             # check-script fixtures, shared tests, every plugin suite, self-improve
 bun run demo             # keyless end-to-end demo in a temporary HOME
 bun run docs:check       # every relative Markdown link resolves
 bun run evidence:check   # committed self-improve evidence has no absolute home paths

@@ -70,7 +70,7 @@
         "kind": "exactly_once",
         "marker": "Stage only changed files",
         "provenance": {
-          "source": "CONTRIBUTING.md",
+          "source": "docs/agent-rules.md §Commit and verification rules",
           "statement": "Stage only the files a change touched; never git add -A.",
           "note": "operationalized as: the staging rule appears exactly once."
         }

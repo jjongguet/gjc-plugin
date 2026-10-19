@@ -255,8 +255,16 @@ async function runSuite(root) {
 		for (const params of [{ unexpected: "value" }, [], null, "{}"]) {
 			const result = await tool.execute("call-bad", params);
 			assert.equal(result.isError, true, JSON.stringify(params));
-			assert.match(result.content[0].text, /^rea_readiness: invalid_input/);
+			const text = result.content[0].text;
+			assert.match(text, /^rea_readiness: invalid_input/);
+			assert.ok(!text.includes("pinned rea-agents"), "no probe runs for rejected input");
+			const lines = text.trimEnd().split("\n");
+			assert.equal(JSON.parse(lines[lines.length - 1]).journalStorage.persisted, true, "a rejected call is still journaled");
 		}
+		const journal = path.join(root, "home", ".gjc-plugin", "rea", "journal", "v1");
+		const inventory = JSON.parse(readFileSync(path.join(journal, "inventory.json"), "utf8"));
+		const segments = inventory.segments.map(segment => readFileSync(path.join(journal, segment.name), "utf8")).join("");
+		assert.match(segments, /"reason":"invalid_or_unavailable_input"/);
 	});
 
 	await check("generated surfaces are in sync with sources (rebuild is a no-op)", () => {

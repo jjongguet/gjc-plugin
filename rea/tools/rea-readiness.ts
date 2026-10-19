@@ -935,12 +935,6 @@ export default function reaReadiness(pi: {
 					!Array.isArray(params) &&
 					Object.getPrototypeOf(params) === Object.prototype &&
 					Reflect.ownKeys(params).length === 0);
-			if (!exactEmptyObject) {
-				return {
-					content: [{ type: "text", text: "rea_readiness: invalid_input — this tool accepts exactly {} (no paths or options)." }],
-					isError: true,
-				};
-			}
 			const finish = async (text: string, isError: boolean, execution?: { status: string; reason: string }) => {
 				let journalStorage;
 				try {
@@ -957,6 +951,12 @@ export default function reaReadiness(pi: {
 					...(isError ? { isError: true } : {}),
 				};
 			};
+			if (!exactEmptyObject) {
+				return finish("rea_readiness: invalid_input — this tool accepts exactly {} (no paths or options).", true, {
+					status: "not_run",
+					reason: "invalid_or_unavailable_input",
+				});
+			}
 			try {
 				const cwd = typeof pi.cwd === "string" && pi.cwd.length > 0 ? pi.cwd : undefined;
 				const report = readinessReport(cwd === undefined ? {} : { cwd });

@@ -26,7 +26,7 @@ Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four ho
 ## Build and test chain
 
 - `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing.
-- `bun run test` runs the root chain: shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks.
+- `bun run test` runs the root chain: fixture tests for the repository check scripts (`scripts/tests/`), shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks.
 - Suites are hermetic: disposable repositories/homes, synthetic or disabled transport, isolated fake CLIs. Live credentials, real personal data and production services are never required and never used in tests.
 - Maintainers additionally run the workspace-standard validator, which lives outside this repository (`node ../shared/workspace-standard/validator/cli.mjs validate --root .`, profile `plugin-ts`). It is not required for external use.
 

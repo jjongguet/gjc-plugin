@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const ALLOWLIST = new Set(["self-improve/ledger.jsonl", "self-improve/evidence/p2b/replay-b0b1.json"]);
-const ABSOLUTE_HOME = /(?:^|[\s"'`(=:,[])(\/Users\/[^\s"'`/]+|\/home\/[^\s"'`/]+|[A-Za-z]:\\\\?Users\\\\?[^\s"'`\\]+)/;
+const ABSOLUTE_HOME = /(?:^|[\s"'`(=:,[]|file:\/\/)(\/Users\/[^\s"'`/]+|\/home\/[^\s"'`/]+|[A-Za-z]:\\{1,2}Users\\{1,2}[^\s"'`\\]+)/i;
 
 const rootFlag = process.argv.indexOf("--root");
 const root = path.resolve(rootFlag === -1 ? process.cwd() : process.argv[rootFlag + 1]);
