@@ -20,7 +20,21 @@ export default function reaReadiness(pi: {
 		description:
 			"Read-only offline readiness report for the REA integration (pinned rea-agents 6.4.0): Node/npx or Bun/bunx availability and REA engine version fit, the pinned CLI invocation, optional GJC MCP registration state in user and project scope, loose-skill installation state, and remediation. Never installs, registers, fetches or runs REA, and never contacts the network.",
 		parameters: pi.typebox.Type.Object({}),
-		async execute(toolCallId: string, _params: Record<string, never>) {
+		async execute(toolCallId: string, params: unknown) {
+			// The contract is exactly {}; extra keys are rejected before any probe runs.
+			const exactEmptyObject =
+				params === undefined ||
+				(typeof params === "object" &&
+					params !== null &&
+					!Array.isArray(params) &&
+					Object.getPrototypeOf(params) === Object.prototype &&
+					Reflect.ownKeys(params).length === 0);
+			if (!exactEmptyObject) {
+				return {
+					content: [{ type: "text", text: "rea_readiness: invalid_input — this tool accepts exactly {} (no paths or options)." }],
+					isError: true,
+				};
+			}
 			const finish = async (text: string, isError: boolean, execution?: { status: string; reason: string }) => {
 				let journalStorage;
 				try {

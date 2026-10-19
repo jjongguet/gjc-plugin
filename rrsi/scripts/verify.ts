@@ -266,8 +266,11 @@ async function runSuite(root) {
 	});
 
 	await check("unknown actions and malformed inputs are handled without throwing", async () => {
-		const unknown = await call({ action: "explode" });
+		const unknownResult = await tool.execute("verify", { action: "explode" });
+		assert.equal(unknownResult.isError, true, "an unknown action is a tool error, not a success");
+		const unknown = JSON.parse(unknownResult.content[0].text);
 		assert.match(unknown.error, /unknown action/);
+		assert.notEqual((await tool.execute("verify", { action: "status" })).isError, true);
 		assert.equal(unknown.journalStorage.persisted, true, "a handled invalid invocation is still journaled");
 		const badAttempts = await call({ action: "capture", goal: "bad", attempts: "{not json" });
 		assert.equal(badAttempts.episode.attempts, 0);
@@ -722,5 +725,5 @@ async function runSuite(root) {
 		scope: "functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop",
 	};
 	console.log(JSON.stringify(summary));
-	if (failures > 0) process.exitCode = 1;
+	process.exitCode = failures || cases === 0 ? 1 : 0;
 }

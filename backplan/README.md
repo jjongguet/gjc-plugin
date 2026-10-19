@@ -15,7 +15,9 @@ Two deliverables:
   content digest. It never writes to Linear, reads credentials or contacts the
   network. Invalid drafts (orphan issues without a project mapping, missing or
   generic completion criteria, in-scope automation smuggled into the plan,
-  unknown keys, duplicate titles) are rejected with path-addressed errors.
+  unknown keys, duplicate titles) are rejected with path-addressed errors; a
+  missing required key is reported once (`plan.end_state: required`), without
+  repeating it for the fields beneath it.
 - **`skills/backplan/SKILL.md`** — the loose skill payload describing the
   method (write the end state first, decompose backwards, map every issue to a
   project, surface policy decisions and automation candidates) and the

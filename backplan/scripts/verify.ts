@@ -213,6 +213,24 @@ async function runSuite(root) {
 		}
 	});
 
+	await check("a missing required key is reported exactly once", () => {
+		const sparse = core.checkBackplanPlan({ goal: "Ship a docs fix" });
+		assert.equal(sparse.status, "invalid");
+		assert.deepEqual(sparse.errors, [
+			"plan.end_state: required",
+			"plan.success_criteria: required",
+			"plan.project: required",
+			"plan.issues: required",
+			"plan.policy_decisions: required",
+			"plan.automation_candidates: required",
+		]);
+		const plan = validPlan();
+		delete plan.issues[0].delivery;
+		plan.issues[0].scope_out = [];
+		const nested = core.checkBackplanPlan(plan);
+		assert.deepEqual(nested.errors, ["issues[0].delivery: required", "issues[0].scope_out: needs at least 1 item(s)"]);
+	});
+
 	await check("repeated criteria warn while the plan still passes", () => {
 		const plan = validPlan();
 		plan.issues[0].completion_criteria = ["`bun test tests/pipeline.test.ts` green", "`bun test tests/pipeline.test.ts` green"];

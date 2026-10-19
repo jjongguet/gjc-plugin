@@ -2,6 +2,7 @@
 /**
  * Build rea plugin surface files from lib/readiness.ts + src/readiness.adapter.ts.
  *
+ *   node scripts/build.mjs --check   →  non-mutating drift check (exit 1 on drift)
  *   node scripts/build.mjs   →  tools/ at the plugin root
  *
  * ALWAYS keyless: the generated surfaces are committed for one-command
@@ -28,16 +29,28 @@ const banner = [
 const keysBlock =
 	"\n// Keyless build. No credentials are read; readiness probes spawn local node/npx/bun/bunx --version only.\n";
 
+const check = process.argv.includes("--check");
+const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
+let drift = false;
 for (const surface of surfaces) {
-	const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
 	const core = stripLocalImports(await readFile(path.join(pluginRoot, surface.core), "utf8"));
 	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
 	const header = banner.replace("{ADAPTER}", surface.adapter);
-	await mkdir(path.dirname(path.join(pluginRoot, surface.out)), { recursive: true });
-	await writeFile(
-		path.join(pluginRoot, surface.out),
-		`${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`,
-		"utf8",
-	);
+	const file = path.join(pluginRoot, surface.out);
+	const text = `${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
+	if (check) {
+		const existing = await readFile(file, "utf8").catch(() => null);
+		if (existing !== text) {
+			drift = true;
+			process.stderr.write(`generated_out_of_sync:${surface.out}\n`);
+		}
+		continue;
+	}
+	await mkdir(path.dirname(file), { recursive: true });
+	await writeFile(file, text, "utf8");
 	console.log(`built ${surface.out} (keyless)`);
+}
+if (check) {
+	if (drift) process.exit(1);
+	console.log(`generated surfaces are in sync: ${surfaces.map(surface => surface.out).join(", ")}`);
 }

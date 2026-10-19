@@ -99,7 +99,7 @@ export default function rrsi(pi: {
 					null,
 					2,
 				);
-				return { content: [{ type: 'text', text }] };
+				return { content: [{ type: 'text', text }], ...(action ? {} : { isError: true }) };
 			};
 
 			if (!action) {

@@ -33,7 +33,7 @@ jobs:
         run: touch AGENTS.md
 
       - name: Generated-surface drift check (non-mutating)
-        run: bun rrsi/scripts/build.mjs --check
+        run: bun run build:check
 
       - name: Build
         run: bun run build

@@ -2,6 +2,7 @@
 /**
  * Build jev-advisor surface files from lib/decision.ts + src/*.adapter.ts.
  *
+ *   node scripts/build.mjs --check   →  non-mutating drift check (exit 1 on drift)
  *   node scripts/build.mjs   →  hooks/, tools/ at the plugin root
  *
  * ALWAYS keyless: the generated surfaces are committed for one-command
@@ -10,7 +11,7 @@
  * exported env vars, which win over the file). Keyless providers (ollaya)
  * need nothing.
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,15 +36,28 @@ const banner = [
 const keysBlock =
 	"\n// Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /\n// OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).\n";
 
+const check = process.argv.includes("--check");
+const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
+let drift = false;
 for (const surface of surfaces) {
-	const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
 	const core = stripLocalImports(await readFile(path.join(pluginRoot, surface.core), "utf8"));
 	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
 	const header = banner.replace("{ADAPTER}", surface.adapter);
-	await writeFile(
-		path.join(pluginRoot, surface.out),
-		`${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`,
-		"utf8",
-	);
+	const file = path.join(pluginRoot, surface.out);
+	const text = `${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
+	if (check) {
+		const existing = await readFile(file, "utf8").catch(() => null);
+		if (existing !== text) {
+			drift = true;
+			process.stderr.write(`generated_out_of_sync:${surface.out}\n`);
+		}
+		continue;
+	}
+	await mkdir(path.dirname(file), { recursive: true });
+	await writeFile(file, text, "utf8");
 	console.log(`built ${surface.out} (keyless)`);
+}
+if (check) {
+	if (drift) process.exit(1);
+	console.log(`generated surfaces are in sync: ${surfaces.map(surface => surface.out).join(", ")}`);
 }

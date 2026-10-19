@@ -320,10 +320,28 @@ function renderNotes(plan: BackplanPlan): string | null {
 	return lines.length > 0 ? lines.join("\n") : null;
 }
 
+// A missing required key is reported once by collectObject; the per-field
+// collectors would otherwise repeat it ("required string missing", "expected an
+// array", nested "required") and crowd real errors out of the bounded list.
+function dropMissingKeyEchoes(errors: string[]): string[] {
+	const pathOf = (error: string) => error.slice(0, error.indexOf(": ")).replace(/^plan\./, "");
+	const missing = new Set(errors.filter(error => error.endsWith(": required")).map(pathOf));
+	const under = (path: string, parent: string) => path.startsWith(`${parent}.`) || path.startsWith(`${parent}[`);
+	return errors.filter(error => {
+		const path = pathOf(error);
+		for (const parent of missing) {
+			if (under(path, parent)) return false;
+			if (path === parent && !error.endsWith(": required")) return false;
+		}
+		return true;
+	});
+}
+
 export function checkBackplanPlan(raw: unknown, context: BackplanRenderContext = {}): BackplanReport {
-	const errors: string[] = [];
+	const collected: string[] = [];
 	const warnings: string[] = [];
-	const plan = normalizePlan(raw, errors, warnings);
+	const plan = normalizePlan(raw, collected, warnings);
+	const errors = dropMissingKeyEchoes(collected);
 	if (errors.length > 0) {
 		const shown = errors.slice(0, BACKPLAN_ERROR_LIMIT);
 		if (errors.length > BACKPLAN_ERROR_LIMIT) shown.push(`... ${errors.length - BACKPLAN_ERROR_LIMIT} more error(s) omitted`);

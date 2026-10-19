@@ -251,6 +251,14 @@ async function runSuite(root) {
 		assert.ok(!segment.includes(root), "journal must not contain raw fixture paths");
 	});
 
+	await check("execute rejects any input other than exactly {}", async () => {
+		for (const params of [{ unexpected: "value" }, [], null, "{}"]) {
+			const result = await tool.execute("call-bad", params);
+			assert.equal(result.isError, true, JSON.stringify(params));
+			assert.match(result.content[0].text, /^rea_readiness: invalid_input/);
+		}
+	});
+
 	await check("generated surfaces are in sync with sources (rebuild is a no-op)", () => {
 		const target = path.join(plugin, "tools/rea-readiness.ts");
 		const before = readFileSync(target, "utf8");

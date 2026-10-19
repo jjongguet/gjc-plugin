@@ -5,7 +5,7 @@ GJC integration surface for [REA](https://github.com/morluto/rea) (reverse-engin
 Two deliverables:
 
 - **`skills/rea/SKILL.md`** — the GJC workflow skill payload (CLI invocation, output budgeting, target routing, evidence discipline, evidence hand-off to wiki/backplan/rrsi, recovery steps) for the loose skill surface. This is the primary integration: REA runs as the pinned CLI (`npx -y rea-agents@6.4.0 <command>`), so no MCP registration and no standing tool-schema cost is needed.
-- **`rea_readiness` tool** — read-only, offline readiness report: Node/npx or Bun/bunx availability and REA engine version fit, the pinned CLI invocation, optional GJC MCP registration state in user (`~/.gjc/agent/mcp.json`) and project (`<cwd>/.gjc/mcp.json`) scope, loose-skill installation state, and remediation commands. It never installs, registers, downloads or runs REA, and never contacts the network.
+- **`rea_readiness` tool** — read-only, offline readiness report: Node/npx or Bun/bunx availability and REA engine version fit, the pinned CLI invocation, optional GJC MCP registration state in user (`~/.gjc/agent/mcp.json`) and project (`<cwd>/.gjc/mcp.json`) scope, loose-skill installation state, and remediation commands. It accepts exactly `{}`; any other input is rejected as `invalid_input` before a probe runs. It never installs, registers, downloads or runs REA, and never contacts the network.
 
 ## Install (once per machine)
 
