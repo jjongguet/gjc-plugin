@@ -82,5 +82,5 @@ Typical plugin layout:
 
 - `standard.json` — profile `plugin-ts`, root `.`.
 - `gjc-plugin.json` — distribution index only; per-plugin manifests are bumped only at an explicitly requested release.
-- `dashboard/` — maintainer-only local meta view; not a plugin and not deployed.
+- `dashboard/` — maintainer-only local meta view; not a plugin and not deployed. See [dashboard/README.md](dashboard/README.md).
 - `steps.json` — the maintainer's manual release checklist (record, verify, human review); nothing runs it on a timer.

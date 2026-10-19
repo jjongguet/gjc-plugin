@@ -1,6 +1,7 @@
-// 로컬 메타 서버 렌더 — Supabase 미연결(보류 — Addendum 1) 구간의 적응 뷰.
-// 봉투 대신 레포 package.json 버전·최신 git 태그를 빌드 시점에 읽어 정적으로 표시하고,
-// 봉투 영역은 미연결 상태를 명시한다. Supabase 연결 후 factory 본보기(4봉투 서버 렌더)로 교체.
+// Local meta server render — the interim view while Supabase is not connected.
+// Instead of envelopes, reads the repo's package.json version and latest git tag at build time
+// and renders them statically; the envelope area states the not-connected status.
+// Replace with the factory example (server-rendered 4 envelopes) once Supabase is connected.
 import { readLocalMeta } from "@/lib/local-meta";
 import { MISSING_THRESHOLD } from "@/platform/missing-threshold";
 
@@ -28,9 +29,10 @@ export default function DashboardPage() {
       <section>
         <h2>envelopes</h2>
         <p>
-          Supabase 미연결(보류 — Addendum 1) — status·ledger·workflow_runs·workflow_steps
-          봉투 열람은 연결 후 활성화된다. push-envelope 없음(적재 원천 미연결).
-          결측 경고: {MISSING_THRESHOLD.warnDays}일 warn·{MISSING_THRESHOLD.urgentDays}일 urgent
+          Supabase is not connected yet — the status, ledger, workflow_runs, and workflow_steps
+          envelopes become readable once it is connected. No push-envelope (no ingestion source
+          connected). Missing warning: {MISSING_THRESHOLD.warnDays}-day warn,{" "}
+          {MISSING_THRESHOLD.urgentDays}-day urgent
         </p>
       </section>
     </main>

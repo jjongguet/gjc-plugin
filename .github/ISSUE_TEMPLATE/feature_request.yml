@@ -1,0 +1,25 @@
+name: Feature request
+description: Propose a change to a plugin's contract or a new capability.
+labels: [enhancement]
+body:
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Plugin
+      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, new plugin, repository / CI]
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do and why the current contract does not cover it.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Inputs, outputs and failure states you would expect, and how it could be verified.
+    validations:
+      required: true

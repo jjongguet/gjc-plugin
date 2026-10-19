@@ -1,12 +1,13 @@
-// 봉투 리더 어댑터(N14) — fetch/PostgREST 기반 서버 전용. postgres 라이브러리 의존 없음.
-// SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY 둘 다 있을 때만 동작한다(fail-loud — 조용한 빈값 반환 금지).
+// Envelope reader adapter — server-only, built on fetch/PostgREST. No postgres library dependency.
+// Works only when both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are set (fail-loud — never return
+// silent empty results).
 import {
   type EnvelopeRow,
   type EnvelopeSnapshot,
   type EnvelopeTable,
 } from "@/ports/envelopes";
 
-/** 봉투별 정렬 컬럼 — 스캐폴드의 collected_at 단일 기준을 테이블 실제 컬럼에 적합화. */
+/** Sort column per envelope — adapts the scaffold's single collected_at basis to each table's real columns. */
 const ORDER_COLUMN: Record<EnvelopeTable, string> = {
   status: "collected_at",
   ledger: "ts",
@@ -18,7 +19,9 @@ function cfg() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
-    throw new Error("SUPABASE_URL·SUPABASE_SERVICE_ROLE_KEY 미설정 — 대시보드 서버 env를 확인하라(fail-loud)");
+    throw new Error(
+      "SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are not set — check the dashboard server env (fail-loud)",
+    );
   }
   return { url: url.replace(/\/$/, ""), key };
 }

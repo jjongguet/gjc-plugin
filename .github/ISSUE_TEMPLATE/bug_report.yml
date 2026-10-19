@@ -1,0 +1,41 @@
+name: Bug report
+description: A plugin, tool or hook behaves differently from its documented contract.
+labels: [bug]
+body:
+  - type: dropdown
+    id: plugin
+    attributes:
+      label: Plugin
+      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, repository / CI]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin and gjc versions
+      description: Output of `gjc plugin list` and `gjc --version`.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The tool or hook, the exact input (use synthetic values) and the commands you ran.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected and actual behavior
+      description: Quote the README line you relied on, and the output you got.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no credentials, API keys or personal data.
+          required: true
+        - label: This is not a security vulnerability (those go through SECURITY.md).
+          required: true

@@ -1,0 +1,34 @@
+name: Close external pull requests
+
+# This repository does not accept pull requests from outside the maintainers;
+# pull-request creation is already limited to collaborators in the repository
+# settings. This workflow is defense in depth for anything that still arrives.
+#
+# Safety properties (asserted by scripts/check-pr-policy.mjs):
+# - pull_request_target only: it runs the base branch's copy of this file, never
+#   the pull request's; there is no checkout and no pull-request code runs.
+# - GitHub-hosted runner, never the self-hosted runner.
+# - The token can only write pull requests; no secrets are used.
+
+on:
+  pull_request_target:
+    types: [opened, reopened]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    if: >-
+      github.event.pull_request.author_association != 'OWNER' &&
+      github.event.pull_request.author_association != 'MEMBER' &&
+      github.event.pull_request.author_association != 'COLLABORATOR'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close the pull request with a pointer to issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh pr close "$PR_NUMBER" --comment "Thanks for your interest. This repository does not accept external pull requests. Please open an issue instead: https://github.com/jjongguet/gjc-plugin/issues"

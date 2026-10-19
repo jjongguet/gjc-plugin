@@ -41,6 +41,9 @@ jobs:
       - name: Documentation link check
         run: bun run docs:check
 
+      - name: External-PR closer safety check
+        run: bun run policy:check
+
       - name: Build
         run: bun run build
 

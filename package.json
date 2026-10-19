@@ -10,6 +10,7 @@
     "build:check": "bun jev-advisor/scripts/build.mjs --check && bun verification-receipts/scripts/build.mjs --check && bun ui-regression/scripts/build.mjs --check && bun wiki/scripts/build.mjs --check && bun rea/scripts/build.mjs --check && bun backplan/scripts/build.mjs --check && bun rrsi/scripts/build.mjs --check && bun aside-memory/scripts/build.mjs --check",
     "evidence:check": "node scripts/check-evidence-paths.mjs",
     "docs:check": "node scripts/check-doc-links.mjs",
+    "policy:check": "node scripts/check-pr-policy.mjs",
     "demo": "bun scripts/demo.mjs",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",

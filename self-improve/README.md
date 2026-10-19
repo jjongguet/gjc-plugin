@@ -174,6 +174,17 @@ reported as "met the pre-registered P2 thresholds", never as bare "proven".
    stalled objectives; `recover --repo .` rolls back a cycle that crashed
    mid-apply.
 
+### Why every cycle, including a reject, is its own commit
+
+The `chore(self-improve): cycle <id> reject` commits in `main`'s history are the
+loop's proof stream, not noise. Each one appends exactly one ledger row, so the
+commit that recorded a decision can be located, the `prev` hash chain can be
+checked commit by commit, and `recover` can roll back an interrupted cycle to
+the last recorded row. Batching rejects into one commit, amending them or
+squashing history would break that one-row-per-commit recovery contract and
+the append-only guarantee, so the loop deliberately does neither. Adoptions add
+a separate code commit next to their ledger row.
+
 Proposal shape:
 
 ```json

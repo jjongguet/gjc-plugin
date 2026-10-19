@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/jjongguet/gjc-plugin/security/advisories/new
+    about: Report vulnerabilities privately, not in a public issue.
+  - name: gajae-code (gjc) itself
+    url: https://github.com/Yeachan-Heo/gajae-code/issues
+    about: Problems with gjc rather than these plugins belong upstream.

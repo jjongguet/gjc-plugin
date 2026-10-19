@@ -1,5 +1,5 @@
-// dashboard 모듈 공개 계약 — 4봉투 열람. 모듈 밖은 이 경로만 import한다
-// (모듈 간 내부 직접 import 금지·UI→adapters 직접 import 금지 — web 프로필 규칙).
+// dashboard module public contract — 4-envelope reads. Code outside the module imports this path
+// only (no direct imports of internals across modules, no UI→adapters direct imports — web profile rule).
 export { readAll, readEnvelope } from "@/adapters/envelopes";
 export type {
   EnvelopeRow,
