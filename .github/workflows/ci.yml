@@ -38,6 +38,9 @@ jobs:
       - name: Evidence path hygiene
         run: bun run evidence:check
 
+      - name: Documentation link check
+        run: bun run docs:check
+
       - name: Build
         run: bun run build
 
@@ -51,6 +54,9 @@ jobs:
         env:
           SELF_IMPROVE_SKIP_SMOKE: "1"
         run: bun run test
+
+      - name: Keyless demo (temporary HOME)
+        run: bun run demo
 
       # Failure forensics: the self-improve scratch guard writes per-guard logs
       # under /tmp and only reports the guard id on failure. Surface the tails

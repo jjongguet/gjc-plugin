@@ -2,25 +2,33 @@
 
 Thanks for contributing to `gjc-plugin`. This repository ships plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`); each plugin directory is independently installable and its `gajae-plugin.json` is the version source of truth.
 
-Changes land on `main` directly with conventional commit subjects in English (this repository does not use pull requests).
+## How to contribute
+
+- **Bugs and feature requests:** open an [issue](https://github.com/jjongguet/gjc-plugin/issues/new/choose) using one of the forms.
+- **Security problems:** report privately as described in [SECURITY.md](SECURITY.md); never in a public issue.
+- **Pull requests:** not accepted from outside the maintainers. Pull-request creation is limited to collaborators, and a workflow closes any pull request whose author is not the owner, a member or a collaborator, with a pointer to issues. The workflow never checks out or runs pull-request code.
+
+Maintainers land changes on `main` with conventional commit subjects in English. Repository rules for agents and contributors are in [docs/agent-rules.md](docs/agent-rules.md).
 
 ## Development setup
 
-- [Bun](https://bun.sh) for builds and tests; a local `gjc` installation for runtime checks.
-- The workspace-standard validator expects a sibling checkout: `shared/workspace-standard` next to this repository.
+- [Bun](https://bun.sh) 1.4.x for builds and tests, Node.js ≥ 22 for the `node:test` runner, and a local `gjc` installation for runtime and smoke checks.
 
 ```sh
-git clone https://github.com/jjongguet/gjc-plugin ~/jjongguet/gjc-plugin
-cd ~/jjongguet/gjc-plugin
+git clone https://github.com/jjongguet/gjc-plugin
+cd gjc-plugin
 bun run build && bun run test
+bun run demo && bun run docs:check && bun run evidence:check && bun run policy:check
 ```
+
+Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four host smoke guards are then reported as skipped.
 
 ## Build and test chain
 
-- `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` are committed and must stay in sync; builders support `bun <plugin>/scripts/build.mjs --check` for drift detection.
+- `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing.
 - `bun run test` runs the root chain: shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks.
 - Suites are hermetic: disposable repositories/homes, synthetic or disabled transport, isolated fake CLIs. Live credentials, real personal data and production services are never required and never used in tests.
-- `node ../shared/workspace-standard/validator/cli.mjs validate --root .` must stay green (profile `plugin-ts`).
+- Maintainers additionally run the workspace-standard validator, which lives outside this repository (`node ../shared/workspace-standard/validator/cli.mjs validate --root .`, profile `plugin-ts`). It is not required for external use.
 
 ## Smoke tests
 
@@ -36,7 +44,7 @@ Host smoke copies installed bundles into a private isolated GJC root and uses on
 
 ## CI
 
-`.github/workflows/ci.yml` runs `bun run build` plus the full test chain on every push to `main`. Two
+`.github/workflows/ci.yml` runs on every push to `main`: `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`. It has no `pull_request` trigger. Two
 check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke
 guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case self-skips with a
 recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its
@@ -66,13 +74,13 @@ Typical plugin layout:
 
 ## Install order and replacement
 
-- Replacement/upgrade uses the supported operation (`gjc plugin install --help`); inspect the recorded source path before replacing an installation.
-- When upgrading several plugins that share the private `~/.gjc-plugin/` stores, upgrade in dependency order and run `gjc plugin doctor` afterwards.
+- `gjc plugin install <path> --user` refuses a plugin that is already installed. Replace one with `gjc plugin uninstall <name> --user` followed by `gjc plugin install <path> --user`; inspect the recorded source (`~/.gjc/agent/gjc-plugins/registry.json`) first.
+- When upgrading several plugins, install **`jev-advisor` first** and **`verification-receipts` second**, then the rest, and run `gjc plugin doctor` afterwards. An older `jev-advisor` reading journal records written by a newer `verification-receipts` fails closed with `store_corrupt`.
 - Rebuilding source alone does not update a running session. Tools and hooks load at **session start**; verify upgraded surfaces in a fresh `gjc` process.
 
 ## Workspace standard
 
 - `standard.json` — profile `plugin-ts`, root `.`.
 - `gjc-plugin.json` — distribution index only; per-plugin manifests are bumped only at an explicitly requested release.
-- `dashboard/` — local meta view only; no Supabase push-envelope until a connection exists. The validator runs locally (`npm run validate` inside `dashboard/`) and is intentionally not part of `vercel-build`.
-- `steps.json` — manual workflow (record, verify, human review); no timer execution.
+- `dashboard/` — maintainer-only local meta view; not a plugin and not deployed.
+- `steps.json` — the maintainer's manual release checklist (record, verify, human review); nothing runs it on a timer.
