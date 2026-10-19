@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   build-and-test:
-    runs-on: arc-test
+    runs-on: arc-ci
     steps:
       - uses: actions/checkout@v5
 
