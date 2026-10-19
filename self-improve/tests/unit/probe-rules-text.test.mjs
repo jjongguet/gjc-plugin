@@ -10,35 +10,35 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "
 const RUNNER = join(REPO_ROOT, "self-improve", "domains", "rules-text", "probes", "run.ts");
 const FIXTURES = join(REPO_ROOT, "self-improve", "domains", "rules-text", "probes", "fixtures.json");
 const HELDOUT = join(REPO_ROOT, "self-improve", "domains", "rules-text", "heldout", "fixtures.json");
-const TARGET = "docs/portfolio/AGENTS.md";
+const TARGET = "docs/agent-rules.md";
 
-// The live migration draft, used for determinism and damage-isolation checks.
+// The live rules document, used for determinism and damage-isolation checks.
 const draft = readFileSync(join(REPO_ROOT, TARGET), "utf8");
 
-// A test-owned migration draft that pins the shipped fixture semantics
-// independently of the live document (the loop may legitimately repair the
-// live draft later): sections 목적/저장소 레이아웃/빌드·테스트/커밋·검증 규칙
-// present; 안전 경계 + 기록 규칙 missing; "bun run test" duplicated.
+// A test-owned draft that pins the shipped fixture semantics independently of
+// the live document: Purpose / Repository layout / Build and test / Commit and
+// verification rules present; Safety boundaries + Records missing; "bun run
+// test" duplicated.
 const MINI_DRAFT = [
   "# Mini rules",
   "",
-  "## 목적",
+  "## Purpose",
   "",
-  "- 모든 검증은 `bun run test` 전체 체인으로 수행한다.",
+  "- Every change passes the full `bun run test` chain.",
   "",
-  "## 저장소 레이아웃",
+  "## Repository layout",
   "",
-  "- 명령 정의는 [package.json](../../package.json)이다.",
+  "- Scripts are defined in [package.json](../package.json).",
   "",
-  "## 빌드·테스트",
+  "## Build and test",
   "",
-  "- 전체 검증: `bun run test`",
-  "- 빌드: `bun run build`",
-  "- 원장: [ledger](../../self-improve/ledger.jsonl), 설정: [rrsi.json](../../self-improve/rrsi.json)",
+  "- Full verification: `bun run test`",
+  "- Build: `bun run build`",
+  "- Ledger: [ledger](../self-improve/ledger.jsonl), config: [rrsi.json](../self-improve/rrsi.json)",
   "",
-  "## 커밋·검증 규칙",
+  "## Commit and verification rules",
   "",
-  "- 변경 파일만 스테이징한다.",
+  "- Stage only changed files.",
   "",
 ].join("\n");
 
@@ -51,10 +51,10 @@ function runRunner(baseline, candidate) {
 
 function makeSide(root, name, content) {
   const dir = join(root, name);
-  mkdirSync(join(dir, "docs", "portfolio"), { recursive: true });
+  mkdirSync(join(dir, "docs"), { recursive: true });
   if (content !== null) {
     writeFileSync(join(dir, TARGET), content, "utf8");
-    // Link targets the mini draft references (relative to docs/portfolio/).
+    // Link targets the mini draft references (relative to docs/).
     writeFileSync(join(dir, "package.json"), "{}\n");
     mkdirSync(join(dir, "self-improve"), { recursive: true });
     writeFileSync(join(dir, "self-improve", "ledger.jsonl"), "");
@@ -89,7 +89,7 @@ test("a single damaged case flips only its owning label", () => {
     // Test-owned draft: the check stays valid even if a later editor renames
     // sections in the live migration draft.
     const clean = makeSide(root, "clean", MINI_DRAFT);
-    const damaged = makeSide(root, "damaged", MINI_DRAFT.replace("## 목적\n", ""));
+    const damaged = makeSide(root, "damaged", MINI_DRAFT.replace("## Purpose\n", ""));
     const r = runRunner(clean, damaged);
     assert.equal(r.status, 0, r.stderr);
     const out = JSON.parse(r.stdout);
@@ -99,7 +99,7 @@ test("a single damaged case flips only its owning label", () => {
     const removed = out.failures.baseline.rule_text_integrity.filter(
       (label) => !out.failures.candidate.rule_text_integrity.includes(label),
     );
-    assert.deepEqual(added, ["rule_text_integrity#0"], "removing ## 목적 flips exactly case 0");
+    assert.deepEqual(added, ["rule_text_integrity#0"], "removing ## Purpose flips exactly case 0");
     assert.deepEqual(removed, [], "no other case may flip");
     assert.deepEqual(out.failures.candidate.link_coverage, out.failures.baseline.link_coverage);
     assert.equal(out.heldout.candidate.heldout_rule_text, out.heldout.baseline.heldout_rule_text);

@@ -11,16 +11,16 @@ import { runCycle } from "../../lib/engine.mjs";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const CLI = join(REPO_ROOT, "self-improve", "scripts", "run.mjs");
 
-const FIXTURE_DOC = ["# Fixture rules", "", "## 목적", "", "- line one", ""].join("\n");
+const FIXTURE_DOC = ["# Fixture rules", "", "## Purpose", "", "- line one", ""].join("\n");
 const FIXTURE_PATCH = [
-  "diff --git a/docs/portfolio/AGENTS.md b/docs/portfolio/AGENTS.md",
-  "--- a/docs/portfolio/AGENTS.md",
-  "+++ b/docs/portfolio/AGENTS.md",
+  "diff --git a/docs/agent-rules.md b/docs/agent-rules.md",
+  "--- a/docs/agent-rules.md",
+  "+++ b/docs/agent-rules.md",
   "@@ -1,3 +1,3 @@",
   "-# Fixture rules",
   "+# Fixture rules updated",
   " ",
-  " ## 목적",
+  " ## Purpose",
   "",
 ].join("\n");
 
@@ -33,10 +33,10 @@ function git(cwd, args) {
 function makeFixture() {
   const root = mkdtempSync(join(tmpdir(), "rules-text-cycle-"));
   const repo = join(root, "repo");
-  mkdirSync(join(repo, "docs", "portfolio"), { recursive: true });
+  mkdirSync(join(repo, "docs"), { recursive: true });
   mkdirSync(join(repo, "self-improve"), { recursive: true });
   writeFileSync(join(repo, "package.json"), '{"name":"fixture","private":true,"type":"module"}\n');
-  writeFileSync(join(repo, "docs", "portfolio", "AGENTS.md"), FIXTURE_DOC);
+  writeFileSync(join(repo, "docs", "agent-rules.md"), FIXTURE_DOC);
   writeFileSync(join(repo, "self-improve", "ledger.jsonl"), "");
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.name", "fixture"]);

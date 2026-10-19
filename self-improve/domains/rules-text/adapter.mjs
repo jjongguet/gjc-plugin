@@ -1,7 +1,7 @@
 /**
  * Second domain adapter: rule-text surfaces.
  *
- * Target: docs/portfolio/AGENTS.md — the tracked in-repo canonical rules-text
+ * Target: docs/agent-rules.md — the tracked in-repo canonical rules-text
  * surface. The deterministic probe (probes/run.ts) scores structural contracts
  * over the target markdown in the baseline/candidate dirs: rule-text integrity,
  * not behavioral effect (no model, no network, no significance claim).
@@ -11,7 +11,7 @@
  */
 import { DEFAULT_DIGEST_TARGETS } from "../../lib/isolate.mjs";
 
-export const RULES_TEXT_TARGETS = Object.freeze(["docs/portfolio/AGENTS.md"]);
+export const RULES_TEXT_TARGETS = Object.freeze(["docs/agent-rules.md"]);
 
 export const DOMAIN = Object.freeze({
   id: "rules-text",

@@ -6,7 +6,7 @@
  *   bun self-improve/domains/rules-text/probes/run.ts \
  *     --baseline <repoDir> --candidate <repoDir> [--json]
  *
- * Scores structural contracts over `<dir>/docs/portfolio/AGENTS.md` on both
+ * Scores structural contracts over `<dir>/docs/agent-rules.md` on both
  * sides and prints exactly ONE JSON object on stdout. It measures rule-text
  * integrity — not behavioral effect: no model, no network, no significance
  * claim. No timers, no randomness, no absolute paths in output: identical
@@ -17,7 +17,7 @@ import fs from "node:fs";
 
 const SCHEMA = "gjc.self-improve.probe.v1";
 const PRIMARY = "rule_text_integrity";
-const TARGET = "docs/portfolio/AGENTS.md";
+const TARGET = "docs/agent-rules.md";
 
 const PROBES_FIXTURES = path.resolve(import.meta.dir, "fixtures.json");
 const HELDOUT_FIXTURES = path.resolve(import.meta.dir, "../heldout/fixtures.json");
@@ -226,7 +226,7 @@ function main(): void {
 			`Metrics are deterministic, non-model structural hit rates over ${TARGET} in the baseline/candidate dirs.`,
 			"Cases are declared in probes/fixtures.json; held-out parallels live in heldout/fixtures.json and are scored into heldout_rule_text only — they never appear in failures or failureDetails.",
 			"failures lists per-case misses as short `<metric>#<index>` labels; failureDetails carries provenance-derived summaries (<= 240 chars) so a proposer blind to self-improve/domains/** can target the documented gap.",
-			"Headroom: the shipped probe corpus keeps document-gap cases failing at migration time (one repaired case adds 1/caseCount >= floor 0.01).",
+			"Headroom: one repaired case adds 1/caseCount >= floor 0.01; the test-owned mini draft keeps document-gap cases failing so the semantics stay exercised.",
 			"This probe makes no behavioral or significance claim; live behavior is separately gated and journal counters are descriptive only.",
 			"No timers, network or randomness are used; identical inputs yield byte-identical stdout JSON.",
 		],

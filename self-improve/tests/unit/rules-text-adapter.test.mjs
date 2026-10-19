@@ -13,8 +13,8 @@ test("rules-text adapter satisfies the full domain shape contract", () => {
   const shape = validateAdapterShape(RULES_TEXT_DOMAIN);
   assert.deepEqual(shape, { ok: true, missing: [], wrongType: [] });
   assert.equal(RULES_TEXT_DOMAIN.id, "rules-text");
-  assert.deepEqual([...RULES_TEXT_DOMAIN.editable], ["docs/portfolio/AGENTS.md"]);
-  assert.deepEqual([...RULES_TEXT_DOMAIN.textFixtures], ["docs/portfolio/AGENTS.md"]);
+  assert.deepEqual([...RULES_TEXT_DOMAIN.editable], ["docs/agent-rules.md"]);
+  assert.deepEqual([...RULES_TEXT_DOMAIN.textFixtures], ["docs/agent-rules.md"]);
   assert.deepEqual([...RULES_TEXT_DOMAIN.generated], []);
   assert.deepEqual(RULES_TEXT_DOMAIN.objectives, ["probe.rule_text_integrity", "probe.rule_link_coverage"]);
   assert.equal(RULES_TEXT_DOMAIN.probes[0].runner, "domains/rules-text/probes/run.ts");
@@ -28,7 +28,7 @@ test("rules-text adapter satisfies the full domain shape contract", () => {
 });
 
 test("editable covers exactly the rule-text target; root AGENTS.md stays excluded", () => {
-  assert.equal(matchesEditable("docs/portfolio/AGENTS.md", RULES_TEXT_DOMAIN.editable), true);
+  assert.equal(matchesEditable("docs/agent-rules.md", RULES_TEXT_DOMAIN.editable), true);
   assert.equal(matchesEditable("AGENTS.md", RULES_TEXT_DOMAIN.editable), false, "untracked root AGENTS.md is not editable");
   assert.equal(matchesEditable("self-improve/lib/engine.mjs", RULES_TEXT_DOMAIN.editable), false);
 });
@@ -37,7 +37,7 @@ test("protected paths still hard-reject engine and manifest edits", () => {
   assert.equal(assertNoProtectedTouched(["self-improve/lib/engine.mjs"], RULES_TEXT_DOMAIN.protectedPaths).ok, false);
   assert.equal(assertNoProtectedTouched(["package.json"], RULES_TEXT_DOMAIN.protectedPaths).ok, false);
   assert.equal(
-    assertNoProtectedTouched(["docs/portfolio/AGENTS.md"], RULES_TEXT_DOMAIN.protectedPaths).ok,
+    assertNoProtectedTouched(["docs/agent-rules.md"], RULES_TEXT_DOMAIN.protectedPaths).ok,
     true,
   );
 });

@@ -7,5 +7,4 @@ keys.local.ts
 */.env.*
 **/.gjc/
 AGENTS.md
-!docs/portfolio/AGENTS.md
 !*/.env.example

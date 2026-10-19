@@ -78,7 +78,7 @@ test("a fat loop cycle row with evidence stays within the 2048-byte ledger bound
       proposal: {
         source: "agent",
         patchSha256: "a".repeat(64),
-        files: ["docs/portfolio/AGENTS.md", "x/y.md", "z/w.md"],
+        files: ["docs/agent-rules.md", "x/y.md", "z/w.md"],
         hunks: 12,
       },
       hypothesisHash: "b".repeat(64),
