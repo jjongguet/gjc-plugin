@@ -14,12 +14,13 @@ provider rationale. Receipts contain metadata only.
 ## Install
 
 The plugin lives at `integrations/hermes/jev-gate/` in this repository and is
-copied to the Hermes host:
+copied to the Hermes host (`<hermes-host>` is the ssh alias of the machine running the
+Hermes gateway):
 
 ```sh
 COPYFILE_DISABLE=1 tar -C integrations/hermes -czf - jev-gate \
-  | ssh gw-kmg 'mkdir -p ~/.hermes/plugins && tar -xzf - -C ~/.hermes/plugins'
-ssh gw-kmg '~/.hermes/plugins/jev-gate/install.sh --install'
+  | ssh <hermes-host> 'mkdir -p ~/.hermes/plugins && tar -xzf - -C ~/.hermes/plugins'
+ssh <hermes-host> '~/.hermes/plugins/jev-gate/install.sh --install'
 ```
 
 `install.sh --install` creates `~/.hermes/plugins/jev-gate-data/config.json`
@@ -44,7 +45,7 @@ receipts: `~/.hermes/plugins/jev-gate-data/<profile>/` (0700; files 0600).
 | `allowlist` | `[]` | job ids the gate may act on |
 | `questions` | `{}` | per-job check question; required for every allowlisted job |
 | `channels` | `{}` | per-job Discord channel id for the replacement notice |
-| `home_channel` | `1557381856909988001` | gate-level failure alerts |
+| `home_channel` | `""` | Discord channel id for gate-level failure alerts; empty records `alert_delivery: "no_channel"` and sends nothing |
 | `max_attempts` | `3` | total generations per run group |
 | `wall_clock_ms` | `900000` | 15-minute retry budget |
 | `hold_confidence` | `0.9` | hold only at `incorrect` with confidence >= this |
@@ -54,9 +55,14 @@ receipts: `~/.hermes/plugins/jev-gate-data/<profile>/` (0700; files 0600).
 | `allow_force_fixture` | `false` | allow `force_fixture` only in self-test/canary |
 | `force_fixture` | `null` | canary-only fixture name under `fixtures/precision/bad/`; requires the guard |
 
-Only enabled assistant-output jobs are gated. In the current host, the agent
-jobs are `e7298ea4d715`, `840f05bef0a4`, `ca1ed67badbb`; the `no_agent` script
-jobs are excluded.
+Only enabled assistant-output jobs are gated; `no_agent` script jobs are
+excluded. `config.example.json` uses placeholder job ids (`job-id-1`..`job-id-3`)
+and channels (`channel-1`); replace them with the operator's own Hermes job ids
+(`python3 gate.py --print-job-map`) and Discord channel ids.
+
+`install.sh --install` never overwrites an existing `config.json`, so an
+upgraded host keeps its explicit `home_channel`. A fresh install must set
+`home_channel` (and per-job `channels`) before alerts are delivered.
 
 ## Decision rule
 

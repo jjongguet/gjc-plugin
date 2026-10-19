@@ -8,6 +8,7 @@
     "build": "bun run build:advisor && bun run build:verification && bun run build:ui && bun run build:wiki && bun run build:rea && bun run build:backplan && bun run build:rrsi && bun run build:aside-memory",
     "test": "bun run test:shared && bun run test:advisor && bun run test:verification && bun run test:ui && bun run test:wiki && bun run test:rea && bun run test:backplan && bun run test:self-improve && bun run test:rrsi && bun run test:aside-memory",
     "build:check": "bun jev-advisor/scripts/build.mjs --check && bun verification-receipts/scripts/build.mjs --check && bun ui-regression/scripts/build.mjs --check && bun wiki/scripts/build.mjs --check && bun rea/scripts/build.mjs --check && bun backplan/scripts/build.mjs --check && bun rrsi/scripts/build.mjs --check && bun aside-memory/scripts/build.mjs --check",
+    "evidence:check": "node scripts/check-evidence-paths.mjs",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",
     "build:verification": "bun verification-receipts/scripts/build.mjs",

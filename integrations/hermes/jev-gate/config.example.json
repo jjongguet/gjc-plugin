@@ -1,21 +1,21 @@
 {
   "mode": "off",
   "allowlist": [
-    "e7298ea4d715",
-    "840f05bef0a4",
-    "ca1ed67badbb"
+    "job-id-1",
+    "job-id-2",
+    "job-id-3"
   ],
   "questions": {
-    "e7298ea4d715": "Does this daily technology digest contain concrete, dated items with source links and no abort/retry/empty placeholder?",
-    "840f05bef0a4": "Does this weekly startup signals brief contain dated, sourced investment or growth signals with concrete names?",
-    "ca1ed67badbb": "Does this startup daily analysis contain the requested sections with concrete, sourced evidence?"
+    "job-id-1": "Does this daily technology digest contain concrete, dated items with source links and no abort/retry/empty placeholder?",
+    "job-id-2": "Does this weekly startup signals brief contain dated, sourced investment or growth signals with concrete names?",
+    "job-id-3": "Does this startup daily analysis contain the requested sections with concrete, sourced evidence?"
   },
   "channels": {
-    "e7298ea4d715": "1557970957585481838",
-    "840f05bef0a4": "1557970957585481838",
-    "ca1ed67badbb": "1557970957585481838"
+    "job-id-1": "channel-1",
+    "job-id-2": "channel-1",
+    "job-id-3": "channel-1"
   },
-  "home_channel": "1557381856909988001",
+  "home_channel": "",
   "max_attempts": 3,
   "wall_clock_ms": 900000,
   "hold_confidence": 0.9,

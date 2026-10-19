@@ -18,9 +18,12 @@ a statistical result.
   and an approved OpenRouter budget.
 - Loop: `p3-20261019-4`; `--max-cycles 5 --max-proposer-calls 8
   --max-wall-ms 1800000 --batch-size 1 --proposer-timeout-ms 300000`.
-- Receipts: `loop-state-p3-20261019-4.json`, `loop-p3-20261019-4.log.jsonl`.
-  The earlier live attempts are preserved as `loop-p3-20261019-2.log.jsonl` and
-  `loop-p3-20261019-3.log.jsonl`.
+- Receipts: ledger rows 26–31 in `self-improve/ledger.jsonl` and
+  [`summary.json`](summary.json), which records per-campaign event counts, stop
+  reasons, counters and ledger sequence numbers for `p3-20261019-2`, `-3` and
+  `-4`. The raw loop logs and loop state recorded absolute local scratch paths, so
+  they were removed from the tree; `summary.json` binds each removed file by path,
+  bytes and SHA-256, and the bytes stay recoverable at commit `02c3177`.
 
 ## Commands
 
@@ -68,8 +71,8 @@ repository verification for this evidence update was `bun run test:self-improve`
   behavior, and held-out cleanliness, not an improvement or an adoption.
 - The `critic_secret` blocks and the `cost_rule` rejection are verdict-level
   reasons; they are not failures of the seven guards.
-- Live model output is not deterministic; the committed loop logs, loop state and
-  ledger rows are the receipt. The proposer is a paid external dependency.
+- Live model output is not deterministic; the ledger rows and `summary.json` are
+  the receipt. The proposer is a paid external dependency.
 - The cost proxy is recorded `wallMs`, which is load-dependent, not a fresh
   measurement.
 - The P2b verdict remains `unmet`; this campaign does not change it and makes no

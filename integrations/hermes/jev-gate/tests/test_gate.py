@@ -66,8 +66,8 @@ class GateTests(unittest.TestCase):
             "mode": "hold",
             "allowlist": ["job1"],
             "questions": {"job1": "Does the artifact contain three dated items with links?"},
-            "channels": {"job1": "1557970957585481838"},
-            "home_channel": "1557381856909988001",
+            "channels": {"job1": "channel-1"},
+            "home_channel": "channel-home",
             "max_attempts": 3,
             "wall_clock_ms": 900000,
             "hold_confidence": 0.9,
@@ -171,6 +171,19 @@ class GateTests(unittest.TestCase):
         receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
         self.assertIn('"alert_type": "home"', receipts)
         self.assertIn('"alert_delivery": "sent"', receipts)
+
+    def test_default_config_has_no_home_channel(self):
+        self.assertEqual(gate.DEFAULTS["home_channel"], "")
+        gate._send_home_alert = self._orig_alert
+        sent = []
+        orig_run = gate.subprocess.run
+        gate.subprocess.run = lambda *args, **kwargs: sent.append(args)
+        try:
+            self.assertEqual(gate._send_home_alert("alert", {"home_channel": ""}), "no_channel")
+            self.assertEqual(gate._send_home_alert("alert", {}), "no_channel")
+        finally:
+            gate.subprocess.run = orig_run
+        self.assertEqual(sent, [])
 
     def test_manual_direct_run_does_not_consume_retry(self):
         gate.handle_turn(ABORT, execution(), config_path=self.config)

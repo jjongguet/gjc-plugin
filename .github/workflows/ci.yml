@@ -35,6 +35,9 @@ jobs:
       - name: Generated-surface drift check (non-mutating)
         run: bun run build:check
 
+      - name: Evidence path hygiene
+        run: bun run evidence:check
+
       - name: Build
         run: bun run build
 

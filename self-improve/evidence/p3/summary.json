@@ -1,0 +1,130 @@
+{
+  "schema": "gjc.self-improve.evidence-summary.v1",
+  "campaign": "P3 redeployed policy (pi-1-25)",
+  "recoverableAt": "02c3177b56b10dd9a5f0b272345648b4f00984ab",
+  "note": "Raw loop logs and loop state were removed from the tree because they recorded absolute local scratch paths; the files remain recoverable at recoverableAt and are bound here by path, bytes and sha256. The append-only ledger rows remain the canonical receipt.",
+  "campaigns": [
+    {
+      "loopId": "p3-20261019-2",
+      "eventCounts": {
+        "cycle": 1,
+        "loop_start": 1,
+        "policy": 1,
+        "proposal_failed": 3,
+        "recovery": 1
+      },
+      "stopReason": null,
+      "counters": null,
+      "lastEvent": {
+        "at": "2026-10-18T18:47:17.054Z",
+        "type": "proposal_failed"
+      },
+      "ledgerSeq": [
+        26
+      ]
+    },
+    {
+      "loopId": "p3-20261019-3",
+      "eventCounts": {
+        "loop_start": 1,
+        "loop_stop": 1,
+        "policy": 1,
+        "proposal_failed": 8,
+        "recovery": 1
+      },
+      "stopReason": "max_proposer_calls",
+      "counters": {
+        "cycles": 0,
+        "proposerCalls": 8,
+        "headMoves": 0,
+        "invalidProposals": 8
+      },
+      "lastEvent": {
+        "at": "2026-10-18T18:56:11.529Z",
+        "type": "loop_stop"
+      },
+      "ledgerSeq": []
+    },
+    {
+      "loopId": "p3-20261019-4",
+      "eventCounts": {
+        "cycle": 5,
+        "loop_start": 1,
+        "loop_stop": 1,
+        "policy": 1,
+        "proposal_invalid": 2,
+        "recovery": 1
+      },
+      "stopReason": "max_cycles",
+      "counters": {
+        "cycles": 5,
+        "proposerCalls": 7,
+        "headMoves": 0,
+        "invalidProposals": 2
+      },
+      "lastEvent": {
+        "at": "2026-10-18T19:14:50.055Z",
+        "type": "loop_stop"
+      },
+      "ledgerSeq": [
+        27,
+        28,
+        29,
+        30,
+        31
+      ]
+    }
+  ],
+  "finalLoopState": {
+    "loopId": "p3-20261019-4",
+    "status": "ok",
+    "stoppedReason": "max_cycles",
+    "counters": {
+      "cycles": 5,
+      "proposerCalls": 7,
+      "headMoves": 0,
+      "invalidProposals": 2
+    },
+    "caps": {
+      "maxCycles": 5,
+      "maxWallMs": 1800000,
+      "maxProposerCalls": 8,
+      "batchSize": 1,
+      "cmdProposerTimeoutMs": 300000,
+      "stopOnAdopt": false,
+      "install": false,
+      "policy": {
+        "id": "pi-1-25",
+        "order": "failure_greedy",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "stopOnAdoptEffective": true
+    },
+    "cycles": 7
+  },
+  "removedFiles": [
+    {
+      "path": "self-improve/evidence/p3/loop-p3-20261019-2.log.jsonl",
+      "bytes": 3191,
+      "sha256": "e74a965770b12bb5a2ca3d72be0db22606bcc0f2fe8e3a7bd337f0bebf878cfb"
+    },
+    {
+      "path": "self-improve/evidence/p3/loop-p3-20261019-3.log.jsonl",
+      "bytes": 6856,
+      "sha256": "746d0485ed4d9d4735dfcfd6f228b49dfecaa5b74dbe7df0c8ce75d8adee05b0"
+    },
+    {
+      "path": "self-improve/evidence/p3/loop-p3-20261019-4.log.jsonl",
+      "bytes": 2766,
+      "sha256": "cb381e3c863efc4b622a28f9364b8ebf238b35b9c664842ad69e2e5789534a69"
+    },
+    {
+      "path": "self-improve/evidence/p3/loop-state-p3-20261019-4.json",
+      "bytes": 5639,
+      "sha256": "2f8a6067686d56276aa0a8f3cf4d8a101b4d29e09669c251985c0a3a909186f9"
+    }
+  ]
+}

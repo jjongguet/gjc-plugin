@@ -50,7 +50,7 @@ DEFAULTS = {
     "allowlist": [],
     "questions": {},
     "channels": {},
-    "home_channel": "1557381856909988001",
+    "home_channel": "",
     "max_attempts": 3,
     "wall_clock_ms": 900000,
     "hold_confidence": 0.9,
