@@ -2,6 +2,23 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.8] - 2026-10-20
+
+Plugins: jev-advisor 0.0.7 · verification-receipts 0.0.3 · ui-regression 0.0.3 · wiki 0.0.3 · rea 0.0.3 · backplan 0.0.6 · rrsi 0.0.2 · aside-memory 0.0.1
+
+Fixes from the boundary review of the 0.0.7 change set.
+
+### Fixed
+
+- **backplan**: a missing `project.mode` or automation-candidate `disposition` is reported once, not twice.
+- **rea**: rejected `rea_readiness` input is journaled (`not_run` / `invalid_or_unavailable_input`) like every other handled invocation.
+- `docs:check` now checks reference-style links and rejects links that escape the repository or have malformed percent-encoding; it ignores scheme and protocol-relative links, fences inside block quotes and indented code.
+- `evidence:check` also catches lowercase Windows and `file://` home paths.
+
+### Added
+
+- `scripts/tests/checks.test.mjs`, first in `bun run test`: pass and fail fixtures for `docs:check`, `evidence:check` and `policy:check`, and a drift probe for every plugin's `build --check`.
+
 ## [0.0.7] - 2026-10-20
 
 Plugins: jev-advisor 0.0.7 · verification-receipts 0.0.3 · ui-regression 0.0.3 · wiki 0.0.3 · rea 0.0.2 · backplan 0.0.5 · rrsi 0.0.2 · aside-memory 0.0.1 (first release)
@@ -85,6 +102,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.8]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.5...v0.0.6
 [0.0.5]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.4...v0.0.5
