@@ -23,5 +23,5 @@ binds each removed file by path, bytes and SHA-256 (recoverable at commit
 `02c3177`).
 
 `bun run evidence:check` fails if any other tracked file under `self-improve/`
-contains an absolute home path (`/Users/…`, `/home/…`, `C:\Users\…`). CI runs it on
-every push to `main`.
+contains an absolute path into a home directory (the macOS `Users`, Linux `home`
+or Windows `Users` roots). CI runs it on every push to `main`.
