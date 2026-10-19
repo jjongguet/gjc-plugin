@@ -13,6 +13,13 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # verification-receipts resolves `node` from absolute PATH entries; the
+      # ARC runner image has bun but no Node. Pin it so the native runner tests
+      # can spawn the same runtime the plugin targets (>= 22).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: "1.4.0"
