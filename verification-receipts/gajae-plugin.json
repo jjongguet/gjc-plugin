@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "verification-receipts",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "hooks": [
     { "name": "verification-gate-baseline", "event": "tool_call", "target": "task", "phase": "before", "path": "hooks/verification-gate-baseline.ts" },
     { "name": "verification-gate-task", "event": "tool_result", "target": "task", "phase": "after", "path": "hooks/verification-gate.ts" },
