@@ -39,7 +39,7 @@ test("receipt selected the deployed policy identity", () => {
   assert.equal(receipt.seed, policy.seed);
 });
 
-test("receipt is byte-identical to its recorded digest", async () => {
+test("receipt file matches its recorded digest", async () => {
   const { createHash } = await import("node:crypto");
   const bytes = readFileSync(path.join(repoRoot, "self-improve/evidence/p2/dream-receipt-20261012.json"));
   assert.equal(createHash("sha256").update(bytes).digest("hex"), "cff80dfbec86402194c509f695aa3d18431c50a023f13d347cff541b5f007b6e");

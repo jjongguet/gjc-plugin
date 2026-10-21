@@ -3,6 +3,7 @@
 Committed receipts for the measured self-improve campaigns. Each subdirectory
 has its own README with the frozen inputs, commands, result and limits.
 
+- [`p2/`](p2/README.md) — the 13-attempt freeze receipt behind the deployed policy (recovered, byte-identical).
 - [`p2b/`](p2b/README.md) — the 22-attempt replay measurement (verdict `unmet`).
 - [`p3/`](p3/README.md) — the redeployed-policy campaign (five rejects, no adoption).
 - [`audit-20261022/`](audit-20261022/README.md) — the RRSI + Harness² introduction audit:
@@ -23,6 +24,12 @@ Neither file contains credentials. The raw P3 loop logs and loop state, which
 recorded absolute scratch paths, were removed; [`p3/summary.json`](p3/summary.json)
 binds each removed file by path, bytes and SHA-256 (recoverable at commit
 `02c3177`).
+
+Protocol `corpus.sha256` values are **canonical-rows digests** over parsed ledger
+rows, not raw-file digests. The raw-file digest of the 13-attempt ledger
+(`72e25ab9…`) is a different value; `self-improve/lib/replay.mjs` defines both
+functions. `bun run paths:check` hash-pins the two historical lines above and
+fails on any other absolute home path in a tracked file.
 
 `bun run evidence:check` fails if any other tracked file under `self-improve/`
 contains an absolute path into a home directory (the macOS `Users`, Linux `home`

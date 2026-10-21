@@ -111,10 +111,13 @@ test("evidence:check fails on absolute home paths in any other tracked file", ()
 });
 
 test("paths:check passes repository-relative paths and allowlisted hash-bound files", () => {
+	const ledgerLine = readFileSync(join(REPO, "self-improve", "ledger.jsonl"), "utf8").split("\n").find(line => line.includes('"policyId":"pi-1-25"'));
+	const replayLine = readFileSync(join(REPO, "self-improve", "evidence", "p2b", "replay-b0b1.json"), "utf8").split("\n").find(line => line.includes('"ledgerPath"'));
+	assert.ok(ledgerLine && replayLine, "the two hash-pinned lines must exist");
 	const root = fixture({
 		"README.md": "Repository-relative self-improve/ledger.jsonl and ~/.gjc-plugin/ paths only.\n",
-		"self-improve/ledger.jsonl": `{"path":"${HOME_PATHS.alice}/repo"}\n`,
-		"self-improve/evidence/p2b/replay-b0b1.json": `{"ledgerPath":"${HOME_PATHS.alice}/repo/self-improve/ledger.jsonl"}\n`,
+		"self-improve/ledger.jsonl": `${ledgerLine}\n`,
+		"self-improve/evidence/p2b/replay-b0b1.json": `${replayLine}\n`,
 	});
 	try {
 		const result = run("check-paths.mjs", root);
@@ -141,7 +144,7 @@ test("paths:check fails on absolute home paths outside the allowlist", () => {
 });
 
 test("audit-claims checker validates a row and rejects an unlisted sentence", () => {
-	const row = spawnSync(NODE, [join(REPO, "scripts", "check-audit-claims.mjs"), "--row", "K0001"], { encoding: "utf8" });
+	const row = spawnSync(NODE, [join(REPO, "scripts", "check-audit-claims.mjs"), "--row", "K0001", "--allow-worktree-fallback"], { encoding: "utf8" });
 	assert.equal(row.status, 0, `${row.stdout}${row.stderr}`);
 	assert.match(row.stdout, /row=K0001 ok/);
 	const unlisted = spawnSync(NODE, [join(REPO, "scripts", "check-audit-claims.mjs"), "--require-candidate", "README.md#1#THIS SENTENCE IS NOT IN THE GRAPH"], { encoding: "utf8" });

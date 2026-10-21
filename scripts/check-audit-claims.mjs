@@ -21,6 +21,7 @@
  */
 import { readFileSync, existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -39,6 +40,7 @@ export const COLUMNS = [
   "caveat_adjacency",
   "required_receipt",
   "evidence_kind",
+  "binding_strength",
   "binding_command",
   "observed",
   "evidence_sha256",
@@ -50,6 +52,7 @@ const CLASSES = new Set(["IMP", "MEAS", "BND", "RDM", "REF"]);
 const VERDICTS = new Set(["PASS", "GAP", "UNVERIFIABLE"]);
 const SEVERITIES = new Set(["S1", "S2", "S3"]);
 const FIX_CLASSES = new Set(["", "doc", "evidence_annex", "code_doc", "refactor", "checker"]);
+const BINDING_STRENGTHS = new Set(["", "bound", "self"]);
 
 const FROZEN_PREFIXES = [
   "self-improve/ledger.jsonl",
@@ -103,14 +106,6 @@ export function parseCsv(text) {
   return rows.filter((entry) => entry.length > 1 || entry[0] !== "");
 }
 
-export function toCsv(rows) {
-  const escape = (value) => {
-    const text = String(value ?? "");
-    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
-  };
-  return rows.map((row) => row.map(escape).join(",")).join("\n") + "\n";
-}
-
 function fail(message) {
   process.stderr.write(`audit-claims: ${message}\n`);
   process.exit(1);
@@ -134,6 +129,8 @@ function loadRows() {
     if (!VERDICTS.has(record.verdict)) fail(`${record.id}: bad verdict ${record.verdict}`);
     if (!SEVERITIES.has(record.severity)) fail(`${record.id}: bad severity ${record.severity}`);
     if (!FIX_CLASSES.has(record.fix_class)) fail(`${record.id}: bad fix_class ${record.fix_class}`);
+    if (!BINDING_STRENGTHS.has(record.binding_strength)) fail(`${record.id}: bad binding_strength ${record.binding_strength}`);
+    if (record.verdict === "PASS" && !record.binding_strength) fail(`${record.id}: PASS row missing binding_strength`);
     if (record.verdict === "PASS" && (!record.binding_command || !record.observed || !record.evidence_sha256)) {
       fail(`${record.id}: PASS row missing binding_command/observed/evidence_sha256`);
     }
@@ -142,6 +139,7 @@ function loadRows() {
   return records;
 }
 
+const allowWorktreeFallback = process.argv.includes("--allow-worktree-fallback");
 const scopeCache = new Map();
 function carrierLines(carrier, scopeSha) {
   const key = `${scopeSha}:${carrier}`;
@@ -156,17 +154,19 @@ function carrierLines(carrier, scopeSha) {
     });
     lines = text.split("\n");
   } catch {
-    // Shallow clone or an exported tree without the audit-scope commit: the
-    // caller validates against the worktree instead. Full runs print the scope
-    // source so the substitution is visible.
+    if (!allowWorktreeFallback) {
+      fail(`audit scope ${scopeSha} unavailable for ${carrier}; full-history checkout required (use --allow-worktree-fallback only for an exported tree)`);
+    }
     const file = path.join(repoRoot, carrier);
     if (!existsSync(file)) fail(`carrier missing and audit scope ${scopeSha.slice(0, 8)} unavailable: ${carrier}`);
     lines = readFileSync(file, "utf8").split("\n");
-    process.stderr.write(`audit-claims: scope ${scopeSha.slice(0, 8)} unavailable for ${carrier}; validating the worktree copy\n`);
+    process.stderr.write(`audit-claims: scope ${scopeSha.slice(0, 8)} unavailable for ${carrier}; --allow-worktree-fallback validates the worktree copy\n`);
   }
   scopeCache.set(key, lines);
   return lines;
 }
+
+const scopeText = (carrier, scopeSha) => carrierLines(carrier, scopeSha).join("\n");
 
 function normalized(text) {
   return text.replace(/\s+/g, " ").trim();
@@ -176,8 +176,10 @@ export function quoteAtLine(carrier, fileLine, quote, scopeSha) {
   const lines = carrierLines(carrier, scopeSha);
   const line = lines[Number(fileLine) - 1];
   if (line === undefined) return { ok: false, reason: `line ${fileLine} out of range` };
-  const needle = normalized(quote).slice(0, 60);
+  const needle = normalized(quote);
   const haystack = normalized(line);
+  // A wrapped markdown line may split one sentence; the window is the exact line
+  // plus its immediate neighbours, and the needle is the full normalized quote.
   const window = normalized([lines[Number(fileLine) - 2] ?? "", line, lines[Number(fileLine)] ?? ""].join(" "));
   if (haystack.includes(needle) || window.includes(needle)) return { ok: true };
   return { ok: false, reason: `quote not found at ${carrier}:${fileLine}` };
@@ -192,12 +194,22 @@ function reenumerate(carriersDir) {
     .filter(Boolean)
     .map((line) => JSON.parse(line));
   const keys = new Set(committed.map((row) => `${row.carrier}#${row.file_line}#${normalized(row.text)}`));
-  const output = execFileSync(process.execPath, [generator, "--stdout"], {
-    cwd: repoRoot,
-    encoding: "utf8",
-    env: { ...process.env, AUDIT_CARRIERS_DIR: carriersDir, AUDIT_CANDIDATES_STDOUT: "1" },
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  let output;
+  try {
+    output = execFileSync(process.execPath, [generator, "--stdout"], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      env: carriersDir ? { ...process.env, AUDIT_CARRIERS_DIR: carriersDir, AUDIT_CANDIDATES_STDOUT: "1" } : process.env,
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+  } catch {
+    if (allowWorktreeFallback) {
+      process.stderr.write("audit-claims: re-enumeration skipped (audit scope unavailable and an exported tree cannot reproduce it)\n");
+      return { committed: committed.length, generated: null, missing: [] };
+    }
+    fail("re-enumeration failed: audit scope unavailable");
+  }
   const generated = output
     .split("\n")
     .filter(Boolean)
@@ -231,17 +243,20 @@ function dispositions(records, candidates) {
 }
 
 function frozenEditCheck(records, base) {
-  for (const record of records) {
-    if (record.fix_class !== "edit") continue;
-    if (FROZEN_PREFIXES.some((prefix) => record.carrier.startsWith(prefix))) {
-      fail(`${record.id}: edit fix_class on a frozen carrier ${record.carrier}`);
-    }
-  }
   if (!base) return;
-  const changed = execFileSync("git", ["diff", "--name-only", `${base}..HEAD`], { cwd: repoRoot, encoding: "utf8" })
+  try {
+    execFileSync("git", ["rev-parse", "--verify", base], { cwd: repoRoot, stdio: ["ignore", "ignore", "ignore"] });
+  } catch {
+    if (allowWorktreeFallback) return;
+    fail(`audit base ${base} unavailable; frozen-path ban cannot run`);
+  }
+  const committed = execFileSync("git", ["diff", "--name-only", `${base}..HEAD`], { cwd: repoRoot, encoding: "utf8" })
     .split("\n")
     .filter(Boolean);
-  const touched = changed.filter((file) => FROZEN_PREFIXES.some((prefix) => file.startsWith(prefix)));
+  const worktree = execFileSync("git", ["diff", "--name-only", "HEAD"], { cwd: repoRoot, encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  const touched = [...new Set([...committed, ...worktree])].filter((file) => FROZEN_PREFIXES.some((prefix) => file.startsWith(prefix)));
   if (touched.length > 0) fail(`frozen paths changed since ${base}: ${touched.join(", ")}`);
 }
 
@@ -280,13 +295,17 @@ if (requireIndex >= 0) {
 for (const record of records) {
   const quote = quoteAtLine(record.carrier, record.file_line, record.quote, record.scope_sha);
   if (!quote.ok) fail(`${record.id}: ${quote.reason}`);
+  if (record.verdict === "PASS" && record.evidence_kind === "a") {
+    const actual = createHash("sha256").update(scopeText(record.carrier, record.scope_sha)).digest("hex");
+    if (record.evidence_sha256 !== actual) fail(`${record.id}: evidence_sha256 does not match the carrier blob at ${record.scope_sha.slice(0, 8)}`);
+  }
 }
 dispositions(records, candidates);
 frozenEditCheck(records, base);
 
 if (args.includes("--reenumerate")) {
-  const reenumerated = reenumerate(carriersDir);
-  if (reenumerated.missing.length > 0) {
+  const reenumerated = reenumerate(carriersIndex >= 0 ? carriersDir : null);
+  if (reenumerated.generated !== null && reenumerated.missing.length > 0) {
     fail(`re-enumeration found ${reenumerated.missing.length} sentence(s) with no candidate row, first: ${reenumerated.missing[0].carrier}:${reenumerated.missing[0].file_line}`);
   }
 }
@@ -295,7 +314,9 @@ const counts = records.reduce((accumulator, record) => {
   accumulator[record.verdict] = (accumulator[record.verdict] ?? 0) + 1;
   return accumulator;
 }, {});
+const bound = records.filter((record) => record.verdict === "PASS" && record.binding_strength === "bound").length;
+const self = records.filter((record) => record.verdict === "PASS" && record.binding_strength === "self").length;
 const aggregate = counts.GAP ? `GAPS_OPEN (${counts.GAP})` : counts.UNVERIFIABLE ? `INCOMPLETE (${counts.UNVERIFIABLE} unverifiable)` : "INTRODUCED CORRECTLY";
 process.stdout.write(
-  `claims=${records.length} candidates=${candidates.length} PASS=${counts.PASS ?? 0} GAP=${counts.GAP ?? 0} UNVERIFIABLE=${counts.UNVERIFIABLE ?? 0} aggregate=${aggregate}\n`,
+  `claims=${records.length} candidates=${candidates.length} PASS=${counts.PASS ?? 0} (bound=${bound} self=${self}) GAP=${counts.GAP ?? 0} UNVERIFIABLE=${counts.UNVERIFIABLE ?? 0} aggregate=${aggregate}\n`,
 );
