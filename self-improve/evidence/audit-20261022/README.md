@@ -79,6 +79,12 @@ evidence; the recovered 13-attempt receipt is the exception and is committed at
 - Pinned digests reproduce byte-exactly from the `e6675cb` and `7f2f97f` blobs,
   including the recovered 13-attempt receipt (`cff80dfb…`, committed as
   [`../p2/dream-receipt-20261012.json`](../p2/dream-receipt-20261012.json)).
+- Verification receipts: `verification_run` over the self-contained unit suites
+  (`policy-provenance`, `replay`, `protocol`, `ledger`) — 20/20, exit 0,
+  receipt `b9319343-15b2-4314-a1c3-a2b14c8193b2`, freshness `fresh`;
+  `verification_loop` → `clean`, 0 open gates. Subprocess-spawning suites cannot
+  run under that tool's environment (it passes only `LANG`/`TZ`, no `PATH`), so
+  they are covered by the battery instead of by a receipt.
 
 ## Honest limits
 
