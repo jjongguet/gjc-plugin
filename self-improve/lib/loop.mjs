@@ -30,7 +30,8 @@ import {
   validateAgentProposal,
 } from "./propose.mjs";
 import { readLedger } from "./ledger.mjs";
-import { ledgerEpoch, loadCandidatePayload, validateCandidate } from "./distill.mjs";
+import { flattenAttempts, ledgerEpoch, loadCandidatePayload, readStoreFile, validateCandidate } from "./distill.mjs";
+import { sha256Hex } from "./types.mjs";
 import { policyArtifactPath, policyCurrentPath, readCurrentPolicy, readPolicyArtifact } from "./policy.mjs";
 
 export const LOOP_STATE_SCHEMA = "gjc.self-improve.loop.v1";
@@ -301,6 +302,7 @@ export async function runLoop(input) {
     includeSmoke = true,
     install = false,
     candidatePath = null,
+    storePath = null,
     maxLag = 0,
     deps = {},
   } = input ?? {};
@@ -319,20 +321,28 @@ export async function runLoop(input) {
   // bypass it. A rejected candidate returns a bounded skip reason and runs no cycle.
   let candidate = null;
   if (candidatePath) {
+    const refuse = (reason) => ({ status: "skipped", reason, candidateRefused: true, loopId });
     let candidateText;
     try {
       candidateText = fs.readFileSync(candidatePath, "utf8");
     } catch {
-      return { status: "skipped", reason: "candidate_unreadable", loopId };
+      return refuse("candidate_unreadable");
     }
     const loaded = loadCandidatePayload(candidateText);
-    if (!loaded.ok) return { status: "skipped", reason: loaded.reason, loopId };
+    if (!loaded.ok) return refuse(loaded.reason);
+    let expectedStoreDigest = null;
+    if (storePath) {
+      const storeRead = readStoreFile(storePath);
+      if (storeRead.status !== "ok") return refuse("candidate_store_unavailable");
+      expectedStoreDigest = sha256Hex(JSON.stringify(flattenAttempts(storeRead.store)));
+    }
     const candidateReason = validateCandidate(loaded.candidate, {
       gatedObjective: adapter.probes?.[0]?.objective,
       ledgerHead: ledgerEpoch(readLedger(ledgerPath)),
       maxLag,
+      expectedStoreDigest,
     });
-    if (candidateReason) return { status: "skipped", reason: candidateReason, loopId };
+    if (candidateReason) return refuse(candidateReason);
     candidate = loaded.candidate;
   }
 
@@ -552,6 +562,19 @@ export async function runLoop(input) {
           hypothesis: outcome.proposal.hypothesis,
         });
         log({ type: "proposal_invalid", cycleIndex, objective: action.objective, reason: validation.reason, detail: validation });
+        persist();
+        continue;
+      }
+      if (candidate && validation.proposal.objective !== candidate.objective) {
+        state.counters.invalidProposals += 1;
+        state.cycles.push({
+          cycleIndex,
+          objective: action.objective,
+          status: "proposal_invalid",
+          reason: "proposer_objective_mismatch",
+          proposedObjective: validation.proposal.objective,
+        });
+        log({ type: "proposal_invalid", cycleIndex, reason: "proposer_objective_mismatch", proposedObjective: validation.proposal.objective });
         persist();
         continue;
       }

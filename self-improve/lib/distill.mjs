@@ -541,20 +541,50 @@ export function loadCandidatePayload(text) {
   return { ok: false, reason: "candidate_schema_unknown" };
 }
 
-/** Structural checks shared by the loader and the loop. */
-export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLag }) {
+/**
+ * Structural checks shared by the loader and the loop. `expectedStoreDigest` is
+ * required in candidate-file mode: the loop recomputes it from the store so a
+ * forged digest cannot reach the proposer.
+ */
+export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLag, expectedStoreDigest = null }) {
   if (!isPlainObject(candidate)) return "candidate_unreadable";
   if (candidate.schema !== CANDIDATE_SCHEMA) return "candidate_schema_unknown";
   if (candidate.objective !== gatedObjective) return "objective_not_gated";
   if (typeof candidate.rule !== "string" || candidate.rule.trim().length === 0 || candidate.rule.length > DISTILL_LIMITS.maxRuleChars) {
     return "candidate_rule_invalid";
   }
-  if (!isPlainObject(candidate.contrast) || !isPlainObject(candidate.contrast.support)) return "candidate_contrast_invalid";
-  if (!isPlainObject(candidate.contrast.contradiction) || !isPlainObject(candidate.contrast.unexplained)) {
+  const contrast = candidate.contrast;
+  if (!isPlainObject(contrast) || !isPlainObject(contrast.support) || !isPlainObject(contrast.contradiction) || !isPlainObject(contrast.unexplained)) {
     return "candidate_contrast_invalid";
   }
-  if (candidate.contrast.contradiction.adopts > 0 || candidate.contrast.contradiction.rejects > 0) return "candidate_contradicted";
-  if (candidate.contrast.unexplained.adopts > 0 || candidate.contrast.unexplained.rejects > 0) return "candidate_unexplained";
+  const isCount = (value) => Number.isInteger(value) && value >= 0;
+  for (const block of [contrast.support, contrast.contradiction, contrast.unexplained]) {
+    if (!isCount(block.adopts) || !isCount(block.rejects)) return "candidate_contrast_invalid";
+  }
+  if (contrast.support.adopts < 1 || contrast.support.rejects < 1) return "candidate_contrast_invalid";
+  if (contrast.contradiction.adopts > 0 || contrast.contradiction.rejects > 0) return "candidate_contradicted";
+  if (contrast.unexplained.adopts > 0 || contrast.unexplained.rejects > 0) return "candidate_unexplained";
+  const pairs = contrast.pairs;
+  if (!isPlainObject(pairs) || !["total", "support", "contradiction", "unexplained"].every((key) => isCount(pairs[key]))) {
+    return "candidate_contrast_invalid";
+  }
+  if (pairs.total !== pairs.support + pairs.contradiction + pairs.unexplained || pairs.support < 1) {
+    return "candidate_contrast_invalid";
+  }
+  if (pairs.support !== contrast.support.adopts * contrast.support.rejects) return "candidate_contrast_invalid";
+  if (pairs.contradiction !== contrast.contradiction.adopts * contrast.contradiction.rejects) return "candidate_contrast_invalid";
+  if (pairs.unexplained !== contrast.unexplained.adopts * contrast.unexplained.rejects) return "candidate_contrast_invalid";
+  for (const side of [contrast.adopt, contrast.reject]) {
+    if (!isPlainObject(side) || !isCount(side.count) || side.count < 1 || !Array.isArray(side.attemptIds)) {
+      return "candidate_contrast_invalid";
+    }
+    if (side.attemptIds.some((id) => typeof id !== "string" || id.length === 0)) return "candidate_contrast_invalid";
+    if (new Set(side.attemptIds).size !== side.attemptIds.length) return "candidate_contrast_invalid";
+    if (side.attemptIds.length > side.count) return "candidate_contrast_invalid";
+  }
+  if (contrast.adopt.count !== contrast.support.adopts || contrast.reject.count !== contrast.support.rejects) {
+    return "candidate_contrast_invalid";
+  }
   if (!isPlainObject(candidate.evidence) || !/^[0-9a-f]{64}$/.test(candidate.evidence.storeDigest ?? "")) {
     return "candidate_evidence_invalid";
   }
@@ -562,5 +592,8 @@ export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLa
   const after = candidate.expires?.kind === "ledger_seq" ? candidate.expires.after : null;
   if (!Number.isInteger(after)) return "candidate_expiry_invalid";
   if (ledgerHead - after > maxLag) return "candidate_stale";
+  if (typeof expectedStoreDigest === "string" && expectedStoreDigest !== candidate.evidence.storeDigest) {
+    return "candidate_store_mismatch";
+  }
   return null;
 }

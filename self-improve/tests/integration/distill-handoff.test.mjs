@@ -13,6 +13,7 @@ import { buildFixture } from "../fixtures/distill-fixture.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const ECHO_PROPOSER = join(REPO_ROOT, "self-improve", "tests", "fixtures", "proposer-echo.mjs");
+const RUN_MJS = join(REPO_ROOT, "self-improve", "scripts", "run.mjs");
 
 function git(cwd, args) {
   const proc = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -62,7 +63,7 @@ function writeLedger(repo, rows) {
   writeFileSync(join(repo, "self-improve", "ledger.jsonl"), `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
 
-function handoffInput({ root, repo, candidatePath, maxLag = 0 }) {
+function handoffInput({ root, repo, candidatePath, maxLag = 0, storePath = null }) {
   return {
     repoRoot: repo,
     adapter: DOMAIN,
@@ -70,6 +71,7 @@ function handoffInput({ root, repo, candidatePath, maxLag = 0 }) {
     proposerCmd: `node ${ECHO_PROPOSER} {request} {response}`,
     liveApproved: true,
     candidatePath,
+    storePath,
     maxLag,
     maxCycles: 1,
     maxProposerCalls: 1,
@@ -102,8 +104,10 @@ test("candidate handoff reaches a dry-run decision with the contrast in the requ
   const candidate = distill.candidates[0];
   const candidatePath = join(root, "candidate.json");
   writeFileSync(candidatePath, `${JSON.stringify(candidate, null, 2)}\n`);
+  const storePath = join(root, "store.json");
+  writeFileSync(storePath, JSON.stringify(fixture.store));
 
-  const result = await runLoop(handoffInput({ root, repo, candidatePath }));
+  const result = await runLoop(handoffInput({ root, repo, candidatePath, storePath }));
   assert.equal(result.status, "ok", JSON.stringify(result));
   assert.equal(result.stoppedReason, "candidate_consumed");
   assert.equal(result.cycles.length, 1);
@@ -131,6 +135,8 @@ test("a contradicted, stale, or tampered candidate is refused before any request
     gatedObjective: fixture.gated,
   });
   const candidate = distill.candidates[0];
+  const storePath = join(root, "store.json");
+  writeFileSync(storePath, JSON.stringify(fixture.store));
 
   const contradicted = {
     ...candidate,
@@ -139,22 +145,52 @@ test("a contradicted, stale, or tampered candidate is refused before any request
   contradicted.id = `cand-${sha256Hex(JSON.stringify((({ id, ...rest }) => rest)(contradicted))).slice(0, 12)}`;
   const contradictedPath = join(root, "contradicted.json");
   writeFileSync(contradictedPath, JSON.stringify(contradicted));
-  const contradictedRun = await runLoop(handoffInput({ root, repo, candidatePath: contradictedPath }));
+  const contradictedRun = await runLoop(handoffInput({ root, repo, candidatePath: contradictedPath, storePath }));
   assert.equal(contradictedRun.status, "skipped");
   assert.equal(contradictedRun.reason, "candidate_contradicted");
 
   const tampered = { ...candidate, rule: "tampered rule" };
   const tamperedPath = join(root, "tampered.json");
   writeFileSync(tamperedPath, JSON.stringify(tampered));
-  const tamperedRun = await runLoop(handoffInput({ root, repo, candidatePath: tamperedPath }));
+  const tamperedRun = await runLoop(handoffInput({ root, repo, candidatePath: tamperedPath, storePath }));
   assert.equal(tamperedRun.reason, "candidate_tampered");
 
   const stale = { ...candidate, expires: { kind: "ledger_seq", after: 0 } };
   stale.id = `cand-${sha256Hex(JSON.stringify((({ id, ...rest }) => rest)(stale))).slice(0, 12)}`;
   const stalePath = join(root, "stale.json");
   writeFileSync(stalePath, JSON.stringify(stale));
-  const staleRun = await runLoop(handoffInput({ root, repo, candidatePath: stalePath }));
+  const staleRun = await runLoop(handoffInput({ root, repo, candidatePath: stalePath, storePath }));
   assert.equal(staleRun.reason, "candidate_stale");
 
+  assert.equal(existsSync(join(root, "runroot")), false);
+});
+
+test("the CLI maps a refused candidate to exit 2 and never reaches the proposer", () => {
+  const { root, repo } = makeFixture();
+  const fixture = buildFixture();
+  writeLedger(repo, fixture.ledgerRows);
+  const storePath = join(root, "store.json");
+  writeFileSync(storePath, JSON.stringify(fixture.store));
+  const distill = distillTrajectories({
+    store: fixture.store,
+    ledgerRows: fixture.ledgerRows,
+    declaredObjectives: fixture.declared,
+    gatedObjective: fixture.gated,
+  });
+  const forged = {
+    ...distill.candidates[0],
+    contrast: { ...distill.candidates[0].contrast, support: { adopts: 9, rejects: 9 } },
+  };
+  forged.id = `cand-${sha256Hex(JSON.stringify((({ id, ...rest }) => rest)(forged))).slice(0, 12)}`;
+  const candidatePath = join(root, "forged.json");
+  writeFileSync(candidatePath, JSON.stringify(forged));
+  const run = spawnSync(
+    process.execPath,
+    [RUN_MJS, "loop", "--repo", repo, "--ledger", join(repo, "self-improve", "ledger.jsonl"),
+      "--store", storePath, "--candidate-file", candidatePath, "--proposer", "stub", "--max-cycles", "1", "--dry-run", "--json"],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 2, run.stderr);
+  assert.match(run.stderr, /candidate refused: candidate_contrast_invalid/);
   assert.equal(existsSync(join(root, "runroot")), false);
 });

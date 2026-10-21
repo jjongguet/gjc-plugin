@@ -492,6 +492,7 @@ async function runLoopCommand(options) {
     stopOnAdopt: options.stopOnAdopt === true,
     install: options.install === true,
     candidatePath: options["candidate-file"] ? resolve(options["candidate-file"]) : null,
+    storePath: options.store ? resolve(options.store) : join(homedir(), ".gjc-plugin", "rrsi", "store.json"),
     maxLag: maxLag.value,
     loopId: options["loop-id"],
     runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
@@ -505,6 +506,10 @@ async function runLoopCommand(options) {
       `status=${result.status} loop=${result.loopId ?? "-"} cycles=${result.counters?.cycles ?? 0} ` +
         `stopped=${result.stoppedReason ?? result.reason ?? "-"}\n`,
     );
+  }
+  if (result.status === "skipped" && result.candidateRefused) {
+    process.stderr.write(`loop: candidate refused: ${result.reason}\n`);
+    return 2;
   }
   return 0;
 }

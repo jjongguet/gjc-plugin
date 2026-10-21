@@ -69,12 +69,16 @@ admission veto, not a proposal target.
 
 `loop --candidate-file <path>` accepts a bare `candidate.v2` or a `distill.v2`
 payload with exactly one candidate. All checks live in `loop.mjs`:
-schema, gated objective, zero contradiction/unexplained, rule length, evidence
-digest shape, recomputed content id (`candidate_tampered`), and freshness
-(`candidate_stale`). A valid candidate pins the objective, adds an optional
-`contrast` field to the v1 proposer request, and stops the loop with
-`candidate_consumed` after one cycle. Requests without a candidate keep their
-previous shape.
+schema, gated objective, zero contradiction/unexplained, rule length, internal
+counter consistency (`pairs.support = support.adopts × support.rejects`, side
+counts equal the support counts, attempt ids unique and bounded), recomputed
+content id (`candidate_tampered`), freshness (`candidate_stale`), and the store
+digest recomputed from `--store` (default the rrsi store) so a forged digest is
+`candidate_store_mismatch`. A refused candidate exits 2 before any proposer
+call. A valid candidate pins the objective, adds an optional `contrast` field
+to the v1 proposer request, rejects a response that moves the objective
+(`proposer_objective_mismatch`), and stops the loop with `candidate_consumed`
+after one cycle. Requests without a candidate keep their previous shape.
 
 ## Command
 

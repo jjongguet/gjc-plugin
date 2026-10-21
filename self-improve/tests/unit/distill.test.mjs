@@ -339,6 +339,19 @@ test("candidate validation catches tampering, contradiction, and staleness", () 
   };
   assert.equal(validateCandidate({ ...contradicted, id: candidateIdFor(contradicted) }, context), "candidate_contradicted");
   assert.equal(validateCandidate(candidate, { ...context, ledgerHead: 9, maxLag: 0 }), "candidate_stale");
+  const inflated = { ...candidate, contrast: { ...candidate.contrast, support: { adopts: 9, rejects: 9 } } };
+  assert.equal(validateCandidate({ ...inflated, id: candidateIdFor(inflated) }, context), "candidate_contrast_invalid");
+  const duplicate = {
+    ...candidate,
+    contrast: { ...candidate.contrast, adopt: { attemptIds: [candidate.contrast.adopt.attemptIds[0], candidate.contrast.adopt.attemptIds[0]], count: 2 } },
+  };
+  assert.equal(validateCandidate({ ...duplicate, id: candidateIdFor(duplicate) }, context), "candidate_contrast_invalid");
+  const badCount = { ...candidate, contrast: { ...candidate.contrast, adopt: { attemptIds: candidate.contrast.adopt.attemptIds, count: 99 } } };
+  assert.equal(validateCandidate({ ...badCount, id: candidateIdFor(badCount) }, context), "candidate_contrast_invalid");
+  assert.equal(
+    validateCandidate(candidate, { ...context, expectedStoreDigest: "f".repeat(64) }),
+    "candidate_store_mismatch",
+  );
 });
 
 test("CLI emits the v2 payload as JSON and exits 0", () => {
