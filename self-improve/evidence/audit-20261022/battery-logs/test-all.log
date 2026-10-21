@@ -1,0 +1,471 @@
+$ bun run test
+✔ docs:check passes resolvable links and ignores external links and code (70.261583ms)
+✔ docs:check fails on missing targets, reference links, escapes and bad encoding (61.973083ms)
+✔ evidence:check allows repository-relative paths and the two hash-bound files (71.229292ms)
+✔ evidence:check fails on absolute home paths in any other tracked file (67.621667ms)
+✔ paths:check passes repository-relative paths and allowlisted hash-bound files (74.7675ms)
+✔ paths:check fails on absolute home paths outside the allowlist (66.69875ms)
+✔ audit-claims checker validates a row and rejects an unlisted sentence (82.081ms)
+✔ every plugin build --check passes in sync and fails on generated-surface drift (305.730583ms)
+✔ policy:check passes the committed workflows (25.882042ms)
+✔ policy:check rejects every unsafe change to the closer or CI triggers (177.031458ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1042.412459
+bun test v1.4.0 (34cbb9a40)
+ok 1 egress allowlist and credentials/redirect boundary
+ok 2 config precedence, disabled/missing key and versioned paths
+ok 3 mixed tasks, malformed entries and bounded extraction
+ok 4 semantic fingerprint excludes ids/tier/order but preserves full content
+ok 5 jev exact complete prompt and limit+1
+ok 6 typesafe-jev exact complete prompt and limit+1
+ok 7 openrouter exact complete prompt and limit+1
+ok 8 ollaya exact complete prompt and limit+1
+ok 9 hosted Jev transmits late shared context beyond old cap unchanged
+ok 10 jev strict confidence and probability parsing
+ok 11 openrouter strict confidence and probability parsing
+ok 12 malformed JSON, tier, partial and reasoning-only responses
+ok 13 HTTP, rejected transport, overflow and invalid endpoint fail open
+ok 14 abort before/during request and timeout
+ok 15 check request wire shape, strict verdict/probability parsing and admission bounds
+ok 16 check path fails open with explicit reasons and rejected configurations never reach transport
+ok 17 generated hook mixed decisions and four-call budget
+ok 18 provider off, missing key and memory off have no prohibited writes
+ok 19 hint/shadow never block, enforce task-local threshold and cached replay
+ok 20 enforce unknown, oversize, low confidence and overprovisioned fail open
+ok 21 cooldown first-zero/exact boundary/failed reservation and deadline
+ok 22 pending duplicate and reversed advice replies preserve exact records
+ok 23 same-handler overlapping calls reserve cooldown before response
+ok 24 late advice persistence failure is visible without lock stealing
+ok 25 blocked-marker persistence failure remains visible
+ok 26 one failed child write does not suppress later healthy child writes
+ok 27 zero threshold still uses each complete explicit tier and blocks whole batch
+ok 28 running launch is not terminal, no result provider calls, singleton exact join
+ok 29 nonterminal statuses, missing identity and outer failures remain unknown
+ok 30 failed/cancelled per-child status and positive-duration denominator
+ok 31 terminal-before-launch, cross-session identity and resumed jobs
+ok 32 original batch cardinality and scheduling failures never map singleton
+ok 33 terminal conflicts are explicit and excluded; late running cannot regress
+ok 34 independent generated surfaces merge concurrent completion and delayed advice
+ok 35 legacy bytes and metadata privacy preserved; manual probability output
+ok 36 result root enforcement and manual disabled/report outcomes are journaled privately
+ok 37 automatic advice launch and terminal journals match retained evidence without prose
+ok 38 batch advice and multi-child observations each append exactly one complete bounded record
+ok 39 manual provider caps, invalid input, offline report with provider off
+ok 40 generated jev_check surfaces journal sanitized check outcomes and stay strict
+ok 41 lock retry rejects ancestor symlink and same-mode directory replacements
+ok 42 generated hook refuses lock-wait ancestor redirection without external writes
+ok 43 publication and release refuse directory replacement inside the synchronous callback
+ok 44 whole-call malformed task input journals once without invalid task indices
+ok 45 corrupt/version/oversize/symlink/nonregular stores never reset
+ok 46 foreign old lock is not stolen; IO errors and callback failures clean up
+ok 47 Jev refuses ancestor symlinks unsafe directories and hardlinked state without adoption
+ok 48 record reuse/conflict, eviction, stale tokens and zero retention
+ok 49 independent observed duration and recommendation denominators
+ok 50 joined per-recommendation duration excludes unjoined jobs and missing values
+ok 51 actualTier is host-only, conflict-flagged, and byEffectiveModel is bounded
+ok 52 V1 matching-receipt classification is total: sync/async/terminal/isError/blocked/non-matching
+ok 53 V2 production-shaped async sequence: running then completed, clear only after terminal observed
+ok 54 V3 unresolved ever-non-terminal child blocks despite threshold
+ok 55 V4 unknown listed status blocks the clear
+ok 56 V4b per-row removal: each terminal child row disappears, last row clears
+ok 57 V4e batch counter anchor rejects an old-batch job with the same task id
+ok 58 V4c last-row clear fires even when the closure predicate is still false
+ok 59 V4d retention boundary: unmapped, unknown, duplicate-label, and contradictory observations never remove rows
+ok 60 V4f pre-launch snapshot cannot remove a row before async ownership
+ok 61 V5 memory off / provider off still clear (zero store writes)
+ok 62 V6 enforce pre-hook block clears its own widget before blocking
+ok 63 V7 supersede and session isolation
+ok 64 V8 notify policy: single-line bounded payloads, shadow silent
+ok 65 widget-lifecycle pure helpers: fold no-regression, unknown, clamp, version guard
+artifact-sync hooks/jev-advisor.ts: exact
+artifact-sync hooks/jev-advisor-result.ts: exact
+artifact-sync tools/jev-advise.ts: exact
+artifact-sync tools/jev-check.ts: exact
+artifact-sync tools/plugin-metrics.ts: exact
+ok 66 canonical builder exact bytes for all five surfaces and stale candidate
+ok 67 manifest surfaces and release version
+ok 68 no unexpected fetch and no owned transaction residue
+ok 69 plugin_metrics tool: invalid_input rejection before any reads, exact envelope, nonmutation
+ok 70 plugin_metrics counts canonical operations including check without widening run/status buckets
+ok 71 plugin_metrics correlation rejects nonrepresentable sums, preserves fractions and readable siblings
+ok 72 plugin_metrics source and generated tools return fixed native errors for unexpected report and serialization exceptions
+ok 73 metrics corrupt inventory and digest-matching malformed segments stay source-local
+ok 74 state descriptor growth, replacement and late lock fail closed without unbounded reads
+ok 75 metrics sparse source-specific fields, overflow isolation and timestamp extrema
+{"kind":"api-package-test-report","cases":75,"failures":0,"scriptedFetchCalls":85,"unexpectedFetches":0,"realNetworkCalls":0,"generatedArtifactsCompared":5}
+ALL PASS (75 cases)
+checked tools/verification-run.ts
+checked tools/verification-status.ts
+checked tools/verification-loop.ts
+checked hooks/verification-gate-baseline.ts
+checked hooks/verification-gate.ts
+bun test v1.4.0 (34cbb9a40)
+checked tools/ui-regression-run.ts
+checked tools/ui-regression-status.ts
+bun test v1.4.0 (34cbb9a40)
+ok 1 lib exposes only the two intended operations (no approve/publish/refresh/configure)
+ok 2 tool surfaces register with the manifest contract
+ok 3 query rejects empty and oversized input without touching wiki.py
+ok 4 propose rejects invalid id, origin, changes shape and missing citation
+notice: sibling personal-wiki/scripts/wiki.py not found — wiki.py-backed e2e cases skipped (structural cases only)
+ok 5 journal records land under the isolated HOME
+ok 6 generated surfaces are in sync with sources (rebuild is a no-op)
+ok 7 shared results module accepts the wiki plugin and operations
+{"kind":"api-package-test-report","cases":7,"failures":0,"wikiPyE2E":"skipped","realNetworkCalls":0}
+ALL PASS (7 cases)
+ok 1 lib exposes only the intended readiness surface
+ok 2 manifest stays tool-only with no platform-quarantined surfaces
+ok 3 tool registers with the manifest contract
+ok 4 Node engine gate matches the pinned REA range
+ok 5 registration classification distinguishes every disabled shape
+ok 6 a fully configured machine reports ready with no remediation
+ok 7 an unregistered machine with runtimes and the installed skill reports ready
+ok 8 a bare machine reports not_ready with the exact remediation commands
+ok 9 unsupported Node and a disabled registration are reported, not repaired
+ok 10 a registration without a declared timeout gets the re-add hint
+ok 11 execute reports structural readiness and journals one sanitized record
+ok 12 execute rejects any input other than exactly {}
+ok 13 generated surfaces are in sync with sources (rebuild is a no-op)
+ok 14 shared results module accepts the rea plugin and operation
+ok 15 skill payload matches the pinned version and frontmatter contract
+{"kind":"api-package-test-report","cases":15,"failures":0,"realNetworkCalls":0}
+ALL PASS (15 cases)
+ok 1 lib exposes only the intended surface
+ok 2 manifest stays tool-only and version-gated
+ok 3 tool registers with the manifest contract
+ok 4 a valid reuse-mode draft renders Linear payloads
+ok 5 create mode renders a project description from the goal and criteria
+ok 6 plan notes render policy decisions and automation candidates
+ok 7 digest is key-order independent and content sensitive
+ok 8 invalid drafts are rejected with path-addressed errors
+ok 9 a missing required key is reported exactly once
+ok 10 repeated criteria warn while the plan still passes
+ok 11 count limits bound criteria and issues
+ok 12 nested unknown keys and prototype keys are rejected without pollution
+ok 13 labels must be well-formed, unicode is accepted and request stays optional
+ok 14 oversized rendered output is rejected with a bounded error
+ok 15 execute renders ok and journals one sanitized record
+ok 16 execute rejects malformed input and contract violations
+ok 17 execute reads a plan file and refuses oversized or symlinked paths
+ok 18 shared results module accepts the backplan plugin and operation
+ok 19 generated surface is in sync with sources (rebuild is a no-op)
+ok 20 skill payload matches the frontmatter and tool contract
+{"kind":"api-package-test-report","cases":20,"failures":0,"realNetworkCalls":0}
+ALL PASS (20 cases)
+ALL PASS (136 cases)
+ALL PASS (45 cases)
+# integration guards: build=pass(222ms) test=pass(77601ms) validator=pass(74ms) smoke-verification=pass(5461ms) smoke-loop=pass(1804ms) smoke-advisor=pass(2483ms) smoke-metrics=pass(2293ms)
+# plan: build,test,validator,smoke-verification,smoke-loop,smoke-advisor,smoke-metrics
+ok 1 manifest declares one tool, one session_start hook (no target/phase), and the four actions
+ok 2 status on an empty store reports missing storage without creating one
+ok 3 capture stores one bounded episode with 0700/0600 privacy and journals the outcome
+ok 4 capture clamps attempts, coerces unknown decisions and truncates labels
+ok 5 import projects the jev-advisor journal into >=10 attempts with the documented fields
+ok 6 import reports bounded projection coverage when the limit omits records
+ok 7 journal-dream emits a deterministic receipt over the synthetic journal
+ok 8 journal-dream fails closed with no_journal and never writes the store
+ok 9 import projects a self-improve ledger read-only when a path is given
+ok 10 dream reports the frozen below-gate verdict for a small store
+ok 11 a store at pass-gate size evaluates the thresholds instead
+ok 12 the round trip runs capture -> import -> dream over >=10 imported attempts
+ok 13 store faults are reported and never repaired
+ok 14 unknown actions and malformed inputs are handled without throwing
+ok 15 periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing
+ok 16 periodic: 160 projection and limited_projection label
+ok 17 periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class
+ok 18 periodic: disabled consumes nothing, interval override fires per override, backoff is honored
+ok 19 periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)
+ok 20 periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes
+ok 21 periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)
+ok 22 periodic: receipt retention prunes to the newest 60
+ok 23 periodic summary is exposed by the tool status and status stays read-only
+ok 24 periodic: unsafe symlinked roots are never written through
+ok 25 periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record
+ok 26 periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)
+ok 27 periodic: a dream failure is a bounded error (no masked success)
+ok 28 periodic: the worker CLI entry runs, records, and stays inert without the flag
+ok 29 the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start
+ok 30 generated surfaces are in sync with sources (non-mutating --check drift gate)
+ok 31 the shared results registry accepts rrsi outcomes and rejects malformed ones
+   measured real journal: segments=2 records=3273
+ok 32 the real jev-advisor journal is counted read-only (measured; never copied into the plugin store)
+{"kind":"rrsi-plugin-acceptance","plugin":"rrsi","version":"0.0.2","cases":32,"failures":0,"realJournalRecords":3273,"scope":"functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop"}
+ok 1 useful natural USER prose with truthful provenance
+ok 2 benign imperative and structured preferences require no USER schema
+ok 3 mixed unsafe blocks withheld whole; separate safe prose survives
+ok 4 additional secret and coercion patterns are screened
+ok 5 fenced and unclosed code excluded, prose preserved
+ok 6 empty, withheld, partial and duplicate count identities
+ok 7 deterministic score/path/range ordering and contradictory identity failure
+ok 8 600-byte complete blocks, multibyte bounds and two-block cap
+ok 9 blank separator runs are not content omissions
+ok 10 control bidi and zero-width excerpt blocks are dropped
+ok 11 sensitive citation components are withheld, never masked
+ok 12 private citation identifiers are withheld without rejecting date paths
+ok 13 all result paths validated before any private payload returned
+ok 14 strict JSON shape types range and unknown/prototype fields
+ok 15 CLI-authored optional date field is accepted typed and never rendered
+ok 16 serialized response overflow emits fixed failure without partial snippets
+ok 17 input types options extra keys and Unicode boundaries fail before spawn
+ok 18 account canonical syntax explicit invalid never falls back
+ok 19 exact root and search argv, ignored stdin, shell false and query one positional
+ok 20 configuration capture and explicit override with all numeric boundary forms
+ok 21 300 Unicode scalar query accepted as a single 1200-byte argument
+ok 22 fake generated dispatch success/withheld/unavailable and one JSON item
+ok 23 nonexistent account and nonzero exit are errors, never empty, stderr suppressed
+ok 24 missing and nonexecutable PATH entries stay unavailable without fallback
+ok 25 root failure and invalid root/UTF8 prevent search
+ok 26 native process empty/withheld/partial and parse failures distinct
+ok 27 real fake process exact and one-over stdout/stderr byte limits
+ok 28 invalid root variants reject with one spawn and CRLF roots accept
+ok 29 diagnostic stages cover validation parse minimize and done
+ok 30 split multibyte process output decodes only after complete capture
+ok 31 overlapping same/different account invocations never mix root or buffers
+ok 32 split exact/oversized chunks retain no partial data and clean listeners
+ok 33 timeout kills only direct child and cleanup uncertainty is bounded
+ok 34 cleanup uncertainty surfaces in the envelope only when unconfirmed
+ok 35 spawn/close/error races settle exactly once and discard diagnostics
+ok 36 shared monotonic budget stops before search after exhausted root time
+ok 37 remaining shared deadline constrains search below its stage maximum
+ok 38 actual stalled root and search obey fixed stage deadlines
+ok 39 manifest/index/schema one explicit tool with no hooks and version 0.0.1
+ok 40 keyless generated rebuild byte equality and check mode
+ok 41 no plugin writes in isolated HOME/config/cwd and no real clients reachable
+{"kind":"api-package-test-report","cases":41,"failures":0,"skipped":0,"realAsideCalls":0,"realNetworkCalls":0,"syntheticProcess":true}
+ALL PASS (41 cases)
+
+$ bun run test:scripts && bun run test:shared && bun run test:advisor && bun run test:verification && bun run test:ui && bun run test:wiki && bun run test:rea && bun run test:backplan && bun run test:self-improve && bun run test:rrsi && bun run test:aside-memory
+$ node --test scripts/tests/checks.test.mjs
+$ bun test shared/tests/results.test.ts
+
+ 43 pass
+ 0 fail
+ 523 expect() calls
+Ran 43 tests across 1 file. [1.58s]
+$ bun jev-advisor/scripts/verify.ts
+$ bun verification-receipts/scripts/verify.ts
+
+tests/adapters.test.ts:
+(pass) run/status automatically assess pass failure no-tests stale and rejected execution [1380.19ms]
+(pass) generated standalone run/status persist private envelopes and reobserve ignored inputs [622.69ms]
+(pass) post-execution repository loss preserves observations and journals the outcome [210.89ms]
+
+tests/receipts.test.ts:
+(pass) actual repo identity and private immutable envelope storage [143.11ms]
+(pass) working bytes, deletion, untracked, mode, spec and index stale evidence [309.48ms]
+(pass) HEAD change invalidates freshness [173.80ms]
+(pass) credential and result exclusions explicit; ordinary symlink text never followed [141.62ms]
+(pass) during-run unavailable and guidance are independent from execution [141.59ms]
+(pass) locked store never stolen; corrupt metadata not accepted [92.49ms]
+(pass) symlink and permissive store rejected without writes [75.43ms]
+(pass) cross repository and imported extra fields rejected [125.00ms]
+(pass) concurrent admissions do not join or overwrite [104.50ms]
+(pass) count capacity warns at 180, admits 200 and preserves history at 201 [1329.33ms]
+(pass) extra raw execution fields, missing counts and low-score guidance rejected honestly [78.23ms]
+(pass) fingerprints reject nested raw canaries, missing keys, mismatched status and resource bounds on admission and load [455.43ms]
+(pass) Node exact fields and passed invariants reject corrupt metadata but preserve nonpass placeholder counts [320.16ms]
+(pass) UI exact fields and actual passed observations reject impossible passes while preserving partial failures [364.98ms]
+(pass) status hides corrupt nested evidence and returns unavailable without raw fields [196.24ms]
+(pass) explicit ignored test actually passes, becomes stale on ignored-only mutation and then fails [408.39ms]
+(pass) selected inputs normalize once and ignored-only changes during a run remain changed_during_run [246.80ms]
+(pass) unsafe, sensitive, excluded, duplicate and oversized selections never silently fall back [192.17ms]
+(pass) missing, tampered, misbound, noncanonical and bare legacy manifests are unavailable [414.26ms]
+(pass) entire envelope counts toward the 32KiB record bound [76.10ms]
+(pass) byte capacity includes manifests, warns at ninety percent and never deletes history [449.32ms]
+(pass) source byte and enumeration bounds include explicitly selected ignored files [157.83ms]
+(pass) hardlinks, permissive receipt files and symlink ancestors fail closed without external writes [102.48ms]
+(pass) default root never loads or migrates legacy receipts and refuses unsafe new-root ancestors [120.54ms]
+(pass) metadata getters, custom serializers and hidden raw fields are not invoked or stored [69.89ms]
+(pass) source replacement between lstat and descriptor inspection is unavailable [67.56ms]
+(pass) staged write or fsync failures do not publish partial receipts or delete prior history [103.82ms]
+
+tests/gate-hook.test.ts:
+(pass) hooks gate only observed completions, dedup repeats and never leak the original content [406.48ms]
+(pass) terminal gates dedup across job and subagent polling and skip failed entries [229.54ms]
+(pass) compact no-change gates resolve immediately and state drops stay factual and fail-open [187.00ms]
+(pass) loop tool blocks outside a repository, rejects parameters and keeps a bounded honest contract [19.30ms]
+(pass) before hook stays within its wall-clock budget under a hanging git [3067.30ms]
+(pass) loop tool drives a real gate to clean through verification_run and stamps the receipt [629.15ms]
+
+tests/loop.test.ts:
+(pass) gate text full and compact stay bounded, deterministic and free of absolute paths [80.48ms]
+(pass) git delta facts cover dirty, commit, mixed, missing-baseline and non-repository fixtures [285.85ms]
+(pass) state files are private, writer-owned, cap-bounded and fail open on corruption [375.92ms]
+(pass) dedup keys canonicalize across job and subagent terminals and pending launches are consumed once [99.22ms]
+(pass) evaluation classifies every receipt gap kind and resolves covering receipts [1926.71ms]
+(pass) changed test files must be covered and binding evidence blocks no-change resolution [651.93ms]
+(pass) carry-forward reads other sessions read-only and honestly flags truncated scans [392.92ms]
+(pass) latest receipt summary classifies none, present, fresh_passed and unavailable without leaking paths [175.06ms]
+(pass) evaluation enforces its wall-clock budget and never reports a false clean [135.48ms]
+(pass) session scans include the own file under truncation and order by mtime [216.51ms]
+(pass) deleted test files are excluded from coverage demands [325.41ms]
+(pass) ui-regression receipts never resolve verification gates and never surface as the latest receipt [139.42ms]
+(pass) interleaved concurrent state writes never corrupt the file or lose acknowledged entries [102.47ms]
+(pass) git delta facts ignore session noise paths and mark resolution attempts honestly [242.24ms]
+(pass) coverage resolution requires available git facts [3308.18ms]
+
+tests/runner.test.ts:
+(pass) native Node verification runner > uses cumulative counts once across files and nested tests [81.09ms]
+(pass) native Node verification runner > skip and TODO are not successful execution [74.91ms]
+(pass) native Node verification runner > empty files cannot pass through native file placeholders [143.37ms]
+(pass) native Node verification runner > mixed passing, skipped and TODO tests retain only actual passes [76.13ms]
+(pass) native Node verification runner > failures and native cancellations never pass or leak diagnostics [246.01ms]
+(pass) native Node verification runner > spoofed stdout and diagnostics do not establish a pass [79.97ms]
+(pass) native Node verification runner > strips credentials and runtime injection environment [80.06ms]
+(pass) native Node verification runner > enforces timeout and waits for owned termination [1020.21ms]
+(pass) native Node verification runner > cancels a running child and rejects pre-aborted execution [1006.55ms]
+(pass) native Node verification runner > caps output and native count overflow [871.68ms]
+(pass) native Node verification runner > a crash is not a passing result [65.35ms]
+(pass) native Node verification runner > rejects escapes, flags, unsupported files, symlinks, missing and duplicate files [1.67ms]
+
+tests/smoke-environment.test.ts:
+(pass) test model persistence stays inside private agent root despite inherited overrides [13.98ms]
+(pass) live HOME and either live agent override are refused before spawning [2.23ms]
+(pass) a symlinked private agent cannot redirect the child to user configuration [0.99ms]
+(pass) extra overrides, external providers and real credentials fail closed [1.99ms]
+
+tests/decision.test.ts:
+(pass) adequacy Decisions contract > nonpassing stale and unavailable evidence still calls Jev without becoming sufficient [0.87ms]
+(pass) adequacy Decisions contract > omitted context automatically calls Jev with explicit missing provenance [0.14ms]
+(pass) adequacy Decisions contract > UI assertion IDs kinds and outcomes are host facts while semantic notes remain caller authored [0.19ms]
+(pass) adequacy Decisions contract > official choice shape, fixed endpoint, and allowlisted caller context [0.08ms]
+(pass) adequacy Decisions contract > independent low confidence and selected probabilities are preserved [0.09ms]
+(pass) adequacy Decisions contract > absent and partial scores remain valid unscored choices [0.11ms]
+(pass) adequacy Decisions contract > none and unknown remain uncertain [0.05ms]
+(pass) adequacy Decisions contract > malformed IDs, type, label, scores, and JSON never return provider data [0.24ms]
+(pass) adequacy Decisions contract > HTTP failures and redirects have bounded receipts and no retries [0.42ms]
+(pass) adequacy Decisions contract > streaming and declared response caps [0.33ms]
+(pass) adequacy Decisions contract > timeout bounds even an injected fetch that ignores abort [0.28ms]
+(pass) adequacy Decisions contract > encoded request cap rejects without transport [0.38ms]
+(pass) adequacy Decisions contract > off, missing key, invalid facts and rejected context make zero calls [0.22ms]
+(pass) adequacy Decisions contract > secret, raw source, path, log and diff canaries are rejected rather than truncated [0.13ms]
+(pass) adequacy Decisions contract > per-variable environment precedence and Jev key priority without configuration changes [0.44ms]
+
+ 82 pass
+ 0 fail
+ 1128 expect() calls
+Ran 82 tests across 7 files. [25.46s]
+$ bun ui-regression/scripts/verify.ts
+
+tests/aside.test.ts:
+(pass) Generated Aside interpreter guards > rejects missing click targets before any mutation [3.88ms]
+(pass) Generated Aside interpreter guards > rejects ambiguous click targets before any mutation [0.17ms]
+(pass) Generated Aside interpreter guards > rejects hidden click targets before any mutation [0.16ms]
+(pass) Generated Aside interpreter guards > rejects missing fill targets before any mutation [0.47ms]
+(pass) Generated Aside interpreter guards > rejects ambiguous fill targets before any mutation [0.09ms]
+(pass) Generated Aside interpreter guards > rejects hidden fill targets before any mutation [0.10ms]
+(pass) Generated Aside interpreter guards > stops immediately when a permitted click navigates outside the initial origin [0.19ms]
+(pass) Generated Aside interpreter guards > rejects name controls before click [0.14ms]
+(pass) Generated Aside interpreter guards > rejects name controls before fill [0.13ms]
+(pass) Generated Aside interpreter guards > rejects id controls before click [0.08ms]
+(pass) Generated Aside interpreter guards > rejects id controls before fill [0.11ms]
+(pass) Generated Aside interpreter guards > rejects autocomplete controls before click [0.07ms]
+(pass) Generated Aside interpreter guards > rejects autocomplete controls before fill [0.08ms]
+(pass) Generated Aside interpreter guards > rejects text controls before click [0.09ms]
+(pass) Generated Aside interpreter guards > rejects text controls before fill [0.14ms]
+(pass) Generated Aside interpreter guards > rejects password type controls before click [0.09ms]
+(pass) Generated Aside interpreter guards > rejects password type controls before fill [0.09ms]
+(pass) Generated Aside interpreter guards > rejects file type controls before click [0.08ms]
+(pass) Generated Aside interpreter guards > rejects file type controls before fill [0.08ms]
+(pass) Generated Aside interpreter guards > rejects submit type controls before click [0.09ms]
+(pass) Generated Aside interpreter guards > rejects submit type controls before fill [0.08ms]
+(pass) Generated Aside interpreter guards > rejects external target controls before click [0.07ms]
+(pass) Generated Aside interpreter guards > rejects external target controls before fill [0.08ms]
+(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful click [0.41ms]
+(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful fill [0.42ms]
+(pass) Generated Aside interpreter guards > executes exact text semantics for " Ready\r\n" [0.46ms]
+(pass) Generated Aside interpreter guards > executes exact text semantics for "Ready now" [0.22ms]
+(pass) Generated Aside interpreter guards > executes substring text semantics for " Ready now\r\n" [0.32ms]
+(pass) Generated Aside interpreter guards > executes substring text semantics for "Not yet" [0.18ms]
+(pass) Generated Aside interpreter guards > keeps quote and backslash-bearing DSL strings as data in the generated interpreter [0.37ms]
+(pass) Aside observation boundary > requires ordered terminal and cleanup observations plus successful exit [0.16ms]
+(pass) Aside observation boundary > rejects malformed, spoofed, oversized and mismatched frames [0.27ms]
+(pass) Aside observation boundary > never passes origin_drift [0.02ms]
+(pass) Aside observation boundary > never passes missing_target
+(pass) Aside observation boundary > never passes ambiguous_target
+(pass) Aside observation boundary > never passes hidden_target
+(pass) Aside observation boundary > never passes unsupported_control
+(pass) Aside observation boundary > never passes assertion_failed
+(pass) Aside observation boundary > generates a local fixed interpreter with owned-tab lifecycle and no attachment [0.28ms]
+(pass) Aside invocation lifecycle > rejects total timeout beyond 90 seconds without invocation [0.42ms]
+(pass) Aside invocation lifecycle > invokes exactly once and excludes private values from receipts [4.01ms]
+(pass) Aside invocation lifecycle > does not steal existing locks or invoke on pre-cancellation [2.10ms]
+(pass) Aside invocation lifecycle > preserves a replaced foreign lock and actual browser observations [2.67ms]
+(pass) Aside invocation lifecycle > does not remove a lock that acquires another hardlink during execution [1.89ms]
+(pass) Aside invocation lifecycle > classifies timeout and mid-run cancellation without raw errors [9.62ms]
+(pass) Aside invocation lifecycle > bounds combined fake capture and rejects missing CLI [5.12ms]
+(pass) Aside invocation lifecycle > bounds mocks that ignore cancellation [108.67ms]
+(pass) Aside invocation lifecycle > rejects symlink ancestors before invoking [1.02ms]
+
+tests/adapters.test.ts:
+(pass) closed run adapter rejects passed imports missing account and no assertion [49.63ms]
+(pass) empty substring input is rejected without invoking the browser and is journaled [9.61ms]
+(pass) UI status metadata fixture remains historical and source scoped [261.71ms]
+(pass) standalone generated UI tools load with only declared installed files [4.92ms]
+
+tests/scenario.test.ts:
+(pass) UI scenario closed DSL > accepts local synthetic steps and literal punctuation without interpretation [0.07ms]
+(pass) UI scenario closed DSL > accepts explicit local URL http://127.0.0.1:4317/demo [0.01ms]
+(pass) UI scenario closed DSL > accepts explicit local URL https://[::1]:4317/demo [0.01ms]
+(pass) UI scenario closed DSL > rejects unsafe URL javascript:alert(1) [0.02ms]
+(pass) UI scenario closed DSL > rejects unsafe URL data:text/html,hello
+(pass) UI scenario closed DSL > rejects unsafe URL file:///tmp/demo
+(pass) UI scenario closed DSL > rejects unsafe URL https://example.com/demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://127.1/demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://2130706433/demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost.evil/demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://user:demo@localhost/demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/demo?label=demo
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/demo#part
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/account
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/payment
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/%6cogin
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/credentials
+(pass) UI scenario closed DSL > rejects unsafe URL http://localhost/upload
+(pass) UI scenario closed DSL > rejects origin drift http://127.0.0.1:4317/demo [0.07ms]
+(pass) UI scenario closed DSL > rejects origin drift http://localhost:4318/demo [0.02ms]
+(pass) UI scenario closed DSL > rejects origin drift https://localhost:4317/demo
+(pass) UI scenario closed DSL > requires first navigation and an assertion [0.05ms]
+(pass) UI scenario closed DSL > rejects observations, code, predicates, prose and all extra fields [0.11ms]
+(pass) UI scenario closed DSL > rejects getters without executing them [0.03ms]
+(pass) UI scenario closed DSL > enforces bounds at both sides [0.84ms]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector javascript:alert(1) [0.02ms]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector ${run()}
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector expression(alert(1))
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector [data-ref="e1"]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector @e1
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector e12
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector input[type="password"]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector button[type="submit"]
+(pass) UI scenario closed DSL > rejects detected sensitive fill demo@example.com [0.01ms]
+(pass) UI scenario closed DSL > rejects detected sensitive fill password: demo
+(pass) UI scenario closed DSL > rejects detected sensitive fill account=real-user
+(pass) UI scenario closed DSL > rejects detected sensitive fill Bearer demo
+(pass) UI scenario closed DSL > rejects detected sensitive fill sk_live_abc123
+(pass) UI scenario closed DSL > rejects detected sensitive fill ghp_12345678901234567890
+(pass) UI scenario closed DSL > rejects detected sensitive fill 4111 1111 1111 1111
+(pass) UI scenario closed DSL > rejects detected sensitive fill demo label
+(pass) UI scenario closed DSL > rejects invalid assertion variants [0.02ms]
+(pass) UI scenario closed DSL > rejects normalized-empty substring expectations "" [0.05ms]
+(pass) UI scenario closed DSL > rejects normalized-empty substring expectations " "
+(pass) UI scenario closed DSL > rejects normalized-empty substring expectations "\r\n\t"
+(pass) UI scenario closed DSL > preserves meaningful exact-empty and empty-fill cases [0.02ms]
+(pass) literal UI text and fingerprint > normalizes only line endings and surrounding whitespace [0.02ms]
+(pass) literal UI text and fingerprint > SHA256 hashes the validated JSON and changes with behavior [0.04ms]
+
+ 100 pass
+ 0 fail
+ 606 expect() calls
+Ran 100 tests across 3 files. [486.00ms]
+$ bun wiki/scripts/verify.ts
+$ bun rea/scripts/verify.ts
+$ bun backplan/scripts/verify.ts
+$ node self-improve/scripts/verify-unit.mjs && node self-improve/scripts/verify-integration.mjs
+$ bun rrsi/scripts/verify.ts
+$ bun aside-memory/scripts/verify.ts

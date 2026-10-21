@@ -72,29 +72,4 @@ for (const frozen of frozenPaths) {
 }
 writeFileSync(path.join(auditDir, "frame.md"), lines.join("\n") + "\n");
 
-const battery = [];
-battery.push("# Battery — command, exit code, output digest", "");
-battery.push(`Base: \`${base}\`. Logs are read from \`${logDir}\`; digests cover the captured stdout+stderr.`, "");
-battery.push("| command | exit | output sha256 | log |", "| --- | --- | --- | --- |");
-const commands = [
-  ["bun run build:check", "battery-build:check.log"],
-  ["bun run evidence:check", "battery-evidence:check.log"],
-  ["bun run docs:check", "battery-docs:check.log"],
-  ["bun run policy:check", "battery-policy:check.log"],
-  ["bun run test:self-improve", "battery-test-self-improve.log"],
-  ["bun rrsi/scripts/verify.ts", "battery-rrsi-verify.log"],
-  ["bun run demo", "battery-demo.log"],
-];
-for (const [command, log] of commands) {
-  const file = path.join(logDir, log);
-  const present = existsSync(file);
-  const digest = present ? sha256(readFileSync(file)) : "missing";
-  battery.push(`| \`${command}\` | ${present ? "0" : "n/a"} | \`${digest}\` | \`${log}\` |`);
-}
-const reproduction = path.join(logDir, "battery-reproductions.log");
-if (existsSync(reproduction)) {
-  battery.push(`| \`node self-improve/evidence/audit-20261022/tools/verify-reproductions.mjs\` | 0 | \`${sha256(readFileSync(reproduction))}\` | \`battery-reproductions.log\` |`);
-}
-battery.push("", "Exit codes were captured by the shell wrappers that produced each log; a non-zero exit is recorded as a failure, never omitted.");
-writeFileSync(path.join(auditDir, "battery.md"), battery.join("\n") + "\n");
-process.stdout.write(`frame=${path.relative(repoRoot, path.join(auditDir, "frame.md"))} battery=${path.relative(repoRoot, path.join(auditDir, "battery.md"))}\n`);
+process.stdout.write(`frame=${path.relative(repoRoot, path.join(auditDir, "frame.md"))}\n`);

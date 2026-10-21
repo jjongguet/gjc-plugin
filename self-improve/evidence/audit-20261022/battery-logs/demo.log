@@ -1,0 +1,20 @@
+$ bun run demo
+$ backplan_check  (validate a work plan and render Linear-ready payloads)
+  status=ok digest=184706eb9ed9… issues=1 project=reuse:docs
+  incomplete plan → status=invalid; first errors: plan.end_state: required; plan.success_criteria: required; plan.project: required
+
+$ rrsi  (capture an exploration episode, then replay policies over the store)
+  status: storage=missing episodes=0
+  capture: attempts=2 episodes=1
+  dream: candidate policies=40 corpus attempts=2 thresholds evaluated=false (corpus_below_pass_gate)
+  verdict: insufficient evidence at pass-gate size — thresholds not evaluated
+
+$ rea_readiness  (offline readiness of the pinned REA CLI)
+  rea_readiness: ready
+  pinned rea-agents: 6.4.0; fetch channel: npx
+  cli: npx -y rea-agents@6.4.0 <command>
+  extra input → rea_readiness: invalid_input — this tool accepts exactly {} (no paths or options).
+
+demo: ok (temporary HOME removed; real backplan/rrsi/rea stores unchanged)
+
+$ bun scripts/demo.mjs

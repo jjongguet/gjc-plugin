@@ -2,7 +2,7 @@
 
 Each row records the audited observation, the fix, and the post-fix evidence.
 The command column is what was actually run in this audit; the full battery is
-in [`battery-final.md`](battery-final.md) (all commands exit 0).
+in [`battery.md`](battery.md) (exit codes recorded by `tools/run-battery.mjs`).
 
 ## Fix commits
 
@@ -29,7 +29,7 @@ in [`battery-final.md`](battery-final.md) (all commands exit 0).
 | F-15 (frozen) | two cycle counts unlabelled | annex labels `counters.cycles` vs `finalLoopState.cycles` | `p3/summary.json` recomputation |
 | F-17 (frozen) | sub-gate split overlap undisclosed | annex records train 1–13 / validation 8–13 at n=13 | `dream.mjs` slice recomputation |
 | F-18 | "advisory" pair was train/full | additive labels, advisory validation pair appended, no number replacement | `bun run docs:check` + C7 fixture-string check |
-| F-12 (code) | `journal-dream` imported the generated bundle; `lib/rrsi.ts` lacked its source imports | three source imports added; script imports `../lib/rrsi.ts` | `bun rrsi/scripts/build.mjs --check` byte-identical; `journal-dream` deterministic over the real journal (two identical sha256); verify 32/32 |
+| F-12 (code) | `journal-dream` imported the generated bundle; `lib/rrsi.ts` lacked its source imports | three source imports added; script imports `../lib/rrsi.ts` | `bun rrsi/scripts/build.mjs --check` byte-identical; `journal-dream` deterministic over a frozen journal snapshot (two identical sha256); live reruns differ only because the journal grows; verify 32/32 |
 | F-11 (checker) | `evidence:check` scanned only `self-improve/` | separate repo-wide `paths:check` + CI step + pass/fail fixtures | `bun run paths:check` exit 0; `node --test scripts/tests/checks.test.mjs` 10/10 |
 | T-B9 | no claim-graph enforcement | `scripts/check-audit-claims.mjs` with pinned-scope quotes, PASS binding fields, candidate negative control | `node scripts/check-audit-claims.mjs --base e74140c` → `GAPS_OPEN (14)`; negative control exits 1 |
 | T-B10 | `import` had no projection coverage | `projectionCoverage` promoted to the shared core and returned by `import` | `bun rrsi/scripts/verify.ts` case "import reports bounded projection coverage when the limit omits records" |

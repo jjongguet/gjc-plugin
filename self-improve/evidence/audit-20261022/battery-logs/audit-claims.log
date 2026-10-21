@@ -1,0 +1,2 @@
+$ node scripts/check-audit-claims.mjs --base e74140c --reenumerate
+claims=809 candidates=809 PASS=732 (bound=324 self=408) GAP=14 UNVERIFIABLE=63 aggregate=GAPS_OPEN (14)

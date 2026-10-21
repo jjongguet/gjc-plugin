@@ -1,0 +1,16 @@
+$ bun run build:check
+generated surfaces are in sync: hooks/jev-advisor.ts, tools/jev-advise.ts, tools/jev-check.ts, hooks/jev-advisor-result.ts, tools/plugin-metrics.ts
+checked tools/verification-run.ts
+checked tools/verification-status.ts
+checked tools/verification-loop.ts
+checked hooks/verification-gate-baseline.ts
+checked hooks/verification-gate.ts
+checked tools/ui-regression-run.ts
+checked tools/ui-regression-status.ts
+generated surfaces are in sync: tools/wiki-query.ts, tools/wiki-propose.ts
+generated surfaces are in sync: tools/rea-readiness.ts
+generated surfaces are in sync: tools/backplan-check.ts
+generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts
+aside-memory generated surface in sync
+
+$ bun jev-advisor/scripts/build.mjs --check && bun verification-receipts/scripts/build.mjs --check && bun ui-regression/scripts/build.mjs --check && bun wiki/scripts/build.mjs --check && bun rea/scripts/build.mjs --check && bun backplan/scripts/build.mjs --check && bun rrsi/scripts/build.mjs --check && bun aside-memory/scripts/build.mjs --check

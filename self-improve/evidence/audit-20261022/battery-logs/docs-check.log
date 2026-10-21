@@ -1,0 +1,4 @@
+$ bun run docs:check
+docs:check ok: 61 relative links in 36 tracked Markdown files
+
+$ node scripts/check-doc-links.mjs

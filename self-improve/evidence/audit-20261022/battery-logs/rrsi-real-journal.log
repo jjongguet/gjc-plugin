@@ -1,0 +1,13 @@
+$ bun test rrsi/tests/real-journal.test.ts
+bun test v1.4.0 (34cbb9a40)
+measured real jev-advisor journal: segments=2 records=3273
+round trip: imported=40 attempts=41 policies=40 verdict=unmet
+periodic real-journal slice: records=40 storeWrite=added rerun=unchanged digest=a2a27a2b1157
+
+
+rrsi/tests/real-journal.test.ts:
+
+ 2 pass
+ 0 fail
+ 22 expect() calls
+Ran 2 tests across 1 file. [198.00ms]

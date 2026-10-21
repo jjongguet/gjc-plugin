@@ -16,7 +16,7 @@ repository-relative; the observed install identity is recorded separately.
   generated files declare this banner themselves.
 - Source: `rrsi/lib/{rrsi,periodic}.ts`, `rrsi/src/{rrsi,periodic}.adapter.ts`,
   `rrsi/scripts/{build.mjs,verify.ts,journal-dream.mjs}`.
-- Tests: `rrsi/scripts/verify.ts` (31 acceptance cases), `rrsi/tests/real-journal.test.ts`,
+| Tests: `rrsi/scripts/verify.ts` (32 acceptance cases at HEAD; 31 at the audit base), `rrsi/tests/real-journal.test.ts`,
   `rrsi/tests/periodic.test.mjs` (+ child harness).
 
 ## Self-improve engine

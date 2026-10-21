@@ -1,0 +1,4 @@
+$ bun run policy:check
+policy:check ok: 2 workflows; external-PR closer is no-checkout, hosted and pull-requests: write only
+
+$ node scripts/check-pr-policy.mjs

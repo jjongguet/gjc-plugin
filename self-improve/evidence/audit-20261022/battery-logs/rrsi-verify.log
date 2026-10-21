@@ -1,0 +1,35 @@
+$ bun rrsi/scripts/verify.ts
+ok 1 manifest declares one tool, one session_start hook (no target/phase), and the four actions
+ok 2 status on an empty store reports missing storage without creating one
+ok 3 capture stores one bounded episode with 0700/0600 privacy and journals the outcome
+ok 4 capture clamps attempts, coerces unknown decisions and truncates labels
+ok 5 import projects the jev-advisor journal into >=10 attempts with the documented fields
+ok 6 import reports bounded projection coverage when the limit omits records
+ok 7 journal-dream emits a deterministic receipt over the synthetic journal
+ok 8 journal-dream fails closed with no_journal and never writes the store
+ok 9 import projects a self-improve ledger read-only when a path is given
+ok 10 dream reports the frozen below-gate verdict for a small store
+ok 11 a store at pass-gate size evaluates the thresholds instead
+ok 12 the round trip runs capture -> import -> dream over >=10 imported attempts
+ok 13 store faults are reported and never repaired
+ok 14 unknown actions and malformed inputs are handled without throwing
+ok 15 periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing
+ok 16 periodic: 160 projection and limited_projection label
+ok 17 periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class
+ok 18 periodic: disabled consumes nothing, interval override fires per override, backoff is honored
+ok 19 periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)
+ok 20 periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes
+ok 21 periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)
+ok 22 periodic: receipt retention prunes to the newest 60
+ok 23 periodic summary is exposed by the tool status and status stays read-only
+ok 24 periodic: unsafe symlinked roots are never written through
+ok 25 periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record
+ok 26 periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)
+ok 27 periodic: a dream failure is a bounded error (no masked success)
+ok 28 periodic: the worker CLI entry runs, records, and stays inert without the flag
+ok 29 the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start
+ok 30 generated surfaces are in sync with sources (non-mutating --check drift gate)
+ok 31 the shared results registry accepts rrsi outcomes and rejects malformed ones
+   measured real journal: segments=2 records=3273
+ok 32 the real jev-advisor journal is counted read-only (measured; never copied into the plugin store)
+{"kind":"rrsi-plugin-acceptance","plugin":"rrsi","version":"0.0.2","cases":32,"failures":0,"realJournalRecords":3273,"scope":"functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop"}

@@ -4,9 +4,11 @@
   candidates dispositioned (`dispositions.jsonl`), checked by
   `node scripts/check-audit-claims.mjs --base e74140c`.
 - Counts: **PASS 732 · GAP 14 · UNVERIFIABLE 63**.
-- Aggregate: **`GAPS_OPEN (14)` at audit time**. Every GAP has a recorded fix
-  and a post-fix command in [`closures.md`](closures.md); the post-fix battery is
-  [`battery-final.md`](battery-final.md) (all commands exit 0).
+- Aggregate: **`GAPS_OPEN (14)` at audit time** — 9 fixed at HEAD, 5 frozen and
+  recorded in [`annex.md`](annex.md). Every fix has a post-fix command in
+  [`closures.md`](closures.md); the post-fix battery is
+  [`battery.md`](battery.md) (exit codes and digests from
+  [`battery-results.json`](battery-results.json)).
 
 ## GAP rows (confirmed defects)
 

@@ -3,11 +3,12 @@
 Answers one question: **was the recent RRSI + Harness² work introduced
 correctly?** — not whether the technique works.
 
-- Base: `e74140c` (== `origin/main`), branch `feat/mbp-rrsi-harness2-audit-01a15f70`.
-- Verdict: **`GAPS_OPEN (14)`** at audit time; 732 PASS / 14 GAP / 63
-  UNVERIFIABLE over 809 claim rows. See [`verdicts.md`](verdicts.md).
-- Approved plan: `.gjc/_session-01a15f70-…/plans/ralplan/…/pending-approval.md`
-  (ralplan consensus: Architect `CLEAR`, Critic `OKAY`).
+- Base: `e74140c` (== `origin/main` at audit time), branch `feat/mbp-rrsi-harness2-audit-01a15f70`.
+- Verdict: **`GAPS_OPEN (14)`** at audit time; 732 PASS (324 bound / 408
+  self) / 14 GAP / 63 UNVERIFIABLE over 809 claim rows. See [`verdicts.md`](verdicts.md).
+- Approved plan: ralplan run `01a15f70-095c-724d-b819-168c0e264701`
+  (`pending-approval.md` is session-local and not committed; the plan text is
+  preserved in the session transcript and the run state).
 
 ## Method (six layers)
 
@@ -15,34 +16,38 @@ correctly?** — not whether the technique works.
 | --- | --- | --- |
 | L0 inventory | what exists, at which identity? | [`inventory.md`](inventory.md) |
 | L1 claim graph | which sentences assert something falsifiable? | [`candidates.jsonl`](candidates.jsonl), [`dispositions.jsonl`](dispositions.jsonl), [`claims.csv`](claims.csv) |
-| L2 receipts | does the cited receipt change if the claim is false? | [`battery.md`](battery.md), [`battery-final.md`](battery-final.md), [`reproductions/`](reproductions/) | |
-| L3 boundaries | does every number travel with its limit? | [`verdicts.md`](verdicts.md) |
-| L4 drift | do code, docs, generated surfaces and runtime agree? | [`annex.md`](annex.md), [`verdicts.md`](verdicts.md) |
+| L2 receipts | does the cited receipt change if the claim is false? | [`battery.md`](battery.md), [`reproductions/`](reproductions/) |
+| L3 boundaries | does every number travel with its limit? | [`verdicts.md`](verdicts.md), [`sweeps.md`](sweeps.md) |
+| L4 drift | do code, docs, generated surfaces and runtime agree? | [`annex.md`](annex.md), [`sweeps.md`](sweeps.md), [`verdicts.md`](verdicts.md) |
 | L5 verdicts | PASS / GAP / UNVERIFIABLE + remediation | [`verdicts.md`](verdicts.md), [`closures.md`](closures.md) |
 
 Claim classes: `IMP` implementation, `MEAS` number, `BND` boundary/caveat,
 `RDM` roadmap, `REF` path/sha/link. A PASS needs a `binding_command`,
-`observed` value and `evidence_sha256`; the binding test is "if the claim were
-false, which byte of which receipt would differ?".
+`observed` value, `evidence_sha256` and a `binding_strength` (`bound` = an
+independent command or receipt; `self` = the quoted text is present at the
+pinned scope). The headline splits them so 732 cannot be read as 732
+independently verified claims.
 
 ## Reproduce
 
 ```sh
-# frame + battery digests
-node self-improve/evidence/audit-20261022/tools/frame.mjs /tmp
+# frame + battery (battery.md is rendered from real exit codes)
+node self-improve/evidence/audit-20261022/tools/frame.mjs
+node self-improve/evidence/audit-20261022/tools/run-battery.mjs
+node self-improve/evidence/audit-20261022/tools/render-battery.mjs
 
-# frozen-corpus reproductions (P2b 22-attempt and P2 13-attempt)
-git show e6675cb:self-improve/ledger.jsonl > /tmp/rrsi-audit/ledger-p2b.jsonl
-git show 7f2f97f:self-improve/ledger.jsonl > /tmp/rrsi-audit/ledger-p2.jsonl
-node self-improve/scripts/run.mjs dream  --seed 1 --ledger /tmp/rrsi-audit/ledger-p2b.jsonl --json > /tmp/rrsi-audit/dream-p2b.json
-node self-improve/scripts/run.mjs replay --ledger /tmp/rrsi-audit/ledger-p2b.jsonl --json > /tmp/rrsi-audit/replay-p2b.json
-node self-improve/scripts/run.mjs dream  --seed 1 --ledger /tmp/rrsi-audit/ledger-p2.jsonl --json > /tmp/rrsi-audit/dream-p2.json
-node self-improve/evidence/audit-20261022/tools/verify-reproductions.mjs /tmp/rrsi-audit
+# frozen-corpus reproductions (P2b 22-attempt and P2 13-attempt), self-contained
+node self-improve/evidence/audit-20261022/tools/verify-reproductions.mjs
 
-# claim graph
+# claim graph (regenerated from base e74140c, not from HEAD)
 node self-improve/evidence/audit-20261022/tools/audit-candidates.mjs
 node self-improve/evidence/audit-20261022/tools/triage.mjs
 node scripts/check-audit-claims.mjs --base e74140c
+
+# independent extraction from the pre-fix tree (e74140c export)
+rm -rf /tmp/audit-carriers && mkdir -p /tmp/audit-carriers
+git archive e74140c | tar -x -C /tmp/audit-carriers
+node scripts/check-audit-claims.mjs --base e74140c --reenumerate --carriers-dir /tmp/audit-carriers
 ```
 
 Accepted values: P2b corpus `9fc5668d…` + receiptHash `d6635a0…`; P2 corpus
@@ -52,15 +57,27 @@ Accepted values: P2b corpus `9fc5668d…` + receiptHash `d6635a0…`; P2 corpus
 
 [`reproductions/verify.txt`](reproductions/verify.txt) is the verifier output;
 [`reproductions/digests.json`](reproductions/digests.json) pins the bytes and
-sha256 of each regenerated artifact. The full dream receipts stay out of the
-repository because they are regenerated deterministically and duplicate the
-frozen evidence.
+sha256 of each regenerated artifact. The regenerated dream/replay JSON stays out
+of the repository because it is deterministic and duplicates the frozen
+evidence; the recovered 13-attempt receipt is the exception and is committed at
+[`../p2/dream-receipt-20261012.json`](../p2/dream-receipt-20261012.json).
 
 ## Honest limits
 
-- Claim triage is mechanical generation plus human disposition; a sentence the
-  generator missed cannot be counted, which is why candidate re-enumeration and
-  the two negative controls are part of the checker.
+- Claim triage is mechanical generation plus human disposition; the generator
+  only emits sentences with a number, a modal claim verb, a path/sha/link, or a
+  boundary phrase, so 809 is a **filtered subset**, not a sentence count. A
+  sentence outside those hints cannot be counted; candidate re-enumeration and
+  the negative control bound the risk but do not remove it.
+- `bound` PASS rows point at a command or receipt that could fail; `self` rows
+  assert only that the quoted text is present at the pinned scope. The split is
+  printed with the headline and is the honest denominator. `observed` is
+  human-recorded prose: the checker verifies the evidence digest, not that the
+  prose is true.
+- The scope-unavailable fallback (`--allow-worktree-fallback`) exists for
+  exported trees without `.git`; it validates the worktree copy and prints a
+  note. The full positive run requires the audit-scope commit and is the only
+  mode that can re-enumerate candidates.
 - 63 rows stay UNVERIFIABLE (historical release notes, private-store snapshots,
   overview figures). They are listed with the missing receipt, never rounded to
   PASS.

@@ -37,6 +37,7 @@ const COLUMNS = [
   "caveat_adjacency",
   "required_receipt",
   "evidence_kind",
+  "binding_strength",
   "binding_command",
   "observed",
   "evidence_sha256",
@@ -317,6 +318,7 @@ for (const [key, group] of byKey) {
       caveat_adjacency: "n/a",
       required_receipt: finding.required_receipt,
       evidence_kind: "d",
+      binding_strength: "",
       binding_command: "",
       observed: finding.observed,
       evidence_sha256: "",
@@ -337,6 +339,7 @@ for (const [key, group] of byKey) {
       caveat_adjacency: "self",
       required_receipt: positive.required_receipt,
       evidence_kind: "a",
+      binding_strength: "self",
       binding_command: "",
       observed: positive.observed,
       evidence_sha256: carrierDigest(carrier),
@@ -357,16 +360,19 @@ for (const [key, group] of byKey) {
     let observed = `row valid; quote present at ${carrier}:${fileLine}`;
     let evidenceKind = "a";
     let requiredReceipt = "carrier text at the pinned scope";
+    let bindingStrength = "self";
 
     if (klass === "REF") {
       binding = "bun run docs:check";
       observed = "exit 0 at HEAD e74140c (paths/links resolve)";
       requiredReceipt = "docs:check exit status at the pinned scope";
+      bindingStrength = "bound";
     } else if (klass === "IMP") {
       const engine = carrier.startsWith("self-improve/") || carrier === "docs/trajectory-memory.md";
       binding = engine ? "bun run test:self-improve" : "bun run build:check";
-      observed = engine ? "exit 0; verify-unit ALL PASS (131 cases)" : "exit 0 (generated surfaces in sync)";
+      observed = engine ? "exit 0; verify-unit ALL PASS (136 cases)" : "exit 0 (generated surfaces in sync)";
       requiredReceipt = engine ? "unit+integration suite exit status" : "build:check exit status";
+      bindingStrength = "bound";
     } else if (klass === "RDM") {
       observed = "no implementation path at HEAD e74140c; roadmap language present";
     } else if (klass === "MEAS" && !isFrozen(carrier)) {
@@ -376,11 +382,13 @@ for (const [key, group] of byKey) {
         binding = `node self-improve/evidence/audit-20261022/tools/check-number.mjs ${carrier} ${source} ${JSON.stringify(numberMatch[0])}`;
         observed = `checked ${numberMatch[0]} in ${source}`;
         requiredReceipt = `${source} contains the documented literal`;
+        bindingStrength = "bound";
       } else {
         verdict = "UNVERIFIABLE";
         binding = "";
         observed = "no constant binding selected at Phase A";
         evidenceKind = "d";
+        bindingStrength = "";
         requiredReceipt = UNVERIFIABLE_RECEIPT[carrier] ?? "result receipt or code-constant binding";
       }
     }
@@ -396,6 +404,7 @@ for (const [key, group] of byKey) {
       caveat_adjacency: klass === "BND" ? "self" : "n/a",
       required_receipt: requiredReceipt,
       evidence_kind: evidenceKind,
+      binding_strength: bindingStrength,
       binding_command: binding,
       observed,
       evidence_sha256: verdict === "PASS" ? carrierDigest(carrier) : "",
