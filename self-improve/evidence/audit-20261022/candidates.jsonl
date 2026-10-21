@@ -1,0 +1,809 @@
+{"id":"A0001","carrier":"README.md","file_line":3,"text":"[![CI](https://github.com/jjongguet/gjc-plugin/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/jjongguet/gjc-plugin/actions/workflows/ci.yml)","hints":["ref"]}
+{"id":"A0002","carrier":"README.md","file_line":4,"text":"[![Release](https://img.shields.io/github/v/release/jjongguet/gjc-plugin)](https://github.com/jjongguet/gjc-plugin/releases/latest)","hints":["ref"]}
+{"id":"A0003","carrier":"README.md","file_line":5,"text":"[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)","hints":["ref"]}
+{"id":"A0004","carrier":"README.md","file_line":7,"text":"Plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`) that make an agent's work checkable.","hints":["ref"]}
+{"id":"A0005","carrier":"README.md","file_line":9,"text":"A coding agent's own report (\"tests pass\", \"the UI works\", \"I followed the plan\") is a claim.","hints":["modal"]}
+{"id":"A0006","carrier":"README.md","file_line":9,"text":"These plugins replace parts of that claim with evidence the agent cannot fake on its own: test runs recorded as private receipts with source freshness, browser assertions against a real page, plans validated against a fixed contract before they reach a tracker, and advisory second opinions labeled as advisory.","hints":["boundary"]}
+{"id":"A0007","carrier":"README.md","file_line":9,"text":"Every plugin states what it does not prove, keeps its results in a private store, and is installable on its own.","hints":["boundary","modal"]}
+{"id":"A0008","carrier":"README.md","file_line":15,"text":"| [`verification-receipts`](verification-receipts/) | `verification_run` / `verification_status`: run explicit `node:test` files and keep an immutable receipt whose source freshness is recomputed on lookup. `verification_loop`: recheck that every delegated task was followed by covering verification. |","hints":["modal"]}
+{"id":"A0009","carrier":"README.md","file_line":18,"text":"| [`jev-advisor`](jev-advisor/) | Advisory `fast` / `balanced` / `strong` tier advice before each delegated task, one-shot `jev_check` artifact checks and the read-only `plugin_metrics` report. Shadow by default; never routes models or proves quality. |","hints":["boundary","modal"]}
+{"id":"A0010","carrier":"README.md","file_line":19,"text":"| [`rrsi`](rrsi/) | Exploration-trace store and deterministic Dream-RSI policy replay (`capture` / `import` / `dream` / `status`) with a due-gated `session_start` refresh. |","hints":["modal"]}
+{"id":"A0011","carrier":"README.md","file_line":20,"text":"| [`rea`](rea/) | `rea_readiness` plus a workflow skill for the pinned [REA](https://github.com/morluto/rea) CLI (`rea-agents` 6.4.0). |","hints":["number","ref"]}
+{"id":"A0012","carrier":"README.md","file_line":21,"text":"| [`wiki`](wiki/) | `wiki_query` over a guarded personal wiki and `wiki_propose` for pending proposals. Never approves or publishes. |","hints":["boundary","modal"]}
+{"id":"A0013","carrier":"README.md","file_line":22,"text":"| [`aside-memory`](aside-memory/) | `aside_memory`: explicit, account-bound, read-only search over Aside memory, returned as quoted historical context. |","hints":["modal"]}
+{"id":"A0014","carrier":"README.md","file_line":24,"text":"Measured attributes (tiers, counts, durations, journals) are descriptive observations, not quality, routing or causal proof.","hints":["boundary"]}
+{"id":"A0015","carrier":"README.md","file_line":52,"text":"Each bundle's generated `tools/` and `hooks/` are self-contained (sources are inlined at build time), so an installed plugin needs no sibling package.","hints":["boundary","modal"]}
+{"id":"A0016","carrier":"README.md","file_line":52,"text":"GJC owns the installed code; plugins write only to their own directory under `~/.gjc-plugin/`.","hints":["modal"]}
+{"id":"A0017","carrier":"README.md","file_line":56,"text":"Common: [Bun](https://bun.sh) 1.4.x and Node.js ≥ 22 to build and test, and [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (verified with 0.18.12) to install.","hints":["number","modal","ref"]}
+{"id":"A0018","carrier":"README.md","file_line":60,"text":"| `verification-receipts` | 3 tools, 4 hooks | Node.js on `PATH` for the test runner | Yes. An optional Jev key adds warning-only adequacy notes. |","hints":["number"]}
+{"id":"A0019","carrier":"README.md","file_line":61,"text":"| `ui-regression` | 2 tools | The `aside` CLI with a connected profile and an explicit account; a page you serve on loopback | Runs drive a browser; `ui_regression_status` is offline. |","hints":["number"]}
+{"id":"A0020","carrier":"README.md","file_line":62,"text":"| `backplan` | 1 tool, loose skill | Nothing for the tool. Rendered issue bodies use Korean section headings; the optional skill registers issues through the maintainer's Linear MCP and trace helper. | Yes |","hints":["number"]}
+{"id":"A0021","carrier":"README.md","file_line":63,"text":"| `jev-advisor` | 3 tools, 3 hooks | `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` for advice and checks | Without a key, advice is an explicit no-decision; `plugin_metrics` is offline. |","hints":["number","boundary"]}
+{"id":"A0022","carrier":"README.md","file_line":64,"text":"| `rrsi` | 1 tool, 1 hook | Nothing | Yes |","hints":["number"]}
+{"id":"A0023","carrier":"README.md","file_line":65,"text":"| `rea` | 1 tool, loose skill | Node.js `^22.19 \\|\\| ^24.11 \\|\\| >=26` or Bun; the first `npx` call downloads `rea-agents` | `rea_readiness` is offline; the CLI fetch uses the network. |","hints":["number"]}
+{"id":"A0024","carrier":"README.md","file_line":66,"text":"| `wiki` | 2 tools | A personal-wiki checkout with `scripts/wiki.py`, located by `WIKI_ROOT` (default `$HOME/jjongguet/personal-wiki`) | Local only |","hints":["number","ref"]}
+{"id":"A0025","carrier":"README.md","file_line":67,"text":"| `aside-memory` | 1 tool | The `aside` CLI and an explicit numeric account | Network through Aside; no key |","hints":["number","boundary"]}
+{"id":"A0026","carrier":"README.md","file_line":69,"text":"Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev-advisor/.env` or the process environment (`JEV_ADVISOR_API_KEY` wins over `OPENROUTER_API_KEY`; process values win over the file).","hints":["ref"]}
+{"id":"A0027","carrier":"README.md","file_line":69,"text":"Never put credentials in source or result records.","hints":["boundary","modal"]}
+{"id":"A0028","carrier":"README.md","file_line":83,"text":"When upgrading several plugins, install `jev-advisor` first and `verification-receipts` second; see [CONTRIBUTING.md](CONTRIBUTING.md#install-order-and-replacement).","hints":["modal"]}
+{"id":"A0029","carrier":"README.md","file_line":85,"text":"Without a local `gjc`, run the chain with `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four host smoke guards are then skipped and reported as skipped.","hints":["number","boundary","modal"]}
+{"id":"A0030","carrier":"README.md","file_line":89,"text":"`bun run demo` drives three offline plugins through their committed tool surfaces, exactly as GJC loads them, under a temporary `HOME`.","hints":["modal"]}
+{"id":"A0031","carrier":"README.md","file_line":89,"text":"It needs no key or network and checks that your real stores are untouched.","hints":["boundary"]}
+{"id":"A0032","carrier":"README.md","file_line":111,"text":"The `rea_readiness` lines depend on the Node/npx/Bun found on your machine.","hints":["ref"]}
+{"id":"A0033","carrier":"README.md","file_line":126,"text":"Offline suites use disposable repositories and homes with synthetic or disabled transport; no live credential is required.","hints":["boundary","modal"]}
+{"id":"A0034","carrier":"README.md","file_line":126,"text":"Host and browser smoke commands, and what each one does and does not prove, are in [CONTRIBUTING.md](CONTRIBUTING.md#smoke-tests).","hints":["boundary","modal"]}
+{"id":"A0035","carrier":"README.md","file_line":130,"text":"All plugin-owned result and state writes go to `~/.gjc-plugin/` (owned `0700` directories and single-link `0600` files; unsafe owners or modes, symlinks, hard links and corrupt inventories fail closed).","hints":["number","boundary","modal"]}
+{"id":"A0036","carrier":"README.md","file_line":130,"text":"Inventory, record contents and retention bounds: [docs/private-results.md](docs/private-results.md).","hints":["modal","ref"]}
+{"id":"A0037","carrier":"README.md","file_line":134,"text":"[`self-improve/`](self-improve/) is a repository-native loop that proposes edits to this repository's own declared surfaces, checks them with deterministic guards in `git archive` scratch copies, and records every decision, including every rejection, in an append-only [ledger](self-improve/ledger.jsonl).","hints":["modal","ref"]}
+{"id":"A0038","carrier":"README.md","file_line":134,"text":"Measured campaigns and their limits are in [self-improve/evidence/](self-improve/evidence/README.md).","hints":["ref"]}
+{"id":"A0039","carrier":"README.md","file_line":134,"text":"The [Harness² comparison](self-improve/HARNESS2.md) is a research proposal, not an installed capability.","hints":["number","boundary","modal","ref","roadmap"]}
+{"id":"A0040","carrier":"README.md","file_line":138,"text":"Issues are welcome; pull requests from outside the maintainers are not accepted and are closed automatically.","hints":["boundary"]}
+{"id":"A0041","carrier":"README.md","file_line":138,"text":"See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the test matrix, [docs/agent-rules.md](docs/agent-rules.md) for the repository rules, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.","hints":["modal","ref"]}
+{"id":"A0042","carrier":"CHANGELOG.md","file_line":3,"text":"Versions follow the `0.0.x` series.","hints":["number"]}
+{"id":"A0043","carrier":"CHANGELOG.md","file_line":5,"text":"## [0.0.8] - 2026-10-20","hints":["number"]}
+{"id":"A0044","carrier":"CHANGELOG.md","file_line":7,"text":"Plugins: jev-advisor 0.0.7 · verification-receipts 0.0.3 · ui-regression 0.0.3 · wiki 0.0.3 · rea 0.0.3 · backplan 0.0.6 · rrsi 0.0.2 · aside-memory 0.0.1","hints":["number"]}
+{"id":"A0045","carrier":"CHANGELOG.md","file_line":9,"text":"Fixes from the boundary review of the 0.0.7 change set.","hints":["number"]}
+{"id":"A0046","carrier":"CHANGELOG.md","file_line":13,"text":"- **backplan**: a missing `project.mode` or automation-candidate `disposition` is reported once, not twice.","hints":["boundary","modal"]}
+{"id":"A0047","carrier":"CHANGELOG.md","file_line":14,"text":"- **rea**: rejected `rea_readiness` input is journaled (`not_run` / `invalid_or_unavailable_input`) like every other handled invocation.","hints":["boundary","modal"]}
+{"id":"A0048","carrier":"CHANGELOG.md","file_line":15,"text":"- `docs:check` now checks reference-style links and rejects links that escape the repository or have malformed percent-encoding; it ignores scheme and protocol-relative links, fences inside block quotes and indented code.","hints":["boundary","modal"]}
+{"id":"A0049","carrier":"CHANGELOG.md","file_line":20,"text":"- `scripts/tests/checks.test.mjs`, first in `bun run test`: pass and fail fixtures for `docs:check`, `evidence:check` and `policy:check`, and a drift probe for every plugin's `build --check`.","hints":["boundary","ref"]}
+{"id":"A0050","carrier":"CHANGELOG.md","file_line":22,"text":"## [0.0.7] - 2026-10-20","hints":["number"]}
+{"id":"A0051","carrier":"CHANGELOG.md","file_line":24,"text":"Plugins: jev-advisor 0.0.7 · verification-receipts 0.0.3 · ui-regression 0.0.3 · wiki 0.0.3 · rea 0.0.2 · backplan 0.0.5 · rrsi 0.0.2 · aside-memory 0.0.1 (first release)","hints":["number"]}
+{"id":"A0052","carrier":"CHANGELOG.md","file_line":28,"text":"- **aside-memory** plugin: `aside_memory`, an explicit account-bound, read-only search over Aside memory that returns bounded quotations with relative citations and screened states.","hints":["modal"]}
+{"id":"A0053","carrier":"CHANGELOG.md","file_line":29,"text":"- **jev-advisor**: `jev_check`, a one-shot strict `correct` / `incorrect` / `unsure` check of one artifact against one question; a Hermes cron pre-delivery gate under `integrations/hermes/jev-gate/`; host-only actual-tier and effective-model coverage in metrics.","hints":["ref"]}
+{"id":"A0054","carrier":"CHANGELOG.md","file_line":30,"text":"- **rrsi**: a due-gated `session_start` periodic refresh (no timer process) that projects the jev-advisor journal into the store, with bounded backoff, locks and receipts.","hints":["boundary","modal"]}
+{"id":"A0055","carrier":"CHANGELOG.md","file_line":33,"text":"- `SECURITY.md` with private vulnerability reporting, issue forms and an English repository rules document (`docs/agent-rules.md`).","hints":["ref"]}
+{"id":"A0056","carrier":"CHANGELOG.md","file_line":34,"text":"- self-improve: the rules-text domain, the 22-attempt P2b replay measurement and the five-cycle P3 redeploy campaign (verdicts and limits in `self-improve/evidence/`).","hints":["number","ref"]}
+{"id":"A0057","carrier":"CHANGELOG.md","file_line":39,"text":"- External pull requests are no longer accepted: creation is limited to collaborators and a hosted, no-checkout workflow closes any other pull request.","hints":["boundary"]}
+{"id":"A0058","carrier":"CHANGELOG.md","file_line":40,"text":"- **backplan**: a missing required key is reported once instead of once per field beneath it; issue registration defaults to standing per-topic projects.","hints":["boundary","modal"]}
+{"id":"A0059","carrier":"CHANGELOG.md","file_line":43,"text":"- CI runs on the maintainer's self-hosted runner with Node 24 pinned.","hints":["number"]}
+{"id":"A0060","carrier":"CHANGELOG.md","file_line":47,"text":"- **rrsi**: an unknown action is now a tool error (`isError: true`); the plugin suite fails when it executes zero cases.","hints":["boundary"]}
+{"id":"A0061","carrier":"CHANGELOG.md","file_line":48,"text":"- **rea**: `rea_readiness` rejects any input other than exactly `{}`.","hints":["boundary","modal"]}
+{"id":"A0062","carrier":"CHANGELOG.md","file_line":49,"text":"- **jev-advisor**: the documented 0.001 probability-sum bound is enforced in the decision parsers; completed task rows leave the batch widget immediately.","hints":["number"]}
+{"id":"A0063","carrier":"CHANGELOG.md","file_line":51,"text":"- **verification-receipts**: truncated receipt scans report bounded-evaluation state; the pre-budget timeout proof is deterministic.","hints":["modal"]}
+{"id":"A0064","carrier":"CHANGELOG.md","file_line":56,"text":"- `hermes/`, the maintainer's personal weekly self-evolution operations (now maintained privately). `rrsi/scripts/journal-dream.mjs`, which it called, is unchanged.","hints":["ref"]}
+{"id":"A0065","carrier":"CHANGELOG.md","file_line":57,"text":"- The internal `docs/portfolio/AGENTS.md` (replaced by `docs/agent-rules.md`) and the raw P3 loop logs (replaced by `self-improve/evidence/p3/summary.json`).","hints":["number","ref"]}
+{"id":"A0066","carrier":"CHANGELOG.md","file_line":61,"text":"- Reinstall in this order: `jev-advisor`, then `verification-receipts`, then the rest (`gjc plugin uninstall <name> --user` followed by `gjc plugin install <path> --user`), and start a new `gjc` session.","hints":["modal"]}
+{"id":"A0067","carrier":"CHANGELOG.md","file_line":62,"text":"- jev-gate: an existing `config.json` keeps its own `home_channel`; a fresh install must set `home_channel` and per-job `channels` before alerts are delivered.","hints":["modal"]}
+{"id":"A0068","carrier":"CHANGELOG.md","file_line":63,"text":"- The self-improve rules-text domain now targets `docs/agent-rules.md`.","hints":["ref"]}
+{"id":"A0069","carrier":"CHANGELOG.md","file_line":64,"text":"- `dashboard/` is a maintainer-only local view and is not part of the plugin distribution.","hints":["boundary"]}
+{"id":"A0070","carrier":"CHANGELOG.md","file_line":66,"text":"## [0.0.6] - 2026-10-13","hints":["number"]}
+{"id":"A0071","carrier":"CHANGELOG.md","file_line":68,"text":"Plugins: jev-advisor 0.0.6 · verification-receipts 0.0.2 · ui-regression 0.0.2 · wiki 0.0.2 · rea 0.0.1 · backplan 0.0.4 · rrsi 0.0.1","hints":["number"]}
+{"id":"A0072","carrier":"CHANGELOG.md","file_line":70,"text":"- **rrsi** plugin: exploration-trace store with `capture` / `import` / `dream` / `status` over the bundled Dream-RSI core.","hints":["modal"]}
+{"id":"A0073","carrier":"CHANGELOG.md","file_line":74,"text":"- self-improve RRSI v2: bounded automatic loop with a live proposer seam, replay simulator, deterministic dreaming, pre-registered thresholds and a deployed policy; first adoption landed without a hand-written proposal.","hints":["number","boundary","modal","roadmap"]}
+{"id":"A0074","carrier":"CHANGELOG.md","file_line":75,"text":"- **jev-advisor**: probability sums exactly on the documented tolerance are accepted and responses are capped at 64 KiB.","hints":["number"]}
+{"id":"A0075","carrier":"CHANGELOG.md","file_line":77,"text":"## [0.0.5] - 2026-10-12","hints":["number"]}
+{"id":"A0076","carrier":"CHANGELOG.md","file_line":79,"text":"Plugins: jev-advisor 0.0.5 · verification-receipts 0.0.2 · ui-regression 0.0.2 · wiki 0.0.2","hints":["number"]}
+{"id":"A0077","carrier":"CHANGELOG.md","file_line":81,"text":"- **wiki** plugin: `wiki_query` (read-only canonical pages) and `wiki_propose` (pending proposals with an exact digest; never approves or publishes).","hints":["boundary"]}
+{"id":"A0078","carrier":"CHANGELOG.md","file_line":83,"text":"- self-improve: the repository-native improvement loop with gates, adoption, rollback, recovery, scratch isolation and guards.","hints":["modal"]}
+{"id":"A0079","carrier":"CHANGELOG.md","file_line":85,"text":"## [0.0.4] - 2026-10-10","hints":["number"]}
+{"id":"A0080","carrier":"CHANGELOG.md","file_line":87,"text":"Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2","hints":["number"]}
+{"id":"A0081","carrier":"CHANGELOG.md","file_line":91,"text":"- **ui-regression**: empty substring expectations are rejected.","hints":["boundary","modal"]}
+{"id":"A0082","carrier":"CHANGELOG.md","file_line":93,"text":"## [0.0.3] - 2026-09-28","hints":["number"]}
+{"id":"A0083","carrier":"CHANGELOG.md","file_line":95,"text":"- **jev-advisor**: learns from delegation outcomes through local evidence memory; self-describing install and management guide.","hints":["modal"]}
+{"id":"A0084","carrier":"CHANGELOG.md","file_line":97,"text":"## [0.0.2] - 2026-09-28","hints":["number"]}
+{"id":"A0085","carrier":"CHANGELOG.md","file_line":101,"text":"## [0.0.1] - 2026-09-27","hints":["number"]}
+{"id":"A0086","carrier":"CHANGELOG.md","file_line":105,"text":"[0.0.8]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.7...v0.0.8","hints":["number","ref"]}
+{"id":"A0087","carrier":"CHANGELOG.md","file_line":106,"text":"[0.0.7]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.6...v0.0.7","hints":["number","ref"]}
+{"id":"A0088","carrier":"CHANGELOG.md","file_line":107,"text":"[0.0.6]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.5...v0.0.6","hints":["number","ref"]}
+{"id":"A0089","carrier":"CHANGELOG.md","file_line":108,"text":"[0.0.5]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.4...v0.0.5","hints":["number","ref"]}
+{"id":"A0090","carrier":"CHANGELOG.md","file_line":109,"text":"[0.0.4]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.3...v0.0.4","hints":["number","ref"]}
+{"id":"A0091","carrier":"CHANGELOG.md","file_line":110,"text":"[0.0.3]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.2...v0.0.3","hints":["number","ref"]}
+{"id":"A0092","carrier":"CHANGELOG.md","file_line":111,"text":"[0.0.2]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.1...v0.0.2","hints":["number","ref"]}
+{"id":"A0093","carrier":"CHANGELOG.md","file_line":112,"text":"[0.0.1]: https://github.com/jjongguet/gjc-plugin/releases/tag/v0.0.1","hints":["number","ref"]}
+{"id":"A0094","carrier":"CONTRIBUTING.md","file_line":3,"text":"This repository ships plugins for [gajae-code](https://github.com/Yeachan-Heo/gajae-code) (`gjc`); each plugin directory is independently installable and its `gajae-plugin.json` is the version source of truth.","hints":["ref"]}
+{"id":"A0095","carrier":"CONTRIBUTING.md","file_line":7,"text":"- **Bugs and feature requests:** open an [issue](https://github.com/jjongguet/gjc-plugin/issues/new/choose) using one of the forms.","hints":["ref"]}
+{"id":"A0096","carrier":"CONTRIBUTING.md","file_line":8,"text":"- **Security problems:** report privately as described in [SECURITY.md](SECURITY.md); never in a public issue.","hints":["boundary","modal"]}
+{"id":"A0097","carrier":"CONTRIBUTING.md","file_line":9,"text":"- **Pull requests:** not accepted from outside the maintainers. Pull-request creation is limited to collaborators, and a workflow closes any pull request whose author is not the owner, a member or a collaborator, with a pointer to issues. The workflow never checks out or runs pull-request code.","hints":["boundary"]}
+{"id":"A0098","carrier":"CONTRIBUTING.md","file_line":11,"text":"Maintainers land changes on `main` with conventional commit subjects in English.","hints":["modal"]}
+{"id":"A0099","carrier":"CONTRIBUTING.md","file_line":11,"text":"Repository rules for agents and contributors are in [docs/agent-rules.md](docs/agent-rules.md).","hints":["ref"]}
+{"id":"A0100","carrier":"CONTRIBUTING.md","file_line":15,"text":"- [Bun](https://bun.sh) 1.4.x for builds and tests, Node.js ≥ 22 for the `node:test` runner, and a local `gjc` installation for runtime and smoke checks.","hints":["number","ref"]}
+{"id":"A0101","carrier":"CONTRIBUTING.md","file_line":24,"text":"Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four host smoke guards are then reported as skipped.","hints":["number","boundary","modal"]}
+{"id":"A0102","carrier":"CONTRIBUTING.md","file_line":28,"text":"- `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing.","hints":["boundary","modal","ref"]}
+{"id":"A0103","carrier":"CONTRIBUTING.md","file_line":29,"text":"- `bun run test` runs the root chain: fixture tests for the repository check scripts (`scripts/tests/`), shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks.","hints":["modal","ref"]}
+{"id":"A0104","carrier":"CONTRIBUTING.md","file_line":30,"text":"- Suites are hermetic: disposable repositories/homes, synthetic or disabled transport, isolated fake CLIs. Live credentials, real personal data and production services are never required and never used in tests.","hints":["boundary","modal","ref"]}
+{"id":"A0105","carrier":"CONTRIBUTING.md","file_line":31,"text":"- Maintainers additionally run the workspace-standard validator, which lives outside this repository (`node ../shared/workspace-standard/validator/cli.mjs validate --root .`, profile `plugin-ts`). It is not required for external use.","hints":["boundary","modal","ref"]}
+{"id":"A0106","carrier":"CONTRIBUTING.md","file_line":43,"text":"Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration.","hints":["boundary","modal"]}
+{"id":"A0107","carrier":"CONTRIBUTING.md","file_line":43,"text":"Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality.","hints":["boundary","modal","ref"]}
+{"id":"A0108","carrier":"CONTRIBUTING.md","file_line":43,"text":"Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers.","hints":["modal"]}
+{"id":"A0109","carrier":"CONTRIBUTING.md","file_line":43,"text":"Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.","hints":["boundary","modal"]}
+{"id":"A0110","carrier":"CONTRIBUTING.md","file_line":47,"text":"`.github/workflows/ci.yml` runs on every push to `main`: `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`.","hints":["ref"]}
+{"id":"A0111","carrier":"CONTRIBUTING.md","file_line":47,"text":"It has no `pull_request` trigger.","hints":["boundary"]}
+{"id":"A0112","carrier":"CONTRIBUTING.md","file_line":48,"text":"check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke","hints":["boundary"]}
+{"id":"A0113","carrier":"CONTRIBUTING.md","file_line":49,"text":"guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case self-skips with a","hints":["number","modal"]}
+{"id":"A0114","carrier":"CONTRIBUTING.md","file_line":50,"text":"recorded reason (no `gjc` binary).","hints":["boundary"]}
+{"id":"A0115","carrier":"CONTRIBUTING.md","file_line":50,"text":"The workspace-standard validator guard is planned only where its","hints":["modal","roadmap"]}
+{"id":"A0116","carrier":"CONTRIBUTING.md","file_line":51,"text":"local tree sits beside the repository (`self-improve/lib/guards.mjs`); the test wrapper prints the","hints":["modal","ref"]}
+{"id":"A0117","carrier":"CONTRIBUTING.md","file_line":52,"text":"planned guard ids, guard statuses and skip counts, so green runs disclose what was planned out and","hints":["modal","roadmap"]}
+{"id":"A0118","carrier":"CONTRIBUTING.md","file_line":53,"text":"The workflow also creates an empty, never-committed `AGENTS.md`","hints":["boundary","modal"]}
+{"id":"A0119","carrier":"CONTRIBUTING.md","file_line":58,"text":"- Declare every installed surface (tools, hooks, skills) in `gajae-plugin.json`; keep generated surfaces keyless and reproducible from `lib/` + `src/` sources.","hints":["modal"]}
+{"id":"A0120","carrier":"CONTRIBUTING.md","file_line":60,"text":"- Reuse the shared private-result primitives (`shared/`) when persistence is required. Transient wrappers such as `aside-memory` intentionally do not journal private payloads; never serialize arbitrary tool output as evidence.","hints":["boundary","modal"]}
+{"id":"A0121","carrier":"CONTRIBUTING.md","file_line":61,"text":"- Tools whose parameters are empty should carry an explicit `schema` in the manifest when static extraction fails.","hints":["boundary"]}
+{"id":"A0122","carrier":"CONTRIBUTING.md","file_line":75,"text":"## Install order and replacement","hints":["modal"]}
+{"id":"A0123","carrier":"CONTRIBUTING.md","file_line":77,"text":"- `gjc plugin install <path> --user` refuses a plugin that is already installed. Replace one with `gjc plugin uninstall <name> --user` followed by `gjc plugin install <path> --user`; inspect the recorded source (`~/.gjc/agent/gjc-plugins/registry.json`) first.","hints":["boundary","modal","ref"]}
+{"id":"A0124","carrier":"CONTRIBUTING.md","file_line":78,"text":"- When upgrading several plugins, install **`jev-advisor` first** and **`verification-receipts` second**, then the rest, and run `gjc plugin doctor` afterwards. An older `jev-advisor` reading journal records written by a newer `verification-receipts` fails closed with `store_corrupt`.","hints":["boundary","modal"]}
+{"id":"A0125","carrier":"CONTRIBUTING.md","file_line":79,"text":"- Rebuilding source alone does not update a running session. Tools and hooks load at **session start**; verify upgraded surfaces in a fresh `gjc` process.","hints":["boundary"]}
+{"id":"A0126","carrier":"CONTRIBUTING.md","file_line":85,"text":"- `dashboard/` — maintainer-only local meta view; not a plugin and not deployed. See [dashboard/README.md](dashboard/README.md).","hints":["boundary","ref"]}
+{"id":"A0127","carrier":"CONTRIBUTING.md","file_line":86,"text":"- `steps.json` — the maintainer's manual release checklist (record, verify, human review); nothing runs it on a timer.","hints":["modal"]}
+{"id":"A0128","carrier":"docs/agent-rules.md","file_line":3,"text":"They are a contract, not background reading: the `rules-text` self-improve domain (`self-improve/domains/rules-text`) scores this file, and an edit must keep that domain green.","hints":["boundary","modal","ref"]}
+{"id":"A0129","carrier":"docs/agent-rules.md","file_line":7,"text":"- Every plugin subtree names its installed, generated and verification surfaces, so an agent can work without guessing.","hints":["boundary","modal"]}
+{"id":"A0130","carrier":"docs/agent-rules.md","file_line":9,"text":"- An unverified change is never adopted.","hints":["boundary","modal"]}
+{"id":"A0131","carrier":"docs/agent-rules.md","file_line":13,"text":"- `jev-advisor/` — task-delegation tier advice, artifact checks and the read-only metrics report (advisory, never a gate).","hints":["boundary","modal"]}
+{"id":"A0132","carrier":"docs/agent-rules.md","file_line":17,"text":"- `self-improve/` — the repository's self-improvement loop. The append-only [ledger](../self-improve/ledger.jsonl) records every decision and [rrsi.json](../self-improve/rrsi.json) configures the loop.","hints":["modal","ref"]}
+{"id":"A0133","carrier":"docs/agent-rules.md","file_line":18,"text":"- `wiki/`, `rea/`, `backplan/`, `aside-memory/` and `shared/` — the remaining plugins and the shared private-results module. Each plugin's `gajae-plugin.json` is its manifest of record.","hints":["modal"]}
+{"id":"A0134","carrier":"docs/agent-rules.md","file_line":22,"text":"- Full verification: `bun run test`; [package.json](../package.json) defines every script.","hints":["ref"]}
+{"id":"A0135","carrier":"docs/agent-rules.md","file_line":23,"text":"- Build: `bun run build`. Generated surfaces (`tools/`, `hooks/`) are build outputs; never edit them by hand.","hints":["boundary"]}
+{"id":"A0136","carrier":"docs/agent-rules.md","file_line":28,"text":"- Never commit credentials, `.env` files or local key files; plugins read keys only from their documented locations outside the repository.","hints":["boundary","modal"]}
+{"id":"A0137","carrier":"docs/agent-rules.md","file_line":29,"text":"- Tests and demos run in disposable homes with synthetic or disabled transport; they must not write to a real `~/.gjc-plugin/` store or call a live provider.","hints":["boundary","modal"]}
+{"id":"A0138","carrier":"docs/agent-rules.md","file_line":30,"text":"- External pull requests are not accepted; report problems through issues.","hints":["boundary","modal"]}
+{"id":"A0139","carrier":"docs/agent-rules.md","file_line":32,"text":"## Records","hints":["modal"]}
+{"id":"A0140","carrier":"docs/agent-rules.md","file_line":34,"text":"- Committed evidence uses repository-relative paths; `bun run evidence:check` enforces this for `self-improve/`.","hints":["modal"]}
+{"id":"A0141","carrier":"docs/agent-rules.md","file_line":35,"text":"- The self-improve ledger is append-only. Never rewrite, reorder or delete a ledger row.","hints":["boundary"]}
+{"id":"A0142","carrier":"docs/agent-rules.md","file_line":36,"text":"- Session logs, dated run notes and test counts do not belong in committed documentation; reproduction steps do.","hints":["boundary","modal"]}
+{"id":"A0143","carrier":"docs/agent-rules.md","file_line":38,"text":"## Commit and verification rules","hints":["modal"]}
+{"id":"A0144","carrier":"docs/agent-rules.md","file_line":40,"text":"- Stage only changed files; never `git add -A`.","hints":["boundary"]}
+{"id":"A0145","carrier":"docs/agent-rules.md","file_line":41,"text":"- Use conventional commit messages, scoped to the plugin name where one applies.","hints":["modal"]}
+{"id":"A0146","carrier":"docs/trajectory-memory.md","file_line":3,"text":"Status: layer 1 implemented as `distill.v2` (`self-improve/lib/distill.mjs`,","hints":["number","modal","ref"]}
+{"id":"A0147","carrier":"docs/trajectory-memory.md","file_line":4,"text":"`self-improve/scripts/run.mjs distill`).","hints":["ref"]}
+{"id":"A0148","carrier":"docs/trajectory-memory.md","file_line":4,"text":"The candidate handoff is proven by a","hints":["modal"]}
+{"id":"A0149","carrier":"docs/trajectory-memory.md","file_line":5,"text":"hermetic integration test; the live guard-tier dry run (E5b) has **not** been","hints":["number","boundary","modal"]}
+{"id":"A0150","carrier":"docs/trajectory-memory.md","file_line":6,"text":"executed and is labelled unproven below.","hints":["boundary"]}
+{"id":"A0151","carrier":"docs/trajectory-memory.md","file_line":6,"text":"Follow-up to JJO-394.","hints":["number","ref","roadmap"]}
+{"id":"A0152","carrier":"docs/trajectory-memory.md","file_line":9,"text":"Layer 1 turns a success/failure contrast into a candidate","hints":["number","ref"]}
+{"id":"A0153","carrier":"docs/trajectory-memory.md","file_line":10,"text":"rule; it is deliberately strict, so most runs emit nothing.","hints":["modal"]}
+{"id":"A0154","carrier":"docs/trajectory-memory.md","file_line":16,"text":"| 0. Capture trajectories | `rrsi` store (`capture`, `import`) | implemented |","hints":["number","modal"]}
+{"id":"A0155","carrier":"docs/trajectory-memory.md","file_line":17,"text":"| 1. Distill contrastive rules | `self-improve/lib/distill.mjs` (`distill`) | implemented (v2) |","hints":["number","modal","ref"]}
+{"id":"A0156","carrier":"docs/trajectory-memory.md","file_line":18,"text":"| 2. Promote under gates | `self-improve` (guards, probes, ledger) | implemented |","hints":["number","modal"]}
+{"id":"A0157","carrier":"docs/trajectory-memory.md","file_line":20,"text":"Layer 1 produces candidates only.","hints":["number"]}
+{"id":"A0158","carrier":"docs/trajectory-memory.md","file_line":20,"text":"It never edits source, never writes to the","hints":["boundary","modal"]}
+{"id":"A0159","carrier":"docs/trajectory-memory.md","file_line":21,"text":"store or ledger, and never bypasses layer 2.","hints":["number","boundary"]}
+{"id":"A0160","carrier":"docs/trajectory-memory.md","file_line":25,"text":"Inputs, read-only: attempts from the `rrsi` store, `self-improve/ledger.jsonl`","hints":["ref"]}
+{"id":"A0161","carrier":"docs/trajectory-memory.md","file_line":27,"text":"is required; an empty list means nothing is declared and yields zero candidates.","hints":["boundary","modal"]}
+{"id":"A0162","carrier":"docs/trajectory-memory.md","file_line":31,"text":"Every adopt × reject pair must agree on","hints":["boundary","modal"]}
+{"id":"A0163","carrier":"docs/trajectory-memory.md","file_line":36,"text":"1. any pair with **no** differing feature → `contradicted`;","hints":["number","boundary"]}
+{"id":"A0164","carrier":"docs/trajectory-memory.md","file_line":37,"text":"2. otherwise, more than one distinct feature → `inconsistent_contrast`;","hints":["number"]}
+{"id":"A0165","carrier":"docs/trajectory-memory.md","file_line":38,"text":"3. otherwise → emitted.","hints":["number","modal"]}
+{"id":"A0166","carrier":"docs/trajectory-memory.md","file_line":41,"text":"Cost (`wallMs`) and edit size never justify a","hints":["boundary"]}
+{"id":"A0167","carrier":"docs/trajectory-memory.md","file_line":49,"text":"`evidence.ledgerSeq == expires.after == drawnFrom`, never","hints":["boundary"]}
+{"id":"A0168","carrier":"docs/trajectory-memory.md","file_line":50,"text":"Attempts without ledger provenance are unbound: a declared,","hints":["boundary"]}
+{"id":"A0169","carrier":"docs/trajectory-memory.md","file_line":52,"text":"never emitted.","hints":["boundary","modal"]}
+{"id":"A0170","carrier":"docs/trajectory-memory.md","file_line":54,"text":"One `--max-lag` authority (default 0) exists on both `distill` and","hints":["number"]}
+{"id":"A0171","carrier":"docs/trajectory-memory.md","file_line":56,"text":"The store-level `projection` block is context only; no emission","hints":["boundary"]}
+{"id":"A0172","carrier":"docs/trajectory-memory.md","file_line":58,"text":"`--max-lag 0`; a positive `--max-lag N` widens the consume window to N epochs.","hints":["number"]}
+{"id":"A0173","carrier":"docs/trajectory-memory.md","file_line":62,"text":"Only the gated primary objective (`adapter.probes[0].objective`) can become a","hints":["number"]}
+{"id":"A0174","carrier":"docs/trajectory-memory.md","file_line":64,"text":"groups are a counted aggregate with a bounded sample and never become","hints":["boundary"]}
+{"id":"A0175","carrier":"docs/trajectory-memory.md","file_line":66,"text":"admission veto, not a proposal target.","hints":["boundary","roadmap"]}
+{"id":"A0176","carrier":"docs/trajectory-memory.md","file_line":70,"text":"`loop --candidate-file <path>` accepts a bare `candidate.v2` or a `distill.v2`","hints":["number"]}
+{"id":"A0177","carrier":"docs/trajectory-memory.md","file_line":72,"text":"schema, gated objective, zero contradiction/unexplained, rule length, internal","hints":["boundary","ref"]}
+{"id":"A0178","carrier":"docs/trajectory-memory.md","file_line":73,"text":"counter consistency (`pairs.support = support.adopts × support.rejects`, side","hints":["boundary","modal"]}
+{"id":"A0179","carrier":"docs/trajectory-memory.md","file_line":74,"text":"counts equal the support counts, attempt ids unique and bounded), recomputed","hints":["modal"]}
+{"id":"A0180","carrier":"docs/trajectory-memory.md","file_line":77,"text":"Candidate mode without a store is","hints":["boundary"]}
+{"id":"A0181","carrier":"docs/trajectory-memory.md","file_line":78,"text":"A refused candidate exits 2 before any proposer","hints":["number","boundary"]}
+{"id":"A0182","carrier":"docs/trajectory-memory.md","file_line":80,"text":"to the v1 proposer request, rejects a response that moves the objective","hints":["number","boundary","modal"]}
+{"id":"A0183","carrier":"docs/trajectory-memory.md","file_line":82,"text":"after one cycle (or `candidate_failed` when the pinned proposal fails).","hints":["boundary","roadmap"]}
+{"id":"A0184","carrier":"docs/trajectory-memory.md","file_line":82,"text":"Requests without a candidate keep their previous shape.","hints":["boundary","modal"]}
+{"id":"A0185","carrier":"docs/trajectory-memory.md","file_line":91,"text":"- Defaults: `~/.gjc-plugin/rrsi/store.json`, `self-improve/ledger.jsonl`, domain","hints":["ref"]}
+{"id":"A0186","carrier":"docs/trajectory-memory.md","file_line":93,"text":"- Exit codes: 0 normal (including a missing store); 2 unknown domain, objective","hints":["number","boundary"]}
+{"id":"A0187","carrier":"docs/trajectory-memory.md","file_line":94,"text":"outside the declaration, or invalid `--max-lag`; 3 corrupt or unreadable","hints":["number"]}
+{"id":"A0188","carrier":"docs/trajectory-memory.md","file_line":96,"text":"- Output carries no clock value, so identical inputs produce byte-identical","hints":["boundary"]}
+{"id":"A0189","carrier":"docs/trajectory-memory.md","file_line":99,"text":"`ledgerPath: self-improve/ledger.jsonl` (or wait for the due-gated","hints":["ref"]}
+{"id":"A0190","carrier":"docs/trajectory-memory.md","file_line":101,"text":"`rrsi import` projects an existing ledger; it does not create ledger rows.","hints":["boundary","modal"]}
+{"id":"A0191","carrier":"docs/trajectory-memory.md","file_line":103,"text":"## Measured result (frozen inputs, 2026-10-21)","hints":["number","modal"]}
+{"id":"A0192","carrier":"docs/trajectory-memory.md","file_line":105,"text":"Inputs frozen at `.gjc/distill-demo/inputs/` from the live store and ledger:","hints":["modal","ref"]}
+{"id":"A0193","carrier":"docs/trajectory-memory.md","file_line":109,"text":"| `store.attempts` / `undeclared` | 212 / 42 groups, 198 attempts |","hints":["number"]}
+{"id":"A0194","carrier":"docs/trajectory-memory.md","file_line":110,"text":"| `projection` | `maxDrawnFrom 16`, `ledgerHead 31`, `storeLag 15`, `label stale` |","hints":["number"]}
+{"id":"A0195","carrier":"docs/trajectory-memory.md","file_line":111,"text":"| `candidates` / `withheld` / `skipped` | 0 / 0 / 3 |","hints":["number"]}
+{"id":"A0196","carrier":"docs/trajectory-memory.md","file_line":112,"text":"| `probe.decision_accuracy` | `contradicted`, `drawnFrom 14`, lag 17, support 1/1, contradiction 1/4, unexplained 1/1 (6 pairs) |","hints":["number","modal","ref"]}
+{"id":"A0197","carrier":"docs/trajectory-memory.md","file_line":113,"text":"| `probe.extract_coverage` | `objective_not_gated`, `drawnFrom 16`, lag 15 |","hints":["number"]}
+{"id":"A0198","carrier":"docs/trajectory-memory.md","file_line":114,"text":"| `probe.egress_boundary` | `objective_not_gated`, `drawnFrom 9`, lag 22 |","hints":["number"]}
+{"id":"A0199","carrier":"docs/trajectory-memory.md","file_line":116,"text":"Zero candidates is the intended outcome: the only group with both decisions is","hints":["boundary"]}
+{"id":"A0200","carrier":"docs/trajectory-memory.md","file_line":122,"text":"- a consolidated enterprise/ontology store;","hints":["ref"]}
+{"id":"A0201","carrier":"docs/trajectory-memory.md","file_line":124,"text":"- new gate thresholds, a new frozen corpus, or weakening an existing guard;","hints":["modal"]}
+{"id":"A0202","carrier":"docs/trajectory-memory.md","file_line":126,"text":"- capture-goal → objective classification.","hints":["modal"]}
+{"id":"A0203","carrier":"docs/trajectory-memory.md","file_line":130,"text":"- Unit (`tests/unit/distill.test.mjs`, 23 cases): unanimity, contradicted","hints":["number","ref"]}
+{"id":"A0204","carrier":"docs/trajectory-memory.md","file_line":133,"text":"candidate tamper/contradiction/staleness.","hints":["ref"]}
+{"id":"A0205","carrier":"docs/trajectory-memory.md","file_line":134,"text":"- Unit (`tests/unit/propose-contrast.test.mjs`): the contrast field is additive;","hints":["ref"]}
+{"id":"A0206","carrier":"docs/trajectory-memory.md","file_line":135,"text":"requests without it keep their previous shape.","hints":["boundary","modal"]}
+{"id":"A0207","carrier":"docs/trajectory-memory.md","file_line":136,"text":"- Integration (`tests/integration/distill-handoff.test.mjs`): fixture store and","hints":["ref"]}
+{"id":"A0208","carrier":"docs/trajectory-memory.md","file_line":137,"text":"ledger → candidate → real request → committed composer fixture → validation →","hints":["modal"]}
+{"id":"A0209","carrier":"docs/trajectory-memory.md","file_line":139,"text":"ledger unchanged, and a mismatched response objective refused.","hints":["boundary"]}
+{"id":"A0210","carrier":"docs/trajectory-memory.md","file_line":139,"text":"This is E5a","hints":["number"]}
+{"id":"A0211","carrier":"docs/trajectory-memory.md","file_line":140,"text":"and it is hermetic (no model, no network).","hints":["boundary"]}
+{"id":"A0212","carrier":"docs/trajectory-memory.md","file_line":141,"text":"- **Not executed:** E5b, the live `cmd` proposer plus build/test tier. Until it","hints":["number","boundary","ref"]}
+{"id":"A0213","carrier":"docs/trajectory-memory.md","file_line":142,"text":"runs, the guard-tier dry run is **unproven**; the E5a test is never described","hints":["number","boundary","modal"]}
+{"id":"A0214","carrier":"docs/trajectory-memory.md","file_line":143,"text":"as a guard-tier run.","hints":["modal"]}
+{"id":"A0215","carrier":"docs/trajectory-memory.md","file_line":144,"text":"- All suites: `verify-unit.mjs` and `verify-integration.mjs` report ALL PASS.","hints":["modal"]}
+{"id":"A0216","carrier":"docs/trajectory-memory.md","file_line":148,"text":"- REM, arXiv 2610.27377: phase-structured consolidation; reported 68.7% vs","hints":["number"]}
+{"id":"A0217","carrier":"docs/trajectory-memory.md","file_line":149,"text":"55.6% match@1 and 27.6% vs 24.9% end-task at 17% lower cost.","hints":["number"]}
+{"id":"A0218","carrier":"docs/trajectory-memory.md","file_line":150,"text":"- MemDev-Bench, arXiv 2610.27524: unrelated history increases failures; agents","hints":["number"]}
+{"id":"A0219","carrier":"docs/trajectory-memory.md","file_line":151,"text":"reuse memory without reassessing applicability.","hints":["boundary"]}
+{"id":"A0220","carrier":"docs/trajectory-memory.md","file_line":152,"text":"- More Memory, Worse Agents, arXiv 2610.27406: persisted abstractions reproduce","hints":["number","modal"]}
+{"id":"A0221","carrier":"docs/trajectory-memory.md","file_line":153,"text":"errors; keep accumulation and abstraction persistence separate.","hints":["modal"]}
+{"id":"A0222","carrier":"docs/trajectory-memory.md","file_line":155,"text":"Numbers above are the sources' own reports, not measurements here.","hints":["boundary","modal"]}
+{"id":"A0223","carrier":"rrsi/README.md","file_line":3,"text":"The plugin captures","hints":["modal"]}
+{"id":"A0224","carrier":"rrsi/README.md","file_line":4,"text":"exploration episodes, projects real journals into attempt records and replays","hints":["modal"]}
+{"id":"A0225","carrier":"rrsi/README.md","file_line":5,"text":"them through the same deterministic replay/dreaming core the repository's","hints":["ref"]}
+{"id":"A0226","carrier":"rrsi/README.md","file_line":6,"text":"`self-improve` loop uses — as an instrument, not as a model upgrade.","hints":["boundary"]}
+{"id":"A0227","carrier":"rrsi/README.md","file_line":7,"text":"due-gated `session_start` hook keeps the store refreshed; there is no timer","hints":["boundary","modal"]}
+{"id":"A0228","carrier":"rrsi/README.md","file_line":8,"text":"process and no wall-clock scheduler.","hints":["boundary"]}
+{"id":"A0229","carrier":"rrsi/README.md","file_line":10,"text":"**Scope (functional acceptance only).** rrsi captures exploration episodes,","hints":["modal"]}
+{"id":"A0230","carrier":"rrsi/README.md","file_line":11,"text":"projects journals into attempt records and replays them through the bundled","hints":["modal"]}
+{"id":"A0231","carrier":"rrsi/README.md","file_line":12,"text":"The performance proof (P1–P3) applies to the `self-improve` loop","hints":["number"]}
+{"id":"A0232","carrier":"rrsi/README.md","file_line":13,"text":"and its frozen corpus, not to this plugin; no accuracy, savings, routing or","hints":["boundary","modal"]}
+{"id":"A0233","carrier":"rrsi/README.md","file_line":20,"text":"`session_start` hook (`hooks/rrsi-periodic.ts`) that performs the due-gated","hints":["ref"]}
+{"id":"A0234","carrier":"rrsi/README.md","file_line":25,"text":"| `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |","hints":["modal","ref"]}
+{"id":"A0235","carrier":"rrsi/README.md","file_line":26,"text":"| `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`) and `projectionDigest`, and `wrote: { persisted:false, reason:\"store_busy\" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |","hints":["number","boundary","modal","ref"]}
+{"id":"A0236","carrier":"rrsi/README.md","file_line":27,"text":"| `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |","hints":["number","boundary","modal","ref"]}
+{"id":"A0237","carrier":"rrsi/README.md","file_line":28,"text":"| _other_ | — | Rejected as a tool error (`isError: true`) with `error: \"unknown action: <value>\"`; the store is read, never written. |","hints":["boundary","modal"]}
+{"id":"A0238","carrier":"rrsi/README.md","file_line":29,"text":"| `status` | — | Store counts (episodes/attempts/adoptions), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |","hints":["ref"]}
+{"id":"A0239","carrier":"rrsi/README.md","file_line":32,"text":"shared plugin journal (`~/.gjc-plugin/rrsi/journal/v1/`, retained-window","hints":["number","ref"]}
+{"id":"A0240","carrier":"rrsi/README.md","file_line":33,"text":"counts only — no goals, attempt payloads or credentials).","hints":["boundary"]}
+{"id":"A0241","carrier":"rrsi/README.md","file_line":34,"text":"no network path, no credentials, no model calls, no timer process.","hints":["boundary"]}
+{"id":"A0242","carrier":"rrsi/README.md","file_line":39,"text":"executed on GJC's own session lifecycle — never a wall-clock scheduler.","hints":["boundary"]}
+{"id":"A0243","carrier":"rrsi/README.md","file_line":40,"text":"periods without sessions do not refresh, and `launchd`/`cron`-style scheduling","hints":["boundary"]}
+{"id":"A0244","carrier":"rrsi/README.md","file_line":43,"text":"- **Trigger and interval.** Every fresh GJC session (interactive, print/SDK,","hints":["ref"]}
+{"id":"A0245","carrier":"rrsi/README.md","file_line":44,"text":"The default interval is 24 h;","hints":["number"]}
+{"id":"A0246","carrier":"rrsi/README.md","file_line":45,"text":"`RRSI_PERIODIC_INTERVAL_MS` (milliseconds, ≥ 60 000) overrides it.","hints":["number"]}
+{"id":"A0247","carrier":"rrsi/README.md","file_line":46,"text":"`RRSI_PERIODIC=off` disables the refresh without consuming the interval.","hints":["boundary"]}
+{"id":"A0248","carrier":"rrsi/README.md","file_line":48,"text":"journal, projects the newest `limit = 160` records into one content-keyed","hints":["number","modal"]}
+{"id":"A0249","carrier":"rrsi/README.md","file_line":49,"text":"derived episode (`ep-jev-<digest12>-0`; a larger configured limit chunks at","hints":["number"]}
+{"id":"A0250","carrier":"rrsi/README.md","file_line":50,"text":"160 attempts per episode with the same digest rules) and replaces that source","hints":["number"]}
+{"id":"A0251","carrier":"rrsi/README.md","file_line":51,"text":"class as a whole; byte-identical content skips the write entirely.","hints":["modal"]}
+{"id":"A0252","carrier":"rrsi/README.md","file_line":53,"text":"(measured at implementation time: 40 attempts ≈ 59 ms; 160 ≈ 0.8 s; 480 ≈","hints":["number"]}
+{"id":"A0253","carrier":"rrsi/README.md","file_line":54,"text":"18.6 s), so corpora above 160 attempts are completed by a detached worker","hints":["number"]}
+{"id":"A0254","carrier":"rrsi/README.md","file_line":55,"text":"(`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`, spawned by the hook,","hints":["number","ref"]}
+{"id":"A0255","carrier":"rrsi/README.md","file_line":58,"text":"`{records, projected, omitted, ratio, limited}` and `limited_projection`;","hints":["modal"]}
+{"id":"A0256","carrier":"rrsi/README.md","file_line":59,"text":"omitted records are labeled, never silently dropped.","hints":["boundary","modal"]}
+{"id":"A0257","carrier":"rrsi/README.md","file_line":61,"text":"- **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`","hints":["ref"]}
+{"id":"A0258","carrier":"rrsi/README.md","file_line":62,"text":"(schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records","hints":["number","modal"]}
+{"id":"A0259","carrier":"rrsi/README.md","file_line":66,"text":"`~/.gjc-plugin/rrsi/runs/v1/<receiptId>.json` (schema","hints":["number","ref"]}
+{"id":"A0260","carrier":"rrsi/README.md","file_line":67,"text":"`gjc.rrsi.periodic.run.v1`, ≤ 64 KiB each, ≤ 60 retained, oldest pruned on","hints":["number"]}
+{"id":"A0261","carrier":"rrsi/README.md","file_line":68,"text":"write).","hints":["modal"]}
+{"id":"A0262","carrier":"rrsi/README.md","file_line":69,"text":"appends exactly one sanitized `dream` record to","hints":["modal"]}
+{"id":"A0263","carrier":"rrsi/README.md","file_line":70,"text":"`~/.gjc-plugin/rrsi/journal/v1/`; `skipped_due` / `skipped_locked` /","hints":["number","ref"]}
+{"id":"A0264","carrier":"rrsi/README.md","file_line":71,"text":"`skipped_disabled` write nothing.","hints":["modal"]}
+{"id":"A0265","carrier":"rrsi/README.md","file_line":72,"text":"- **Outcome taxonomy.** `ran` (store written: `added`/`replaced`) ·","hints":["modal"]}
+{"id":"A0266","carrier":"rrsi/README.md","file_line":73,"text":"`unchanged` (due run, byte-identical content, no write) · `deferred` (large","hints":["boundary","modal"]}
+{"id":"A0267","carrier":"rrsi/README.md","file_line":74,"text":"corpus handed to the detached worker) · `no_input` (journal missing/empty;","hints":["boundary","ref"]}
+{"id":"A0268","carrier":"rrsi/README.md","file_line":78,"text":"15 min base, doubling per consecutive failure, capped at the interval — and a","hints":["number"]}
+{"id":"A0269","carrier":"rrsi/README.md","file_line":79,"text":"dream failure is recorded as an `error` receipt/state, never a masked","hints":["boundary","ref"]}
+{"id":"A0270","carrier":"rrsi/README.md","file_line":82,"text":"interval only when it is absent); `clockSkew` and `lockTakeover` are recorded","hints":["boundary"]}
+{"id":"A0271","carrier":"rrsi/README.md","file_line":85,"text":"hook writes the import, a handoff state (`lastStatus: \"deferred\"`) and a","hints":["modal"]}
+{"id":"A0272","carrier":"rrsi/README.md","file_line":87,"text":"worker re-runs under the same locks and writes its own receipt, the single","hints":["modal"]}
+{"id":"A0273","carrier":"rrsi/README.md","file_line":88,"text":"`dream` journal record and the success stamps.","hints":["modal"]}
+{"id":"A0274","carrier":"rrsi/README.md","file_line":88,"text":"A failed spawn is recorded as","hints":["boundary","modal"]}
+{"id":"A0275","carrier":"rrsi/README.md","file_line":89,"text":"`worker_spawn_failed` (bounded — no crash) and writes no handoff receipt.","hints":["boundary","modal"]}
+{"id":"A0276","carrier":"rrsi/README.md","file_line":90,"text":"- **Failure isolation.** A broken run never blocks or fails a session: every","hints":["boundary"]}
+{"id":"A0277","carrier":"rrsi/README.md","file_line":91,"text":"failure is a bounded result recorded in state (plus one journal record);","hints":["modal"]}
+{"id":"A0278","carrier":"rrsi/README.md","file_line":92,"text":"corrupt/oversized stores are reported and never reset or repaired; a","hints":["boundary","ref"]}
+{"id":"A0279","carrier":"rrsi/README.md","file_line":93,"text":"`resource_limit` or `store_unavailable` write keeps the store untouched and","hints":["modal"]}
+{"id":"A0280","carrier":"rrsi/README.md","file_line":94,"text":"records an error receipt with `persisted: false`; a lock older than","hints":["modal"]}
+{"id":"A0281","carrier":"rrsi/README.md","file_line":95,"text":"2 × 12 s may be taken over once.","hints":["number"]}
+{"id":"A0282","carrier":"rrsi/README.md","file_line":95,"text":"Stored future timestamps beyond 5 minutes","hints":["number","roadmap"]}
+{"id":"A0283","carrier":"rrsi/README.md","file_line":97,"text":"- **Rollback.** Set `RRSI_PERIODIC=off` (immediate, no uninstall), disable the","hints":["boundary"]}
+{"id":"A0284","carrier":"rrsi/README.md","file_line":98,"text":"hook surface if the loader supports per-surface disable, or","hints":["modal"]}
+{"id":"A0285","carrier":"rrsi/README.md","file_line":104,"text":"`~/.gjc-plugin/rrsi/store.json` — private `0700` directory, `0600` single-link","hints":["number","ref"]}
+{"id":"A0286","carrier":"rrsi/README.md","file_line":105,"text":"file, written atomically (temp + rename).","hints":["modal"]}
+{"id":"A0287","carrier":"rrsi/README.md","file_line":105,"text":"Bounded: 128 episodes, 160 attempts per","hints":["number"]}
+{"id":"A0288","carrier":"rrsi/README.md","file_line":106,"text":"episode, 512 KiB store, 4 MiB source reads, 40-char identifiers, 280-char text","hints":["number"]}
+{"id":"A0289","carrier":"rrsi/README.md","file_line":107,"text":"Absent, corrupt, symlinked or oversized stores are **reported** as","hints":["boundary"]}
+{"id":"A0290","carrier":"rrsi/README.md","file_line":108,"text":"`missing` / `invalid` and never reset or repaired; the store is never committed","hints":["boundary","modal"]}
+{"id":"A0291","carrier":"rrsi/README.md","file_line":110,"text":"(`periodic.lock`, `store.lock`) and run receipts (`runs/v1/`) live under the","hints":["number","ref"]}
+{"id":"A0292","carrier":"rrsi/README.md","file_line":111,"text":"same root with the same ownership/mode rules.","hints":["ref"]}
+{"id":"A0293","carrier":"rrsi/README.md","file_line":117,"text":"| jev-advisor journal record | branch `objective` = `<operation>:<tier or advice status>`; `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the record carries a decision, else `reject`; `wallMs` = `durationMs`; `provenance` = the journal record id |","hints":["boundary","modal"]}
+{"id":"A0294","carrier":"rrsi/README.md","file_line":118,"text":"| `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict; `wallMs` = recorded cost; `guardFailures` = non-passing guard ids; `provenance` = the cycle id |","hints":["modal","ref"]}
+{"id":"A0295","carrier":"rrsi/README.md","file_line":124,"text":"array and the applied limit; ids `ep-jev-<digest12>-<n>` /","hints":["number"]}
+{"id":"A0296","carrier":"rrsi/README.md","file_line":125,"text":"`ep-ledger-<digest12>-<n>`, `createdAt: derived:<digest12>`): identical content","hints":["number"]}
+{"id":"A0297","carrier":"rrsi/README.md","file_line":128,"text":"User `capture` episodes are never","hints":["boundary","modal"]}
+{"id":"A0298","carrier":"rrsi/README.md","file_line":131,"text":"## Bundling decision (M5)","hints":["number"]}
+{"id":"A0299","carrier":"rrsi/README.md","file_line":133,"text":"`scripts/build.mjs` emits two self-contained surfaces, exactly like the sibling","hints":["modal","ref"]}
+{"id":"A0300","carrier":"rrsi/README.md","file_line":134,"text":"plugins: `tools/rrsi.ts` (the tool) and `hooks/rrsi-periodic.ts` (the","hints":["ref"]}
+{"id":"A0301","carrier":"rrsi/README.md","file_line":136,"text":"shared journaling core (`../shared/lib/results.ts`) and the Dream-RSI core","hints":["ref"]}
+{"id":"A0302","carrier":"rrsi/README.md","file_line":137,"text":"(`../self-improve/lib/{types,ledger,replay,dream,policy}.mjs`); local imports","hints":["ref"]}
+{"id":"A0303","carrier":"rrsi/README.md","file_line":140,"text":"installer copies only manifest-declared files, so the generated hook must not","hints":["boundary"]}
+{"id":"A0304","carrier":"rrsi/README.md","file_line":141,"text":"`--check` provides a non-mutating","hints":["modal"]}
+{"id":"A0305","carrier":"rrsi/README.md","file_line":154,"text":"The verifier uses a temporary isolated `HOME`; the real `~/.gjc-plugin/rrsi`","hints":["ref"]}
+{"id":"A0306","carrier":"rrsi/README.md","file_line":155,"text":"store is never touched.","hints":["boundary"]}
+{"id":"A0307","carrier":"rrsi/README.md","file_line":158,"text":"real journal is unavailable the verifier records the measured count (null/0)","hints":["number","modal","ref"]}
+{"id":"A0308","carrier":"rrsi/README.md","file_line":160,"text":"`rrsi/tests/periodic.test.mjs` is the node-native file eligible for","hints":["ref"]}
+{"id":"A0309","carrier":"self-improve/README.md","file_line":8,"text":"plus declared probes, and records every decision in an append-only ledger","hints":["modal"]}
+{"id":"A0310","carrier":"self-improve/README.md","file_line":9,"text":"(`ledger.jsonl`) that is committed as the proof stream.","hints":["modal"]}
+{"id":"A0311","carrier":"self-improve/README.md","file_line":15,"text":"| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `runner`, `propose`, `loop`, `replay`, `dream`, `policy`) |","hints":["modal"]}
+{"id":"A0312","carrier":"self-improve/README.md","file_line":16,"text":"| `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON, incl. per-case `failures` labels) |","hints":["ref"]}
+{"id":"A0313","carrier":"self-improve/README.md","file_line":17,"text":"| `scripts/run.mjs` | CLI (`report`, `cycle`, `loop`, `recover`, `prune`, `runner`, `history`) |","hints":["modal","ref"]}
+{"id":"A0314","carrier":"self-improve/README.md","file_line":18,"text":"| `scripts/verify-unit.mjs` | runs the unit suite; prints `ALL PASS (N cases)`; zero cases fails |","hints":["boundary","ref"]}
+{"id":"A0315","carrier":"self-improve/README.md","file_line":19,"text":"| `scripts/verify-integration.mjs` | runs the integration suite the same way; part of the `test:self-improve` chain and therefore every cycle's `test` guard |","hints":["modal","ref"]}
+{"id":"A0316","carrier":"self-improve/README.md","file_line":20,"text":"| `tests/unit/` | `node:test` unit suite (node builtins only) |","hints":["ref"]}
+{"id":"A0317","carrier":"self-improve/README.md","file_line":21,"text":"| `tests/integration/` | `node:test` integration suite (temp git fixtures; calls the real `gjc`/`bun`/`git` toolchain) |","hints":["ref"]}
+{"id":"A0318","carrier":"self-improve/README.md","file_line":23,"text":"| `DREAM.md` | replay/dreaming protocol spec: digest-epoch rule, reveal protocol, thresholds, pinned caveat, residual-surface note |","hints":["ref"]}
+{"id":"A0319","carrier":"self-improve/README.md","file_line":24,"text":"| `replay-protocol.json` | pre-registered P2 numbers/epoch/reveal/threshold statements (committed before the dream run) |","hints":["number","modal","ref"]}
+{"id":"A0320","carrier":"self-improve/README.md","file_line":25,"text":"| `policies/` | committed policy artifacts (`<id>.json`) plus the `current.json` pointer |","hints":["modal"]}
+{"id":"A0321","carrier":"self-improve/README.md","file_line":26,"text":"| `PATTERNS.md` | proposer/review rules (commit pattern, resubmission ban, threat model, labels) |","hints":["modal","ref"]}
+{"id":"A0322","carrier":"self-improve/README.md","file_line":31,"text":"annealed edit budget, pruner, and proposal-side history/stall regularization.","hints":["ref","roadmap"]}
+{"id":"A0323","carrier":"self-improve/README.md","file_line":36,"text":"- Candidates run in `git archive` scratch copies with an allowlisted environment; the live `~/.gjc/agent` is never modified. Installation is an explicit `--install` flag on an accepted cycle.","hints":["boundary","modal","ref"]}
+{"id":"A0324","carrier":"self-improve/README.md","file_line":37,"text":"- Keyless: the loop never reads credentials; logs and ledger rows contain no secrets.","hints":["boundary"]}
+{"id":"A0325","carrier":"self-improve/README.md","file_line":38,"text":"- Commits: at most three main commits per accepted cycle — ledger-only `chore(self-improve): cycle <cycleId> <decision>`, the code commit, and ledger-only `chore(self-improve): record adoption <cycleId>`. Push, install and release stay separate steps.","hints":["modal"]}
+{"id":"A0326","carrier":"self-improve/README.md","file_line":39,"text":"- `subskills/jev-advisor/SKILL.md` is scored only as a `text_fixture` (plain text input); it is not a runtime-loaded surface.","hints":["boundary","ref"]}
+{"id":"A0327","carrier":"self-improve/README.md","file_line":43,"text":"The deterministic cycle engine is in place (gates, guard pipeline, scratch-copy","hints":["modal"]}
+{"id":"A0328","carrier":"self-improve/README.md","file_line":44,"text":"isolation, replay-gated adoption, ledger commits, crash recovery), together with","hints":["modal"]}
+{"id":"A0329","carrier":"self-improve/README.md","file_line":45,"text":"the deterministic probe/held-out suites, history conditioning (duplicate-hypothesis","hints":["ref"]}
+{"id":"A0330","carrier":"self-improve/README.md","file_line":46,"text":"ban, forced exploration) and the k>=3 local-stub stochastic runner.","hints":["number"]}
+{"id":"A0331","carrier":"self-improve/README.md","file_line":47,"text":"automatic loop (`loop`) drives that engine without hand-written proposals via the","hints":["boundary","modal"]}
+{"id":"A0332","carrier":"self-improve/README.md","file_line":49,"text":"The real-cycle report lands with the final","hints":["modal"]}
+{"id":"A0333","carrier":"self-improve/README.md","file_line":52,"text":"Trajectory-memory layer 1 (`lib/distill.mjs`, `distill`, schema v2) reads the","hints":["number","ref"]}
+{"id":"A0334","carrier":"self-improve/README.md","file_line":53,"text":"rrsi store and this ledger read-only and emits deterministic contrastive","hints":["modal"]}
+{"id":"A0335","carrier":"self-improve/README.md","file_line":55,"text":"Unbound evidence is never emitted and stale groups are","hints":["boundary","modal"]}
+{"id":"A0336","carrier":"self-improve/README.md","file_line":57,"text":"and gate path; it does not patch, adopt, or write either input.","hints":["boundary","modal"]}
+{"id":"A0337","carrier":"self-improve/README.md","file_line":58,"text":"`docs/trajectory-memory.md`.","hints":["ref"]}
+{"id":"A0338","carrier":"self-improve/README.md","file_line":100,"text":"the engine (full evaluation, no ledger rows and no commits).","hints":["boundary","modal"]}
+{"id":"A0339","carrier":"self-improve/README.md","file_line":103,"text":"editable surfaces, rung caps (`maxFiles`/`maxHunks`), base commit, prior attempts,","hints":["modal"]}
+{"id":"A0340","carrier":"self-improve/README.md","file_line":104,"text":"and constraints (editable-only, no network, no timers, no secrets, patch must","hints":["boundary"]}
+{"id":"A0341","carrier":"self-improve/README.md","file_line":108,"text":"`self-improve/domains/**` excluded (held-out fixtures never reach the proposer),","hints":["boundary","ref"]}
+{"id":"A0342","carrier":"self-improve/README.md","file_line":110,"text":"and loop logs record env key names only, never values.","hints":["boundary","modal"]}
+{"id":"A0343","carrier":"self-improve/README.md","file_line":111,"text":"without `--live-approved` the invocation is recorded `skipped`.","hints":["boundary"]}
+{"id":"A0344","carrier":"self-improve/README.md","file_line":112,"text":"- Live template: `--proposer-cmd 'node self-improve/scripts/propose-with-gjc.mjs {request} {response}'`","hints":["ref"]}
+{"id":"A0345","carrier":"self-improve/README.md","file_line":113,"text":"drives the installed `gjc` CLI (`--print`, non-interactive, no tools) with a","hints":["boundary","modal"]}
+{"id":"A0346","carrier":"self-improve/README.md","file_line":114,"text":"strict \"reply with one JSON object\" prompt and writes the first complete JSON","hints":["modal"]}
+{"id":"A0347","carrier":"self-improve/README.md","file_line":115,"text":"Model/binary/timeout overrides are","hints":["ref"]}
+{"id":"A0348","carrier":"self-improve/README.md","file_line":117,"text":"`GJC_PROPOSER_TIMEOUT_MS=…`); the helper never logs environment values.","hints":["boundary"]}
+{"id":"A0349","carrier":"self-improve/README.md","file_line":118,"text":"runs still require `--live-approved` and the frozen caps in","hints":["modal"]}
+{"id":"A0350","carrier":"self-improve/README.md","file_line":122,"text":"added lines only (probe-corpus vocabulary is not treated as held-out; matches","hints":["boundary"]}
+{"id":"A0351","carrier":"self-improve/README.md","file_line":125,"text":"(proposal preparation only — engine cycles stay serialized by the cycle lock).","hints":["roadmap"]}
+{"id":"A0352","carrier":"self-improve/README.md","file_line":126,"text":"No timers; guard failures are never retried; a crashed cycle is swept by","hints":["boundary","modal"]}
+{"id":"A0353","carrier":"self-improve/README.md","file_line":128,"text":"- **HEAD-moved rule**: a proposal authored against an old HEAD is discarded","hints":["roadmap"]}
+{"id":"A0354","carrier":"self-improve/README.md","file_line":130,"text":"- **State**: only under `<run-root>/loop-<loopId>/` (`~/.gjc-plugin/self-improve`","hints":["ref"]}
+{"id":"A0355","carrier":"self-improve/README.md","file_line":133,"text":"Nothing is written into the repository outside the","hints":["modal"]}
+{"id":"A0356","carrier":"self-improve/README.md","file_line":134,"text":"engine's own ledger commits.","hints":["modal"]}
+{"id":"A0357","carrier":"self-improve/README.md","file_line":135,"text":"- **Pre-registration**: `rrsi-protocol.json` freezes the headroom derivation","hints":["modal"]}
+{"id":"A0358","carrier":"self-improve/README.md","file_line":136,"text":"(denominator, per-case delta, required repaired cases), the spec-sourced gap","hints":["modal"]}
+{"id":"A0359","carrier":"self-improve/README.md","file_line":137,"text":"clusters, the M2/M4 caps with auto-stop, the dual-floor decision rule, the P2","hints":["number","ref","roadmap"]}
+{"id":"A0360","carrier":"self-improve/README.md","file_line":138,"text":"validation minimum, the corpus sha256 and the no-post-hoc-edits sentence.","hints":["number","boundary"]}
+{"id":"A0361","carrier":"self-improve/README.md","file_line":139,"text":"Headroom cases live in `domains/gjc-plugin/probes/fixtures.json` with a","hints":["ref"]}
+{"id":"A0362","carrier":"self-improve/README.md","file_line":145,"text":"**Establishes:** the Dream-RSI core (trace→replay→dreaming→redeploy) is implemented, real, and functional on this repository's recorded search space; the loop landed a real, guard-green, heldout-clean, committed improvement without a hand-written proposal (**P1 DEGRADED — 1 adoption, the plan's minimum count; target 2 not reached because the single adopted patch consumed the remaining headroom**); the protocol was frozen and content-hashed before the evidence runs (commits re-created into review order afterward — integrity-pre/post receipts prove no post-hoc changes) and the dream is deterministic and byte-reproducible; **measured checkpoint — P2:** the corpus froze below the pass gate (13 attempts < 20; pass-1 floor of 12 met), so the frozen verdict is `insufficient evidence at pass-gate size — thresholds not evaluated` and the advisory numbers (π* 6 attempts / 408s vs baselines 12 / 874s; validation-slice advisory smaller) are NOT a met-threshold claim; **measured checkpoint — P3:** the redeployed policy (`pi-1-25`) steered six live completed cycles — one earlier (`cyc-20261018182238-50bb`) and five in the final campaign (`cyc-20261018185941-9f39`, `cyc-20261018190244-9942`, `cyc-20261018190540-fab5`, `cyc-20261018190917-97bb`, `cyc-20261018191208-3956`) — with zero guard failures across all seven guards, so the five-cycle redeploy floor is met.","hints":["number","boundary","modal","ref","roadmap"]}
+{"id":"A0363","carrier":"self-improve/README.md","file_line":145,"text":"All five final-campaign cycles were rejected (`floor_not_met`; two also `critic_secret` and one also `cost_rule`; the `critic_secret` blocks are verdict reasons, not guard failures), held-out coverage stayed 1.0 with zero regressions, and the redeployed state operates within the safety gates.","hints":["number","boundary","modal"]}
+{"id":"A0364","carrier":"self-improve/README.md","file_line":145,"text":"The final campaign's receipts are `self-improve/evidence/p3/`; the earlier provider outages are recorded in the P3 evidence.","hints":["number","ref"]}
+{"id":"A0365","carrier":"self-improve/README.md","file_line":145,"text":"**Does not establish:** statistical significance (n is tens; one realized corpus; post-hoc counterfactual reuse of recorded outcomes and costs); generalization to other repos/domains; superiority over human choices (baseline is fixed exploration); live-provider equivalence to stub behavior; indefinite improvement.","hints":["boundary","modal","ref"]}
+{"id":"A0366","carrier":"self-improve/README.md","file_line":145,"text":"**Session-authored corpus disclosure [F03]:** the probe corpus was expanded *this session* with spec-sourced cases (each carrying a `provenance` field) and session-authored held-out parallels; the P1 adoption deltas are measured on that expanded corpus under the documented best-effort held-out threat model — not on an externally curated benchmark.","hints":["number","boundary"]}
+{"id":"A0367","carrier":"self-improve/README.md","file_line":145,"text":"This full text ships verbatim in `self-improve/README.md` and the v0.0.6 release notes (whose scope is this session's change set only) [F08].","hints":["number","ref"]}
+{"id":"A0368","carrier":"self-improve/README.md","file_line":147,"text":"**Post-v0.0.6 update (JJO-213):** a second real adoption cycle (`cyc-20261018172021-6f5f`) replayed the live proposer's probability-bound patch and was adopted: delta 0.0588 >= 0.01, held-out coverage 0.9667 → 1.0 with no regressions, all seven guards pass, code commit `079da02` (six files, including the regenerated surfaces) and the adoption-recorded ledger row.","hints":["number","boundary","modal","ref"]}
+{"id":"A0369","carrier":"self-improve/README.md","file_line":147,"text":"The first adoption (`95f1600`) ran `--install`; the second was installed manually after the cycle and verified in the user-scope install, so the P1 dual-floor's \">=2 adoption cycles\" is met.","hints":["number","modal","ref"]}
+{"id":"A0370","carrier":"self-improve/README.md","file_line":147,"text":"The second adoption is a manual replay, not a second live-proposer launch, and the P2 corpus remains frozen at 13 attempts below the 20 pass gate; the P2/P3 measured checkpoints above are unchanged.","hints":["number","boundary","modal","ref"]}
+{"id":"A0371","carrier":"self-improve/README.md","file_line":147,"text":"The v0.0.6 text remains the release-time disclosure.","hints":["number"]}
+{"id":"A0372","carrier":"self-improve/README.md","file_line":150,"text":"## Replay and dreaming (P2/P3)","hints":["number","ref"]}
+{"id":"A0373","carrier":"self-improve/README.md","file_line":152,"text":"Recorded cycles are replayed off-policy (no agent, no evaluator rerun) as","hints":["boundary"]}
+{"id":"A0374","carrier":"self-improve/README.md","file_line":155,"text":"Baselines B0 (recorded order) and B1 (round-robin) and the dreamed policy π\\*","hints":["number"]}
+{"id":"A0375","carrier":"self-improve/README.md","file_line":156,"text":"(selected on the train split from ≤48 deterministic candidates) are scored on","hints":["number"]}
+{"id":"A0376","carrier":"self-improve/README.md","file_line":159,"text":"protocol are frozen in `replay-protocol.json`; the full spec is `DREAM.md`.","hints":["modal"]}
+{"id":"A0377","carrier":"self-improve/README.md","file_line":161,"text":"*\"All P2 comparisons are off-policy replays over ONE realized corpus of fewer","hints":["number"]}
+{"id":"A0378","carrier":"self-improve/README.md","file_line":162,"text":"than ~24 recorded attempts; no statistical significance is claimed; effect","hints":["number","boundary"]}
+{"id":"A0379","carrier":"self-improve/README.md","file_line":163,"text":"sizes are reported with n and are not confidence-interval estimates of future","hints":["boundary","roadmap"]}
+{"id":"A0380","carrier":"self-improve/README.md","file_line":164,"text":"performance; the cost proxy is load-dependent recorded wallMs, not a fresh","hints":["boundary"]}
+{"id":"A0381","carrier":"self-improve/README.md","file_line":167,"text":"Below the pass gate the verdict is `insufficient evidence at pass-gate size —","hints":["boundary"]}
+{"id":"A0382","carrier":"self-improve/README.md","file_line":168,"text":"thresholds not evaluated` (measured, never downgraded), and a met threshold is","hints":["boundary","modal"]}
+{"id":"A0383","carrier":"self-improve/README.md","file_line":169,"text":"reported as \"met the pre-registered P2 thresholds\", never as bare \"proven\".","hints":["number","boundary","modal"]}
+{"id":"A0384","carrier":"self-improve/README.md","file_line":173,"text":"1.","hints":["number"]}
+{"id":"A0385","carrier":"self-improve/README.md","file_line":173,"text":"Write a proposal JSON next to its patch; `patchFile` resolves relative to the","hints":["modal","roadmap"]}
+{"id":"A0386","carrier":"self-improve/README.md","file_line":174,"text":"proposal file (`cycle`), or run the `loop` above and let the proposer author","hints":["roadmap"]}
+{"id":"A0387","carrier":"self-improve/README.md","file_line":176,"text":"2.","hints":["number"]}
+{"id":"A0388","carrier":"self-improve/README.md","file_line":177,"text":"guard set and probes, writes nothing and commits nothing.","hints":["modal"]}
+{"id":"A0389","carrier":"self-improve/README.md","file_line":178,"text":"3.","hints":["number"]}
+{"id":"A0390","carrier":"self-improve/README.md","file_line":179,"text":"`chore(self-improve): cycle <id> <decision>` commit.","hints":["modal"]}
+{"id":"A0391","carrier":"self-improve/README.md","file_line":180,"text":"commit (including regenerated surfaces) and the adoption row (see","hints":["modal"]}
+{"id":"A0392","carrier":"self-improve/README.md","file_line":181,"text":"Accepted cycles can optionally install with `--install`","hints":["modal"]}
+{"id":"A0393","carrier":"self-improve/README.md","file_line":184,"text":"4.","hints":["number"]}
+{"id":"A0394","carrier":"self-improve/README.md","file_line":184,"text":"`history --json` exposes recent rejects, per-objective reject streaks and","hints":["boundary","modal"]}
+{"id":"A0395","carrier":"self-improve/README.md","file_line":188,"text":"### Why every cycle, including a reject, is its own commit","hints":["boundary","modal"]}
+{"id":"A0396","carrier":"self-improve/README.md","file_line":190,"text":"The `chore(self-improve): cycle <id> reject` commits in `main`'s history are the","hints":["boundary","modal"]}
+{"id":"A0397","carrier":"self-improve/README.md","file_line":191,"text":"loop's proof stream, not noise.","hints":["boundary"]}
+{"id":"A0398","carrier":"self-improve/README.md","file_line":192,"text":"commit that recorded a decision can be located, the `prev` hash chain can be","hints":["modal"]}
+{"id":"A0399","carrier":"self-improve/README.md","file_line":193,"text":"checked commit by commit, and `recover` can roll back an interrupted cycle to","hints":["modal"]}
+{"id":"A0400","carrier":"self-improve/README.md","file_line":194,"text":"Batching rejects into one commit, amending them or","hints":["boundary","modal"]}
+{"id":"A0401","carrier":"self-improve/README.md","file_line":195,"text":"squashing history would break that one-row-per-commit recovery contract and","hints":["modal"]}
+{"id":"A0402","carrier":"self-improve/README.md","file_line":197,"text":"a separate code commit next to their ledger row.","hints":["modal"]}
+{"id":"A0403","carrier":"self-improve/README.md","file_line":199,"text":"Proposal shape:","hints":["roadmap"]}
+{"id":"A0404","carrier":"self-improve/README.md","file_line":211,"text":"The stochastic runner is keyless by default (`local_stub`: k>=3 pinned","hints":["number"]}
+{"id":"A0405","carrier":"self-improve/README.md","file_line":213,"text":"provider calls require `--live-approved` and an approved budget; without it the","hints":["boundary","modal"]}
+{"id":"A0406","carrier":"self-improve/DREAM.md","file_line":1,"text":"# DREAM.md — replay simulator, dreaming and redeploy (P2/P3)","hints":["number","ref"]}
+{"id":"A0407","carrier":"self-improve/DREAM.md","file_line":3,"text":"Status: **frozen** (M3b).","hints":["number","modal"]}
+{"id":"A0408","carrier":"self-improve/DREAM.md","file_line":3,"text":"The corpus is frozen in `replay-protocol.json` (ledger sha256 `72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e`, 13 attempts / 1 adoption, 2 epochs) and both files are committed before the dream run; the corpus hash fields in `replay-protocol.json` are","hints":["number","modal","ref"]}
+{"id":"A0409","carrier":"self-improve/DREAM.md","file_line":4,"text":"filled and both files are committed **before** the dream run (M3b); this file is","hints":["number","modal"]}
+{"id":"A0410","carrier":"self-improve/DREAM.md","file_line":7,"text":"## Corpus freeze (M3b)","hints":["number","modal"]}
+{"id":"A0411","carrier":"self-improve/DREAM.md","file_line":9,"text":"The P2 corpus is `self-improve/ledger.jsonl` at the M2 campaign close: sha256","hints":["number","ref","roadmap"]}
+{"id":"A0412","carrier":"self-improve/DREAM.md","file_line":10,"text":"`72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e`, 13 cycle rows (12 reject /","hints":["number","boundary","modal","ref"]}
+{"id":"A0413","carrier":"self-improve/DREAM.md","file_line":11,"text":"1 adopt) and 1 adoption row, partitioned into","hints":["number","modal"]}
+{"id":"A0414","carrier":"self-improve/DREAM.md","file_line":12,"text":"2 epochs by adoptions (adoption order preserved).","hints":["number"]}
+{"id":"A0415","carrier":"self-improve/DREAM.md","file_line":12,"text":"The frozen pass gate asks","hints":["modal"]}
+{"id":"A0416","carrier":"self-improve/DREAM.md","file_line":13,"text":"for 20 attempts; 13 is below it but meets the pass-1 floor of 12, so","hints":["number","modal"]}
+{"id":"A0417","carrier":"self-improve/DREAM.md","file_line":14,"text":"the dream run reports **\"insufficient evidence at pass-gate size - thresholds not evaluated\"**","hints":["boundary","modal"]}
+{"id":"A0418","carrier":"self-improve/DREAM.md","file_line":16,"text":"`replay-protocol.json` - no threshold is relaxed or re-derived.","hints":["boundary"]}
+{"id":"A0419","carrier":"self-improve/DREAM.md","file_line":30,"text":"No network, no timers, no model calls.","hints":["boundary"]}
+{"id":"A0420","carrier":"self-improve/DREAM.md","file_line":37,"text":"commits move HEAD without changing the graded surface.","hints":["boundary","modal"]}
+{"id":"A0421","carrier":"self-improve/DREAM.md","file_line":38,"text":"as provenance, never used as the epoch key.","hints":["boundary"]}
+{"id":"A0422","carrier":"self-improve/DREAM.md","file_line":42,"text":"- reject-only attempts inside an epoch are freely reorderable;","hints":["boundary","modal"]}
+{"id":"A0423","carrier":"self-improve/DREAM.md","file_line":45,"text":"(branch hypothesis novelty, prior revealed outcomes, prior guard-failure","hints":["modal"]}
+{"id":"A0424","carrier":"self-improve/DREAM.md","file_line":50,"text":"Selection sees ex-ante features only: objective/gap id, attempt index within the","hints":["ref"]}
+{"id":"A0425","carrier":"self-improve/DREAM.md","file_line":52,"text":"same branch, prior guard-failure classes and the budget rung.","hints":["modal"]}
+{"id":"A0426","carrier":"self-improve/DREAM.md","file_line":54,"text":"`tests/unit/replay.test.mjs` pins both the epoch rules and the","hints":["ref"]}
+{"id":"A0427","carrier":"self-improve/DREAM.md","file_line":59,"text":"- **B0** = recorded order, batch 1, stop at the first adoption (today's fixed","hints":["number"]}
+{"id":"A0428","carrier":"self-improve/DREAM.md","file_line":61,"text":"- **B1** = fixed round-robin objective order, batch 1.","hints":["number"]}
+{"id":"A0429","carrier":"self-improve/DREAM.md","file_line":62,"text":"- **π\\*** = the candidate selected on the **train split only** (first 14 recorded","hints":["number"]}
+{"id":"A0430","carrier":"self-improve/DREAM.md","file_line":63,"text":"attempts) from 40 deterministic candidates (5 order rules × batch 1–3 × stall","hints":["number"]}
+{"id":"A0431","carrier":"self-improve/DREAM.md","file_line":64,"text":"switch × stop rule; ≤48 by construction).","hints":["number"]}
+{"id":"A0432","carrier":"self-improve/DREAM.md","file_line":64,"text":"The validation split (last 6","hints":["number"]}
+{"id":"A0433","carrier":"self-improve/DREAM.md","file_line":65,"text":"attempts, must include ≥1 adoption) is used only to evaluate the frozen","hints":["number","modal"]}
+{"id":"A0434","carrier":"self-improve/DREAM.md","file_line":66,"text":"thresholds — never to choose π\\*.","hints":["boundary"]}
+{"id":"A0435","carrier":"self-improve/DREAM.md","file_line":68,"text":"Thresholds (frozen in `replay-protocol.json`): π\\* attempts ≤ min(B0, B1) − 1 on","hints":["number","modal"]}
+{"id":"A0436","carrier":"self-improve/DREAM.md","file_line":69,"text":"validation; π\\* cost ≤ 0.7 × B0 cost on validation; π\\* cost ≤ B0 cost on the","hints":["number"]}
+{"id":"A0437","carrier":"self-improve/DREAM.md","file_line":71,"text":"below the pass gate (n < 20, validation < 6, or a validation slice without an","hints":["number","boundary"]}
+{"id":"A0438","carrier":"self-improve/DREAM.md","file_line":72,"text":"adoption) the verdict is **\"insufficient evidence at pass-gate size — thresholds","hints":["boundary"]}
+{"id":"A0439","carrier":"self-improve/DREAM.md","file_line":73,"text":"not evaluated\"** — measured, never silently downgraded.","hints":["boundary"]}
+{"id":"A0440","carrier":"self-improve/DREAM.md","file_line":77,"text":"> All P2 comparisons are off-policy replays over ONE realized corpus of fewer","hints":["number"]}
+{"id":"A0441","carrier":"self-improve/DREAM.md","file_line":78,"text":"> than ~24 recorded attempts; no statistical significance is claimed; effect","hints":["number","boundary"]}
+{"id":"A0442","carrier":"self-improve/DREAM.md","file_line":79,"text":"> sizes are reported with n and are not confidence-interval estimates of future","hints":["boundary","roadmap"]}
+{"id":"A0443","carrier":"self-improve/DREAM.md","file_line":80,"text":"> performance; the cost proxy is load-dependent recorded wallMs, not a fresh","hints":["boundary"]}
+{"id":"A0444","carrier":"self-improve/DREAM.md","file_line":83,"text":"## Redeploy (P3, M4)","hints":["number"]}
+{"id":"A0445","carrier":"self-improve/DREAM.md","file_line":85,"text":"`dream --write-policy <id>` writes `policies/<id>.json`; `policy --deploy <id>`","hints":["modal"]}
+{"id":"A0446","carrier":"self-improve/DREAM.md","file_line":86,"text":"writes `policies/current.json`, appends exactly one `kind:\"policy\"` ledger row","hints":["modal","ref"]}
+{"id":"A0447","carrier":"self-improve/DREAM.md","file_line":87,"text":"(≤2 KiB, `validatePolicyRow`) and commits both files plus the ledger with","hints":["number","modal"]}
+{"id":"A0448","carrier":"self-improve/DREAM.md","file_line":88,"text":"`chore(self-improve): policy <id> deploy` (the commit is skipped, with the","hints":["modal"]}
+{"id":"A0449","carrier":"self-improve/DREAM.md","file_line":89,"text":"command printed, when the ledger does not live inside a git work tree).","hints":["boundary"]}
+{"id":"A0450","carrier":"self-improve/DREAM.md","file_line":91,"text":"produces the calibration report (predicted vs realized selection outcomes,","hints":["modal"]}
+{"id":"A0451","carrier":"self-improve/DREAM.md","file_line":96,"text":"The propose-time scratch excludes `self-improve/domains/**`, but the held-out","hints":["ref"]}
+{"id":"A0452","carrier":"self-improve/PATTERNS.md","file_line":3,"text":"Rules the proposal and review sides follow.","hints":["roadmap"]}
+{"id":"A0453","carrier":"self-improve/PATTERNS.md","file_line":8,"text":"- One hypothesis per cycle. Record it as `hypothesisHash` (sha256 of the","hints":["number","modal"]}
+{"id":"A0454","carrier":"self-improve/PATTERNS.md","file_line":10,"text":"- Resubmission ban: the same `(objective, hypothesisHash)` must not be","hints":["boundary"]}
+{"id":"A0455","carrier":"self-improve/PATTERNS.md","file_line":11,"text":"resubmitted until the probe files change; the engine rejects it as","hints":["boundary","modal"]}
+{"id":"A0456","carrier":"self-improve/PATTERNS.md","file_line":13,"text":"- Stalled objectives are redirected: K=3 consecutive rejections on the same","hints":["number"]}
+{"id":"A0457","carrier":"self-improve/PATTERNS.md","file_line":14,"text":"objective force the next proposal onto an unexplored probe","hints":["roadmap"]}
+{"id":"A0458","carrier":"self-improve/PATTERNS.md","file_line":16,"text":"- Budget: the rung tightens with accepted cycles in the campaign (0 accepted ->","hints":["number"]}
+{"id":"A0459","carrier":"self-improve/PATTERNS.md","file_line":17,"text":"3 files/12 hunks, 1 -> 2/8, 2+ -> 1/4).","hints":["number","ref"]}
+{"id":"A0460","carrier":"self-improve/PATTERNS.md","file_line":17,"text":"Resets require an auditable reason:","hints":["modal"]}
+{"id":"A0461","carrier":"self-improve/PATTERNS.md","file_line":19,"text":"count treated as 0).","hints":["number"]}
+{"id":"A0462","carrier":"self-improve/PATTERNS.md","file_line":21,"text":"## Commit pattern (max 3 commits per accepted cycle)","hints":["number","modal"]}
+{"id":"A0463","carrier":"self-improve/PATTERNS.md","file_line":23,"text":"1.","hints":["number"]}
+{"id":"A0464","carrier":"self-improve/PATTERNS.md","file_line":24,"text":"2.","hints":["number"]}
+{"id":"A0465","carrier":"self-improve/PATTERNS.md","file_line":25,"text":"3.","hints":["number"]}
+{"id":"A0466","carrier":"self-improve/PATTERNS.md","file_line":25,"text":"`chore(self-improve): record adoption <cycleId>` — ledger only.","hints":["modal"]}
+{"id":"A0467","carrier":"self-improve/PATTERNS.md","file_line":27,"text":"Rejected cycles commit only the cycle record.","hints":["boundary","modal"]}
+{"id":"A0468","carrier":"self-improve/PATTERNS.md","file_line":27,"text":"Push, `--install` and releases","hints":["modal"]}
+{"id":"A0469","carrier":"self-improve/PATTERNS.md","file_line":30,"text":"## Protected paths (hard reject)","hints":["boundary","modal"]}
+{"id":"A0470","carrier":"self-improve/PATTERNS.md","file_line":32,"text":"Tests, verifiers (`scripts/verify.ts`), `package.json` scripts, held-out","hints":["ref"]}
+{"id":"A0471","carrier":"self-improve/PATTERNS.md","file_line":34,"text":"generated surfaces by hand, or adding network/timer behaviour, fails the critic.","hints":["boundary","ref"]}
+{"id":"A0472","carrier":"self-improve/PATTERNS.md","file_line":39,"text":"best-effort, not enforced.","hints":["boundary"]}
+{"id":"A0473","carrier":"self-improve/PATTERNS.md","file_line":40,"text":"the protected path set, and manual review of the cycle record.","hints":["modal"]}
+{"id":"A0474","carrier":"self-improve/PATTERNS.md","file_line":45,"text":"`subskills/jev-advisor/SKILL.md` is scored as a `text_fixture` (text input),","hints":["ref"]}
+{"id":"A0475","carrier":"self-improve/PATTERNS.md","file_line":46,"text":"never as a runtime-loaded skill surface: the plugin manifest does not register","hints":["boundary"]}
+{"id":"A0476","carrier":"self-improve/PATTERNS.md","file_line":47,"text":"`subskills`, the installed bundle does not contain it, and skill loaders scan","hints":["boundary","modal"]}
+{"id":"A0477","carrier":"self-improve/PATTERNS.md","file_line":48,"text":"only project `.gjc/skills/` and user `~/.gjc/agent/skills/`.","hints":["modal","ref"]}
+{"id":"A0478","carrier":"self-improve/PATTERNS.md","file_line":50,"text":"## Headroom (M2)","hints":["number","roadmap"]}
+{"id":"A0479","carrier":"self-improve/PATTERNS.md","file_line":52,"text":"Probes start saturated (every metric at 1.0, `delta = 0 < floor`), so the loop","hints":["number"]}
+{"id":"A0480","carrier":"self-improve/PATTERNS.md","file_line":53,"text":"cannot adopt anything until the corpus contains cases the current","hints":["boundary","modal"]}
+{"id":"A0481","carrier":"self-improve/PATTERNS.md","file_line":56,"text":"- **Source each case from a documented statement**, never from implementation","hints":["boundary"]}
+{"id":"A0482","carrier":"self-improve/PATTERNS.md","file_line":59,"text":"the current code already satisfies create no headroom and are not added for","hints":["boundary"]}
+{"id":"A0483","carrier":"self-improve/PATTERNS.md","file_line":61,"text":"- **Clusters**: cases that fail for the same reason form one cluster, repaired","hints":["boundary"]}
+{"id":"A0484","carrier":"self-improve/PATTERNS.md","file_line":63,"text":"`rrsi-protocol.json` so the live proposer keeps a fallback; each cluster's","hints":["modal"]}
+{"id":"A0485","carrier":"self-improve/PATTERNS.md","file_line":68,"text":"documented tolerance is decimal, not binary).","hints":["boundary"]}
+{"id":"A0486","carrier":"self-improve/PATTERNS.md","file_line":69,"text":"bound (the 64 KiB response cap), the probe suite also carries the at-cap","hints":["number"]}
+{"id":"A0487","carrier":"self-improve/PATTERNS.md","file_line":70,"text":"accept case so an over-strict repair cannot adopt.","hints":["boundary","modal"]}
+{"id":"A0488","carrier":"self-improve/PATTERNS.md","file_line":71,"text":"- **Derivation** (frozen in `rrsi-protocol.json` before the first live cycle):","hints":["modal"]}
+{"id":"A0489","carrier":"self-improve/PATTERNS.md","file_line":72,"text":"`delta = repaired/denominator`, `required = ceil(floor x denominator)`; the","hints":["modal","ref"]}
+{"id":"A0490","carrier":"self-improve/PATTERNS.md","file_line":75,"text":"- **Disclosure**: the probe corpus was expanded this session and P1 deltas are","hints":["number"]}
+{"id":"A0491","carrier":"self-improve/PATTERNS.md","file_line":77,"text":"The M2 gap hunt ran as throwaway batteries recorded under","hints":["number","roadmap"]}
+{"id":"A0492","carrier":"self-improve/PATTERNS.md","file_line":78,"text":"`artifacts/dream-rsi-01a130dd-20261013/m2-gap-hunt/` — zero-violation","hints":["number","boundary","ref","roadmap"]}
+{"id":"A0493","carrier":"self-improve/PATTERNS.md","file_line":79,"text":"The 64 KiB cap cases make the fixture files large","hints":["number"]}
+{"id":"A0494","carrier":"self-improve/PATTERNS.md","file_line":82,"text":"## Replay / dreaming (P2/P3)","hints":["number","ref"]}
+{"id":"A0495","carrier":"self-improve/PATTERNS.md","file_line":86,"text":"`chore` commits and concurrent-lane commits are not boundaries, so `baseCommit`","hints":["boundary","modal"]}
+{"id":"A0496","carrier":"self-improve/PATTERNS.md","file_line":87,"text":"is provenance, never the epoch key.","hints":["boundary"]}
+{"id":"A0497","carrier":"self-improve/PATTERNS.md","file_line":87,"text":"Adoption order is preserved; rejects inside","hints":["boundary","modal"]}
+{"id":"A0498","carrier":"self-improve/PATTERNS.md","file_line":90,"text":"- **Selection features**: objective/gap id, attempt index within the branch,","hints":["ref"]}
+{"id":"A0499","carrier":"self-improve/PATTERNS.md","file_line":91,"text":"hypothesis-novelty flag, files/hunks, prior *revealed* outcomes of the same","hints":["ref"]}
+{"id":"A0500","carrier":"self-improve/PATTERNS.md","file_line":92,"text":"branch, prior guard-failure classes, budget rung.","hints":["modal"]}
+{"id":"A0501","carrier":"self-improve/PATTERNS.md","file_line":93,"text":"order/adoption flags of unplayed attempts stay sealed until selection.","hints":["ref"]}
+{"id":"A0502","carrier":"self-improve/PATTERNS.md","file_line":95,"text":"failure_greedy, novelty_first) × batch size 1–3 × stall switch × stop rule;","hints":["number"]}
+{"id":"A0503","carrier":"self-improve/PATTERNS.md","file_line":96,"text":"40 deterministic candidates (≤48). π\\* is chosen on the train split only; the","hints":["number"]}
+{"id":"A0504","carrier":"self-improve/PATTERNS.md","file_line":97,"text":"validation split exists to evaluate the frozen thresholds.","hints":["modal"]}
+{"id":"A0505","carrier":"self-improve/PATTERNS.md","file_line":99,"text":"No timestamps, randomness or network in the replay/dream path.","hints":["boundary","ref"]}
+{"id":"A0506","carrier":"self-improve/PATTERNS.md","file_line":100,"text":"- **Wording**: report a met threshold as \"met the pre-registered P2 thresholds\";","hints":["number","modal"]}
+{"id":"A0507","carrier":"self-improve/PATTERNS.md","file_line":101,"text":"below the pass gate the verdict is the measured insufficient-evidence string;","hints":["boundary"]}
+{"id":"A0508","carrier":"self-improve/PATTERNS.md","file_line":102,"text":"never claim bare \"proven\".","hints":["boundary","modal"]}
+{"id":"A0509","carrier":"self-improve/PATTERNS.md","file_line":102,"text":"The pinned no-significance/CI caveat sentence lives","hints":["boundary","ref"]}
+{"id":"A0510","carrier":"self-improve/PATTERNS.md","file_line":108,"text":"What is deliberately not regularized yet:","hints":["boundary"]}
+{"id":"A0511","carrier":"self-improve/PATTERNS.md","file_line":110,"text":"- Hypothesis resubmission is keyed to `(objective, hypothesisHash)` without a","hints":["boundary"]}
+{"id":"A0512","carrier":"self-improve/PATTERNS.md","file_line":111,"text":"probe-file content hash: changing only fixtures does not unlock a rejected","hints":["boundary","modal"]}
+{"id":"A0513","carrier":"self-improve/PATTERNS.md","file_line":115,"text":"the engine reports the unexplored objectives.","hints":["modal"]}
+{"id":"A0514","carrier":"self-improve/PATTERNS.md","file_line":117,"text":"no bootstrap or multi-campaign calibration exists.","hints":["boundary"]}
+{"id":"A0515","carrier":"self-improve/PATTERNS.md","file_line":122,"text":"Missing is not zero; unmeasured is `null`; unrun is `skipped`.","hints":["boundary"]}
+{"id":"A0516","carrier":"self-improve/PATTERNS.md","file_line":122,"text":"No completion","hints":["boundary"]}
+{"id":"A0517","carrier":"self-improve/PATTERNS.md","file_line":123,"text":"claim without a receipt.","hints":["boundary"]}
+{"id":"A0518","carrier":"self-improve/PATTERNS.md","file_line":123,"text":"Flaky repository tests are never silently retried: a","hints":["boundary"]}
+{"id":"A0519","carrier":"self-improve/PATTERNS.md","file_line":124,"text":"guard failure rejects the cycle — fix the flaky test in the repository instead.","hints":["boundary","modal"]}
+{"id":"A0520","carrier":"self-improve/PATTERNS.md","file_line":125,"text":"Ledger rows are <= 2 KiB; raw logs stay in","hints":["number"]}
+{"id":"A0521","carrier":"self-improve/PATTERNS.md","file_line":126,"text":"`~/.gjc-plugin/self-improve/runs/<cycleId>/` (0700, never committed).","hints":["number","boundary","modal","ref"]}
+{"id":"A0522","carrier":"self-improve/HARNESS2.md","file_line":6,"text":"self-improve loop; do not replace the engine or install upstream as a runtime","hints":["boundary","modal"]}
+{"id":"A0523","carrier":"self-improve/HARNESS2.md","file_line":7,"text":"Establish real GJC behavior evaluation first, then investigate","hints":["modal"]}
+{"id":"A0524","carrier":"self-improve/HARNESS2.md","file_line":8,"text":"proposal composition and experience reuse.","hints":["roadmap"]}
+{"id":"A0525","carrier":"self-improve/HARNESS2.md","file_line":9,"text":"unchanged remains a valid outcome if those experiments do not show benefit.","hints":["boundary"]}
+{"id":"A0526","carrier":"self-improve/HARNESS2.md","file_line":11,"text":"This is a source-based integration proposal, not an implemented feature or a","hints":["boundary","modal","roadmap"]}
+{"id":"A0527","carrier":"self-improve/HARNESS2.md","file_line":13,"text":"No upstream success rate, speedup, or cost","hints":["boundary"]}
+{"id":"A0528","carrier":"self-improve/HARNESS2.md","file_line":18,"text":"- [Harness² at `1cfe254e`](https://github.com/google-research/harness2/tree/1cfe254e8d25b15f37048c3730134686abe60335).","hints":["number","ref"]}
+{"id":"A0529","carrier":"self-improve/HARNESS2.md","file_line":19,"text":"- [gjc-plugin at `b9d47c2`](https://github.com/jjongguet/gjc-plugin/tree/b9d47c2a5ea73fa2db270f85d01fe1801d86f186).","hints":["number","ref"]}
+{"id":"A0530","carrier":"self-improve/HARNESS2.md","file_line":21,"text":"These are comparison snapshots, not claims that later delivery commits contain","hints":["boundary","modal"]}
+{"id":"A0531","carrier":"self-improve/HARNESS2.md","file_line":30,"text":"| Proposal | Editable surfaces, failing probe cases, budgets, and prior attempts enter the proposer request | General/invariant and domain-specific harness candidates | Reuse the proposer seam; investigate scoped candidates after behavior evaluation exists |","hints":["ref","roadmap"]}
+{"id":"A0532","carrier":"self-improve/HARNESS2.md","file_line":31,"text":"| Probe | Deterministic repository checks and probes; a local-stub/text-fixture runner | Candidate harnesses execute the same task and produce trajectories/deliverables | Add actual consumer-loading and task-outcome evidence, not another fixture-only score |","hints":["boundary","ref"]}
+{"id":"A0533","carrier":"self-improve/HARNESS2.md","file_line":33,"text":"| Adoption | Reject paths for guards, improvement floor, cost, held-out regression, and edit budget | Final-output selection excludes reference baseline executions | Preserve baseline eligibility, rejection, and abstention; do not copy finals-only adoption |","hints":["boundary","modal"]}
+{"id":"A0534","carrier":"self-improve/HARNESS2.md","file_line":34,"text":"| Experience | Attempt history, ledger, replay/dreaming, and existing knowledge tools | Per-domain adopted harness trees and cue/lesson/evidence records | Extend existing provenance and bounded retrieval rather than create a competing memory system |","hints":["modal","ref"]}
+{"id":"A0535","carrier":"self-improve/HARNESS2.md","file_line":35,"text":"| Safety | Declared editable sources, scratch copies, protected paths, and explicit live-mode admission | Editable harness validation, but unrestricted executor network by default | Preserve controls and add enforceable execution/network isolation before real-agent trials |","hints":["ref"]}
+{"id":"A0536","carrier":"self-improve/HARNESS2.md","file_line":39,"text":"- [Local proposer](https://github.com/jjongguet/gjc-plugin/blob/b9d47c2a5ea73fa2db270f85d01fe1801d86f186/self-improve/lib/propose.mjs):","hints":["number","ref"]}
+{"id":"A0537","carrier":"self-improve/HARNESS2.md","file_line":42,"text":"- [Local runner](https://github.com/jjongguet/gjc-plugin/blob/b9d47c2a5ea73fa2db270f85d01fe1801d86f186/self-improve/lib/runner.mjs):","hints":["number","ref"]}
+{"id":"A0538","carrier":"self-improve/HARNESS2.md","file_line":45,"text":"input, not evidence that the corresponding runtime surface was loaded.","hints":["boundary"]}
+{"id":"A0539","carrier":"self-improve/HARNESS2.md","file_line":46,"text":"- [Local gates](https://github.com/jjongguet/gjc-plugin/blob/b9d47c2a5ea73fa2db270f85d01fe1801d86f186/self-improve/lib/gates.mjs):","hints":["number","ref"]}
+{"id":"A0540","carrier":"self-improve/HARNESS2.md","file_line":47,"text":"`noiseFloor`, `evaluateCostRule`, `evaluateHeldout`, and `decideCycle` provide","hints":["modal"]}
+{"id":"A0541","carrier":"self-improve/HARNESS2.md","file_line":48,"text":"They are not a complete safety proof for an","hints":["boundary"]}
+{"id":"A0542","carrier":"self-improve/HARNESS2.md","file_line":49,"text":"The existing wall-time/byte cost proxy is not a live","hints":["boundary","ref"]}
+{"id":"A0543","carrier":"self-improve/HARNESS2.md","file_line":51,"text":"- [Upstream recursion](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/recursion.py):","hints":["number","ref"]}
+{"id":"A0544","carrier":"self-improve/HARNESS2.md","file_line":55,"text":"- [Upstream selection](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/selection.py):","hints":["number","ref"]}
+{"id":"A0545","carrier":"self-improve/HARNESS2.md","file_line":56,"text":"`selection_pool` deliberately excludes `base` and returns only `agg1..aggk`","hints":["number","modal"]}
+{"id":"A0546","carrier":"self-improve/HARNESS2.md","file_line":57,"text":"or `c1..ck`.","hints":["number"]}
+{"id":"A0547","carrier":"self-improve/HARNESS2.md","file_line":57,"text":"Output selection therefore does not prove improvement over baseline.","hints":["boundary","modal"]}
+{"id":"A0548","carrier":"self-improve/HARNESS2.md","file_line":58,"text":"- [Upstream library](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/harness2/core/library.py):","hints":["number","ref"]}
+{"id":"A0549","carrier":"self-improve/HARNESS2.md","file_line":59,"text":"nonempty `cue`, `lesson`, and `evidence` are required to store an entry, along","hints":["modal"]}
+{"id":"A0550","carrier":"self-improve/HARNESS2.md","file_line":60,"text":"with the full adopted harness.","hints":["modal"]}
+{"id":"A0551","carrier":"self-improve/HARNESS2.md","file_line":60,"text":"Field presence does not validate a lesson's","hints":["boundary"]}
+{"id":"A0552","carrier":"self-improve/HARNESS2.md","file_line":61,"text":"truth or establish causality.","hints":["modal"]}
+{"id":"A0553","carrier":"self-improve/HARNESS2.md","file_line":62,"text":"- [Upstream experiments](https://github.com/google-research/harness2/blob/1cfe254e8d25b15f37048c3730134686abe60335/docs/EXPERIMENTS.md):","hints":["number","ref"]}
+{"id":"A0554","carrier":"self-improve/HARNESS2.md","file_line":64,"text":"reproducibility limits, and network/rubric leakage warnings.","hints":["ref"]}
+{"id":"A0555","carrier":"self-improve/HARNESS2.md","file_line":66,"text":"The existing loop is functional for its declared code/probe domain.","hints":["ref"]}
+{"id":"A0556","carrier":"self-improve/HARNESS2.md","file_line":67,"text":"narrower: improving a fixture or deterministic parser does not establish that a","hints":["boundary","modal"]}
+{"id":"A0557","carrier":"self-improve/HARNESS2.md","file_line":69,"text":"recorded attempts likewise does not execute a new harness on fresh tasks.","hints":["boundary"]}
+{"id":"A0558","carrier":"self-improve/HARNESS2.md","file_line":71,"text":"## Transfer the method, not the defaults","hints":["boundary"]}
+{"id":"A0559","carrier":"self-improve/HARNESS2.md","file_line":73,"text":"A useful future loop is:","hints":["roadmap"]}
+{"id":"A0560","carrier":"self-improve/HARNESS2.md","file_line":85,"text":"This is not a mandate to run recursion on every user task.","hints":["boundary"]}
+{"id":"A0561","carrier":"self-improve/HARNESS2.md","file_line":86,"text":"repeatable repository tasks without external side effects.","hints":["boundary"]}
+{"id":"A0562","carrier":"self-improve/HARNESS2.md","file_line":87,"text":"to declared editable surfaces; global authority and approval rules are not","hints":["boundary"]}
+{"id":"A0563","carrier":"self-improve/HARNESS2.md","file_line":92,"text":"Upstream schedules **4 × k task executions and 3 × k improvement stages per","hints":["number"]}
+{"id":"A0564","carrier":"self-improve/HARNESS2.md","file_line":94,"text":"`k = 1`, that means four task executions and three improvement stages, not","hints":["number","boundary"]}
+{"id":"A0565","carrier":"self-improve/HARNESS2.md","file_line":97,"text":"`--max-tasks` is per domain, not a global task cap.","hints":["boundary"]}
+{"id":"A0566","carrier":"self-improve/HARNESS2.md","file_line":102,"text":"outcome and reject or abstain when evidence is insufficient.","hints":["boundary","modal"]}
+{"id":"A0567","carrier":"self-improve/HARNESS2.md","file_line":108,"text":"Do not copy these defaults.","hints":["boundary"]}
+{"id":"A0568","carrier":"self-improve/HARNESS2.md","file_line":108,"text":"A Git scratch copy is filesystem separation, not a","hints":["boundary"]}
+{"id":"A0569","carrier":"self-improve/HARNESS2.md","file_line":109,"text":"A future runner must demonstrate credential exclusion,","hints":["modal","roadmap"]}
+{"id":"A0570","carrier":"self-improve/HARNESS2.md","file_line":110,"text":"execution and network restrictions, allowed tools/endpoints, and no external","hints":["boundary","modal","ref"]}
+{"id":"A0571","carrier":"self-improve/HARNESS2.md","file_line":111,"text":"A prompt saying “no network” is not enforcement.","hints":["boundary"]}
+{"id":"A0572","carrier":"self-improve/HARNESS2.md","file_line":113,"text":"Separate proposal/selection inputs from held-out evaluation.","hints":["ref","roadmap"]}
+{"id":"A0573","carrier":"self-improve/HARNESS2.md","file_line":113,"text":"Freeze scoring,","hints":["modal"]}
+{"id":"A0574","carrier":"self-improve/HARNESS2.md","file_line":115,"text":"record every attempt, failure, skip, and exclusion.","hints":["modal"]}
+{"id":"A0575","carrier":"self-improve/HARNESS2.md","file_line":115,"text":"A missing or non-finite","hints":["boundary"]}
+{"id":"A0576","carrier":"self-improve/HARNESS2.md","file_line":116,"text":"measurement must not become an adoption pass.","hints":["boundary"]}
+{"id":"A0577","carrier":"self-improve/HARNESS2.md","file_line":121,"text":"The links below are follow-up","hints":["roadmap"]}
+{"id":"A0578","carrier":"self-improve/HARNESS2.md","file_line":122,"text":"work, not claims that these capabilities are installed.","hints":["boundary","modal"]}
+{"id":"A0579","carrier":"self-improve/HARNESS2.md","file_line":126,"text":"| Relationship decision | [JJO-269](https://linear.app/jjongguet/issue/JJO-269) | Source-grounded document, README link, remotely verified delivery, and linked follow-up issues |","hints":["number","ref","roadmap"]}
+{"id":"A0580","carrier":"self-improve/HARNESS2.md","file_line":127,"text":"| M1: real behavior evaluation | [JJO-270](https://linear.app/jjongguet/issue/JJO-270) | Prove intended baseline/candidate surfaces actually load; freeze tasks/scoring; compare outcomes and cost; reject regression, ineffective candidates, wrong loading, invalid measurements, timeout, and exhausted budget |","hints":["number","boundary","modal","ref","roadmap"]}
+{"id":"A0581","carrier":"self-improve/HARNESS2.md","file_line":128,"text":"| M2: evidence-backed composition | [JJO-271](https://linear.app/jjongguet/issue/JJO-271) | After M1, probe components and re-execute each composite; preserve provenance and all existing gates; reject conflicts and composite regression even when components improved separately |","hints":["number","boundary","modal","ref","roadmap"]}
+{"id":"A0582","carrier":"self-improve/HARNESS2.md","file_line":129,"text":"| M3: bounded experience reuse | [JJO-272](https://linear.app/jjongguet/issue/JJO-272) | After M1/M2, attach cue/lesson/evidence and source/version/outcome references; invalidate contradicted lessons; test held-out separation, learning on/off, and misleading-lesson negative controls |","hints":["number","ref","roadmap"]}
+{"id":"A0583","carrier":"self-improve/HARNESS2.md","file_line":131,"text":"[JJO-213](https://linear.app/jjongguet/issue/JJO-213) is related prior RRSI evidence","hints":["number","ref"]}
+{"id":"A0584","carrier":"self-improve/HARNESS2.md","file_line":132,"text":"work, not a new Harness² implementation or an issue to reopen for this roadmap.","hints":["boundary","roadmap"]}
+{"id":"A0585","carrier":"self-improve/HARNESS2.md","file_line":134,"text":"M1 must define a frozen task/model/tool contract and immutable per-trial loading,","hints":["number","modal","ref","roadmap"]}
+{"id":"A0586","carrier":"self-improve/HARNESS2.md","file_line":135,"text":"Existing verification receipts may establish","hints":["modal"]}
+{"id":"A0587","carrier":"self-improve/HARNESS2.md","file_line":136,"text":"the checks they actually ran, not whole-agent quality.","hints":["boundary"]}
+{"id":"A0588","carrier":"self-improve/HARNESS2.md","file_line":136,"text":"Composition must never","hints":["boundary"]}
+{"id":"A0589","carrier":"self-improve/HARNESS2.md","file_line":142,"text":"call/token/currency/wall-time caps, task/domain counts, recursion budget,","hints":["ref"]}
+{"id":"A0590","carrier":"self-improve/HARNESS2.md","file_line":143,"text":"auxiliary-stage allowance, allowed endpoints and files, and stop conditions.","hints":["modal"]}
+{"id":"A0591","carrier":"self-improve/HARNESS2.md","file_line":144,"text":"No timers,","hints":["boundary"]}
+{"id":"A0592","carrier":"self-improve/HARNESS2.md","file_line":150,"text":"- **Keep the current runtime:** lowest operational risk and a valid conclusion","hints":["modal"]}
+{"id":"A0593","carrier":"self-improve/HARNESS2.md","file_line":151,"text":"if behavior experiments show no transferable benefit; leaves the evaluation","hints":["boundary"]}
+{"id":"A0594","carrier":"self-improve/HARNESS2.md","file_line":153,"text":"- **Selective extension (recommended):** reuses current guards and evidence","hints":["modal"]}
+{"id":"A0595","carrier":"self-improve/HARNESS2.md","file_line":155,"text":"- **Full upstream port/replacement:** preserves upstream structure, but expands","hints":["ref"]}
+{"id":"A0596","carrier":"self-improve/HARNESS2.md","file_line":156,"text":"scope and still requires local safety, baseline, and evaluation decisions.","hints":["modal"]}
+{"id":"A0597","carrier":"self-improve/HARNESS2.md","file_line":157,"text":"It is not justified by this source comparison alone.","hints":["boundary"]}
+{"id":"A0598","carrier":"self-improve/HARNESS2.md","file_line":161,"text":"Upstream benchmark claims were not reproduced.","hints":["boundary","modal"]}
+{"id":"A0599","carrier":"self-improve/HARNESS2.md","file_line":162,"text":"M1's bounded design and evaluation, not in fabricated performance estimates.","hints":["number","boundary","roadmap"]}
+{"id":"A0600","carrier":"self-improve/HARNESS2.md","file_line":167,"text":"links, the intended two-file diff, published commit contents, and Linear issue","hints":["modal"]}
+{"id":"A0601","carrier":"self-improve/HARNESS2.md","file_line":168,"text":"Runtime efficacy requires the future M1–M3 contracts and their actual","hints":["number","modal","roadmap"]}
+{"id":"A0602","carrier":"self-improve/HARNESS2.md","file_line":170,"text":"judgments do not substitute for that evidence.","hints":["boundary"]}
+{"id":"A0603","carrier":"self-improve/evidence/README.md","file_line":3,"text":"Committed receipts for the measured self-improve campaigns.","hints":["modal"]}
+{"id":"A0604","carrier":"self-improve/evidence/README.md","file_line":4,"text":"has its own README with the frozen inputs, commands, result and limits.","hints":["modal"]}
+{"id":"A0605","carrier":"self-improve/evidence/README.md","file_line":6,"text":"- [`p2b/`](p2b/README.md) — the 22-attempt replay measurement (verdict `unmet`).","hints":["number","ref"]}
+{"id":"A0606","carrier":"self-improve/evidence/README.md","file_line":7,"text":"- [`p3/`](p3/README.md) — the redeployed-policy campaign (five rejects, no adoption).","hints":["number","boundary","modal","ref"]}
+{"id":"A0607","carrier":"self-improve/evidence/README.md","file_line":11,"text":"Evidence must be written with repository-relative paths.","hints":["modal"]}
+{"id":"A0608","carrier":"self-improve/evidence/README.md","file_line":17,"text":"| `self-improve/ledger.jsonl` (seq 15, a `policy` row) | The ledger is append-only and hash-chained (`prev`); the P2b corpus hash `9fc5668d…` in `replay-protocol-p2b.json` covers it. Editing the row would break the chain and the frozen corpus. |","hints":["number","modal","ref"]}
+{"id":"A0609","carrier":"self-improve/evidence/README.md","file_line":18,"text":"| `self-improve/evidence/p2b/replay-b0b1.json` (`corpus.ledgerPath`) | Literal output of the frozen replay command. Rewriting it would make the receipt differ from what the command produced. |","hints":["number","modal","ref"]}
+{"id":"A0610","carrier":"self-improve/evidence/README.md","file_line":20,"text":"The raw P3 loop logs and loop state, which","hints":["number"]}
+{"id":"A0611","carrier":"self-improve/evidence/README.md","file_line":21,"text":"recorded absolute scratch paths, were removed; [`p3/summary.json`](p3/summary.json)","hints":["number","ref"]}
+{"id":"A0612","carrier":"self-improve/evidence/README.md","file_line":22,"text":"binds each removed file by path, bytes and SHA-256 (recoverable at commit","hints":["number","modal"]}
+{"id":"A0613","carrier":"self-improve/evidence/README.md","file_line":23,"text":"`02c3177`).","hints":["number","ref"]}
+{"id":"A0614","carrier":"self-improve/evidence/README.md","file_line":25,"text":"`bun run evidence:check` fails if any other tracked file under `self-improve/`","hints":["boundary"]}
+{"id":"A0615","carrier":"self-improve/evidence/p2b/README.md","file_line":1,"text":"# P2b — 22-attempt replay measurement (JJO-213)","hints":["number","ref"]}
+{"id":"A0616","carrier":"self-improve/evidence/p2b/README.md","file_line":3,"text":"Status: **measured, verdict `unmet`** (attempts threshold met; cost threshold not met).","hints":["boundary","modal"]}
+{"id":"A0617","carrier":"self-improve/evidence/p2b/README.md","file_line":4,"text":"This is a separate post-v0.0.6 pre-registration, not a retroactive edit of the","hints":["number","boundary"]}
+{"id":"A0618","carrier":"self-improve/evidence/p2b/README.md","file_line":5,"text":"original 13-attempt P2 verdict.","hints":["number"]}
+{"id":"A0619","carrier":"self-improve/evidence/p2b/README.md","file_line":7,"text":"## Frozen inputs","hints":["modal"]}
+{"id":"A0620","carrier":"self-improve/evidence/p2b/README.md","file_line":9,"text":"- Protocol: `self-improve/replay-protocol-p2b.json`, commit `e6675cb`,","hints":["number","modal","ref"]}
+{"id":"A0621","carrier":"self-improve/evidence/p2b/README.md","file_line":10,"text":"sha256 `1fe71eb0274f7738b17af79bd10c214f737e01e04f1be68a9ec8d6fa1906ba06`.","hints":["number","ref"]}
+{"id":"A0622","carrier":"self-improve/evidence/p2b/README.md","file_line":11,"text":"- Corpus: `self-improve/ledger.jsonl` at freeze, sha256","hints":["number","modal","ref"]}
+{"id":"A0623","carrier":"self-improve/evidence/p2b/README.md","file_line":12,"text":"`9fc5668d4542fd1e6e410edd6bcee53d968e13d7e3c9294fb88aa82daf211638`","hints":["number","ref"]}
+{"id":"A0624","carrier":"self-improve/evidence/p2b/README.md","file_line":13,"text":"(22 attempts, 2 adoption rows, 2 epochs).","hints":["number"]}
+{"id":"A0625","carrier":"self-improve/evidence/p2b/README.md","file_line":14,"text":"- Split: train = attempts 1–14, validation = attempts 17–22 (6 attempts,","hints":["number"]}
+{"id":"A0626","carrier":"self-improve/evidence/p2b/README.md","file_line":15,"text":"1 adoption row); attempts 15–16 are excluded from the two slices and used","hints":["number"]}
+{"id":"A0627","carrier":"self-improve/evidence/p2b/README.md","file_line":28,"text":"- Gate: `ok` — 22 attempts >= 20; validation 6 with 1 adoption.","hints":["number"]}
+{"id":"A0628","carrier":"self-improve/evidence/p2b/README.md","file_line":29,"text":"- Selected policy: `pi-1-25` (`failure_greedy`, batch 1, `first_adoption`).","hints":["number"]}
+{"id":"A0629","carrier":"self-improve/evidence/p2b/README.md","file_line":31,"text":"- attempts: π* **5** <= min(B0, B1) − 1 = **5** → **met**","hints":["number","modal"]}
+{"id":"A0630","carrier":"self-improve/evidence/p2b/README.md","file_line":32,"text":"- cost: π* **876,237 ms** <= 0.7 × B0 **726,720 ms** → **not met**","hints":["number","boundary","modal"]}
+{"id":"A0631","carrier":"self-improve/evidence/p2b/README.md","file_line":33,"text":"- anti-fluke: full-corpus π* cost **met**","hints":["modal"]}
+{"id":"A0632","carrier":"self-improve/evidence/p2b/README.md","file_line":35,"text":"- Calibration: π* predicted 6 attempts / 407,924 ms vs realized 5 / 876,237 ms;","hints":["number"]}
+{"id":"A0633","carrier":"self-improve/evidence/p2b/README.md","file_line":36,"text":"B0/B1 predicted 12 / 873,652 ms vs realized 6 / 1,038,172 ms.","hints":["number","ref"]}
+{"id":"A0634","carrier":"self-improve/evidence/p2b/README.md","file_line":37,"text":"- Determinism: `dream-seed1.json` receiptHash","hints":["number"]}
+{"id":"A0635","carrier":"self-improve/evidence/p2b/README.md","file_line":38,"text":"`d6635a0bac2575a48cfbea0bb777f4b7b6986836662fb42ccea163bdc61df489`.","hints":["number","ref"]}
+{"id":"A0636","carrier":"self-improve/evidence/p2b/README.md","file_line":42,"text":"- The 22-attempt corpus was assembled after the original 13-attempt P2 run; this","hints":["number"]}
+{"id":"A0637","carrier":"self-improve/evidence/p2b/README.md","file_line":43,"text":"is a new pre-registration, not evidence that the original P2 threshold was met.","hints":["number","boundary","modal"]}
+{"id":"A0638","carrier":"self-improve/evidence/p2b/README.md","file_line":45,"text":"No statistical significance is claimed.","hints":["boundary"]}
+{"id":"A0639","carrier":"self-improve/evidence/p2b/README.md","file_line":46,"text":"- The cost proxy is load-dependent recorded `wallMs`, not a fresh measurement.","hints":["boundary"]}
+{"id":"A0640","carrier":"self-improve/evidence/p2b/README.md","file_line":47,"text":"- The verdict is `unmet` because the cost threshold failed; the attempts","hints":["boundary","modal"]}
+{"id":"A0641","carrier":"self-improve/evidence/p2b/README.md","file_line":48,"text":"threshold alone is not a pass.","hints":["boundary"]}
+{"id":"A0642","carrier":"self-improve/evidence/p3/README.md","file_line":1,"text":"# P3 — redeployed policy campaign (JJO-213)","hints":["number","ref"]}
+{"id":"A0643","carrier":"self-improve/evidence/p3/README.md","file_line":3,"text":"Status: **completed — five live completed cycles, zero guard failures, zero adoptions**.","hints":["boundary","modal"]}
+{"id":"A0644","carrier":"self-improve/evidence/p3/README.md","file_line":5,"text":"This campaign measures the redeployed policy selected by the frozen P2b dream.","hints":["number","modal"]}
+{"id":"A0645","carrier":"self-improve/evidence/p3/README.md","file_line":6,"text":"does not replace the P2b replay verdict (`unmet`) and does not claim an adoption or","hints":["number","boundary"]}
+{"id":"A0646","carrier":"self-improve/evidence/p3/README.md","file_line":9,"text":"## Frozen inputs","hints":["modal"]}
+{"id":"A0647","carrier":"self-improve/evidence/p3/README.md","file_line":11,"text":"- Policy: `pi-1-25` (`failure_greedy`, batch 1, first-adoption stop), selected in","hints":["number"]}
+{"id":"A0648","carrier":"self-improve/evidence/p3/README.md","file_line":12,"text":"`self-improve/evidence/p2b/README.md`.","hints":["number","ref"]}
+{"id":"A0649","carrier":"self-improve/evidence/p3/README.md","file_line":13,"text":"- Calibration: the frozen P2b replay's predicted-vs-realized receipts remain the","hints":["number","modal"]}
+{"id":"A0650","carrier":"self-improve/evidence/p3/README.md","file_line":14,"text":"calibration; this campaign reuses `pi-1-25` and does not re-fit or re-score","hints":["number","boundary"]}
+{"id":"A0651","carrier":"self-improve/evidence/p3/README.md","file_line":16,"text":"- Proposer: `openrouter/~google/gemini-pro-latest` via","hints":["ref"]}
+{"id":"A0652","carrier":"self-improve/evidence/p3/README.md","file_line":17,"text":"`self-improve/scripts/propose-with-gjc.mjs`; live calls require `--live-approved`","hints":["modal","ref"]}
+{"id":"A0653","carrier":"self-improve/evidence/p3/README.md","file_line":19,"text":"- Loop: `p3-20261019-4`; `--max-cycles 5 --max-proposer-calls 8","hints":["number","ref"]}
+{"id":"A0654","carrier":"self-improve/evidence/p3/README.md","file_line":20,"text":"--max-wall-ms 1800000 --batch-size 1 --proposer-timeout-ms 300000`.","hints":["number","ref"]}
+{"id":"A0655","carrier":"self-improve/evidence/p3/README.md","file_line":21,"text":"- Receipts: ledger rows 26–31 in `self-improve/ledger.jsonl` and","hints":["number","ref"]}
+{"id":"A0656","carrier":"self-improve/evidence/p3/README.md","file_line":22,"text":"[`summary.json`](summary.json), which records per-campaign event counts, stop","hints":["modal"]}
+{"id":"A0657","carrier":"self-improve/evidence/p3/README.md","file_line":23,"text":"reasons, counters and ledger sequence numbers for `p3-20261019-2`, `-3` and","hints":["number","ref"]}
+{"id":"A0658","carrier":"self-improve/evidence/p3/README.md","file_line":24,"text":"`-4`.","hints":["number"]}
+{"id":"A0659","carrier":"self-improve/evidence/p3/README.md","file_line":25,"text":"they were removed from the tree; `summary.json` binds each removed file by path,","hints":["modal"]}
+{"id":"A0660","carrier":"self-improve/evidence/p3/README.md","file_line":26,"text":"bytes and SHA-256, and the bytes stay recoverable at commit `02c3177`.","hints":["number","modal","ref"]}
+{"id":"A0661","carrier":"self-improve/evidence/p3/README.md","file_line":37,"text":"The loop is live and paid; re-running requires an approved OpenRouter budget.","hints":["modal"]}
+{"id":"A0662","carrier":"self-improve/evidence/p3/README.md","file_line":39,"text":"(unit 106 cases, integration 41 cases, all pass).","hints":["number"]}
+{"id":"A0663","carrier":"self-improve/evidence/p3/README.md","file_line":43,"text":"- Loop counters: 5 cycles, 7 proposer calls, 0 head moves, 2 invalid proposals,","hints":["number"]}
+{"id":"A0664","carrier":"self-improve/evidence/p3/README.md","file_line":45,"text":"- Five ledger rows, sequence 27–31:","hints":["number"]}
+{"id":"A0665","carrier":"self-improve/evidence/p3/README.md","file_line":49,"text":"| 27 | `cyc-20261018185941-9f39` | `probe.egress_boundary` | reject: `floor_not_met` | coverage 1.0, 0 regressions |","hints":["number","boundary","modal","ref"]}
+{"id":"A0666","carrier":"self-improve/evidence/p3/README.md","file_line":50,"text":"| 28 | `cyc-20261018190244-9942` | `probe.extract_coverage` | reject: `floor_not_met`, `cost_rule` | coverage 1.0, 0 regressions |","hints":["number","boundary","modal","ref"]}
+{"id":"A0667","carrier":"self-improve/evidence/p3/README.md","file_line":51,"text":"| 29 | `cyc-20261018190540-fab5` | `probe.egress_boundary` | reject: `critic_secret`, `floor_not_met` | coverage 1.0, 0 regressions |","hints":["number","boundary","modal","ref"]}
+{"id":"A0668","carrier":"self-improve/evidence/p3/README.md","file_line":52,"text":"| 30 | `cyc-20261018190917-97bb` | `probe.extract_coverage` | reject: `floor_not_met` | coverage 1.0, 0 regressions |","hints":["number","boundary","modal","ref"]}
+{"id":"A0669","carrier":"self-improve/evidence/p3/README.md","file_line":53,"text":"| 31 | `cyc-20261018191208-3956` | `probe.egress_boundary` | reject: `critic_secret`, `floor_not_met` | coverage 1.0, 0 regressions |","hints":["number","boundary","modal","ref"]}
+{"id":"A0670","carrier":"self-improve/evidence/p3/README.md","file_line":55,"text":"- All seven guards passed in every cycle; there were zero guard failures and zero","hints":["boundary","modal"]}
+{"id":"A0671","carrier":"self-improve/evidence/p3/README.md","file_line":57,"text":"(`critic_secret`); those are verdict reasons, not guard failures.","hints":["boundary","modal"]}
+{"id":"A0672","carrier":"self-improve/evidence/p3/README.md","file_line":58,"text":"- No cycle met the `0.01` floor (`delta = 0`), so all five were rejected; the","hints":["number","boundary","modal"]}
+{"id":"A0673","carrier":"self-improve/evidence/p3/README.md","file_line":59,"text":"campaign produced no adoption and no head movement.","hints":["boundary"]}
+{"id":"A0674","carrier":"self-improve/evidence/p3/README.md","file_line":60,"text":"- Selection was `policy:failure_greedy` with `policyId=pi-1-25`, alternating the","hints":["number"]}
+{"id":"A0675","carrier":"self-improve/evidence/p3/README.md","file_line":62,"text":"- Earlier live attempts: `p3-20261019-2` recorded three `cmd_proposer_failed` calls","hints":["number","ref"]}
+{"id":"A0676","carrier":"self-improve/evidence/p3/README.md","file_line":64,"text":"(`cyc-20261018182238-50bb`).","hints":["number","ref"]}
+{"id":"A0677","carrier":"self-improve/evidence/p3/README.md","file_line":64,"text":"`p3-20261019-3` recorded eight invalid","hints":["number","ref"]}
+{"id":"A0678","carrier":"self-improve/evidence/p3/README.md","file_line":65,"text":"proposals and zero cycles; a manual reproduction of the same proposer returned `proposer_reply_missing_patch`.","hints":["boundary","modal"]}
+{"id":"A0679","carrier":"self-improve/evidence/p3/README.md","file_line":70,"text":"- All five cycles are rejects. The campaign demonstrates policy steering, guard","hints":["boundary","modal"]}
+{"id":"A0680","carrier":"self-improve/evidence/p3/README.md","file_line":71,"text":"behavior, and held-out cleanliness, not an improvement or an adoption.","hints":["boundary"]}
+{"id":"A0681","carrier":"self-improve/evidence/p3/README.md","file_line":73,"text":"reasons; they are not failures of the seven guards.","hints":["boundary","modal"]}
+{"id":"A0682","carrier":"self-improve/evidence/p3/README.md","file_line":74,"text":"- Live model output is not deterministic; the ledger rows and `summary.json` are","hints":["boundary"]}
+{"id":"A0683","carrier":"self-improve/evidence/p3/README.md","file_line":76,"text":"- The cost proxy is recorded `wallMs`, which is load-dependent, not a fresh","hints":["boundary"]}
+{"id":"A0684","carrier":"self-improve/evidence/p3/README.md","file_line":78,"text":"- The P2b verdict remains `unmet`; this campaign does not change it and makes no","hints":["number","boundary"]}
+{"id":"A0685","carrier":"self-improve/policies/pi-1-25.json","file_line":2,"text":"\"schema\": \"gjc.self-improve.policy.v1\",","hints":["number"]}
+{"id":"A0686","carrier":"self-improve/policies/pi-1-25.json","file_line":13,"text":"\"corpus\": \"6700fb56d668b33e358f7239af7c11a460f32306aeb5754a955c1ace1d263071\",","hints":["number","ref"]}
+{"id":"A0687","carrier":"self-improve/policies/pi-1-25.json","file_line":14,"text":"\"verdict\": \"insufficient evidence at pass-gate size — thresholds not evaluated\",","hints":["boundary"]}
+{"id":"A0688","carrier":"self-improve/policies/pi-1-25.json","file_line":15,"text":"\"receiptHash\": \"e7f987e5dfc0764bf0cb20ddc8e4e0262313a8134f0e7940dd506ee75dc2761c\"","hints":["number","ref"]}
+{"id":"A0689","carrier":"self-improve/policies/pi-1-25.json","file_line":17,"text":"\"createdAt\": \"2026-10-12T22:07:34.948Z\"","hints":["number"]}
+{"id":"A0690","carrier":"self-improve/policies/current.json","file_line":3,"text":"\"file\": \"pi-1-25.json\",","hints":["number"]}
+{"id":"A0691","carrier":"self-improve/policies/current.json","file_line":4,"text":"\"sha256\": \"944d03a0b146a66acf01ad2d8ded5264d463e71dcf8976e8431d1e9a508f2835\",","hints":["number","ref"]}
+{"id":"A0692","carrier":"self-improve/rrsi-protocol.json","file_line":2,"text":"\"schema\": \"gjc.self-improve.rrsi-protocol.v1\",","hints":["number"]}
+{"id":"A0693","carrier":"self-improve/rrsi-protocol.json","file_line":3,"text":"\"frozenFrom\": \"plan stage-02-revision.md §4.1-§4.4 / §9-M2 (M2 caps: --max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000; M4 caps: --max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000) + JJO-213 approved headroom extension (2026-10-19)\",","hints":["number","ref","roadmap"]}
+{"id":"A0694","carrier":"self-improve/rrsi-protocol.json","file_line":7,"text":"\"denominator\": 17,","hints":["number"]}
+{"id":"A0695","carrier":"self-improve/rrsi-protocol.json","file_line":8,"text":"\"denominatorBasis\": \"decision_accuracy cases in self-improve/domains/gjc-plugin/probes/fixtures.json after the JJO-213 headroom extension\",","hints":["number","ref"]}
+{"id":"A0696","carrier":"self-improve/rrsi-protocol.json","file_line":9,"text":"\"perCaseDelta\": 0.058823529411764705,","hints":["number","ref"]}
+{"id":"A0697","carrier":"self-improve/rrsi-protocol.json","file_line":10,"text":"\"requiredRepairedCases\": 1,","hints":["number"]}
+{"id":"A0698","carrier":"self-improve/rrsi-protocol.json","file_line":11,"text":"\"derivation\": \"delta = hits/denominator; repairing one case adds 1/denominator; required k = smallest integer with k/denominator >= floor=0.01, i.e. k = ceil(0.01 * denominator); frozen here before the first live cycle\",","hints":["number","modal","ref"]}
+{"id":"A0699","carrier":"self-improve/rrsi-protocol.json","file_line":12,"text":"\"gapClusters\": 2,","hints":["number"]}
+{"id":"A0700","carrier":"self-improve/rrsi-protocol.json","file_line":13,"text":"\"clusterCountDeviation\": \"plan R1 mitigation asked for >=4 gap clusters; the M2 gap audit (artifacts/dream-rsi-01a130dd-20261013/m2-gap-hunt/) found exactly two candidates that satisfy both the spec-anchor and metric-visibility requirements, and inventing cases is forbidden — 2 is accepted as the honest final count (parent-conceded).","hints":["number","ref","roadmap"]}
+{"id":"A0701","carrier":"self-improve/rrsi-protocol.json","file_line":13,"text":"The two clusters map 1:1 onto the P1 goal (>=2 adoptions, minimum 1).\",","hints":["number"]}
+{"id":"A0702","carrier":"self-improve/rrsi-protocol.json","file_line":18,"text":"\"source\": \"jev-advisor/README.md:57-58 (distribution must sum to one within 0.001)\",","hints":["number","ref"]}
+{"id":"A0703","carrier":"self-improve/rrsi-protocol.json","file_line":19,"text":"\"repairSurface\": \"jev-advisor/lib/decision.ts (parseProbabilityMap)\",","hints":["ref"]}
+{"id":"A0704","carrier":"self-improve/rrsi-protocol.json","file_line":20,"text":"\"class\": \"decimal |sum-1| == 0.001 boundary rejected by binary comparison; and sums above the documented 0.001 bound by up to 1e-9 accepted by the undocumented 0.001 + 1e-9 slack\",","hints":["number","boundary","modal"]}
+{"id":"A0705","carrier":"self-improve/rrsi-protocol.json","file_line":26,"text":"\"source\": \"jev-advisor/README.md:60-61 (response overflow yields explicit no-decision) + decision.ts:70 MAX_RESPONSE_BYTES\",","hints":["number","boundary","ref"]}
+{"id":"A0706","carrier":"self-improve/rrsi-protocol.json","file_line":27,"text":"\"repairSurface\": \"jev-advisor/lib/decision.ts (parseDecision)\",","hints":["ref"]}
+{"id":"A0707","carrier":"self-improve/rrsi-protocol.json","file_line":28,"text":"\"class\": \"64 KiB cap enforced only by the transport reader; the exported parser accepts an over-cap reply\",","hints":["number"]}
+{"id":"A0708","carrier":"self-improve/rrsi-protocol.json","file_line":33,"text":"\"decisionAccuracy\": 0.6470588235294118,","hints":["number","ref"]}
+{"id":"A0709","carrier":"self-improve/rrsi-protocol.json","file_line":34,"text":"\"heldoutCoverage\": 0.8,","hints":["number"]}
+{"id":"A0710","carrier":"self-improve/rrsi-protocol.json","file_line":35,"text":"\"driftCases\": 6,","hints":["number"]}
+{"id":"A0711","carrier":"self-improve/rrsi-protocol.json","file_line":36,"text":"\"atCapGuardCase\": \"decision_accuracy#14 (65536 bytes, accepted) rejects over-strict repairs\"","hints":["number","boundary","modal"]}
+{"id":"A0712","carrier":"self-improve/rrsi-protocol.json","file_line":38,"text":"\"clusterStatus\": \"re-frozen for JJO-213 on 2026-10-19 before the new measurement; the M2 freeze remains in git history at 7f2f97f\"","hints":["number","modal","ref","roadmap"]}
+{"id":"A0713","carrier":"self-improve/rrsi-protocol.json","file_line":41,"text":"\"pass\": \">=2 adoption cycles\",","hints":["number"]}
+{"id":"A0714","carrier":"self-improve/rrsi-protocol.json","file_line":42,"text":"\"degraded\": \"exactly 1 adoption cycle with a documented cause (recorded, not proof-grade)\",","hints":["number","boundary"]}
+{"id":"A0715","carrier":"self-improve/rrsi-protocol.json","file_line":43,"text":"\"fail\": \"0 adoption cycles\",","hints":["number","boundary"]}
+{"id":"A0716","carrier":"self-improve/rrsi-protocol.json","file_line":45,"text":"\"all 6 guards pass\",","hints":["number","modal"]}
+{"id":"A0717","carrier":"self-improve/rrsi-protocol.json","file_line":48,"text":"\"adoption row + code commit + adoption-recorded chore commit\",","hints":["modal"]}
+{"id":"A0718","carrier":"self-improve/rrsi-protocol.json","file_line":49,"text":"\">=1 adoption ran --install\"","hints":["number","modal"]}
+{"id":"A0719","carrier":"self-improve/rrsi-protocol.json","file_line":53,"text":"\"invariant\": \"proposerCalls >= cycles (a cycle cannot run without a proposer call); if a frozen pair violates it, the conflict is recorded here instead of silently redistributing and effective cycles = min(cycles, proposerCalls)\",","hints":["boundary","modal"]}
+{"id":"A0720","carrier":"self-improve/rrsi-protocol.json","file_line":56,"text":"\"maxProposerCalls\": 24,","hints":["number"]}
+{"id":"A0721","carrier":"self-improve/rrsi-protocol.json","file_line":59,"text":"\"cli\": \"--max-cycles 20 --max-proposer-calls 24 --max-wall-ms 9000000\",","hints":["number","ref"]}
+{"id":"A0722","carrier":"self-improve/rrsi-protocol.json","file_line":64,"text":"\"maxProposerCalls\": 8,","hints":["number"]}
+{"id":"A0723","carrier":"self-improve/rrsi-protocol.json","file_line":67,"text":"\"cli\": \"--max-cycles 6 --max-proposer-calls 8 --max-wall-ms 2400000\",","hints":["number","ref"]}
+{"id":"A0724","carrier":"self-improve/rrsi-protocol.json","file_line":71,"text":"\"autoStop\": \"A cap breach stops the campaign and records stopped_reason in the loop state; extension requires a re-frozen protocol artifact — no ad-hoc --max-* bump.\",","hints":["boundary","modal"]}
+{"id":"A0725","carrier":"self-improve/rrsi-protocol.json","file_line":72,"text":"\"escalation\": \"Cap breach, repeated HEAD movement, or a second hit on the same proposal stops the campaign; the operator records the measured state and reports the residual gap (plan §14/§16 R7).\",","hints":["number","modal","roadmap"]}
+{"id":"A0726","carrier":"self-improve/rrsi-protocol.json","file_line":76,"text":"\"validation\": 6,","hints":["number"]}
+{"id":"A0727","carrier":"self-improve/rrsi-protocol.json","file_line":78,"text":"\"insufficientEvidenceVerdict\": \"insufficient evidence at pass-gate size — thresholds not evaluated\"","hints":["boundary"]}
+{"id":"A0728","carrier":"self-improve/rrsi-protocol.json","file_line":83,"text":"\"helper\": \"self-improve/scripts/propose-with-gjc.mjs\",","hints":["ref"]}
+{"id":"A0729","carrier":"self-improve/rrsi-protocol.json","file_line":84,"text":"\"template\": \"--proposer-cmd 'node self-improve/scripts/propose-with-gjc.mjs {request} {response}'\"","hints":["ref"]}
+{"id":"A0730","carrier":"self-improve/rrsi-protocol.json","file_line":86,"text":"\"noPostHocEdits\": \"No post-hoc threshold edits: thresholds are frozen by this file's commit and re-hashed in the evidence map.\",","hints":["boundary","modal"]}
+{"id":"A0731","carrier":"self-improve/rrsi-protocol.json","file_line":88,"text":"\"probes\": \"self-improve/domains/gjc-plugin/probes/fixtures.json\",","hints":["ref"]}
+{"id":"A0732","carrier":"self-improve/rrsi-protocol.json","file_line":89,"text":"\"heldout\": \"self-improve/domains/gjc-plugin/heldout/fixtures.json\",","hints":["ref"]}
+{"id":"A0733","carrier":"self-improve/rrsi-protocol.json","file_line":91,"text":"\"probes\": \"59ade9279061b15ca4c0cededfe167de755ab097b5bf2ecf8248bd80a4b9e768\",","hints":["number","ref"]}
+{"id":"A0734","carrier":"self-improve/rrsi-protocol.json","file_line":92,"text":"\"heldout\": \"2efdd9c250192c5446aba416f942aed5b1ff7204d4a38a21a1bc84910b0f7508\"","hints":["number","ref"]}
+{"id":"A0735","carrier":"self-improve/rrsi-protocol.json","file_line":97,"text":"\"approvedAt\": \"2026-10-19T00:25:00+09:00\",","hints":["number"]}
+{"id":"A0736","carrier":"self-improve/rrsi-protocol.json","file_line":98,"text":"\"approvedBudgetUsd\": 5,","hints":["number"]}
+{"id":"A0737","carrier":"self-improve/rrsi-protocol.json","file_line":99,"text":"\"supersedes\": \"M2 freeze at commit 7f2f97f (rrsi-protocol.json v1)\",","hints":["number","modal","ref","roadmap"]}
+{"id":"A0738","carrier":"self-improve/rrsi-protocol.json","file_line":100,"text":"\"reason\": \"add one spec-sourced probability-bound headroom case and its heldout parallel; no threshold, pass-gate or cap change\",","hints":["boundary"]}
+{"id":"A0739","carrier":"self-improve/rrsi-protocol.json","file_line":102,"text":"\"preRegistration\": \"this file is committed before the adoption measurement; the M2 thresholds and dual-floor rule are unchanged\"","hints":["number","modal","roadmap"]}
+{"id":"A0740","carrier":"self-improve/replay-protocol.json","file_line":2,"text":"\"schema\": \"gjc.self-improve.replay-protocol.v1\",","hints":["number"]}
+{"id":"A0741","carrier":"self-improve/replay-protocol.json","file_line":8,"text":"\"validation\": 6,","hints":["number"]}
+{"id":"A0742","carrier":"self-improve/replay-protocol.json","file_line":10,"text":"\"insufficientEvidenceVerdict\": \"insufficient evidence at pass-gate size — thresholds not evaluated\",","hints":["boundary"]}
+{"id":"A0743","carrier":"self-improve/replay-protocol.json","file_line":11,"text":"\"source\": \"self-improve/rrsi-protocol.json p2 (this file does not re-derive them)\"","hints":["number","boundary","ref"]}
+{"id":"A0744","carrier":"self-improve/replay-protocol.json","file_line":14,"text":"\"boundary\": \"editable-surface digest; an adoption is the observable boundary event, ledger-only chore commits are not\",","hints":["boundary","modal"]}
+{"id":"A0745","carrier":"self-improve/replay-protocol.json","file_line":15,"text":"\"baseCommit\": \"provenance only, never the epoch key\",","hints":["boundary"]}
+{"id":"A0746","carrier":"self-improve/replay-protocol.json","file_line":19,"text":"\"historyRule\": \"attempts recorded before a replayed slice are ex-ante prior knowledge: branch hypothesis novelty, prior revealed outcomes and prior guard-failure classes may use them\"","hints":["modal"]}
+{"id":"A0747","carrier":"self-improve/replay-protocol.json","file_line":30,"text":"\"prior guard-failure classes\",","hints":["modal"]}
+{"id":"A0748","carrier":"self-improve/replay-protocol.json","file_line":41,"text":"\"B0\": \"recorded order, batch 1, stop at first adoption\",","hints":["number"]}
+{"id":"A0749","carrier":"self-improve/replay-protocol.json","file_line":42,"text":"\"B1\": \"fixed round-robin objective order, batch 1, stop at first adoption\",","hints":["number"]}
+{"id":"A0750","carrier":"self-improve/replay-protocol.json","file_line":44,"text":"\"candidateSpace\": \"5 order rules (fixed, round_robin, success_greedy, failure_greedy, novelty_first) x batch size 1-3 x stall switch x stop rule = 40 candidates by construction (<=48)\"","hints":["number"]}
+{"id":"A0751","carrier":"self-improve/replay-protocol.json","file_line":47,"text":"\"validationAttempts\": \"pi* attempts-to-first-adoption <= min(B0, B1) - 1\",","hints":["number"]}
+{"id":"A0752","carrier":"self-improve/replay-protocol.json","file_line":48,"text":"\"validationCost\": \"pi* cost-to-first-adoption <= 0.7 x B0 cost-to-first-adoption\",","hints":["number"]}
+{"id":"A0753","carrier":"self-improve/replay-protocol.json","file_line":49,"text":"\"antiFluke\": \"full-corpus pi* cost-to-first-adoption <= B0 cost-to-first-adoption\",","hints":["number"]}
+{"id":"A0754","carrier":"self-improve/replay-protocol.json","file_line":55,"text":"\"source\": \"self-improve/rrsi.json policy defaults\",","hints":["ref"]}
+{"id":"A0755","carrier":"self-improve/replay-protocol.json","file_line":56,"text":"\"note\": \"the paper-shaped replay value V = s - beta1*N + beta2*N/max(1,k) is reported for reference; ranking uses the primary metrics above\"","hints":["number","ref"]}
+{"id":"A0756","carrier":"self-improve/replay-protocol.json","file_line":59,"text":"\"costProxyCaveat\": \"the cost proxy is load-dependent recorded wallMs, not a fresh measurement\",","hints":["boundary"]}
+{"id":"A0757","carrier":"self-improve/replay-protocol.json","file_line":60,"text":"\"noStatisticalSignificance\": \"All P2 comparisons are off-policy replays over ONE realized corpus of fewer than ~24 recorded attempts; no statistical significance is claimed; effect sizes are reported with n and are not confidence-interval estimates of future performance; the cost proxy is load-dependent recorded wallMs, not a fresh measurement.\",","hints":["number","boundary","roadmap"]}
+{"id":"A0758","carrier":"self-improve/replay-protocol.json","file_line":61,"text":"\"noPostHocEdits\": \"No post-hoc threshold edits: thresholds are frozen by this file's commit and re-hashed in the evidence map.\",","hints":["boundary","modal"]}
+{"id":"A0759","carrier":"self-improve/replay-protocol.json","file_line":63,"text":"\"path\": \"self-improve/ledger.jsonl\",","hints":["ref"]}
+{"id":"A0760","carrier":"self-improve/replay-protocol.json","file_line":64,"text":"\"sha256\": \"72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e\",","hints":["number","ref"]}
+{"id":"A0761","carrier":"self-improve/replay-protocol.json","file_line":65,"text":"\"attemptsAtFreeze\": 13,","hints":["number"]}
+{"id":"A0762","carrier":"self-improve/replay-protocol.json","file_line":66,"text":"\"adoptionsAtFreeze\": 1,","hints":["number"]}
+{"id":"A0763","carrier":"self-improve/replay-protocol.json","file_line":67,"text":"\"rejectsAtFreeze\": 12,","hints":["number"]}
+{"id":"A0764","carrier":"self-improve/replay-protocol.json","file_line":68,"text":"\"epochsAtFreeze\": 2,","hints":["number"]}
+{"id":"A0765","carrier":"self-improve/replay-protocol.json","file_line":69,"text":"\"frozenAt\": \"2026-10-12T22:03:01.161Z\",","hints":["number"]}
+{"id":"A0766","carrier":"self-improve/replay-protocol.json","file_line":70,"text":"\"passGateSituation\": \"attemptsAtFreeze (13) < passGate.n (20): the dream run reports the frozen insufficient-evidence verdict; thresholds are NOT evaluated or re-derived\",","hints":["number","boundary","modal"]}
+{"id":"A0767","carrier":"self-improve/replay-protocol.json","file_line":71,"text":"\"downgradeNote\": \"plan 4.3 / M3 brief: a corpus in [12,19] attempts (here 13, >= the pass-1 floor of 12) yields \\\"insufficient evidence at pass-gate size - thresholds not evaluated\\\" as a measured, escalated verdict with this downgrade recorded explicitly - no silent downgrade and no threshold relaxation\",","hints":["number","boundary","roadmap"]}
+{"id":"A0768","carrier":"self-improve/replay-protocol.json","file_line":72,"text":"\"integrity\": \"protocol file hash and corpus hash are recorded in the M3 evidence dir before and after the evidence runs (no post-hoc edits)\"","hints":["number","boundary","roadmap"]}
+{"id":"A0769","carrier":"self-improve/replay-protocol.json","file_line":75,"text":"\"dir\": \"self-improve/policies\",","hints":["ref"]}
+{"id":"A0770","carrier":"self-improve/replay-protocol.json","file_line":76,"text":"\"current\": \"self-improve/policies/current.json\",","hints":["ref"]}
+{"id":"A0771","carrier":"self-improve/replay-protocol.json","file_line":80,"text":"\"replay/dream JSON receipts (per-policy per-world scores)\",","hints":["ref"]}
+{"id":"A0772","carrier":"self-improve/replay-protocol.json","file_line":81,"text":"\"this protocol file plus its commit hash\",","hints":["modal"]}
+{"id":"A0773","carrier":"self-improve/replay-protocol-p2b.json","file_line":2,"text":"\"schema\": \"gjc.self-improve.replay-protocol.v1\",","hints":["number"]}
+{"id":"A0774","carrier":"self-improve/replay-protocol-p2b.json","file_line":3,"text":"\"status\": \"frozen-p2b\",","hints":["number","modal"]}
+{"id":"A0775","carrier":"self-improve/replay-protocol-p2b.json","file_line":8,"text":"\"validation\": 6,","hints":["number"]}
+{"id":"A0776","carrier":"self-improve/replay-protocol-p2b.json","file_line":10,"text":"\"insufficientEvidenceVerdict\": \"insufficient evidence at pass-gate size — thresholds not evaluated\",","hints":["boundary"]}
+{"id":"A0777","carrier":"self-improve/replay-protocol-p2b.json","file_line":11,"text":"\"source\": \"self-improve/rrsi-protocol.json p2 (this file does not re-derive them)\"","hints":["number","boundary","ref"]}
+{"id":"A0778","carrier":"self-improve/replay-protocol-p2b.json","file_line":14,"text":"\"boundary\": \"editable-surface digest; an adoption is the observable boundary event, ledger-only chore commits are not\",","hints":["boundary","modal"]}
+{"id":"A0779","carrier":"self-improve/replay-protocol-p2b.json","file_line":15,"text":"\"baseCommit\": \"provenance only, never the epoch key\",","hints":["boundary"]}
+{"id":"A0780","carrier":"self-improve/replay-protocol-p2b.json","file_line":19,"text":"\"historyRule\": \"attempts recorded before a replayed slice are ex-ante prior knowledge: branch hypothesis novelty, prior revealed outcomes and prior guard-failure classes may use them\"","hints":["modal"]}
+{"id":"A0781","carrier":"self-improve/replay-protocol-p2b.json","file_line":30,"text":"\"prior guard-failure classes\",","hints":["modal"]}
+{"id":"A0782","carrier":"self-improve/replay-protocol-p2b.json","file_line":41,"text":"\"B0\": \"recorded order, batch 1, stop at first adoption\",","hints":["number"]}
+{"id":"A0783","carrier":"self-improve/replay-protocol-p2b.json","file_line":42,"text":"\"B1\": \"fixed round-robin objective order, batch 1, stop at first adoption\",","hints":["number"]}
+{"id":"A0784","carrier":"self-improve/replay-protocol-p2b.json","file_line":44,"text":"\"candidateSpace\": \"5 order rules (fixed, round_robin, success_greedy, failure_greedy, novelty_first) x batch size 1-3 x stall switch x stop rule = 40 candidates by construction (<=48)\"","hints":["number"]}
+{"id":"A0785","carrier":"self-improve/replay-protocol-p2b.json","file_line":47,"text":"\"validationAttempts\": \"pi* attempts-to-first-adoption <= min(B0, B1) - 1\",","hints":["number"]}
+{"id":"A0786","carrier":"self-improve/replay-protocol-p2b.json","file_line":48,"text":"\"validationCost\": \"pi* cost-to-first-adoption <= 0.7 x B0 cost-to-first-adoption\",","hints":["number"]}
+{"id":"A0787","carrier":"self-improve/replay-protocol-p2b.json","file_line":49,"text":"\"antiFluke\": \"full-corpus pi* cost-to-first-adoption <= B0 cost-to-first-adoption\",","hints":["number"]}
+{"id":"A0788","carrier":"self-improve/replay-protocol-p2b.json","file_line":55,"text":"\"source\": \"self-improve/rrsi.json policy defaults\",","hints":["ref"]}
+{"id":"A0789","carrier":"self-improve/replay-protocol-p2b.json","file_line":56,"text":"\"note\": \"the paper-shaped replay value V = s - beta1*N + beta2*N/max(1,k) is reported for reference; ranking uses the primary metrics above\"","hints":["number","ref"]}
+{"id":"A0790","carrier":"self-improve/replay-protocol-p2b.json","file_line":59,"text":"\"costProxyCaveat\": \"the cost proxy is load-dependent recorded wallMs, not a fresh measurement\",","hints":["boundary"]}
+{"id":"A0791","carrier":"self-improve/replay-protocol-p2b.json","file_line":60,"text":"\"noStatisticalSignificance\": \"All P2 comparisons are off-policy replays over ONE realized corpus of fewer than ~24 recorded attempts; no statistical significance is claimed; effect sizes are reported with n and are not confidence-interval estimates of future performance; the cost proxy is load-dependent recorded wallMs, not a fresh measurement.\",","hints":["number","boundary","roadmap"]}
+{"id":"A0792","carrier":"self-improve/replay-protocol-p2b.json","file_line":61,"text":"\"noPostHocEdits\": \"No post-hoc threshold edits: thresholds are unchanged from the original replay-protocol.json and are frozen again by this file's commit before the P2b dream/replay run.\",","hints":["number","boundary","modal","ref"]}
+{"id":"A0793","carrier":"self-improve/replay-protocol-p2b.json","file_line":63,"text":"\"path\": \"self-improve/ledger.jsonl\",","hints":["ref"]}
+{"id":"A0794","carrier":"self-improve/replay-protocol-p2b.json","file_line":64,"text":"\"sha256\": \"9fc5668d4542fd1e6e410edd6bcee53d968e13d7e3c9294fb88aa82daf211638\",","hints":["number","ref"]}
+{"id":"A0795","carrier":"self-improve/replay-protocol-p2b.json","file_line":65,"text":"\"attemptsAtFreeze\": 22,","hints":["number"]}
+{"id":"A0796","carrier":"self-improve/replay-protocol-p2b.json","file_line":66,"text":"\"adoptionsAtFreeze\": 2,","hints":["number"]}
+{"id":"A0797","carrier":"self-improve/replay-protocol-p2b.json","file_line":67,"text":"\"rejectsAtFreeze\": 20,","hints":["number"]}
+{"id":"A0798","carrier":"self-improve/replay-protocol-p2b.json","file_line":68,"text":"\"epochsAtFreeze\": 2,","hints":["number"]}
+{"id":"A0799","carrier":"self-improve/replay-protocol-p2b.json","file_line":69,"text":"\"frozenAt\": \"2026-10-18T18:07:11Z\",","hints":["number"]}
+{"id":"A0800","carrier":"self-improve/replay-protocol-p2b.json","file_line":70,"text":"\"passGateSituation\": \"attemptsAtFreeze (22) >= passGate.n (20); the validation slice (last 6 attempts) includes 3 adoption cycles, so the frozen thresholds will be evaluated.\",","hints":["number","modal"]}
+{"id":"A0801","carrier":"self-improve/replay-protocol-p2b.json","file_line":71,"text":"\"splitDisclosure\": \"train = attempts 1-14; validation = attempts 17-22; attempts 15-16 are excluded from the train/validation slices and used only in the full-corpus anti-fluke score.\",","hints":["number","ref"]}
+{"id":"A0802","carrier":"self-improve/replay-protocol-p2b.json","file_line":72,"text":"\"integrity\": \"the protocol file hash and the 22-attempt corpus hash are recorded in the P2b evidence receipts before and after the dream/replay runs; the original replay-protocol.json remains unchanged.\"","hints":["number","ref"]}
+{"id":"A0803","carrier":"self-improve/replay-protocol-p2b.json","file_line":75,"text":"\"dir\": \"self-improve/policies\",","hints":["ref"]}
+{"id":"A0804","carrier":"self-improve/replay-protocol-p2b.json","file_line":76,"text":"\"current\": \"self-improve/policies/current.json\",","hints":["ref"]}
+{"id":"A0805","carrier":"self-improve/replay-protocol-p2b.json","file_line":80,"text":"\"replay/dream JSON receipts (per-policy per-world scores)\",","hints":["ref"]}
+{"id":"A0806","carrier":"self-improve/replay-protocol-p2b.json","file_line":81,"text":"\"this protocol file plus its commit hash\",","hints":["modal"]}
+{"id":"A0807","carrier":"self-improve/replay-protocol-p2b.json","file_line":85,"text":"\"supersedes\": \"replay-protocol.json (v0.0.6 13-attempt corpus; preserved unchanged as historical evidence)\",","hints":["number"]}
+{"id":"A0808","carrier":"self-improve/replay-protocol-p2b.json","file_line":86,"text":"\"frozenReason\": \"JJO-213 follow-up: the accumulated ledger reached 22 attempts, meeting the original passGate.n=20 without changing thresholds.","hints":["number","boundary","ref","roadmap"]}
+{"id":"A0809","carrier":"self-improve/replay-protocol-p2b.json","file_line":86,"text":"This is a new pre-registration after the original 13-attempt run, not a retroactive edit of the original P2 verdict.\"","hints":["number","boundary"]}

@@ -1,0 +1,32 @@
+{
+  "schema": "gjc.audit.reproductions.v1",
+  "commands": [
+    "git show e6675cb:self-improve/ledger.jsonl",
+    "node self-improve/scripts/run.mjs dream --seed 1 --ledger <blob> --json",
+    "node self-improve/scripts/run.mjs replay --ledger <blob> --json",
+    "git show 7f2f97f:self-improve/ledger.jsonl",
+    "node self-improve/scripts/run.mjs dream --seed 1 --ledger <blob> --json"
+  ],
+  "files": {
+    "ledger-p2b.jsonl": {
+      "bytes": 32323,
+      "sha256": "616e95f736b860425030a72f7c9c9d7bcb4225296d7f3f42843af993a32b8707"
+    },
+    "dream-p2b.json": {
+      "bytes": 60558,
+      "sha256": "dc2383dc6f54567b2561ad3dd7e03baa0235f56a177f2ebe55df84b10619464d"
+    },
+    "replay-p2b.json": {
+      "bytes": 1030,
+      "sha256": "fdba1bbfecfe58d062dfbf01f1f5e05b18e982c71fb20e19c3dde3c7a6970be4"
+    },
+    "ledger-p2.jsonl": {
+      "bytes": 17250,
+      "sha256": "72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e"
+    },
+    "dream-p2.json": {
+      "bytes": 61028,
+      "sha256": "cff80dfbec86402194c509f695aa3d18431c50a023f13d347cff541b5f007b6e"
+    }
+  }
+}

@@ -1,0 +1,6 @@
+PASS p2b corpus observed=9fc5668d4542fd1e expected=9fc5668d4542fd1e
+PASS p2b receiptHash observed=d6635a0bac2575a4 expected=d6635a0bac2575a4
+PASS p2 corpus observed=6700fb56d668b33e expected=6700fb56d668b33e
+PASS p2 receiptHash observed=e7f987e5dfc0764b expected=e7f987e5dfc0764b
+PASS p2b replay equals evidence/p2b/replay-b0b1.json except corpus.ledgerPath
+verdict=verified failures=0

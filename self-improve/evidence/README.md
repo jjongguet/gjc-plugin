@@ -5,6 +5,8 @@ has its own README with the frozen inputs, commands, result and limits.
 
 - [`p2b/`](p2b/README.md) — the 22-attempt replay measurement (verdict `unmet`).
 - [`p3/`](p3/README.md) — the redeployed-policy campaign (five rejects, no adoption).
+- [`audit-20261022/`](audit-20261022/README.md) — the RRSI + Harness² introduction audit:
+  claim graph, frozen-corpus reproductions, frozen-artifact annex and verdicts.
 
 ## Path disclosure
 
