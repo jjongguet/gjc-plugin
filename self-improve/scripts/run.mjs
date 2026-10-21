@@ -582,7 +582,8 @@ function runDistillCommand(options) {
     const projection = payload.projection;
     process.stdout.write(
       `domain=${payload.domain} store=${read.status} projection=${projection.maxDrawnFrom ?? "-"} head=${projection.ledgerHead} ` +
-        `lag=${projection.storeLag ?? "-"} label=${projection.label} candidates=${payload.candidates.length} ` +
+        `lag=${projection.storeLag ?? "-"} label=${projection.label} declared=${payload.groups.declared} gated=${payload.groups.gated} ` +
+        `candidates=${payload.candidates.length} ` +
         `withheld=${payload.withheld.length} skipped=${payload.skipped.length} ` +
         `undeclared=${payload.undeclared.groups}(${payload.undeclared.attempts})` +
         `${options.out ? ` out=${resolve(options.out)}` : ""}\n`,

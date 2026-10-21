@@ -454,12 +454,12 @@ export function distillTrajectories({
       skipped.push({ ...common, reason: "no_attempts" });
       continue;
     }
-    if (unbound > 0) {
-      skipped.push({ ...common, reason: "unbound_evidence", basis: "unbound", bound, unbound });
-      continue;
-    }
     if (key !== gatedObjective) {
       skipped.push({ ...common, reason: "objective_not_gated" });
+      continue;
+    }
+    if (unbound > 0) {
+      skipped.push({ ...common, reason: "unbound_evidence", basis: "unbound", bound, unbound });
       continue;
     }
 

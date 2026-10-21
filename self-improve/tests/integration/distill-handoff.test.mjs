@@ -14,6 +14,7 @@ import { buildFixture } from "../fixtures/distill-fixture.mjs";
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const ECHO_PROPOSER = join(REPO_ROOT, "self-improve", "tests", "fixtures", "proposer-echo.mjs");
 const RUN_MJS = join(REPO_ROOT, "self-improve", "scripts", "run.mjs");
+const MISMATCH_PROPOSER = join(REPO_ROOT, "self-improve", "tests", "fixtures", "proposer-mismatch.mjs");
 
 function git(cwd, args) {
   const proc = spawnSync("git", ["-C", cwd, ...args], { encoding: "utf8" });
@@ -63,12 +64,12 @@ function writeLedger(repo, rows) {
   writeFileSync(join(repo, "self-improve", "ledger.jsonl"), `${rows.map((row) => JSON.stringify(row)).join("\n")}\n`);
 }
 
-function handoffInput({ root, repo, candidatePath, maxLag = 0, storePath = null }) {
+function handoffInput({ root, repo, candidatePath, maxLag = 0, storePath = null, proposerCmd = null }) {
   return {
     repoRoot: repo,
     adapter: DOMAIN,
     proposer: "cmd",
-    proposerCmd: `node ${ECHO_PROPOSER} {request} {response}`,
+    proposerCmd: proposerCmd ?? `node ${ECHO_PROPOSER} {request} {response}`,
     liveApproved: true,
     candidatePath,
     storePath,
@@ -163,6 +164,36 @@ test("a contradicted, stale, or tampered candidate is refused before any request
   assert.equal(staleRun.reason, "candidate_stale");
 
   assert.equal(existsSync(join(root, "runroot")), false);
+});
+
+test("a proposer response that moves the pinned objective is refused", async () => {
+  const { root, repo } = makeFixture();
+  const fixture = buildFixture();
+  writeLedger(repo, fixture.ledgerRows);
+  const storePath = join(root, "store.json");
+  writeFileSync(storePath, JSON.stringify(fixture.store));
+  const distill = distillTrajectories({
+    store: fixture.store,
+    ledgerRows: fixture.ledgerRows,
+    declaredObjectives: fixture.declared,
+    gatedObjective: fixture.gated,
+  });
+  const candidatePath = join(root, "candidate.json");
+  writeFileSync(candidatePath, JSON.stringify(distill.candidates[0]));
+  const result = await runLoop(
+    handoffInput({
+      root,
+      repo,
+      candidatePath,
+      storePath,
+      proposerCmd: `node ${MISMATCH_PROPOSER} {request} {response}`,
+    }),
+  );
+  assert.equal(result.status, "ok");
+  assert.equal(result.stoppedReason, "candidate_failed");
+  assert.equal(result.cycles.length, 1);
+  assert.equal(result.cycles[0].status, "proposal_invalid");
+  assert.equal(result.cycles[0].reason, "proposer_objective_mismatch");
 });
 
 test("the CLI maps a refused candidate to exit 2 and never reaches the proposer", () => {

@@ -74,7 +74,8 @@ counter consistency (`pairs.support = support.adopts × support.rejects`, side
 counts equal the support counts, attempt ids unique and bounded), recomputed
 content id (`candidate_tampered`), freshness (`candidate_stale`), and the store
 digest recomputed from `--store` (default the rrsi store) so a forged digest is
-`candidate_store_mismatch`. A refused candidate exits 2 before any proposer
+`candidate_store_mismatch`. Candidate mode without a store is
+`candidate_store_required`. A refused candidate exits 2 before any proposer
 call. A valid candidate pins the objective, adds an optional `contrast` field
 to the v1 proposer request, rejects a response that moves the objective
 (`proposer_objective_mismatch`), and stops the loop with `candidate_consumed`
@@ -133,9 +134,10 @@ refuted by four of its six pairs.
 - Unit (`tests/unit/propose-contrast.test.mjs`): the contrast field is additive;
   requests without it keep their previous shape.
 - Integration (`tests/integration/distill-handoff.test.mjs`): fixture store and
-  ledger → candidate → real request → composer script → validation → engine
-  **dry-run** decision, with the contrast present in the request and the ledger
-  unchanged. This is E5a and it is hermetic (no model, no network).
+  ledger → candidate → real request → committed composer fixture → validation →
+  engine **dry-run** decision, with the contrast present in the request, the
+  ledger unchanged, and a mismatched response objective refused. This is E5a
+  and it is hermetic (no model, no network).
 - **Not executed:** E5b, the live `cmd` proposer plus build/test tier. Until it
   runs, the guard-tier dry run is **unproven**; the E5a test is never described
   as a guard-tier run.

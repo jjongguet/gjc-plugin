@@ -19,8 +19,16 @@ function request(contrast) {
   });
 }
 
-test("requests without a contrast keep the pre-candidate shape byte-for-byte", () => {
+test("requests without a contrast keep the exact pre-candidate key set", () => {
   const requestNoContrast = request(null);
+  assert.deepEqual(
+    Object.keys(requestNoContrast).sort(),
+    ["baseCommit", "budget", "constraints", "cycleIndex", "editableSurfaces", "evaluationPath", "failingCases", "loopId", "objective", "priorAttempts", "responseContract", "schema", "stalledObjectives", "unexploredObjectives"].sort(),
+  );
+  assert.deepEqual(
+    Object.keys(requestNoContrast.responseContract).sort(),
+    ["commitMessage", "hypothesis", "objective", "patch"].sort(),
+  );
   assert.equal("contrast" in requestNoContrast, false);
   assert.equal("rule" in requestNoContrast.responseContract, false);
   assert.equal(JSON.stringify(requestNoContrast), JSON.stringify(request(undefined)));

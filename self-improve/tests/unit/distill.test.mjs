@@ -146,7 +146,7 @@ test("two signatures with no null pair classify as inconsistent_contrast", () =>
   assert.deepEqual(skip.contradiction, { adopts: 0, rejects: 0 });
 });
 
-test("missing adopt and missing reject are skipped, never synthesized", () => {
+test("declared but ungated objectives report objective_not_gated before contrast analysis", () => {
   const result = distill({
     store: store([
       episode("ep-a", [attempt(0, { objective: "probe.extract_coverage", decision: "reject" })]),
@@ -156,6 +156,11 @@ test("missing adopt and missing reject are skipped, never synthesized", () => {
   const reasons = Object.fromEntries(result.skipped.map((entry) => [entry.objective, entry.reason]));
   assert.equal(reasons["probe.extract_coverage"], "objective_not_gated");
   assert.equal(reasons["probe.egress_boundary"], "objective_not_gated");
+});
+
+test("separateGroup reports missing adopt and missing reject", () => {
+  assert.equal(separateGroup([attempt(0, { decision: "reject" })]).reason, "missing_adopt");
+  assert.equal(separateGroup([attempt(0, { decision: "adopt" })]).reason, "missing_reject");
 });
 
 test("cost-only differences are a null pair and never an emitted rule", () => {

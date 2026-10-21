@@ -322,6 +322,7 @@ export async function runLoop(input) {
   let candidate = null;
   if (candidatePath) {
     const refuse = (reason) => ({ status: "skipped", reason, candidateRefused: true, loopId });
+    if (!storePath) return refuse("candidate_store_required");
     let candidateText;
     try {
       candidateText = fs.readFileSync(candidatePath, "utf8");
@@ -539,6 +540,10 @@ export async function runLoop(input) {
         state.cycles.push({ cycleIndex, objective: action.objective, status: "proposal_failed", reason: outcome.reason });
         log({ type: "proposal_failed", cycleIndex, objective: action.objective, reason: outcome.reason, log: outcome.log ?? null });
         persist();
+        if (candidate) {
+          stoppedReason = "candidate_failed";
+          break;
+        }
         continue;
       }
       const validation = validateAgentProposal({
@@ -563,6 +568,10 @@ export async function runLoop(input) {
         });
         log({ type: "proposal_invalid", cycleIndex, objective: action.objective, reason: validation.reason, detail: validation });
         persist();
+        if (candidate) {
+          stoppedReason = "candidate_failed";
+          break;
+        }
         continue;
       }
       if (candidate && validation.proposal.objective !== candidate.objective) {
@@ -576,7 +585,8 @@ export async function runLoop(input) {
         });
         log({ type: "proposal_invalid", cycleIndex, reason: "proposer_objective_mismatch", proposedObjective: validation.proposal.objective });
         persist();
-        continue;
+        stoppedReason = "candidate_failed";
+        break;
       }
       const headAfter = head();
       if (headAfter !== request.baseCommit) {
