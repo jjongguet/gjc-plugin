@@ -34,6 +34,7 @@ These are the working rules for agents and contributors changing this repository
 - Committed evidence uses repository-relative paths; `bun run evidence:check` enforces this for `self-improve/`.
 - The self-improve ledger is append-only. Never rewrite, reorder or delete a ledger row.
 - Session logs, dated run notes and test counts do not belong in committed documentation; reproduction steps do.
+- `self-improve/evidence/**` is the sanctioned home for dated receipts and measured counts; the exception does not extend to other documentation.
 
 ## Commit and verification rules
 

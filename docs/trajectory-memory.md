@@ -102,7 +102,10 @@ node self-improve/scripts/run.mjs distill [--store <path>] [--ledger <path>]
 
 ## Measured result (frozen inputs, 2026-10-21)
 
-Inputs frozen at `.gjc/distill-demo/inputs/` from the live store and ledger:
+Inputs are a point-in-time snapshot of the live rrsi store and ledger. They are
+not committed (the store is private), so these store-derived rows are **not
+reproducible** from the repository; only the ledger-derived counters can be
+regenerated against the same snapshot.
 
 | Field | Value |
 | --- | --- |
@@ -114,7 +117,10 @@ Inputs frozen at `.gjc/distill-demo/inputs/` from the live store and ledger:
 | `probe.egress_boundary` | `objective_not_gated`, `drawnFrom 9`, lag 22 |
 
 Zero candidates is the intended outcome: the only group with both decisions is
-refuted by four of its six pairs.
+refuted by four of its six pairs. Measured at 2026-10-21; regenerate the
+ledger-derived counters with `node self-improve/scripts/run.mjs distill --json`
+against the same private store snapshot — the snapshot itself is not
+reconstructible and the counts are a sample, not a reproducible series.
 
 ## Non-goals
 

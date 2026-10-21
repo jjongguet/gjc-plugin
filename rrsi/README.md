@@ -23,10 +23,10 @@ periodic refresh described below.
 | Action | Parameter | What it does |
 | --- | --- | --- |
 | `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |
-| `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`) and `projectionDigest`, and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
+| `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`), `projectionDigest` and `projection` (`records` / `projected` / `omitted` / `ratio` / `limited`), and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
 | `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |
 | _other_ | — | Rejected as a tool error (`isError: true`) with `error: "unknown action: <value>"`; the store is read, never written. |
-| `status` | — | Store counts (episodes/attempts/adoptions), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
+| `status` | — | Store counts (episodes/attempts/adoptions, where `adoptions` counts attempts whose `decision` is `adopt`, including projected advice records), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
 
 Every handled invocation appends exactly one sanitized `rrsi` outcome to the
 shared plugin journal (`~/.gjc-plugin/rrsi/journal/v1/`, retained-window
@@ -42,7 +42,9 @@ is out of scope and unprovided.
 
 - **Trigger and interval.** Every fresh GJC session (interactive, print/SDK,
   task) runs one bounded attempt. The default interval is 24 h;
-  `RRSI_PERIODIC_INTERVAL_MS` (milliseconds, ≥ 60 000) overrides it.
+  `RRSI_PERIODIC_INTERVAL_MS` (milliseconds, ≥ 60 000) overrides it; values
+  below the floor fall back to the 24 h default and values above 30 days are
+  clamped.
   `RRSI_PERIODIC=off` disables the refresh without consuming the interval.
 - **Bounded work (one slot per source).** The hook reads the jev-advisor
   journal, projects the newest `limit = 160` records into one content-keyed
@@ -56,8 +58,9 @@ is out of scope and unprovided.
   re-running under the same locks) instead of inside the session.
 - **Coverage labels.** The periodic receipt carries `projection`
   `{records, projected, omitted, ratio, limited}` and `limited_projection`;
-  omitted records are labeled, never silently dropped. The same projection is
-  stored as `lastProjection` for `rrsi status`.
+  omitted records are labeled in the periodic receipt, never silently dropped
+  by that path (`import` reports consumed counts but not projection coverage).
+  The same projection is stored as `lastProjection` for `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
@@ -103,8 +106,8 @@ is out of scope and unprovided.
 
 `~/.gjc-plugin/rrsi/store.json` — private `0700` directory, `0600` single-link
 file, written atomically (temp + rename). Bounded: 128 episodes, 160 attempts per
-episode, 512 KiB store, 4 MiB source reads, 40-char identifiers, 280-char text
-fields. Absent, corrupt, symlinked or oversized stores are **reported** as
+episode, 512 KiB store, 4 MiB source reads, 64-char identifiers, 40-char labels,
+280-char text fields. Absent, corrupt, symlinked or oversized stores are **reported** as
 `missing` / `invalid` and never reset or repaired; the store is never committed
 to the repository. The periodic state (`periodic.json`), its exclusive locks
 (`periodic.lock`, `store.lock`) and run receipts (`runs/v1/`) live under the
