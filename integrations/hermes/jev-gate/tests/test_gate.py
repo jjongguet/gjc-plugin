@@ -250,6 +250,46 @@ class GateTests(unittest.TestCase):
                 parsed = gate._parse_check_response(json.dumps(case["response"]).encode())
                 self.assertEqual(parsed["status"], case["expected"]["status"])
 
+    def test_scheduler_replacement_joins_and_exhausts_within_budget(self):
+        first = gate.handle_turn(ABORT, execution(), config_path=self.config)
+        self.assertIn("attempt=2/3", first)
+        state_path = self.data / "default" / "state.json"
+        marker_path = self.data / "default" / "pending_job1.json"
+        self.assertTrue(marker_path.exists())
+        group = json.loads(state_path.read_text())["jobs"]["job1"]["run_group_id"]
+        for expected_attempt in (3, 3):
+            result = gate.handle_turn(ABORT, execution(execution_id=f"exec-retry-{expected_attempt}"), config_path=self.config)
+            self.assertIn(f"attempt={expected_attempt}/3", result)
+        state = json.loads(state_path.read_text())["jobs"]["job1"]
+        self.assertEqual(state["status"], "exhausted")
+        self.assertEqual(state["run_group_id"], group)
+        self.assertEqual(len(self.spawned), 2)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        joined = [json.loads(line) for line in receipts]
+        self.assertEqual([r.get("join_status") for r in joined], ["new", "joined", "joined"])
+        self.assertEqual(joined[-1].get("decision"), "exhausted")
+
+    def test_stale_marker_past_budget_starts_new_group(self):
+        gate.handle_turn(ABORT, execution(), config_path=self.config)
+        state_path = self.data / "default" / "state.json"
+        state = json.loads(state_path.read_text())
+        state["jobs"]["job1"]["deadline_at"] = 1.0
+        state_path.write_text(json.dumps(state))
+        result = gate.handle_turn(ABORT, execution(execution_id="exec-late"), config_path=self.config)
+        self.assertIn("attempt=2/3", result)
+        after = json.loads(state_path.read_text())["jobs"]["job1"]
+        self.assertEqual(after["status"], "retrying")
+        self.assertEqual(after["attempt"], 2)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        self.assertIn('"join_status": "new"', receipts[-1])
+
+    def test_builtin_without_marker_supersedes_retry(self):
+        gate.handle_turn(ABORT, execution(), config_path=self.config)
+        gate._clear_marker("default", "job1")
+        result = gate.handle_turn(ABORT, execution(execution_id="exec-fresh"), config_path=self.config)
+        self.assertIn("attempt=2/3", result)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        self.assertIn('"join_status": "new"', receipts[-1])
 
 class RetryHelperTests(unittest.TestCase):
     """The replacement trigger must stay detached: `hermes cron run` owns the

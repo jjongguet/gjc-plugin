@@ -90,10 +90,14 @@ never waits on or kills it; the retry is tracked by the continuation marker and
 recorded as `enqueue_status=spawned`. If the ledger is unavailable or the wait
 expires, the helper records `enqueue_status=skipped` and does not enqueue.
 
-A `source=direct` run joins the pending retry only through the per-job
-continuation marker and `enqueue_key`; a user manual run is recorded as
-`manual_run_ignored` and does not consume the budget. A new `source=builtin`
-run supersedes an old retrying group.
+A replacement joins the pending retry only through the per-job continuation
+marker and `enqueue_key`, and only while the run group is inside its
+wall-clock budget. On this host the helper-triggered `hermes cron run` is
+executed by the scheduler and reaches the hook as a scheduled run, so the
+join is recognized there; a genuinely new scheduled occurrence, a run past
+the budget, or a run without a matching marker starts a fresh run group and
+supersedes the old retrying one. A `source=direct` run that arrives without
+the marker is recorded as a user manual run and does not consume the budget.
 
 The budget is per job and never resets on a join miss. On exhaustion the hook
 returns the exhausted notice; no replacement is requested.

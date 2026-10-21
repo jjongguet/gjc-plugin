@@ -614,26 +614,43 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
                     "manual": True,
                 }
         else:
-            if rec and rec.get("status") == "retrying":
-                rec["status"] = "superseded"
-            rec = {
-                "job_id": job_id,
-                "job_name": job_name,
-                "run_group_id": hashlib.sha256(f"{job_id}|{scheduled}|{execution_id}|{now}".encode("utf-8")).hexdigest()[:12],
-                "attempt": 1,
-                "max_attempts": cfg["max_attempts"],
-                "first_at": now,
-                "deadline_at": now + cfg["wall_clock_ms"] / 1000.0,
-                "status": "evaluating",
-                "pending_retry_at": None,
-                "last_execution_id": execution_id,
-                "last_source": source,
-                "last_scheduled_instant": scheduled,
-                "join_misses": 0,
-                "last_receipt_id": None,
-                "enqueue_key": None,
-                "manual": False,
-            }
+            marker = _read_marker(profile, job_id)
+            if (
+                rec
+                and rec.get("status") == "retrying"
+                and marker
+                and rec.get("enqueue_key")
+                and marker.get("enqueue_key") == rec.get("enqueue_key")
+                and now < float(rec.get("deadline_at") or 0)
+            ):
+                # On this host the helper-triggered `hermes cron run`
+                # replacement is executed by the scheduler and reaches the
+                # hook as a scheduled run. A marker-matched run inside the
+                # retry budget joins the pending retry; anything else (a
+                # genuinely new scheduled occurrence, or a retry past its
+                # wall-clock budget) starts a fresh run group.
+                joined = True
+            else:
+                if rec and rec.get("status") == "retrying":
+                    rec["status"] = "superseded"
+                rec = {
+                    "job_id": job_id,
+                    "job_name": job_name,
+                    "run_group_id": hashlib.sha256(f"{job_id}|{scheduled}|{execution_id}|{now}".encode("utf-8")).hexdigest()[:12],
+                    "attempt": 1,
+                    "max_attempts": cfg["max_attempts"],
+                    "first_at": now,
+                    "deadline_at": now + cfg["wall_clock_ms"] / 1000.0,
+                    "status": "evaluating",
+                    "pending_retry_at": None,
+                    "last_execution_id": execution_id,
+                    "last_source": source,
+                    "last_scheduled_instant": scheduled,
+                    "join_misses": 0,
+                    "last_receipt_id": None,
+                    "enqueue_key": None,
+                    "manual": False,
+                }
         if joined and started_at and rec.get("pending_retry_at") and str(started_at) < str(rec["pending_retry_at"]):
             manual = True
             joined = False
