@@ -1,0 +1,2077 @@
+{
+  "schema": "gjc.self-improve.dream.v1",
+  "seed": 1,
+  "betas": {
+    "beta1": 0.01,
+    "beta2": 0.005
+  },
+  "corpus": {
+    "ledgerSha256": "6700fb56d668b33e358f7239af7c11a460f32306aeb5754a955c1ace1d263071",
+    "attempts": 13,
+    "adoptions": 1,
+    "epochs": 2,
+    "trainN": 13,
+    "validationN": 6
+  },
+  "candidateCount": 40,
+  "candidates": [
+    {
+      "id": "pi-1-01",
+      "config": {
+        "order": "fixed",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-01",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "313ea4c9534c41b7f91080b230d67f8df95a01685809a00c8c6cea5216bb47c8"
+      },
+      "validation": {
+        "policyId": "pi-1-01",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "beaef4a18c09caa1425959e1271498639021761bdb75481b501e19528391d16d"
+      },
+      "full": {
+        "policyId": "pi-1-01",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "313ea4c9534c41b7f91080b230d67f8df95a01685809a00c8c6cea5216bb47c8"
+      }
+    },
+    {
+      "id": "pi-1-02",
+      "config": {
+        "order": "fixed",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-02",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "4eeb1f265c9ab1acc4357d958b811c18e341e4007c216d5b2f5ac810e08dcce7"
+      },
+      "validation": {
+        "policyId": "pi-1-02",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "8b61a34a12e2296ef4b79ef0a9e3d4bb81b93857d8165b9acac1b7c94b0e8aa4"
+      },
+      "full": {
+        "policyId": "pi-1-02",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "4eeb1f265c9ab1acc4357d958b811c18e341e4007c216d5b2f5ac810e08dcce7"
+      }
+    },
+    {
+      "id": "pi-1-03",
+      "config": {
+        "order": "fixed",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-03",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "13961affb55a0fac30bac49a428582156f95b42282698af3ab015ffcd7f25aba"
+      },
+      "validation": {
+        "policyId": "pi-1-03",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "7a8491efc92cc05a04aa30f633f388411d93d10d0adb63a3ef4304409f41d583"
+      },
+      "full": {
+        "policyId": "pi-1-03",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "13961affb55a0fac30bac49a428582156f95b42282698af3ab015ffcd7f25aba"
+      }
+    },
+    {
+      "id": "pi-1-04",
+      "config": {
+        "order": "fixed",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-04",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "03f50b16f385e22b04f277056fec9240c0f8ac4713d4a1b31fa18dd865227b3c"
+      },
+      "validation": {
+        "policyId": "pi-1-04",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "1bf0fcf89dc6b8b548f753f69f7b96837981ec20b61cedd998eb45aab5c861ce"
+      },
+      "full": {
+        "policyId": "pi-1-04",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "03f50b16f385e22b04f277056fec9240c0f8ac4713d4a1b31fa18dd865227b3c"
+      }
+    },
+    {
+      "id": "pi-1-05",
+      "config": {
+        "order": "fixed",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-05",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "d82906de20f4586d7640287ef6814fc6e5dad405c6ff5ea71235553119275649"
+      },
+      "validation": {
+        "policyId": "pi-1-05",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "590adff63540c1c84dda8991c4b4c4530388f6b499c6ba946a5f54bb2b9d40b2"
+      },
+      "full": {
+        "policyId": "pi-1-05",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "d82906de20f4586d7640287ef6814fc6e5dad405c6ff5ea71235553119275649"
+      }
+    },
+    {
+      "id": "pi-1-06",
+      "config": {
+        "order": "fixed",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-06",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "bc6c0c24426b6be1a0d7a2f0ca730639f8eb459123797755764865897ffd1f71"
+      },
+      "validation": {
+        "policyId": "pi-1-06",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "a31e8443162131a4a84d89939c7ba06b6e7b24cccdf70c67ef6f8e6e87b900ae"
+      },
+      "full": {
+        "policyId": "pi-1-06",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "bc6c0c24426b6be1a0d7a2f0ca730639f8eb459123797755764865897ffd1f71"
+      }
+    },
+    {
+      "id": "pi-1-07",
+      "config": {
+        "order": "fixed",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-07",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "e3e5d5c60dc26e4b2561fba109d11e00a3ad79aff74d326e3265a9e39496aae2"
+      },
+      "validation": {
+        "policyId": "pi-1-07",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "50ed55ccfbb98eddcfc1113018da7181cc31134941c22c42b0a824583ccedca8"
+      },
+      "full": {
+        "policyId": "pi-1-07",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "e3e5d5c60dc26e4b2561fba109d11e00a3ad79aff74d326e3265a9e39496aae2"
+      }
+    },
+    {
+      "id": "pi-1-08",
+      "config": {
+        "order": "fixed",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-08",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "efd81ced75e6b41dc3e12ae704f52203504680ff9d5c70e1670eec1033d39d74"
+      },
+      "validation": {
+        "policyId": "pi-1-08",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "53f1604a909f0f2442cc6d98a4017d765963b0fb8378e28f73db7939398b9c7e"
+      },
+      "full": {
+        "policyId": "pi-1-08",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "efd81ced75e6b41dc3e12ae704f52203504680ff9d5c70e1670eec1033d39d74"
+      }
+    },
+    {
+      "id": "pi-1-09",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-09",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "c06ad28f13ad8dc7d1bf881bd6f5463e337c0eb3c3d858b39da6f5b53a4f2ca1"
+      },
+      "validation": {
+        "policyId": "pi-1-09",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "e66890d11adc06bee94f9acd922920666c3f47d0a35dd3c2d72ba27c68ce2446"
+      },
+      "full": {
+        "policyId": "pi-1-09",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "c06ad28f13ad8dc7d1bf881bd6f5463e337c0eb3c3d858b39da6f5b53a4f2ca1"
+      }
+    },
+    {
+      "id": "pi-1-10",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-10",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "64a2b1b28b92ac5f6c6d56540948d5fab267769cc4345eb896a2c6aa7b0fce67"
+      },
+      "validation": {
+        "policyId": "pi-1-10",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "0209b60dfa514f69ca1a7e335102e9ecb9d78165cfd39ecf6f11498ac8791e6e"
+      },
+      "full": {
+        "policyId": "pi-1-10",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "64a2b1b28b92ac5f6c6d56540948d5fab267769cc4345eb896a2c6aa7b0fce67"
+      }
+    },
+    {
+      "id": "pi-1-11",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-11",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "40ca863fa0eb48beed75a28aa134c220108d43a2af9f54e95748f53a386d3b73"
+      },
+      "validation": {
+        "policyId": "pi-1-11",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "97ed5cf046c32d6199127d29321807ddebe77f790e26b4be32759a9a865887e6"
+      },
+      "full": {
+        "policyId": "pi-1-11",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "40ca863fa0eb48beed75a28aa134c220108d43a2af9f54e95748f53a386d3b73"
+      }
+    },
+    {
+      "id": "pi-1-12",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-12",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "31be4c590cf518a44f09db22c8cc2c870fc1899e0527e29afc92802844246930"
+      },
+      "validation": {
+        "policyId": "pi-1-12",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "b13d50e20b3493f4d885b3dfe30593aa47e571546e51be42ffcd58ad8f77db74"
+      },
+      "full": {
+        "policyId": "pi-1-12",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "31be4c590cf518a44f09db22c8cc2c870fc1899e0527e29afc92802844246930"
+      }
+    },
+    {
+      "id": "pi-1-13",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-13",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "f23eb39275d38dad1b76045e8902dce97073157837d9f29b595c63fff7067223"
+      },
+      "validation": {
+        "policyId": "pi-1-13",
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696,
+        "adoptionReached": true,
+        "attemptsPlayed": 3,
+        "costMs": 222696,
+        "rounds": 1,
+        "parallelism": 3,
+        "value": 0.975,
+        "scoreHash": "e8f3cbdcc7127b26c2f96e0158737c3d876049c47aac7d5b33faa82e83c12788"
+      },
+      "full": {
+        "policyId": "pi-1-13",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "f23eb39275d38dad1b76045e8902dce97073157837d9f29b595c63fff7067223"
+      }
+    },
+    {
+      "id": "pi-1-14",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-14",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "9c7de2ad5d35a07527895a75066c1d3b7fc564d9b97c84174d448c26be43f3fb"
+      },
+      "validation": {
+        "policyId": "pi-1-14",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "9e4ea47d4f1ab007921ad4cfc24af19de3242a4456e75808c281ca95b7bb326f"
+      },
+      "full": {
+        "policyId": "pi-1-14",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "9c7de2ad5d35a07527895a75066c1d3b7fc564d9b97c84174d448c26be43f3fb"
+      }
+    },
+    {
+      "id": "pi-1-15",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-15",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "c8c0b5c1e41f21e06488a3b1bee35f7f5368763ca067ccb6ee1dda5921055a4f"
+      },
+      "validation": {
+        "policyId": "pi-1-15",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "c329ca81913c4968b42af62556a6bdf5bc3fb2838ed6e5b18692c8f7fabc08f9"
+      },
+      "full": {
+        "policyId": "pi-1-15",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "c8c0b5c1e41f21e06488a3b1bee35f7f5368763ca067ccb6ee1dda5921055a4f"
+      }
+    },
+    {
+      "id": "pi-1-16",
+      "config": {
+        "order": "round_robin",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-16",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "3ab73c077da3d7926e8876322f6f63f9cc24b2fa248ab1f6bb57185caf370d55"
+      },
+      "validation": {
+        "policyId": "pi-1-16",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "1181da37385d03123a664ef36c2811cdd280555a7e5ee1f92ed6fa6a235b4eed"
+      },
+      "full": {
+        "policyId": "pi-1-16",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "3ab73c077da3d7926e8876322f6f63f9cc24b2fa248ab1f6bb57185caf370d55"
+      }
+    },
+    {
+      "id": "pi-1-17",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-17",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "91b5d57b366dfbf3047cda5fe600808c44c14440c6169cf092c082300dd51562"
+      },
+      "validation": {
+        "policyId": "pi-1-17",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "82104e38d40525c3c0b08f2e8e3221bf0445f9979185d28fa6a9d0a200e41717"
+      },
+      "full": {
+        "policyId": "pi-1-17",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "91b5d57b366dfbf3047cda5fe600808c44c14440c6169cf092c082300dd51562"
+      }
+    },
+    {
+      "id": "pi-1-18",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-18",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "fb2924a8205dbd8812bdfd35e0514c109eeee6612d9106bb6efb36b6a7e4138b"
+      },
+      "validation": {
+        "policyId": "pi-1-18",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "c9855a2f13d4fd57515fe3cfb49870beee7abf0d5a720665a757daedbe961f87"
+      },
+      "full": {
+        "policyId": "pi-1-18",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "fb2924a8205dbd8812bdfd35e0514c109eeee6612d9106bb6efb36b6a7e4138b"
+      }
+    },
+    {
+      "id": "pi-1-19",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-19",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "83aa6ad61472455688f5a404d8bef2bf5df600d5e5534722732654089ce53913"
+      },
+      "validation": {
+        "policyId": "pi-1-19",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "4de94f2ea8b6752ad58614b37fbd35a3936276a0305502d0e72eab564ba355e3"
+      },
+      "full": {
+        "policyId": "pi-1-19",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "83aa6ad61472455688f5a404d8bef2bf5df600d5e5534722732654089ce53913"
+      }
+    },
+    {
+      "id": "pi-1-20",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-20",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "ac3e026770186ff51f3b1b69c3a1f5b7886d7fea14c11aaa83176b963fe4642e"
+      },
+      "validation": {
+        "policyId": "pi-1-20",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "d793a281bd5b4cfbf967b44f4d66eb55926f63d8cf42555ce410a623ffadf18f"
+      },
+      "full": {
+        "policyId": "pi-1-20",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "ac3e026770186ff51f3b1b69c3a1f5b7886d7fea14c11aaa83176b963fe4642e"
+      }
+    },
+    {
+      "id": "pi-1-21",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-21",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "d3c26ce92559f570b8e2fa5932cb0c2a6a6d9b6749f62629263f650b640f44c2"
+      },
+      "validation": {
+        "policyId": "pi-1-21",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "03631eee482d7efa8142c19d632a83b2e7e23eeeb72a149d8e0d9fd6d4120fc3"
+      },
+      "full": {
+        "policyId": "pi-1-21",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "d3c26ce92559f570b8e2fa5932cb0c2a6a6d9b6749f62629263f650b640f44c2"
+      }
+    },
+    {
+      "id": "pi-1-22",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-22",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "2701fdbd95441530d3414b1a729a97129c7a0e2484d4f69c2e321b76e0f8aa2b"
+      },
+      "validation": {
+        "policyId": "pi-1-22",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "9f8b55bfa3d113af0c1205456ad7f7ae299738c0574fd2891ee7c748f57d789a"
+      },
+      "full": {
+        "policyId": "pi-1-22",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "2701fdbd95441530d3414b1a729a97129c7a0e2484d4f69c2e321b76e0f8aa2b"
+      }
+    },
+    {
+      "id": "pi-1-23",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-23",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "bc1c753e78df7f7ef3fd2217b876f6ac26a176f0f00dafe7d131e1610db0d52b"
+      },
+      "validation": {
+        "policyId": "pi-1-23",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "82e85fdf97a1595fc6405098d440f8698c1bd1ab8dd2b34873badb6bfeb4d16b"
+      },
+      "full": {
+        "policyId": "pi-1-23",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "bc1c753e78df7f7ef3fd2217b876f6ac26a176f0f00dafe7d131e1610db0d52b"
+      }
+    },
+    {
+      "id": "pi-1-24",
+      "config": {
+        "order": "success_greedy",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-24",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "199d01a8ee55848e26bf1045586bafd166dffde33801b5276671792451ce5baf"
+      },
+      "validation": {
+        "policyId": "pi-1-24",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "b814809499d4ceafdfbea1f1951af5a43eb85f44aba3f9ee059ef45787abd274"
+      },
+      "full": {
+        "policyId": "pi-1-24",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "199d01a8ee55848e26bf1045586bafd166dffde33801b5276671792451ce5baf"
+      }
+    },
+    {
+      "id": "pi-1-25",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-25",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.97,
+        "scoreHash": "da7407a1554fded2759c6a6abc3f3f8f49b5dacd29b0947f1984037b6cd397cd"
+      },
+      "validation": {
+        "policyId": "pi-1-25",
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696,
+        "adoptionReached": true,
+        "attemptsPlayed": 3,
+        "costMs": 222696,
+        "rounds": 3,
+        "parallelism": 1,
+        "value": 0.985,
+        "scoreHash": "809d65a3589a68afa5a92c50a67ea59e56a658ac314685f199023528ad7a72e2"
+      },
+      "full": {
+        "policyId": "pi-1-25",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.97,
+        "scoreHash": "da7407a1554fded2759c6a6abc3f3f8f49b5dacd29b0947f1984037b6cd397cd"
+      }
+    },
+    {
+      "id": "pi-1-26",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-26",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "2f5f0c0efb748df54038bb83af670fee6b5845fca434c073b4551b3b929e0d65"
+      },
+      "validation": {
+        "policyId": "pi-1-26",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "0fee8c8b79600c39ee25401270a13a3d69f2b73c2e4b5f49bf3a959b7a9f5f04"
+      },
+      "full": {
+        "policyId": "pi-1-26",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "2f5f0c0efb748df54038bb83af670fee6b5845fca434c073b4551b3b929e0d65"
+      }
+    },
+    {
+      "id": "pi-1-27",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-27",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 3,
+        "parallelism": 2,
+        "value": 0.955,
+        "scoreHash": "d257637069860cd3302ed094821f11f1fb32cb9c76c574ecdb12e25a474c89f3"
+      },
+      "validation": {
+        "policyId": "pi-1-27",
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696,
+        "adoptionReached": true,
+        "attemptsPlayed": 3,
+        "costMs": 222696,
+        "rounds": 2,
+        "parallelism": 1.5,
+        "value": 0.98,
+        "scoreHash": "32d1f1d31a48ef664507368ae430319816a890480e4fe48c8bcc3dc099483625"
+      },
+      "full": {
+        "policyId": "pi-1-27",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 3,
+        "parallelism": 2,
+        "value": 0.955,
+        "scoreHash": "d257637069860cd3302ed094821f11f1fb32cb9c76c574ecdb12e25a474c89f3"
+      }
+    },
+    {
+      "id": "pi-1-28",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-28",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "b855c6d9706088b9228c94fadff866308a96658534b69d799dd77724dd8998a6"
+      },
+      "validation": {
+        "policyId": "pi-1-28",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "1bf9851d307d6751965f9105dcbcf121658dcbc5002cf2b113e199f35cea4c41"
+      },
+      "full": {
+        "policyId": "pi-1-28",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "b855c6d9706088b9228c94fadff866308a96658534b69d799dd77724dd8998a6"
+      }
+    },
+    {
+      "id": "pi-1-29",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-29",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 2,
+        "parallelism": 3,
+        "value": 0.95,
+        "scoreHash": "0117f124e1f2dd10902fa433a76540ea66f799acf8e6175affc30dcc65a137bf"
+      },
+      "validation": {
+        "policyId": "pi-1-29",
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696,
+        "adoptionReached": true,
+        "attemptsPlayed": 3,
+        "costMs": 222696,
+        "rounds": 1,
+        "parallelism": 3,
+        "value": 0.975,
+        "scoreHash": "d806911849c02a954dd1741208d7e76fe7d822199343e3dbf17047bc68638a07"
+      },
+      "full": {
+        "policyId": "pi-1-29",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 407924,
+        "rounds": 2,
+        "parallelism": 3,
+        "value": 0.95,
+        "scoreHash": "0117f124e1f2dd10902fa433a76540ea66f799acf8e6175affc30dcc65a137bf"
+      }
+    },
+    {
+      "id": "pi-1-30",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-30",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "b52a42dc40f52c1d137d37f1b33cd63602e463c9976260eeea23477091f4ff25"
+      },
+      "validation": {
+        "policyId": "pi-1-30",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "91ce0fccaaa7f9eb16b5678fb41cf1346ea30a1e829c6f54a30ff6283e962975"
+      },
+      "full": {
+        "policyId": "pi-1-30",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "b52a42dc40f52c1d137d37f1b33cd63602e463c9976260eeea23477091f4ff25"
+      }
+    },
+    {
+      "id": "pi-1-31",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-31",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.97,
+        "scoreHash": "4d66b1ad2011b453e47326be43dfd43ab9d24dbcef0efdee04f92577830c4dab"
+      },
+      "validation": {
+        "policyId": "pi-1-31",
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.985,
+        "scoreHash": "17683f33e26c909734fda6c91aae4442a21e20a21fa8bfe295a4fb354918ae78"
+      },
+      "full": {
+        "policyId": "pi-1-31",
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.97,
+        "scoreHash": "4d66b1ad2011b453e47326be43dfd43ab9d24dbcef0efdee04f92577830c4dab"
+      }
+    },
+    {
+      "id": "pi-1-32",
+      "config": {
+        "order": "failure_greedy",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-32",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "5dc7c80ecb63b5e7abf3c10a77793eac74816b2839242ede7c2b014aad236131"
+      },
+      "validation": {
+        "policyId": "pi-1-32",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "3c81e67579c05261354830e607482500fc180ce0d36a8a90fd22ddb46a03e8b9"
+      },
+      "full": {
+        "policyId": "pi-1-32",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "5dc7c80ecb63b5e7abf3c10a77793eac74816b2839242ede7c2b014aad236131"
+      }
+    },
+    {
+      "id": "pi-1-33",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-33",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "1da84639e04fae22343ad246dba6f7b2bc46fad6b09ea512fbb2ad4fd2b2d34b"
+      },
+      "validation": {
+        "policyId": "pi-1-33",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "2c411b51f183740ea3e4cd2ac3c3d7242948682161b68433bc025a7578ff5bfb"
+      },
+      "full": {
+        "policyId": "pi-1-33",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "1da84639e04fae22343ad246dba6f7b2bc46fad6b09ea512fbb2ad4fd2b2d34b"
+      }
+    },
+    {
+      "id": "pi-1-34",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 1,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-34",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "0e33c4d8a0f8437c74ba8c30fc9d5a83deb2d0e6dd8a7ea1ba9cf263af3d2db1"
+      },
+      "validation": {
+        "policyId": "pi-1-34",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "0560c63d54a5c2f022cfa3af2f32cfb16952cb91fcba8bea3604bccd5823eaa5"
+      },
+      "full": {
+        "policyId": "pi-1-34",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "0e33c4d8a0f8437c74ba8c30fc9d5a83deb2d0e6dd8a7ea1ba9cf263af3d2db1"
+      }
+    },
+    {
+      "id": "pi-1-35",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-35",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "d346ad6e351f773b93ca33e48bf6695d61a2d814842f6ba5b45761c8dd7bbd59"
+      },
+      "validation": {
+        "policyId": "pi-1-35",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "0967990543639dfd81e6de6ed8b0a95393671314d3bf1577da5712bf28fb3d6c"
+      },
+      "full": {
+        "policyId": "pi-1-35",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "d346ad6e351f773b93ca33e48bf6695d61a2d814842f6ba5b45761c8dd7bbd59"
+      }
+    },
+    {
+      "id": "pi-1-36",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 2,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-36",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "cee65d73bc4d0ab4e3a076eacee762adbc9a3ccd082c69945da349c03dfb0a82"
+      },
+      "validation": {
+        "policyId": "pi-1-36",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 3,
+        "parallelism": 1.6666666666666667,
+        "value": 0.965,
+        "scoreHash": "644bac011d93a30b943462c0992a5eedec7e5b1463ae10065615f9ed97121f6c"
+      },
+      "full": {
+        "policyId": "pi-1-36",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 6,
+        "parallelism": 2,
+        "value": 0.91,
+        "scoreHash": "cee65d73bc4d0ab4e3a076eacee762adbc9a3ccd082c69945da349c03dfb0a82"
+      }
+    },
+    {
+      "id": "pi-1-37",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-37",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "b3869db96043799cfca9f9973311575ebdfb2c5f4ed9b75dafadd2ee4e28d1fa"
+      },
+      "validation": {
+        "policyId": "pi-1-37",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "af21829f88b01a43c44d1894c7fb43f7d1b3e5d3c9bfb4e5d2b5083ca444409b"
+      },
+      "full": {
+        "policyId": "pi-1-37",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "b3869db96043799cfca9f9973311575ebdfb2c5f4ed9b75dafadd2ee4e28d1fa"
+      }
+    },
+    {
+      "id": "pi-1-38",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 3,
+        "stopRule": "first_adoption",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-38",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "32cfa4a4fc05cc94485be8e067a2918f87afc722aaa0f9043aaaf7e3a0629c5a"
+      },
+      "validation": {
+        "policyId": "pi-1-38",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 2,
+        "parallelism": 2.5,
+        "value": 0.96,
+        "scoreHash": "8ebb7f82f823800d405d57e1dea7ba66cd8acbe2f54004aeeeec79a2bffc2a68"
+      },
+      "full": {
+        "policyId": "pi-1-38",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 4,
+        "parallelism": 3,
+        "value": 0.9,
+        "scoreHash": "32cfa4a4fc05cc94485be8e067a2918f87afc722aaa0f9043aaaf7e3a0629c5a"
+      }
+    },
+    {
+      "id": "pi-1-39",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": false,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-39",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "28b7a2229d3182023664b5428c21513936e284e66b2dd32468fa7cfa32e97ae9"
+      },
+      "validation": {
+        "policyId": "pi-1-39",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "ec35772696288f3310c6fe21e0bad04377e2ac0ac308a92d29e1753af7ec89e5"
+      },
+      "full": {
+        "policyId": "pi-1-39",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "28b7a2229d3182023664b5428c21513936e284e66b2dd32468fa7cfa32e97ae9"
+      }
+    },
+    {
+      "id": "pi-1-40",
+      "config": {
+        "order": "novelty_first",
+        "batchSize": 1,
+        "stopRule": "exhaustive",
+        "stallRedirect": true,
+        "stallK": 3
+      },
+      "train": {
+        "policyId": "pi-1-40",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "d9b76ff6212e50673f6fe4dfbed90577d75daf49b2d2b082ce8f7d8f349dd866"
+      },
+      "validation": {
+        "policyId": "pi-1-40",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 6,
+        "costMs": 448688,
+        "rounds": 6,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "76d59d9e91f2b107dd72b4666f6ffe613b66b7c03a7105f1694d11e81055dbab"
+      },
+      "full": {
+        "policyId": "pi-1-40",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 13,
+        "costMs": 945513,
+        "rounds": 13,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "d9b76ff6212e50673f6fe4dfbed90577d75daf49b2d2b082ce8f7d8f349dd866"
+      }
+    }
+  ],
+  "rankings": [
+    "pi-1-25",
+    "pi-1-27",
+    "pi-1-29",
+    "pi-1-31",
+    "pi-1-01",
+    "pi-1-02",
+    "pi-1-03",
+    "pi-1-04",
+    "pi-1-05",
+    "pi-1-06",
+    "pi-1-07",
+    "pi-1-08",
+    "pi-1-09",
+    "pi-1-10",
+    "pi-1-11",
+    "pi-1-12",
+    "pi-1-13",
+    "pi-1-14",
+    "pi-1-15",
+    "pi-1-16",
+    "pi-1-17",
+    "pi-1-18",
+    "pi-1-19",
+    "pi-1-20",
+    "pi-1-21",
+    "pi-1-22",
+    "pi-1-23",
+    "pi-1-24",
+    "pi-1-26",
+    "pi-1-28",
+    "pi-1-30",
+    "pi-1-32",
+    "pi-1-33",
+    "pi-1-34",
+    "pi-1-35",
+    "pi-1-36",
+    "pi-1-37",
+    "pi-1-38",
+    "pi-1-39",
+    "pi-1-40"
+  ],
+  "selected": {
+    "id": "pi-1-25",
+    "config": {
+      "order": "failure_greedy",
+      "batchSize": 1,
+      "stopRule": "first_adoption",
+      "stallRedirect": false,
+      "stallK": 3
+    }
+  },
+  "baselines": {
+    "B0": {
+      "train": {
+        "policyId": "B0",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "3189eda6c8b90dcee5c81baba8c30fec09ada98fc6498c395fb8bd71ce947ad9"
+      },
+      "validation": {
+        "policyId": "B0",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "fc4f21e1f477061dc6f63b79d89a123b52a3c9a0c1093e29449813d365142e4e"
+      },
+      "full": {
+        "policyId": "B0",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "3189eda6c8b90dcee5c81baba8c30fec09ada98fc6498c395fb8bd71ce947ad9"
+      }
+    },
+    "B1": {
+      "train": {
+        "policyId": "B1",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "28c58467532ec254ef5dfbcd564ff675fb1602cb8898d7c47f6cf53f9fddfa35"
+      },
+      "validation": {
+        "policyId": "B1",
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827,
+        "adoptionReached": true,
+        "attemptsPlayed": 5,
+        "costMs": 376827,
+        "rounds": 5,
+        "parallelism": 1,
+        "value": 0.975,
+        "scoreHash": "78130de9c198a690c41024314ef20889aee141899036641a6dfdca6e88b811e8"
+      },
+      "full": {
+        "policyId": "B1",
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652,
+        "adoptionReached": true,
+        "attemptsPlayed": 12,
+        "costMs": 873652,
+        "rounds": 12,
+        "parallelism": 1,
+        "value": 0.94,
+        "scoreHash": "28c58467532ec254ef5dfbcd564ff675fb1602cb8898d7c47f6cf53f9fddfa35"
+      }
+    }
+  },
+  "thresholds": {
+    "evaluated": false,
+    "reason": "corpus_below_pass_gate",
+    "advisory": {
+      "attemptsOk": true,
+      "costOk": true,
+      "antiFlukeOk": true,
+      "determinismOk": true,
+      "targets": {
+        "maxAttempts": 4,
+        "maxCostMs": 263778.89999999997
+      },
+      "measured": {
+        "pi": {
+          "attemptsToFirstAdoption": 3,
+          "costMsToFirstAdoption": 222696
+        },
+        "B0": {
+          "attemptsToFirstAdoption": 5,
+          "costMsToFirstAdoption": 376827
+        },
+        "B1": {
+          "attemptsToFirstAdoption": 5,
+          "costMsToFirstAdoption": 376827
+        }
+      }
+    },
+    "statements": {
+      "validationAttempts": "pi* attempts-to-first-adoption <= min(B0, B1) - 1",
+      "validationCost": "pi* cost-to-first-adoption <= 0.7 x B0 cost-to-first-adoption",
+      "antiFluke": "full-corpus pi* cost-to-first-adoption <= B0 cost-to-first-adoption",
+      "determinism": "same seed => byte-identical receipt hash"
+    },
+    "validationNumbers": {
+      "attemptsPlayed": 6,
+      "adoptions": 1,
+      "trainAttempts": 13
+    },
+    "passGateSituation": "attempts (13) < passGateN (20)",
+    "downgradeNote": "plan 4.3 / M3 brief: a corpus in [12,19] attempts yields the frozen insufficient-evidence verdict with the downgrade recorded explicitly - no silent downgrade, no threshold relaxation"
+  },
+  "gate": {
+    "ok": false,
+    "total": 13,
+    "passGateN": 20,
+    "trainN": 13,
+    "validationN": 6,
+    "validationAdoptions": 1,
+    "reason": "corpus_below_pass_gate"
+  },
+  "calibration": [
+    {
+      "policyId": "pi-1-25",
+      "predicted": {
+        "attemptsToFirstAdoption": 6,
+        "costMsToFirstAdoption": 407924
+      },
+      "realized": {
+        "attemptsToFirstAdoption": 3,
+        "costMsToFirstAdoption": 222696
+      }
+    },
+    {
+      "policyId": "B0",
+      "predicted": {
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652
+      },
+      "realized": {
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827
+      }
+    },
+    {
+      "policyId": "B1",
+      "predicted": {
+        "attemptsToFirstAdoption": 12,
+        "costMsToFirstAdoption": 873652
+      },
+      "realized": {
+        "attemptsToFirstAdoption": 5,
+        "costMsToFirstAdoption": 376827
+      }
+    }
+  ],
+  "caveat": "All P2 comparisons are off-policy replays over ONE realized corpus of fewer than ~24 recorded attempts; no statistical significance is claimed; effect sizes are reported with n and are not confidence-interval estimates of future performance; the cost proxy is load-dependent recorded wallMs, not a fresh measurement.",
+  "verdict": "insufficient evidence at pass-gate size — thresholds not evaluated",
+  "receiptHash": "e7f987e5dfc0764bf0cb20ddc8e4e0262313a8134f0e7940dd506ee75dc2761c"
+}
