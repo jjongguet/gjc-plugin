@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -247,6 +249,143 @@ class GateTests(unittest.TestCase):
             else:
                 parsed = gate._parse_check_response(json.dumps(case["response"]).encode())
                 self.assertEqual(parsed["status"], case["expected"]["status"])
+
+
+class RetryHelperTests(unittest.TestCase):
+    """The replacement trigger must stay detached: `hermes cron run` owns the
+    replacement execution for the whole agent turn, so waiting on it with a
+    timeout kills that owner mid-run and orphans the execution."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        self.data = self.root / "data"
+        self.config = self.root / "config.json"
+        self.jobs = self.root / "jobs.json"
+        self.execdb = self.root / "executions.db"
+        os.environ["JEV_GATE_DATA_ROOT"] = str(self.data)
+        os.environ["JEV_GATE_CONFIG"] = str(self.config)
+        os.environ["JEV_GATE_JOBS"] = str(self.jobs)
+        os.environ["JEV_GATE_EXECUTIONS_DB"] = str(self.execdb)
+        self.jobs.write_text(json.dumps({"jobs": []}), encoding="utf-8")
+        self.execdb.parent.mkdir(parents=True, exist_ok=True)
+        con = sqlite3.connect(self.execdb)
+        con.execute("create table executions (id text primary key, status text)")
+        con.execute("insert into executions values ('exec-9', 'completed')")
+        con.commit()
+        con.close()
+        state = {"version": 1, "jobs": {"job1": {"job_id": "job1", "job_name": "Job One", "status": "retrying", "attempt": 2, "max_attempts": 3, "enqueue_key": "key-abc"}}}
+        path = self.data / "default" / "state.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(state), encoding="utf-8")
+        self.write_config()
+
+    def tearDown(self):
+        for name in ("JEV_GATE_DATA_ROOT", "JEV_GATE_CONFIG", "JEV_GATE_JOBS", "JEV_GATE_EXECUTIONS_DB"):
+            os.environ.pop(name, None)
+        self.temp.cleanup()
+
+    def write_config(self):
+        cfg = {
+            "mode": "hold",
+            "allowlist": ["job1"],
+            "questions": {"job1": "Does the artifact contain three dated items with links?"},
+            "channels": {"job1": "channel-1"},
+            "home_channel": "channel-home",
+            "max_attempts": 3,
+            "wall_clock_ms": 900000,
+            "hold_confidence": 0.9,
+            "max_artifact_chars": 4000,
+            "timeout_ms": 1000,
+            "abort_patterns": gate.DEFAULT_ABORT_PATTERNS,
+            "alert_cooldown_ms": 3600000,
+        }
+        self.config.write_text(json.dumps(cfg), encoding="utf-8")
+
+    def test_spawns_detached_and_never_waits_or_kills(self):
+        calls = []
+
+        class FakeProc:
+            def __init__(self):
+                self.waited = False
+                self.killed = False
+
+            def wait(self, *args, **kwargs):
+                self.waited = True
+                raise AssertionError("retry_helper must not wait on the replacement run")
+
+            def kill(self, *args, **kwargs):
+                self.killed = True
+                raise AssertionError("retry_helper must not kill the replacement run")
+
+            def terminate(self, *args, **kwargs):
+                raise AssertionError("retry_helper must not terminate the replacement run")
+
+        fake = FakeProc()
+
+        def fake_popen(args, **kwargs):
+            calls.append((args, kwargs))
+            return fake
+
+        def no_run(*args, **kwargs):
+            raise AssertionError("subprocess.run must not be used for the replacement run")
+
+        orig_popen, orig_run = gate.subprocess.Popen, gate.subprocess.run
+        gate.subprocess.Popen = fake_popen
+        gate.subprocess.run = no_run
+        try:
+            rc = gate.retry_helper("job1", "exec-9", "default", self.config)
+        finally:
+            gate.subprocess.Popen, gate.subprocess.run = orig_popen, orig_run
+        self.assertEqual(rc, 0)
+        self.assertEqual(len(calls), 1)
+        args, kwargs = calls[0]
+        self.assertEqual(args[-3:], ["cron", "run", "job1"])
+        self.assertTrue(kwargs.get("start_new_session"))
+        self.assertTrue(kwargs.get("close_fds"))
+        self.assertIs(kwargs.get("stdin"), subprocess.DEVNULL)
+        self.assertIs(kwargs.get("stdout"), subprocess.DEVNULL)
+        self.assertIs(kwargs.get("stderr"), subprocess.DEVNULL)
+        self.assertFalse(fake.waited or fake.killed)
+        marker = json.loads((self.data / "default" / "pending_job1.json").read_text())
+        self.assertEqual(marker.get("enqueue_key"), "key-abc")
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        self.assertIn('"enqueue_status": "spawned"', receipts[-1])
+        self.assertIn('"reason": "replacement_requested"', receipts[-1])
+
+    def test_spawn_failure_is_recorded(self):
+        def boom(args, **kwargs):
+            raise OSError("no hermes binary")
+
+        orig_popen = gate.subprocess.Popen
+        gate.subprocess.Popen = boom
+        try:
+            gate.retry_helper("job1", "exec-9", "default", self.config)
+        finally:
+            gate.subprocess.Popen = orig_popen
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        self.assertIn('"enqueue_status": "spawn_failed"', receipts[-1])
+        self.assertIn('"reason": "replacement_requested"', receipts[-1])
+
+    def test_nonterminal_execution_skips_spawn(self):
+        con = sqlite3.connect(self.execdb)
+        con.execute("update executions set status='running'")
+        con.commit()
+        con.close()
+        spawned = []
+        ticks = iter([0.0, 61.0])
+        orig_popen, orig_mono, orig_sleep = gate.subprocess.Popen, gate.time.monotonic, gate.time.sleep
+        gate.subprocess.Popen = lambda args, **kwargs: (spawned.append(args), object())[1]
+        gate.time.monotonic = lambda: next(ticks, 61.0)
+        gate.time.sleep = lambda seconds: None
+        try:
+            gate.retry_helper("job1", "exec-9", "default", self.config)
+        finally:
+            gate.subprocess.Popen, gate.time.monotonic, gate.time.sleep = orig_popen, orig_mono, orig_sleep
+        self.assertEqual(spawned, [])
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()
+        self.assertIn('"reason": "terminal_unavailable"', receipts[-1])
+        self.assertIn('"enqueue_status": "skipped"', receipts[-1])
 
 
 if __name__ == "__main__":

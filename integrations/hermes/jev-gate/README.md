@@ -84,9 +84,11 @@ artifact sha prefix and character count — never artifact prose.
 
 A detached helper waits up to 60 seconds for the current execution to become
 terminal in `~/.hermes/cron/executions.db` (or `hermes cron runs <job_id>`),
-then runs `hermes cron run <job_id>` exactly once. If the ledger is unavailable
-or the wait expires, the helper records `enqueue_status=skipped` and does not
-enqueue.
+then triggers `hermes cron run <job_id>` exactly once as a detached process.
+The CLI owns the replacement execution for the whole agent turn, so the helper
+never waits on or kills it; the retry is tracked by the continuation marker and
+recorded as `enqueue_status=spawned`. If the ledger is unavailable or the wait
+expires, the helper records `enqueue_status=skipped` and does not enqueue.
 
 A `source=direct` run joins the pending retry only through the per-job
 continuation marker and `enqueue_key`; a user manual run is recorded as

@@ -882,11 +882,22 @@ def retry_helper(job_id: str, execution_id: str, profile: str, config_path: Path
     status = "skipped"
     if enqueue_key:
         _write_marker(profile, job_id, enqueue_key)
+        # `hermes cron run` owns the replacement execution for the whole agent
+        # turn (minutes on this host). Waiting on it with a timeout kills that
+        # owner mid-run and orphans the execution, so trigger the run detached
+        # and let the continuation marker track the retry instead.
         try:
-            proc = subprocess.run([hermes_bin(), "cron", "run", job_id], capture_output=True, text=True, timeout=30)
-            status = "enqueued" if proc.returncode == 0 else "failed"
+            subprocess.Popen(
+                [hermes_bin(), "cron", "run", job_id],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
+            )
+            status = "spawned"
         except Exception:
-            status = "failed"
+            status = "spawn_failed"
     append_receipt(profile, job_id, {
         "schema": SCHEMA_RECEIPT,
         "observed_at": _now(),
