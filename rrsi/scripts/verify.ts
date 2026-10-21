@@ -141,6 +141,7 @@ async function runSuite(root) {
 		assert.equal(imported.imported, 12);
 		assert.equal(imported.journal.records, 12);
 		assert.equal(imported.journal.status, "ok");
+		assert.deepEqual(imported.projection, { records: 12, projected: 12, omitted: 0, ratio: 1, limited: false });
 		const stored = JSON.parse(readFileSync(storeFile, "utf8"));
 		const episode = stored.episodes.at(-1);
 		assert.equal(episode.source, "jev-journal");
@@ -152,6 +153,17 @@ async function runSuite(root) {
 		assert.equal(episode.attempts.every((attempt) => typeof attempt.provenance === "string" && attempt.provenance.length > 0), true, "provenance names the journal record id");
 		assert.equal(episode.attempts.some((attempt) => attempt.decision === "adopt"), true, "decisions project to adopt");
 		assert.equal(episode.attempts.some((attempt) => attempt.decision === "reject"), true, "no-decisions project to reject");
+	});
+
+	await check("import reports bounded projection coverage when the limit omits records", async () => {
+		writeJournal(syntheticRecords(12));
+		const imported = await call({ action: "import", limit: "5" });
+		assert.equal(imported.imported, 5);
+		assert.equal(imported.projection.records, 12);
+		assert.equal(imported.projection.projected, 5);
+		assert.equal(imported.projection.omitted, 7);
+		assert.equal(imported.projection.ratio, 5 / 12);
+		assert.equal(imported.projection.limited, true);
 	});
 
 	await check("journal-dream emits a deterministic receipt over the synthetic journal", async () => {

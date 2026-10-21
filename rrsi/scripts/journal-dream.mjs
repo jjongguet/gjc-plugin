@@ -34,7 +34,7 @@ import {
   rrsiJournalDir,
   storeCounts,
   summarizeReceipt,
-} from "../tools/rrsi.ts";
+} from "../lib/rrsi.ts";
 
 // Deterministic snapshot label: journal-dream never persists state, so this
 // constant only feeds the in-memory corpus hashes (byte-identical reruns).

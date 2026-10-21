@@ -13,6 +13,7 @@ import {
 	derivedEpisodeSetFor,
 	dreamOverStore,
 	projectionDigestFor,
+	projectionCoverage,
 	projectJournalRecords,
 	projectLedgerRows,
 	readJournalRecords,
@@ -149,6 +150,7 @@ export default function rrsi(pi: {
 			if (action === 'import') {
 				const journal = readJournalRecords({ journalDir: rrsiJournalDir() });
 				const projected = projectJournalRecords(journal.records, { limit });
+				const projection = projectionCoverage(journal.records, projected.attempts);
 				const projectionDigest = projectionDigestFor(projected.attempts, limit);
 				const derived = derivedEpisodeSetFor({ digest: projectionDigest, attempts: projected.attempts });
 				let ledgerCount = 0;
@@ -184,6 +186,7 @@ export default function rrsi(pi: {
 							wrote: { persisted: false, reason: locked.reason ?? 'store_busy' },
 							storeWrite: 'rejected',
 							projectionDigest,
+							projection,
 						},
 						storage,
 					);
@@ -198,6 +201,7 @@ export default function rrsi(pi: {
 						wrote: written,
 						storeWrite,
 						projectionDigest,
+						projection,
 					},
 					written.persisted ? 'ok' : 'unavailable',
 				);

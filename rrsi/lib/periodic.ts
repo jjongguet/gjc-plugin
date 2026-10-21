@@ -28,6 +28,7 @@ import {
   replaceDerivedSet,
   derivedEpisodeSetFor,
   projectionDigestFor,
+  projectionCoverage,
   projectJournalRecords,
   privateDirSafe,
   readJournalRecords,
@@ -581,13 +582,6 @@ function backoffMs(failures, intervalMs) {
   const base = RRSI_PERIODIC_DEFAULTS.minRetryMs;
   const scaled = base * Math.pow(2, Math.max(0, failures - 1));
   return Math.min(scaled, intervalMs);
-}
-
-function projectionCoverage(records, attempts) {
-  const total = Array.isArray(records) ? records.length : 0;
-  const projected = Array.isArray(attempts) ? attempts.length : 0;
-  const omitted = Math.max(0, total - projected);
-  return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
 }
 
 function appliedLimits(intervalMs = RRSI_PERIODIC_DEFAULTS.intervalMs) {

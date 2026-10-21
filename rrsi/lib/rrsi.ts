@@ -17,6 +17,9 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { sha256Hex } from "../../self-improve/lib/types.mjs";
+import { corpusFromAttempts } from "../../self-improve/lib/replay.mjs";
+import { runDream } from "../../self-improve/lib/dream.mjs";
 
 export const RRSI_STORE_SCHEMA = "gjc.rrsi.store.v1";
 
@@ -351,6 +354,14 @@ export function mergeEpisodes({ store, episodes, now }) {
 export function projectionDigestFor(attempts, limit) {
   const bounded = Array.isArray(attempts) ? attempts.slice(0, 4000) : [];
   return projectionDigestHex(JSON.stringify({ limit, attempts: bounded }));
+}
+
+/** Coverage of one bounded projection: records read vs attempts kept. */
+export function projectionCoverage(records, attempts) {
+  const total = Array.isArray(records) ? records.length : 0;
+  const projected = Array.isArray(attempts) ? attempts.length : 0;
+  const omitted = Math.max(0, total - projected);
+  return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
 }
 
 /**

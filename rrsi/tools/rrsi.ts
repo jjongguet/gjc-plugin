@@ -1983,6 +1983,14 @@ export function projectionDigestFor(attempts, limit) {
   return projectionDigestHex(JSON.stringify({ limit, attempts: bounded }));
 }
 
+/** Coverage of one bounded projection: records read vs attempts kept. */
+export function projectionCoverage(records, attempts) {
+  const total = Array.isArray(records) ? records.length : 0;
+  const projected = Array.isArray(attempts) ? attempts.length : 0;
+  const omitted = Math.max(0, total - projected);
+  return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
+}
+
 /**
  * Chunked derived episode set for one source class (no clock value enters any
  * episode, so identical content yields a byte-identical set). Ids:
@@ -2732,13 +2740,6 @@ function backoffMs(failures, intervalMs) {
   return Math.min(scaled, intervalMs);
 }
 
-function projectionCoverage(records, attempts) {
-  const total = Array.isArray(records) ? records.length : 0;
-  const projected = Array.isArray(attempts) ? attempts.length : 0;
-  const omitted = Math.max(0, total - projected);
-  return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
-}
-
 function appliedLimits(intervalMs = RRSI_PERIODIC_DEFAULTS.intervalMs) {
   return {
     limit: RRSI_PERIODIC_DEFAULTS.projectionLimit,
@@ -2909,6 +2910,7 @@ export default function rrsi(pi: {
 			if (action === 'import') {
 				const journal = readJournalRecords({ journalDir: rrsiJournalDir() });
 				const projected = projectJournalRecords(journal.records, { limit });
+				const projection = projectionCoverage(journal.records, projected.attempts);
 				const projectionDigest = projectionDigestFor(projected.attempts, limit);
 				const derived = derivedEpisodeSetFor({ digest: projectionDigest, attempts: projected.attempts });
 				let ledgerCount = 0;
@@ -2944,6 +2946,7 @@ export default function rrsi(pi: {
 							wrote: { persisted: false, reason: locked.reason ?? 'store_busy' },
 							storeWrite: 'rejected',
 							projectionDigest,
+							projection,
 						},
 						storage,
 					);
@@ -2958,6 +2961,7 @@ export default function rrsi(pi: {
 						wrote: written,
 						storeWrite,
 						projectionDigest,
+						projection,
 					},
 					written.persisted ? 'ok' : 'unavailable',
 				);
