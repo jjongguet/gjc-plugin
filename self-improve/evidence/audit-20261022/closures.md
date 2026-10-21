@@ -12,6 +12,7 @@ in [`battery.md`](battery.md) (exit codes recorded by `tools/run-battery.mjs`).
 | `7d2479c` | `docs(rrsi,self-improve)`: audited documentation drift |
 | `48547ea` | `test`: `paths:check` + `check-audit-claims` + fixtures + CI step |
 | `251dfef` | `docs(self-improve)`: recovered 13-attempt P2 receipt + provenance test |
+| `b05f034` | `fix(audit)`: bound-command sweep, honest PASS bindings, slow-test timeout, receipt numbers |
 
 | Finding | Pre-fix observation | Fix | Post-fix evidence |
 | --- | --- | --- | --- |
