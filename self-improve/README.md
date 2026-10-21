@@ -49,11 +49,17 @@ automatic loop (`loop`) drives that engine without hand-written proposals via th
 the HEAD-moved re-propose rule. The real-cycle report lands with the final
 milestones.
 
+Trajectory-memory layer 1 (`lib/distill.mjs`, `distill`) reads the rrsi store and
+this ledger read-only and emits deterministic contrastive candidates. It does not
+patch, adopt, or write either input; the proposer and gate path above remain the
+only route to a change. Contract: `docs/trajectory-memory.md`.
+
 ## Commands
 
 ```sh
 node self-improve/scripts/run.mjs report --json
 node self-improve/scripts/run.mjs history --json
+node self-improve/scripts/run.mjs distill --json
 node self-improve/scripts/verify-unit.mjs
 node self-improve/scripts/verify-integration.mjs
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json

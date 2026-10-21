@@ -1,16 +1,18 @@
 #!/usr/bin/env node
 /**
- * self-improve CLI: report, cycle, loop, replay, dream, policy, recover, prune, runner, history.
+ * self-improve CLI: report, cycle, loop, replay, dream, policy, recover, prune, runner, history, distill.
  */
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { homedir } from "node:os";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
 import RULES_TEXT_DOMAIN from "../domains/rules-text/adapter.mjs";
 import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
 import { LOOP_DEFAULTS, runLoop } from "../lib/loop.mjs";
-import { ledgerCounts } from "../lib/ledger.mjs";
+import { ledgerCounts, readLedger } from "../lib/ledger.mjs";
+import { distillTrajectories, readStoreFile } from "../lib/distill.mjs";
 import { BASELINE_POLICIES, DEFAULT_BETAS, loadCorpus, scorePolicy } from "../lib/replay.mjs";
 import { runDream, summarizeScore } from "../lib/dream.mjs";
 import {
@@ -62,10 +64,13 @@ commands:
           [--timeout-ms <n>] [--model <pin>] [--prompt <text> | --text-fixture <path>]
           [--live-approved] [--run-root <path>] [--json]
   history [--json] [--ledger <path>]
+  distill [--store <path>] [--ledger <path>] [--objective <id>] [--out <path>] [--json]
 `;
 
 const VALUED_FLAGS = new Set([
   "--ledger",
+  "--store",
+  "--objective",
   "--domain",
   "--proposal",
   "--repo",
@@ -494,6 +499,60 @@ async function runLoopCommand(options) {
   return 0;
 }
 
+function runDistillCommand(options) {
+  const storePath = options.store ? resolve(options.store) : join(homedir(), ".gjc-plugin", "rrsi", "store.json");
+  const ledgerPath = options.ledger ? resolve(options.ledger) : DEFAULT_LEDGER;
+  const read = readStoreFile(storePath);
+  if (read.status === "invalid" || read.status === "unavailable") {
+    process.stderr.write(`distill: store ${read.status}${read.reason ? ` (${read.reason})` : ""}: ${storePath}\n`);
+    return 3;
+  }
+  let rows;
+  try {
+    rows = readLedger(ledgerPath);
+  } catch (error) {
+    process.stderr.write(`distill: ledger unreadable: ${error.message}\n`);
+    return 3;
+  }
+  const result = distillTrajectories({
+    store: read.status === "ok" ? read.store : { schema: "gjc.rrsi.store.v1", episodes: [] },
+    ledgerRows: rows,
+    objective: options.objective ?? null,
+  });
+  const payload = {
+    ...result,
+    store: { ...result.store, status: read.status, path: storePath },
+    ledger: { ...result.ledger, path: ledgerPath },
+  };
+  const text = `${JSON.stringify(payload, null, 2)}\n`;
+  if (options.out) {
+    const outPath = resolve(options.out);
+    try {
+      fs.mkdirSync(dirname(outPath), { recursive: true });
+      fs.writeFileSync(outPath, text, { mode: 0o600 });
+    } catch (error) {
+      process.stderr.write(`distill: cannot write --out ${outPath}: ${error.message}\n`);
+      return 3;
+    }
+  }
+  if (options.json) {
+    process.stdout.write(text);
+  } else {
+    process.stdout.write(
+      `store=${read.status} attempts=${payload.store.attempts} ledgerSeq=${payload.ledger.seq} ` +
+        `candidates=${payload.candidates.length} skipped=${payload.skipped.length}` +
+        `${options.out ? ` out=${resolve(options.out)}` : ""}\n`,
+    );
+    for (const candidate of payload.candidates) {
+      process.stdout.write(`- ${candidate.objective} [${candidate.contrast.feature.kind}] ${candidate.rule}\n`);
+    }
+    for (const skip of payload.skipped) {
+      process.stdout.write(`- ${skip.objective} skipped (${skip.reason})\n`);
+    }
+  }
+  return 0;
+}
+
 function runHistoryCommand(options) {
   const ledgerPath = options.ledger ? resolve(options.ledger) : DEFAULT_LEDGER;
   const state = historyState(ledgerPath);
@@ -522,6 +581,7 @@ async function run(argv) {
   if (command === "prune") return runPruneCommand(options);
   if (command === "runner") return await runRunnerCommand(options);
   if (command === "history") return runHistoryCommand(options);
+  if (command === "distill") return runDistillCommand(options);
   if (command === "help" || command === "--help" || command === "-h") {
     process.stdout.write(USAGE);
     return 0;

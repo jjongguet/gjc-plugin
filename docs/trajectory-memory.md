@@ -1,6 +1,6 @@
 # Trajectory memory: from attempts to gated rules
 
-Status: proposal. Not implemented. Tracking ticket: JJO-394.
+Status: layer 1 implemented (`self-improve/lib/distill.mjs`). Tracking ticket: JJO-394.
 
 The repository already stores exploration attempts (`rrsi`) and already gates
 changes (`self-improve`). What it does not have is the layer that turns a
@@ -12,7 +12,7 @@ before any code exists.
 | Layer | Owner | State |
 | --- | --- | --- |
 | 0. Capture trajectories | `rrsi` store (`capture`, `import`; attempt shape) | implemented |
-| 1. Distill contrastive rules | this note | **missing** |
+| 1. Distill contrastive rules | `self-improve/lib/distill.mjs` (`distill` command) | implemented |
 | 2. Promote under gates | `self-improve` (guards, probes, ledger) | implemented |
 
 Layer 1 produces candidates only. It never edits source, never writes to the
@@ -39,10 +39,27 @@ A candidate carries:
 - `expires`: a supersede condition (source hash or ledger epoch), not a
   wall-clock date alone.
 
-Output shape is a `self-improve` proposal: `hypothesis` (why the contrast
-implies the edit), `objective`, `commitMessage`, `patchFile`. Admission runs
-through the existing `cycle --dry-run` and the existing guard set. There is no
-second evaluator and no second store schema.
+The candidate is the input to a proposal, not a proposal itself. Patch
+synthesis stays with the existing proposer seam (`loop --proposer cmd` or a
+human), and admission runs through `cycle --dry-run` and the existing guard
+set. There is no second evaluator and no second store schema.
+
+## Command
+
+```sh
+node self-improve/scripts/run.mjs distill [--store <path>] [--ledger <path>]
+  [--objective <id>] [--out <path>] [--json]
+```
+
+- Defaults: `~/.gjc-plugin/rrsi/store.json` and `self-improve/ledger.jsonl`.
+- The store is read-only; a missing store is a normal first-run state and a
+  corrupt or unsafe one exits 3 without repair.
+- Objectives are processed in sorted order. Within an objective the first
+  adopting and first rejected attempt are the contrast pair. A candidate is
+  emitted only when `guardFailures`, `budgetRung`, or `hypothesisNovelty`
+  separates them; cost-only and size-only differences are skipped.
+- Output contains no clock value, so identical inputs produce byte-identical
+  JSON. `expires.after` is the highest cycle `seq` read from the ledger.
 
 ## Non-goals
 
@@ -68,13 +85,16 @@ second evaluator and no second store schema.
 
 Offline and keyless.
 
-- Unit: candidate generation over a fixed attempt fixture is deterministic and
-  byte-identical across runs.
-- Integration: candidate -> `cycle --dry-run` -> adopt or reject; rejections
-  remain visible in `history --json` with their streak.
-- Acceptance: adoption only when the existing probe improves on the held-out
-  slice. Otherwise the cycle is recorded as rejected; a rejection is a valid
-  outcome, not a failure to fix by loosening a guard.
+- Unit (`tests/unit/distill.test.mjs`): candidate generation is deterministic and
+  byte-identical across runs; missing adopt/reject, cost-only differences, and
+  malformed stores are handled without synthesis or repair.
+- CLI: `distill --json` and `distill --out` exit 0 with a parseable payload; a
+  corrupt store exits 3. A read-only run over the real `~/.gjc-plugin/rrsi`
+  store produced one candidate and 44 skips without writing either input.
+- Not yet exercised: a candidate turned into a proposal patch and passed through
+  `cycle --dry-run`. Until that runs, the adoption half of this contract is
+  unproven; a rejection would be recorded as rejected, not repaired by loosening
+  a guard.
 - No change to `replay-protocol.json`, the frozen corpus, or the guard set.
 
 ## Evidence
@@ -91,9 +111,15 @@ Offline and keyless.
 Numbers above are the sources' own reports, not measurements in this
 repository.
 
-## Open decisions
+## Decisions taken
 
-- first objective to run the loop against;
-- distillation method: contrast prompt versus deterministic heuristic over
-  `guardFailures` classes;
-- where candidates live before they become proposals.
+- Distillation is a deterministic heuristic over `guardFailures` ->
+  `budgetRung` -> `hypothesisNovelty`, not a contrast prompt. No model call is
+  involved, which keeps the layer keyless and reproducible.
+- All objectives are processed by default; `--objective` narrows to one.
+- Candidates are emitted to stdout or `--out`; they are not stored. The
+  proposer seam remains the only path that produces a patch.
+
+Remaining open: which objective should be the first to run end to end, and
+whether a candidate should become a `loop` request payload rather than an
+operator-authored proposal.
