@@ -46,7 +46,8 @@ for (const [name, command, args] of COMMANDS) {
   const stdout = proc.stdout ?? "";
   const stderr = proc.stderr ?? "";
   const logName = `${name}.log`;
-  writeFileSync(path.join(logDir, logName), `$ ${command} ${args.join(" ")}\n${stdout}\n${stderr}`.trimEnd() + "\n");
+  const logBody = `$ ${command} ${args.join(" ")}\n${stdout}\n${stderr}`.trimEnd() + "\n";
+  writeFileSync(path.join(logDir, logName), logBody);
   results.push({
     name,
     command: `${command} ${args.join(" ")}`,
@@ -58,14 +59,14 @@ for (const [name, command, args] of COMMANDS) {
     log: path.relative(repoRoot, path.join(logDir, logName)),
     stdoutSha256: createHash("sha256").update(stdout).digest("hex"),
     stderrSha256: createHash("sha256").update(stderr).digest("hex"),
-    logSha256: createHash("sha256").update(`${command} ${args.join(" ")}\n${stdout}\n${stderr}`.trimEnd() + "\n").digest("hex"),
+    logSha256: createHash("sha256").update(logBody).digest("hex"),
   });
   process.stdout.write(`${name}: exit=${proc.status} durationMs=${results.at(-1).durationMs}\n`);
 }
 
 const failed = results.filter((row) => row.exitCode !== 0);
 writeFileSync(
-  path.join(auditDir, "battery-results.json"),
+  path.join(auditDir, only ? "battery-results-partial.json" : "battery-results.json"),
   `${JSON.stringify({ schema: "gjc.audit.battery.v1", base: "e74140c", executedAt: new Date().toISOString(), results }, null, 2)}\n`,
 );
 process.stdout.write(`battery: commands=${results.length} failed=${failed.length}\n`);

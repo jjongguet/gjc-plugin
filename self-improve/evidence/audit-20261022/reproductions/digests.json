@@ -16,10 +16,6 @@
       "bytes": 60558,
       "sha256": "dc2383dc6f54567b2561ad3dd7e03baa0235f56a177f2ebe55df84b10619464d"
     },
-    "replay-p2b.json": {
-      "bytes": 1030,
-      "sha256": "fdba1bbfecfe58d062dfbf01f1f5e05b18e982c71fb20e19c3dde3c7a6970be4"
-    },
     "ledger-p2.jsonl": {
       "bytes": 17250,
       "sha256": "72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e"
@@ -28,5 +24,10 @@
       "bytes": 61028,
       "sha256": "cff80dfbec86402194c509f695aa3d18431c50a023f13d347cff541b5f007b6e"
     }
+  },
+  "ledgerPathDependent": {
+    "file": "replay-p2b.json",
+    "reason": "the replay receipt embeds corpus.ledgerPath, so its bytes depend on the workdir string of the generating run",
+    "comparison": "remove corpus.ledgerPath and compare against evidence/p2b/replay-b0b1.json; verify-reproductions.mjs does exactly that"
   }
 }

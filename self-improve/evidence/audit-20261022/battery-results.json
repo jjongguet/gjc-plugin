@@ -1,7 +1,7 @@
 {
   "schema": "gjc.audit.battery.v1",
   "base": "e74140c",
-  "executedAt": "2026-10-21T20:53:52.407Z",
+  "executedAt": "2026-10-21T23:30:27.169Z",
   "results": [
     {
       "name": "build-check",
@@ -9,12 +9,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 154,
-      "startedAt": "2026-10-21T20:51:04.165Z",
+      "durationMs": 86,
+      "startedAt": "2026-10-21T23:27:54.981Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/build-check.log",
       "stdoutSha256": "23defc2fc1ff3e55adc3a8884203e21c2c4a20978ec16d29bc958940ee6cabe6",
       "stderrSha256": "810fc531ce34ee5850939150abc50580c7a47691324dc97cb9d6fea44c89270a",
-      "logSha256": "f90659051297ce9ec528cef523600972418da584ec121803187f3dfb4be85deb"
+      "logSha256": "7e227265439b1e64a14577af6b04912199a8222bff3c7a791e0a32d9d55c8e0d"
     },
     {
       "name": "evidence-check",
@@ -22,12 +22,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 73,
-      "startedAt": "2026-10-21T20:51:04.325Z",
+      "durationMs": 53,
+      "startedAt": "2026-10-21T23:27:55.068Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/evidence-check.log",
-      "stdoutSha256": "7b211383459d6478328411ce8b297f92ee3d7e90e6086d8730d6315759acd22e",
+      "stdoutSha256": "1c2e1b73b36333c2c70ae4a776dfd48af1543acd8c19acf0024833bef3cfb314",
       "stderrSha256": "fc143f1c9e674885e10648799546117f430c5daed4ee4c72ca713544dcf2458d",
-      "logSha256": "9513ee9729c4ffb3b8ad229a3cc0cb3bb9f6a821b9cd13992201f3dbc9da354d"
+      "logSha256": "a0b95648b4b75f9a56713aca6917bca0c68742f496ad546c51d6369ba855289c"
     },
     {
       "name": "docs-check",
@@ -35,12 +35,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 53,
-      "startedAt": "2026-10-21T20:51:04.398Z",
+      "durationMs": 43,
+      "startedAt": "2026-10-21T23:27:55.121Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/docs-check.log",
-      "stdoutSha256": "accc1e62d7b98705ba94a3a2c4d52f92d5415ef0dbeccef496321e7852481d4d",
+      "stdoutSha256": "98b99abf3ee847308bc76364eef106ee4ed6b5350496ef1d11365d63653a5835",
       "stderrSha256": "8e1cf7a4d4a102e371629123f8f4df557a932161a6516b6de05c4d89b3d96c02",
-      "logSha256": "e12cba5828f91e7fd4076ec82716f4fc80e88f1b0a6c9a9f012066bb9043a8bc"
+      "logSha256": "7bffcad098420124b9458b469557a47122a7badd1e9864ab90ae8f9699b5af9e"
     },
     {
       "name": "policy-check",
@@ -48,12 +48,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 33,
-      "startedAt": "2026-10-21T20:51:04.451Z",
+      "durationMs": 29,
+      "startedAt": "2026-10-21T23:27:55.164Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/policy-check.log",
       "stdoutSha256": "ddf1778ff438c6a71f07a85c7161f7780e09cbbd9a37371fbcf5dfb5b273b5ba",
       "stderrSha256": "303bb59cf35c2e14a4ae928af473390389bbf841b66e669e5fdc0c06b87deaf2",
-      "logSha256": "7d9d6fdca0aa856d6f4fd25670980d243981c99519d9e7b0fb56213900734421"
+      "logSha256": "094afdbdbb12730b2bae118feb1ccfbd04fac1d8d37ef4615e12db0123a060df"
     },
     {
       "name": "paths-check",
@@ -61,12 +61,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 80,
-      "startedAt": "2026-10-21T20:51:04.485Z",
+      "durationMs": 73,
+      "startedAt": "2026-10-21T23:27:55.193Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/paths-check.log",
-      "stdoutSha256": "be0721697f184f387a7444fa8ba83c87ace813de524cee1429333a3817ab5f61",
+      "stdoutSha256": "32a9392cf1bc1f0f9afeff6437645a4ded5957776be327794d71dd9305f86e81",
       "stderrSha256": "40c5cb5d52c7f9e2c01e44d4ce0ea3fbb1aec02bb74449c4c83d415dcdedd229",
-      "logSha256": "1c388bd1cbb80c4c15972507a502f1c4f75eae120c6d788e9bd198e74278465a"
+      "logSha256": "7c7c1af428f8359bb685c3079ea195458bc13e7564d69eb6291112eb963654f4"
     },
     {
       "name": "audit-claims",
@@ -74,12 +74,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 536,
-      "startedAt": "2026-10-21T20:51:04.565Z",
+      "durationMs": 408,
+      "startedAt": "2026-10-21T23:27:55.266Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/audit-claims.log",
-      "stdoutSha256": "707a2af052878fbb242eda2630542cb775520128bf7e688ffa7eb5af97c0d3ad",
+      "stdoutSha256": "e860e4d4c52fc721856991706acdb3fc7275add727b3a5514d19b20b6bc59bb6",
       "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "logSha256": "8b9a3bc974edc5c9bda58b51de68d42c7dc30e86e3385ac4a050ddf9f711baa3"
+      "logSha256": "f88725c0f361712e4cbd3afae0ebffb37895f85dfaa90ef25bc4da8deccbbca3"
     },
     {
       "name": "test-all",
@@ -87,12 +87,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 157287,
-      "startedAt": "2026-10-21T20:51:05.102Z",
+      "durationMs": 142327,
+      "startedAt": "2026-10-21T23:27:55.674Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/test-all.log",
-      "stdoutSha256": "c6b6f6e882b303f88ef01fd490e7053544ab11483bd0d574389fb1f61d62fdcd",
-      "stderrSha256": "a4df615b8362c86cf46dffd5ead6f09517219b0db2b02d2edeefc810d021b54f",
-      "logSha256": "fda9a145524e7673041bae5c192ec8c207ae111adb0dedeae6e55a275737b81a"
+      "stdoutSha256": "a148e6e8e4ed11827b89de73fb3bc906a0004e8f7ade3d7107d144e8bfd7bb56",
+      "stderrSha256": "48d4d7c749da135602fe5b355af09152f5131ade69bdcf27c6beb8474cb566ba",
+      "logSha256": "7e31674ad7169beefe1287651f87d4ae4109124fbb48b82f78fd03a013b9b676"
     },
     {
       "name": "rrsi-verify",
@@ -100,12 +100,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 4593,
-      "startedAt": "2026-10-21T20:53:42.390Z",
+      "durationMs": 4260,
+      "startedAt": "2026-10-21T23:30:18.001Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/rrsi-verify.log",
-      "stdoutSha256": "78fd95c519ef67a37d80ed8e5e2f0939f148e6ebca292976a557b18a0e1c18ba",
+      "stdoutSha256": "c13c837dfe65d01afe8e860f29dd1bc207ebceb75b51ce8c2c2960f693cd58e8",
       "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "logSha256": "70bca2f29c68b5d8d2a4faa5c6449263bf5a8c6934891824f82d6a764a272035"
+      "logSha256": "6704d5707ac392ac4700d21ce37e17347330673837a9dfb28b394184172d3748"
     },
     {
       "name": "rrsi-real-journal",
@@ -113,12 +113,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 205,
-      "startedAt": "2026-10-21T20:53:46.983Z",
+      "durationMs": 190,
+      "startedAt": "2026-10-21T23:30:22.261Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/rrsi-real-journal.log",
-      "stdoutSha256": "e1e9656a466bf9797fbcc345663739418610361b1bee8d5504f75ac7374b91bf",
-      "stderrSha256": "7c821dd2274f98c3ac484206fe8ff927a724f44e7def44c3f50ed089b70d70bd",
-      "logSha256": "888f77d54bc2eb734f143578f52a2dfa82ceec6455399980abd8ca4113fb791e"
+      "stdoutSha256": "dfa2d0f2a37d51638774458de517605fd4b69f18400713c51be9721d708cc465",
+      "stderrSha256": "c89575b2ce669a8a8cd1a990a72575bb73e67a03999fc2a1d045f71427047135",
+      "logSha256": "3f2dfbcc02da1b92eaa9b5a547a67136de5e3775dec4ee8f5c7b2e6745df86cb"
     },
     {
       "name": "rrsi-periodic",
@@ -126,12 +126,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 4785,
-      "startedAt": "2026-10-21T20:53:47.188Z",
+      "durationMs": 4328,
+      "startedAt": "2026-10-21T23:30:22.451Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/rrsi-periodic.log",
-      "stdoutSha256": "094e1bae8f9c8ff022aa2f617d28d58ef062d6924407a44179bcd00aa0792cf5",
+      "stdoutSha256": "c55445969094f53d05097b64d93de24e4e1393e595728d5a9e4e05f64e16afab",
       "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "logSha256": "dbc280626c1ca8238cbe64c2a4252474a7890b0fc92589ca9f72d4d46e319089"
+      "logSha256": "b2b91b74b06b0da96f851455c5401992376c80a6cb9a9587ad7fcabe1613af8b"
     },
     {
       "name": "demo",
@@ -139,12 +139,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 249,
-      "startedAt": "2026-10-21T20:53:51.973Z",
+      "durationMs": 218,
+      "startedAt": "2026-10-21T23:30:26.779Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/demo.log",
       "stdoutSha256": "65e170afb45e0ab90373512bc4a73e9ce4df403dccd99d2abe31efee4b283a3c",
       "stderrSha256": "43b94f8ae948a9d69a7d6bf92d9eee7e723134d9b81287945f171f768c682afa",
-      "logSha256": "d358b113074d0357acad98fa5b01ccfde469f1abe654bf0355ea8fba38132dcb"
+      "logSha256": "3e0f87f691bb853dfca4963517d2e57ff734ec04ef9f041a9f8c88123c84c77c"
     },
     {
       "name": "reproductions",
@@ -152,12 +152,12 @@
       "exitCode": 0,
       "signal": null,
       "error": null,
-      "durationMs": 185,
-      "startedAt": "2026-10-21T20:53:52.222Z",
+      "durationMs": 172,
+      "startedAt": "2026-10-21T23:30:26.997Z",
       "log": "self-improve/evidence/audit-20261022/battery-logs/reproductions.log",
       "stdoutSha256": "fc3af6774d64b0882c3c97c4fa0bb16bdb70919e0075cbdc060e96bc8a8b7367",
       "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-      "logSha256": "f17a08a7ac73fc05e9fa351a9c3f112c4445667343e8d4fabeb56058db7443de"
+      "logSha256": "cf41255e889739c36d068e4af966f81040efbccc83e23086b0fcd06f4b19840d"
     }
   ]
 }

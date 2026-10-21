@@ -4,7 +4,7 @@ Answers one question: **was the recent RRSI + Harness² work introduced
 correctly?** — not whether the technique works.
 
 - Base: `e74140c` (== `origin/main` at audit time), branch `feat/mbp-rrsi-harness2-audit-01a15f70`.
-- Verdict: **`GAPS_OPEN (14)`** at audit time; 732 PASS (324 bound / 408
+- Verdict: **`GAPS_OPEN (14)`** at audit time; 732 PASS (175 bound / 557
   self) / 14 GAP / 63 UNVERIFIABLE over 809 claim rows. See [`verdicts.md`](verdicts.md).
 - Approved plan: ralplan run `01a15f70-095c-724d-b819-168c0e264701`
   (`pending-approval.md` is session-local and not committed; the plan text is
@@ -44,6 +44,9 @@ node self-improve/evidence/audit-20261022/tools/audit-candidates.mjs
 node self-improve/evidence/audit-20261022/tools/triage.mjs
 node scripts/check-audit-claims.mjs --base e74140c
 
+# execution half: run every distinct bound command (~3.5 min, mostly the test suites)
+node self-improve/evidence/audit-20261022/tools/bound-sweep.mjs --out self-improve/evidence/audit-20261022/reproductions/bound-sweep.txt
+
 # independent extraction from the pre-fix tree (e74140c export)
 rm -rf /tmp/audit-carriers && mkdir -p /tmp/audit-carriers
 git archive e74140c | tar -x -C /tmp/audit-carriers
@@ -71,16 +74,32 @@ evidence; the recovered 13-attempt receipt is the exception and is committed at
   the negative control bound the risk but do not remove it.
 - `bound` PASS rows point at a command or receipt that could fail; `self` rows
   assert only that the quoted text is present at the pinned scope. The split is
-  printed with the headline and is the honest denominator. `observed` is
-  human-recorded prose: the checker verifies the evidence digest, not that the
-  prose is true.
-- The scope-unavailable fallback (`--allow-worktree-fallback`) exists for
-  exported trees without `.git`; it validates the worktree copy and prints a
-  note. The full positive run requires the audit-scope commit and is the only
-  mode that can re-enumerate candidates.
+  printed with the headline and is the honest denominator. `observed` for MEAS
+  rows is the captured `check-number` output; for REF/IMP rows it is a recorded
+  summary. The checker does not execute those commands; `tools/bound-sweep.mjs`
+  does, running each distinct bound command once and recording how many rows it
+  covers ([`reproductions/bound-sweep.txt`](reproductions/bound-sweep.txt):
+  **175/175 rows over 28 distinct commands, 0 failures**). A PASS row's
+  `evidence_sha256` is the carrier blob digest and `evidence_kind: a` is
+  required — it proves the quoted text, not the prose.
+- `dispositions.jsonl` maps every candidate to a claim automatically; the 14
+  findings are the hand-written part. 63 UNVERIFIABLE rows are one of four
+  carrier-level reasons (historical release notes, private-store snapshots,
+  overview figures, process statements), not per-row research.
+- The scope-unavailable fallback (`--allow-worktree-fallback`) exists for an
+  exported tree whose carriers still match the audit scope; on a post-fix
+  export it fails closed at the first changed quote. The full positive run
+  requires the audit-scope commit and is the only mode that re-enumerates.
 - 63 rows stay UNVERIFIABLE (historical release notes, private-store snapshots,
   overview figures). They are listed with the missing receipt, never rounded to
   PASS.
+- The first bound sweep failed the 86 rows bound to `bun run test:self-improve`:
+  its nested full-suite guard hit a 5000 ms per-test timeout in
+  `verification-receipts/tests/loop.test.ts` (observed 5015.91 ms, `test` guard
+  red). The test was unchanged since the audit base and sits at the default
+  limit; it now carries the file's existing explicit `30000` ms timeout, and
+  both `bun run test:verification` (82 pass) and the sweep are green. The fix is
+  a test-harness timeout, not a product behavior change.
 - No efficacy, live-provider, installed-byte or Linear-workflow verdict is made.
 - Frozen artifacts are never edited; their defects are recorded in
   [`annex.md`](annex.md) with recomputed values.

@@ -15,7 +15,7 @@ if (!carrier || !source || !literal) {
   process.exit(2);
 }
 
-const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..", "..");
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const text = readFileSync(path.join(repoRoot, source), "utf8");
 const normalized = literal.replace(/[,._]/g, "");
 const variants = new Set([literal, literal.replace(/,/g, ""), literal.replace(/_/g, "")]);

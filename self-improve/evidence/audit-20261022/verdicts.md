@@ -3,7 +3,7 @@
 - Claim graph: **809 rows** over 18 enumerated carriers (`claims.csv`), all 809
   candidates dispositioned (`dispositions.jsonl`), checked by
   `node scripts/check-audit-claims.mjs --base e74140c`.
-- Counts: **PASS 732 · GAP 14 · UNVERIFIABLE 63**.
+- Counts: **PASS 732 (175 bound / 557 self) · GAP 14 · UNVERIFIABLE 63**.
 - Aggregate: **`GAPS_OPEN (14)` at audit time** — 9 fixed at HEAD, 5 frozen and
   recorded in [`annex.md`](annex.md). Every fix has a post-fix command in
   [`closures.md`](closures.md); the post-fix battery is
@@ -25,7 +25,7 @@
 | F-09 dated-receipt exception unstated | K0142 | `docs/agent-rules.md:36` | BND/S3 | doc | T-B6 |
 | F-10 snapshot without command | K0194 | `docs/trajectory-memory.md:110` | MEAS/S3 | doc | T-B6 |
 | F-14 interval override silently clamps | K0246 | `rrsi/README.md:45` | IMP/S2 | doc | T-B6 |
-| F-15 two cycle counts unlabelled | K0663 | `self-improve/evidence/p3/README.md:43` | MEAS/S2 frozen | annex | T-B7 |
+| F-15 two cycle counts unlabelled | K0663 | `self-improve/evidence/p3/README.md:43` (the row quotes an accurate sentence; the defect is in the frozen `p3/summary.json` keys) | MEAS/S2 frozen | annex | T-B7 |
 | F-17 sub-gate split overlap | K0801 | `self-improve/replay-protocol-p2b.json:71` | BND/S2 frozen | annex | T-B7 |
 | F-18 "advisory" pair is train/full | K0362 | `self-improve/README.md:145` | MEAS/S3 | doc | T-B3 |
 

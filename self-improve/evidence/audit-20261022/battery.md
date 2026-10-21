@@ -1,23 +1,23 @@
 # Battery
 
-Base: `e74140c`. Executed 2026-10-21T20:53:52.407Z. Every row is produced by
+Base: `e74140c`. Executed 2026-10-21T23:30:27.169Z. Every row is produced by
 `tools/run-battery.mjs`, which records the real exit status and keeps the
 captured output under [`battery-logs/`](battery-logs/). A non-zero exit fails
 this renderer; a command that did not run has no row.
 
 | command | exit | duration ms | log sha256 |
 | --- | --- | --- | --- |
-| `bun run build:check` | 0 | 154 | `f90659051297ce9ec528cef523600972418da584ec121803187f3dfb4be85deb` |
-| `bun run evidence:check` | 0 | 73 | `9513ee9729c4ffb3b8ad229a3cc0cb3bb9f6a821b9cd13992201f3dbc9da354d` |
-| `bun run docs:check` | 0 | 53 | `e12cba5828f91e7fd4076ec82716f4fc80e88f1b0a6c9a9f012066bb9043a8bc` |
-| `bun run policy:check` | 0 | 33 | `7d9d6fdca0aa856d6f4fd25670980d243981c99519d9e7b0fb56213900734421` |
-| `bun run paths:check` | 0 | 80 | `1c388bd1cbb80c4c15972507a502f1c4f75eae120c6d788e9bd198e74278465a` |
-| `node scripts/check-audit-claims.mjs --base e74140c --reenumerate` | 0 | 536 | `8b9a3bc974edc5c9bda58b51de68d42c7dc30e86e3385ac4a050ddf9f711baa3` |
-| `bun run test` | 0 | 157287 | `fda9a145524e7673041bae5c192ec8c207ae111adb0dedeae6e55a275737b81a` |
-| `bun rrsi/scripts/verify.ts` | 0 | 4593 | `70bca2f29c68b5d8d2a4faa5c6449263bf5a8c6934891824f82d6a764a272035` |
-| `bun test rrsi/tests/real-journal.test.ts` | 0 | 205 | `888f77d54bc2eb734f143578f52a2dfa82ceec6455399980abd8ca4113fb791e` |
-| `node --test rrsi/tests/periodic.test.mjs` | 0 | 4785 | `dbc280626c1ca8238cbe64c2a4252474a7890b0fc92589ca9f72d4d46e319089` |
-| `bun run demo` | 0 | 249 | `d358b113074d0357acad98fa5b01ccfde469f1abe654bf0355ea8fba38132dcb` |
-| `node self-improve/evidence/audit-20261022/tools/verify-reproductions.mjs` | 0 | 185 | `f17a08a7ac73fc05e9fa351a9c3f112c4445667343e8d4fabeb56058db7443de` |
+| `bun run build:check` | 0 | 86 | `7e227265439b1e64a14577af6b04912199a8222bff3c7a791e0a32d9d55c8e0d` |
+| `bun run evidence:check` | 0 | 53 | `a0b95648b4b75f9a56713aca6917bca0c68742f496ad546c51d6369ba855289c` |
+| `bun run docs:check` | 0 | 43 | `7bffcad098420124b9458b469557a47122a7badd1e9864ab90ae8f9699b5af9e` |
+| `bun run policy:check` | 0 | 29 | `094afdbdbb12730b2bae118feb1ccfbd04fac1d8d37ef4615e12db0123a060df` |
+| `bun run paths:check` | 0 | 73 | `7c7c1af428f8359bb685c3079ea195458bc13e7564d69eb6291112eb963654f4` |
+| `node scripts/check-audit-claims.mjs --base e74140c --reenumerate` | 0 | 408 | `f88725c0f361712e4cbd3afae0ebffb37895f85dfaa90ef25bc4da8deccbbca3` |
+| `bun run test` | 0 | 142327 | `7e31674ad7169beefe1287651f87d4ae4109124fbb48b82f78fd03a013b9b676` |
+| `bun rrsi/scripts/verify.ts` | 0 | 4260 | `6704d5707ac392ac4700d21ce37e17347330673837a9dfb28b394184172d3748` |
+| `bun test rrsi/tests/real-journal.test.ts` | 0 | 190 | `3f2dfbcc02da1b92eaa9b5a547a67136de5e3775dec4ee8f5c7b2e6745df86cb` |
+| `node --test rrsi/tests/periodic.test.mjs` | 0 | 4328 | `b2b91b74b06b0da96f851455c5401992376c80a6cb9a9587ad7fcabe1613af8b` |
+| `bun run demo` | 0 | 218 | `3e0f87f691bb853dfca4963517d2e57ff734ec04ef9f041a9f8c88123c84c77c` |
+| `node self-improve/evidence/audit-20261022/tools/verify-reproductions.mjs` | 0 | 172 | `cf41255e889739c36d068e4af966f81040efbccc83e23086b0fcd06f4b19840d` |
 
 Commands: 12. Failed: 0. Logs: `battery-logs/` (committed).

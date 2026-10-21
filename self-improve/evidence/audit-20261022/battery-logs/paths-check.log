@@ -1,4 +1,4 @@
 $ bun run paths:check
-paths:check ok: 296 tracked files, 2 allowlisted hash-pinned line(s)
+paths:check ok: 312 tracked files, 2 allowlisted hash-pinned line(s)
 
 $ node scripts/check-paths.mjs

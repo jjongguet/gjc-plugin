@@ -29,6 +29,11 @@ const P2_RAW = "72e25ab9092fac9a2f9ac3a9903a9e5aa2c3fffae3038ecd25a9c91a5b2da72e
 const git = (args) => execFileSync("git", args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
 const run = (args, out) => execFileSync(process.execPath, args, { cwd: repoRoot, encoding: "utf8", maxBuffer: 256 * 1024 * 1024, stdio: ["ignore", "pipe", "ignore"] });
 
+if (!generated && !existsSync(path.join(workdir, "dream-p2b.json"))) {
+  process.stderr.write("verify-reproductions: supplied workdir must contain ledger-p2b.jsonl, dream-p2b.json, replay-p2b.json, ledger-p2.jsonl and dream-p2.json (omit the argument to regenerate them)\n");
+  process.exit(2);
+}
+
 if (generated) {
   writeFileSync(path.join(workdir, "ledger-p2b.jsonl"), git(["show", "e6675cb:self-improve/ledger.jsonl"]));
   writeFileSync(path.join(workdir, "ledger-p2.jsonl"), git(["show", "7f2f97f:self-improve/ledger.jsonl"]));

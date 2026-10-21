@@ -117,10 +117,11 @@ regenerated against the same snapshot.
 | `probe.egress_boundary` | `objective_not_gated`, `drawnFrom 9`, lag 22 |
 
 Zero candidates is the intended outcome: the only group with both decisions is
-refuted by four of its six pairs. Measured at 2026-10-21; regenerate the
-ledger-derived counters with `node self-improve/scripts/run.mjs distill --json`
-against the same private store snapshot — the snapshot itself is not
-reconstructible and the counts are a sample, not a reproducible series.
+refuted by four of its six pairs. Measured at 2026-10-21; the ledger-derived
+counters can be regenerated with `node self-improve/scripts/run.mjs distill
+--json` only from a store in the same state. The snapshot itself is not
+reconstructible, so treat these rows as a labelled sample, not a reproducible
+series.
 
 ## Non-goals
 

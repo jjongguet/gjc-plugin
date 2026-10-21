@@ -20,6 +20,11 @@ if (!existsSync(resultsFile)) {
 }
 
 const { base, executedAt, results } = JSON.parse(readFileSync(resultsFile, "utf8"));
+const EXPECTED = 12;
+if (results.length !== EXPECTED) {
+  process.stderr.write(`render-battery: expected ${EXPECTED} commands, found ${results.length}; a partial run cannot render the canonical battery (use battery-results-partial.json for subsets)\n`);
+  process.exit(2);
+}
 const failed = results.filter((row) => row.exitCode !== 0);
 const lines = [
   "# Battery",

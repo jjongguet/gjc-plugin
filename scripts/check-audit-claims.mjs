@@ -131,6 +131,7 @@ function loadRows() {
     if (!FIX_CLASSES.has(record.fix_class)) fail(`${record.id}: bad fix_class ${record.fix_class}`);
     if (!BINDING_STRENGTHS.has(record.binding_strength)) fail(`${record.id}: bad binding_strength ${record.binding_strength}`);
     if (record.verdict === "PASS" && !record.binding_strength) fail(`${record.id}: PASS row missing binding_strength`);
+    if (record.verdict === "PASS" && record.evidence_kind !== "a") fail(`${record.id}: PASS rows must carry the carrier evidence kind`);
     if (record.verdict === "PASS" && (!record.binding_command || !record.observed || !record.evidence_sha256)) {
       fail(`${record.id}: PASS row missing binding_command/observed/evidence_sha256`);
     }

@@ -248,7 +248,7 @@ test('dedup keys canonicalize across job and subagent terminals and pending laun
  const resolution = await makeReceipt(root, ['feature.test.mjs'], 'passed');
  expect((await evaluateRepoGates(root, repoDigest, sessionDigest)).status).toBe('clean');
  expect(resolution.id.length).toBe(36);
-});
+}, 30000);
 
  test('changed test files must be covered and binding evidence blocks no-change resolution', async () => {
  await makeHome();

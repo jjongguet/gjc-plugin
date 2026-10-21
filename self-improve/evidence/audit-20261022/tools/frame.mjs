@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
  * Phase-A receipt frame: writes frame.md (base, window, per-carrier scope sha,
- * frozen-path digests) and battery.md (command, exit code, output digest).
+ * frozen-path digests) from the audit-scope blobs.
  *
- * Usage: node tools/frame.mjs <battery-log-dir>
+ * Usage: node tools/frame.mjs
  */
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createHash } from "node:crypto";

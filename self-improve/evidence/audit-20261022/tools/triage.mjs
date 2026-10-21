@@ -8,13 +8,14 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const auditDir = path.resolve(here, "..");
 const repoRoot = path.resolve(auditDir, "..", "..", "..");
+const CHECK_NUMBER = path.join(auditDir, "tools", "check-number.mjs");
 const SCOPE = process.env.AUDIT_SCOPE_SHA ?? "e74140c7b014b60402b6f2c4ef748cfd1b7d3512";
 const scopeSha = SCOPE;
 const scopeText = (carrier) => execFileSync("git", ["show", `${SCOPE}:${carrier}`], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -277,7 +278,9 @@ const UNVERIFIABLE_RECEIPT = {
 
 const sourceFor = (carrier) => {
   if (carrier === "rrsi/README.md") return "rrsi/lib/rrsi.ts";
-  if (carrier.startsWith("self-improve/") && carrier.endsWith(".md")) return "self-improve/rrsi-protocol.json";
+  if (carrier === "self-improve/DREAM.md") return "self-improve/replay-protocol.json";
+  if (carrier.startsWith("self-improve/evidence/p3/")) return "self-improve/evidence/p3/summary.json";
+  if (carrier.startsWith("self-improve/")) return "self-improve/rrsi-protocol.json";
   return carrier;
 };
 
@@ -363,10 +366,11 @@ for (const [key, group] of byKey) {
     let bindingStrength = "self";
 
     if (klass === "REF") {
-      binding = "bun run docs:check";
-      observed = "exit 0 at HEAD e74140c (paths/links resolve)";
-      requiredReceipt = "docs:check exit status at the pinned scope";
-      bindingStrength = "bound";
+      const hasLink = /\]\([^)]+\)/.test(quote);
+      binding = hasLink ? "bun run docs:check" : ROW_CHECK(id);
+      observed = hasLink ? "exit 0 at HEAD e74140c (paths/links resolve)" : `quote present at ${carrier}:${fileLine}; no markdown link for docs:check`;
+      requiredReceipt = hasLink ? "docs:check exit status at the pinned scope" : "carrier text at the pinned scope";
+      bindingStrength = hasLink ? "bound" : "self";
     } else if (klass === "IMP") {
       const engine = carrier.startsWith("self-improve/") || carrier === "docs/trajectory-memory.md";
       binding = engine ? "bun run test:self-improve" : "bun run build:check";
@@ -376,20 +380,38 @@ for (const [key, group] of byKey) {
     } else if (klass === "RDM") {
       observed = "no implementation path at HEAD e74140c; roadmap language present";
     } else if (klass === "MEAS" && !isFrozen(carrier)) {
-      const numberMatch = quote.match(/\d[\d,._]*/);
-      const source = sourceFor(carrier);
-      if (numberMatch && source !== carrier) {
-        binding = `node self-improve/evidence/audit-20261022/tools/check-number.mjs ${carrier} ${source} ${JSON.stringify(numberMatch[0])}`;
-        observed = `checked ${numberMatch[0]} in ${source}`;
-        requiredReceipt = `${source} contains the documented literal`;
-        bindingStrength = "bound";
-      } else {
+      if (UNVERIFIABLE_RECEIPT[carrier]) {
         verdict = "UNVERIFIABLE";
         binding = "";
-        observed = "no constant binding selected at Phase A";
+        observed = "no machine binding for this carrier class";
         evidenceKind = "d";
         bindingStrength = "";
-        requiredReceipt = UNVERIFIABLE_RECEIPT[carrier] ?? "result receipt or code-constant binding";
+        requiredReceipt = UNVERIFIABLE_RECEIPT[carrier];
+      } else {
+        const numberMatch = quote.match(/\d[\d,._]*/);
+      const source = sourceFor(carrier);
+      const literal = numberMatch ? numberMatch[0] : "";
+      const significant = literal.replace(/[,._]/g, "").length >= 2;
+      if (literal && source !== carrier && significant) {
+        const probe = spawnSync(process.execPath, [CHECK_NUMBER, carrier, source, literal], { cwd: repoRoot, encoding: "utf8" });
+        const output = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.trim();
+        if (probe.status === 0) {
+          binding = `node self-improve/evidence/audit-20261022/tools/check-number.mjs ${carrier} ${source} ${JSON.stringify(literal)}`;
+          observed = output.split("\n")[0] ?? `PASS literal ${literal}`;
+          requiredReceipt = `${source} contains the documented literal`;
+          bindingStrength = "bound";
+        } else {
+          binding = ROW_CHECK(id);
+          observed = `literal ${literal} not found in ${source}; quote present at ${carrier}:${fileLine}`;
+          requiredReceipt = "carrier text at the pinned scope (literal mapping failed)";
+          bindingStrength = "self";
+        }
+      } else {
+        binding = ROW_CHECK(id);
+        observed = `quote present at ${carrier}:${fileLine}; no significant literal binding`;
+        requiredReceipt = "carrier text at the pinned scope";
+        bindingStrength = "self";
+      }
       }
     }
 

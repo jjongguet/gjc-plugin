@@ -28,7 +28,9 @@ re-verification) is out of scope for this mission.
 
 ## S3 — reference resolution
 
-- Relative links: **58** tracked Markdown links, `bun run docs:check` exit 0.
+- Relative links: **61** tracked Markdown links, `bun run docs:check` exit 0
+  (links only; 9 of the 77 REF rows carry a Markdown link, the other 68 are
+  `self` bindings).
 - Pinned commits: `e6675cb`, `7f2f97f`, `02c3177`, `b9d47c2` resolve locally
   (`git cat-file -e`); `harness2@1cfe254e` resolves upstream (read-only fetch).
 - Linear refs: JJO-269/270/271/272 resolve with matching titles.
@@ -37,9 +39,14 @@ re-verification) is out of scope for this mission.
 
 ## S4 — claim ↔ test matrix
 
+- Binding split: **175 bound / 557 self**. `bound` = an executed command or
+  receipt (docs:check 9, build:check 51, test:self-improve 86, check-number 29);
+  `self` = quote presence at the pinned scope.
+- Execution: `tools/bound-sweep.mjs` runs each of the 28 distinct bound commands
+  once → **175/175 rows, 0 failures** ([`reproductions/bound-sweep.txt`](reproductions/bound-sweep.txt)).
 - Suites exercised: self-improve unit **136** cases, integration **45**, rrsi
-  acceptance **32**, fixture/check tests **10**, real-journal **2**, periodic
-  node tests **2**.
+  acceptance **32**, readme-contract **4**, fixture/check tests **10**,
+  real-journal **2**, periodic node tests **2**.
 - Changed behavior with a bound case: T-B2 (journal-dream import + determinism
   cases), T-B10 (projection-coverage cases), T-B9 (row + negative control).
 - Orphan changed behavior: **0** found. Docs-only changes have no test by design.

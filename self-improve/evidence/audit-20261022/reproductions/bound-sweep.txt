@@ -1,0 +1,40 @@
+# Bound-row sweep
+
+Every distinct `binding_command` declared by a PASS row with
+`binding_strength=bound`, executed once in the repository root. A failing
+command leaves its rows unverified; the sweep exits non-zero.
+
+claims.csv rows: 809 · bound rows: 175 · distinct commands: 28
+
+| command | rows | exit | duration ms |
+| --- | --- | --- | --- |
+| `bun run docs:check` | 9 | 0 | 50 |
+| `bun run build:check` | 51 | 0 | 91 |
+| `bun run test:self-improve` | 86 | 0 | 84756 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "24"` | 1 | 0 | 27 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "160"` | 2 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "12"` | 3 | 0 | 27 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "40"` | 1 | 0 | 23 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "0700"` | 1 | 0 | 25 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs rrsi/README.md rrsi/lib/rrsi.ts "128"` | 1 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/README.md self-improve/rrsi-protocol.json "48"` | 1 | 0 | 25 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "256"` | 1 | 0 | 27 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "20"` | 1 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "14"` | 1 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "40"` | 1 | 0 | 27 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "48"` | 1 | 0 | 23 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/DREAM.md self-improve/replay-protocol.json "0.7"` | 1 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/PATTERNS.md self-improve/rrsi-protocol.json "256"` | 1 | 0 | 25 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/PATTERNS.md self-improve/rrsi-protocol.json "1.0,"` | 1 | 0 | 25 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/PATTERNS.md self-improve/rrsi-protocol.json "64"` | 2 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/PATTERNS.md self-improve/rrsi-protocol.json "40"` | 1 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/HARNESS2.md self-improve/rrsi-protocol.json "213"` | 1 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/README.md self-improve/rrsi-protocol.json "15,"` | 1 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/README.md self-improve/rrsi-protocol.json "256"` | 1 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/README.md self-improve/rrsi-protocol.json "02"` | 1 | 0 | 25 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/p3/README.md self-improve/evidence/p3/summary.json "1800000"` | 1 | 0 | 26 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/p3/README.md self-improve/evidence/p3/summary.json "26"` | 1 | 0 | 24 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/p3/README.md self-improve/evidence/p3/summary.json "256,"` | 1 | 0 | 23 |
+| `node self-improve/evidence/audit-20261022/tools/check-number.mjs self-improve/evidence/p3/README.md self-improve/evidence/p3/summary.json "27"` | 1 | 0 | 25 |
+
+verified rows: 175/175 · failing commands: 0
