@@ -97,7 +97,7 @@ describe("adequacy Decisions contract", () => {
   for (const invalid of [{ ...facts, status: "canary" }, { ...facts, freshness: "canary" }, { ...facts, counts: { tests: -1 } }, { ...facts, counts: undefined }]) { const h = harness(); expect((await assessAdequacy(context, invalid, h.deps)).reason).toBe("invalid_facts"); expect(h.calls.length).toBe(0); }
  });
  test("secret, raw source, path, log and diff canaries are rejected rather than truncated", async () => {
-  for (const text of ["api_key=private-canary", "Cookie: private-canary", "account_id=private-canary", "Bearer private-canary", "sk-private-canary", "https://private.invalid", "/Users/private-canary/file", "```source canary```", "diff --git private-canary", "at private-canary:20", "a".repeat(64)]) {
+  for (const text of ["api_key=private-canary", "Cookie: private-canary", "account_id=private-canary", "Bearer private-canary", "sk-private-canary", "https://private.invalid", "/Users/" + "private-canary/file", "```source canary```", "diff --git private-canary", "at private-canary:20", "a".repeat(64)]) {
    for (const field of ["changeSummary", "expectedBehavior", "note"]) {
     const input = field === "note" ? { ...context, caseNotes: [{ id: "empty", note: text }] } : { ...context, [field]: text };
     const h = harness(); expect(await assessAdequacy(input, facts, h.deps)).toEqual({ status: "invalid_input", reason: "invalid_context" }); expect(h.calls.length).toBe(0);

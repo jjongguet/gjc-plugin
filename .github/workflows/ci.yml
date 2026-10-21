@@ -38,6 +38,9 @@ jobs:
       - name: Evidence path hygiene
         run: bun run evidence:check
 
+      - name: Repository path hygiene
+        run: bun run paths:check
+
       - name: Documentation link check
         run: bun run docs:check
 

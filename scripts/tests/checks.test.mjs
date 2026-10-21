@@ -11,6 +11,15 @@ import { fileURLToPath } from "node:url";
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const NODE = process.execPath;
+// Absolute home paths are assembled at runtime so this fixture file itself stays
+// free of literal home paths (checked by scripts/check-paths.mjs).
+const HOME_PATHS = {
+	alice: "/Users/" + "alice",
+	bob: "/home/" + "bob",
+	carol: "C:\\\\Users\\\\" + "carol",
+	dave: "c:\\\\users\\\\" + "dave",
+	erin: "/Users/" + "erin",
+};
 
 function fixture(files) {
 	const root = mkdtempSync(join(tmpdir(), "gjc-plugin-checks-"));
@@ -73,8 +82,8 @@ test("docs:check fails on missing targets, reference links, escapes and bad enco
 test("evidence:check allows repository-relative paths and the two hash-bound files", () => {
 	const root = fixture({
 		"self-improve/notes.md": "Stores live under ~/.gjc-plugin/ and repo-relative self-improve/ledger.jsonl.\n",
-		"self-improve/ledger.jsonl": '{"path":"/Users/alice/repo"}\n',
-		"self-improve/evidence/p2b/replay-b0b1.json": '{"ledgerPath":"/Users/alice/repo/self-improve/ledger.jsonl"}\n',
+		"self-improve/ledger.jsonl": `{"path":"${HOME_PATHS.alice}/repo"}\n`,
+		"self-improve/evidence/p2b/replay-b0b1.json": `{"ledgerPath":"${HOME_PATHS.alice}/repo/self-improve/ledger.jsonl"}\n`,
 	});
 	try {
 		const result = run("check-evidence-paths.mjs", root);
@@ -86,11 +95,11 @@ test("evidence:check allows repository-relative paths and the two hash-bound fil
 
 test("evidence:check fails on absolute home paths in any other tracked file", () => {
 	const root = fixture({
-		"self-improve/a.json": '{"p":"/Users/alice/x"}\n',
-		"self-improve/b.log": "cwd=/home/bob/work\n",
-		"self-improve/c.txt": "C:\\Users\\carol\\x\n",
-		"self-improve/d.txt": "c:\\users\\dave\\x\n",
-		"self-improve/e.md": "see file:///Users/erin/x\n",
+		"self-improve/a.json": `{"p":"${HOME_PATHS.alice}/x"}\n`,
+		"self-improve/b.log": `cwd=${HOME_PATHS.bob}/work\n`,
+		"self-improve/c.txt": `${HOME_PATHS.carol}\\x\n`,
+		"self-improve/d.txt": `${HOME_PATHS.dave}\\x\n`,
+		"self-improve/e.md": `see file://${HOME_PATHS.erin}/x\n`,
 	});
 	try {
 		const result = run("check-evidence-paths.mjs", root);
@@ -99,6 +108,45 @@ test("evidence:check fails on absolute home paths in any other tracked file", ()
 	} finally {
 		rmSync(root, { recursive: true, force: true });
 	}
+});
+
+test("paths:check passes repository-relative paths and allowlisted hash-bound files", () => {
+	const root = fixture({
+		"README.md": "Repository-relative self-improve/ledger.jsonl and ~/.gjc-plugin/ paths only.\n",
+		"self-improve/ledger.jsonl": `{"path":"${HOME_PATHS.alice}/repo"}\n`,
+		"self-improve/evidence/p2b/replay-b0b1.json": `{"ledgerPath":"${HOME_PATHS.alice}/repo/self-improve/ledger.jsonl"}\n`,
+	});
+	try {
+		const result = run("check-paths.mjs", root);
+		assert.equal(result.status, 0, result.out);
+		assert.match(result.out, /paths:check ok: 3 tracked files/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("paths:check fails on absolute home paths outside the allowlist", () => {
+	const root = fixture({
+		"docs/a.md": `cwd ${HOME_PATHS.alice}/repo\n`,
+		"rrsi/b.ts": `const p = '${HOME_PATHS.bob}/x';\n`,
+		"README.md": `${HOME_PATHS.carol}\\x\n`,
+	});
+	try {
+		const result = run("check-paths.mjs", root);
+		assert.equal(result.status, 1, result.out);
+		for (const file of ["docs/a.md", "rrsi/b.ts", "README.md"]) assert.ok(result.out.includes(`absolute_home_path:${file}:1`), `${file}\n${result.out}`);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("audit-claims checker validates a row and rejects an unlisted sentence", () => {
+	const row = spawnSync(NODE, [join(REPO, "scripts", "check-audit-claims.mjs"), "--row", "K0001"], { encoding: "utf8" });
+	assert.equal(row.status, 0, `${row.stdout}${row.stderr}`);
+	assert.match(row.stdout, /row=K0001 ok/);
+	const unlisted = spawnSync(NODE, [join(REPO, "scripts", "check-audit-claims.mjs"), "--require-candidate", "README.md#1#THIS SENTENCE IS NOT IN THE GRAPH"], { encoding: "utf8" });
+	assert.equal(unlisted.status, 1, `${unlisted.stdout}${unlisted.stderr}`);
+	assert.match(unlisted.stderr, /candidate sentence has no candidates\.jsonl row/);
 });
 
 test("every plugin build --check passes in sync and fails on generated-surface drift", () => {

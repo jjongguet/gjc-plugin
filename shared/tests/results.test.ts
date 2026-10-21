@@ -144,7 +144,7 @@ test('one bounded batch record covers all32 task decisions and refuses malformed
 
 test('unknown fields, raw strings and privacy canaries are rejected before creating storage', async () => {
   const { baseDir } = await fixture();
-  const canary = 'SECRET_CANARY /Users/private/account sk-secret https://private.invalid';
+  const canary = 'SECRET_CANARY ' + '/Users/' + 'private/account sk-secret https://private.invalid';
   const invalid: unknown[] = [
     { ...outcome, assignment: canary }, { ...outcome, rationale: canary }, { ...outcome, account: canary },
     { ...outcome, execution: { ...outcome.execution, rawLogs: canary } },
