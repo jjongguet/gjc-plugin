@@ -79,7 +79,7 @@ digest recomputed from `--store` (default the rrsi store) so a forged digest is
 call. A valid candidate pins the objective, adds an optional `contrast` field
 to the v1 proposer request, rejects a response that moves the objective
 (`proposer_objective_mismatch`), and stops the loop with `candidate_consumed`
-after one cycle. Requests without a candidate keep their previous shape.
+after one cycle (or `candidate_failed` when the pinned proposal fails). Requests without a candidate keep their previous shape.
 
 ## Command
 
@@ -127,7 +127,7 @@ refuted by four of its six pairs.
 
 ## Verification
 
-- Unit (`tests/unit/distill.test.mjs`, 22 cases): unanimity, contradicted
+- Unit (`tests/unit/distill.test.mjs`, 23 cases): unanimity, contradicted
   counters, inconsistent contrast, unbound evidence, gated scope, undeclared
   aggregate, per-group lag, `parseMaxLag`, deterministic output, CLI exit codes,
   candidate tamper/contradiction/staleness.

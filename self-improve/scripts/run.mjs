@@ -51,7 +51,7 @@ commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
-  loop    [--repo <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
+  loop    [--repo <path>] [--store <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
           [--candidate-file <path>] [--max-lag <n>]
           [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--proposer-timeout-ms <n>]
           [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
