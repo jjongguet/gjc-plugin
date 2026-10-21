@@ -142,15 +142,30 @@ function loadRows() {
   return records;
 }
 
+const scopeCache = new Map();
 function carrierLines(carrier, scopeSha) {
+  const key = `${scopeSha}:${carrier}`;
+  if (scopeCache.has(key)) return scopeCache.get(key);
+  let lines;
   try {
-    const text = execFileSync("git", ["show", `${scopeSha}:${carrier}`], { cwd: repoRoot, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-    return text.split("\n");
+    const text = execFileSync("git", ["show", key], {
+      cwd: repoRoot,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    lines = text.split("\n");
   } catch {
+    // Shallow clone or an exported tree without the audit-scope commit: the
+    // caller validates against the worktree instead. Full runs print the scope
+    // source so the substitution is visible.
     const file = path.join(repoRoot, carrier);
-    if (!existsSync(file)) fail(`carrier missing: ${carrier}`);
-    return readFileSync(file, "utf8").split("\n");
+    if (!existsSync(file)) fail(`carrier missing and audit scope ${scopeSha.slice(0, 8)} unavailable: ${carrier}`);
+    lines = readFileSync(file, "utf8").split("\n");
+    process.stderr.write(`audit-claims: scope ${scopeSha.slice(0, 8)} unavailable for ${carrier}; validating the worktree copy\n`);
   }
+  scopeCache.set(key, lines);
+  return lines;
 }
 
 function normalized(text) {
@@ -255,19 +270,19 @@ const candidates = readFileSync(candidatesFile, "utf8")
   .filter(Boolean)
   .map((line) => JSON.parse(line));
 
-for (const record of records) {
-  const quote = quoteAtLine(record.carrier, record.file_line, record.quote, record.scope_sha);
-  if (!quote.ok) fail(`${record.id}: ${quote.reason}`);
-}
-dispositions(records, candidates);
-frozenEditCheck(records, base);
-
 const requireIndex = args.indexOf("--require-candidate");
 if (requireIndex >= 0) {
   const probe = args[requireIndex + 1];
   const known = new Set(candidates.map((row) => `${row.carrier}#${row.file_line}#${normalized(row.text)}`));
   if (!known.has(probe)) fail(`candidate sentence has no candidates.jsonl row: ${probe.slice(0, 80)}`);
 }
+
+for (const record of records) {
+  const quote = quoteAtLine(record.carrier, record.file_line, record.quote, record.scope_sha);
+  if (!quote.ok) fail(`${record.id}: ${quote.reason}`);
+}
+dispositions(records, candidates);
+frozenEditCheck(records, base);
 
 if (args.includes("--reenumerate")) {
   const reenumerated = reenumerate(carriersDir);
