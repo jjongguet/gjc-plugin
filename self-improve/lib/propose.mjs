@@ -154,6 +154,7 @@ export function buildProposerRequest({
   rung,
   failures = [],
   history = {},
+  contrast = null,
 }) {
   const priorAttempts = (history.priorAttempts ?? []).slice(-MAX_PRIOR_ATTEMPTS).map((entry) => ({
     objective: entry.objective,
@@ -161,7 +162,7 @@ export function buildProposerRequest({
     reasons: entry.reasons ?? [],
     hypothesis: String(entry.hypothesis ?? "").slice(0, 280),
   }));
-  return {
+  const request = {
     schema: PROPOSER_REQUEST_SCHEMA,
     loopId,
     cycleIndex,
@@ -190,6 +191,13 @@ export function buildProposerRequest({
       patch: "string: unified diff text, or patchPath: path inside the scratch copy holding it",
     },
   };
+  // Additive only when a candidate is supplied: requests without a contrast keep
+  // the exact pre-candidate shape (asserted by the byte-identity test).
+  if (contrast !== null && contrast !== undefined) {
+    request.contrast = contrast;
+    request.responseContract.rule = "string: implement the supplied contrast.rule for this objective; keep objective equal to the pinned candidate objective";
+  }
+  return request;
 }
 
 /**

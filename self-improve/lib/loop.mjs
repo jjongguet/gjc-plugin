@@ -30,6 +30,7 @@ import {
   validateAgentProposal,
 } from "./propose.mjs";
 import { readLedger } from "./ledger.mjs";
+import { ledgerEpoch, loadCandidatePayload, validateCandidate } from "./distill.mjs";
 import { policyArtifactPath, policyCurrentPath, readCurrentPolicy, readPolicyArtifact } from "./policy.mjs";
 
 export const LOOP_STATE_SCHEMA = "gjc.self-improve.loop.v1";
@@ -299,6 +300,8 @@ export async function runLoop(input) {
     dryRun = false,
     includeSmoke = true,
     install = false,
+    candidatePath = null,
+    maxLag = 0,
     deps = {},
   } = input ?? {};
   if (!repoRoot || !adapter) throw new Error("loop_requires repoRoot and adapter");
@@ -310,6 +313,27 @@ export async function runLoop(input) {
   if (typeof maxWallMs !== "number" || !(maxWallMs >= 1)) throw new Error("max_wall_ms_must_be_positive");
   if (proposer === "cmd" && (typeof proposerCmd !== "string" || proposerCmd.length === 0)) {
     throw new Error("cmd_proposer_requires --proposer-cmd");
+  }
+
+  // Handoff candidate: every check lives here so an in-process caller cannot
+  // bypass it. A rejected candidate returns a bounded skip reason and runs no cycle.
+  let candidate = null;
+  if (candidatePath) {
+    let candidateText;
+    try {
+      candidateText = fs.readFileSync(candidatePath, "utf8");
+    } catch {
+      return { status: "skipped", reason: "candidate_unreadable", loopId };
+    }
+    const loaded = loadCandidatePayload(candidateText);
+    if (!loaded.ok) return { status: "skipped", reason: loaded.reason, loopId };
+    const candidateReason = validateCandidate(loaded.candidate, {
+      gatedObjective: adapter.probes?.[0]?.objective,
+      ledgerHead: ledgerEpoch(readLedger(ledgerPath)),
+      maxLag,
+    });
+    if (candidateReason) return { status: "skipped", reason: candidateReason, loopId };
+    candidate = loaded.candidate;
   }
 
   const nowMs = deps.now ?? Date.now;
@@ -430,7 +454,7 @@ export async function runLoop(input) {
     state.probeScan = { ok: scan.ok, reason: scan.reason ?? null, count: scan.failures?.length ?? 0 };
     if (!scan.ok) log({ type: "probe_scan", ok: false, reason: scan.reason });
     const preferredObjective = preferredObjectiveFromFailures({ failures: scan.failures ?? [], adapter });
-    const { actions, stalled, unexplored } = computeAdmissibleActions({
+    const { actions: computedActions, stalled, unexplored } = computeAdmissibleActions({
       ledgerPath,
       adapter,
       k: adapter.stallK ?? 3,
@@ -438,6 +462,9 @@ export async function runLoop(input) {
       orderRule,
       stallRedirect,
     });
+    // A pinned candidate replaces the admissibility ordering, not the history
+    // inputs: stalled/unexplored still come from the same computation.
+    const actions = candidate ? [{ objective: candidate.objective, reason: `candidate:${candidate.id}` }] : computedActions;
     if (actions.length === 0) {
       stoppedReason = stalled.length > 0 ? "all_objectives_stalled" : "no_admissible_actions";
       break;
@@ -456,6 +483,24 @@ export async function runLoop(input) {
         adapter,
         rung,
         failures: scan.failures ?? [],
+        contrast: candidate
+          ? {
+              candidateId: candidate.id,
+              objective: candidate.objective,
+              rule: candidate.rule,
+              feature: candidate.contrast.feature,
+              adopt: { attemptIds: candidate.contrast.adopt.attemptIds, count: candidate.contrast.adopt.count },
+              reject: { attemptIds: candidate.contrast.reject.attemptIds, count: candidate.contrast.reject.count },
+              support: candidate.contrast.support,
+              evidence: {
+                storeDigest: candidate.evidence.storeDigest,
+                ledgerSeq: candidate.evidence.ledgerSeq,
+                ledgerHead: candidate.evidence.ledgerHead,
+                lag: candidate.evidence.lag,
+              },
+              expires: candidate.expires,
+            }
+          : null,
         history: {
           priorAttempts: state.cycles.filter((entry) => entry.decision === "reject" || entry.status === "proposal_failed" || entry.status === "proposal_invalid"),
           stalled,
@@ -629,6 +674,10 @@ export async function runLoop(input) {
         dryRun: dryRun === true,
       });
       persist();
+      if (candidate) {
+        stoppedReason = "candidate_consumed";
+        break;
+      }
       if (stopOnAdoptEffective && result.adoption === "committed") {
         stoppedReason = "adopted";
         break;

@@ -49,10 +49,13 @@ automatic loop (`loop`) drives that engine without hand-written proposals via th
 the HEAD-moved re-propose rule. The real-cycle report lands with the final
 milestones.
 
-Trajectory-memory layer 1 (`lib/distill.mjs`, `distill`) reads the rrsi store and
-this ledger read-only and emits deterministic contrastive candidates. It does not
-patch, adopt, or write either input; the proposer and gate path above remain the
-only route to a change. Contract: `docs/trajectory-memory.md`.
+Trajectory-memory layer 1 (`lib/distill.mjs`, `distill`, schema v2) reads the
+rrsi store and this ledger read-only and emits deterministic contrastive
+candidates under group-wide unanimity, per-group drawn-from epochs and a
+gated-primary scope. Unbound evidence is never emitted and stale groups are
+withheld. `loop --candidate-file` hands one candidate to the existing proposer
+and gate path; it does not patch, adopt, or write either input. Contract:
+`docs/trajectory-memory.md`.
 
 ## Commands
 
@@ -60,6 +63,8 @@ only route to a change. Contract: `docs/trajectory-memory.md`.
 node self-improve/scripts/run.mjs report --json
 node self-improve/scripts/run.mjs history --json
 node self-improve/scripts/run.mjs distill --json
+node self-improve/scripts/run.mjs distill --max-lag 15 --json
+node self-improve/scripts/run.mjs loop --candidate-file /tmp/candidate.json --ledger self-improve/ledger.jsonl --proposer cmd --proposer-cmd 'node tools/proposer.mjs {request} {response}' --max-cycles 1 --dry-run --json
 node self-improve/scripts/verify-unit.mjs
 node self-improve/scripts/verify-integration.mjs
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json

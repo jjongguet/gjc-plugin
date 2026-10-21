@@ -104,6 +104,12 @@ export function buildProposerPrompt(request, { editableFiles = [] } = {}) {
     "- do not hardcode held-out fixture values; the hypothesis must be new (see priorAttempts, which lists earlier proposals including rejected and non-applying ones);",
     `- failing probe cases (if any): ${JSON.stringify(request?.failingCases ?? [])}.`,
   ];
+  if (request?.contrast) {
+    lines.push(
+      `- pinned candidate rule (implement this): ${request.contrast.rule}`,
+      `- contrast feature: ${JSON.stringify(request.contrast.feature)}; support: ${JSON.stringify(request.contrast.support)}; adopt/reject attempts: ${request.contrast.adopt?.count ?? "?"}/${request.contrast.reject?.count ?? "?"}; evidence epoch: ${request.contrast.evidence?.ledgerSeq ?? "?"}.`,
+    );
+  }
   if (editableFiles.length > 0) {
     lines.push("", "Current file contents — author your patch against exactly these:");
     for (const file of editableFiles) {

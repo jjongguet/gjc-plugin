@@ -12,7 +12,7 @@ import RULES_TEXT_DOMAIN from "../domains/rules-text/adapter.mjs";
 import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
 import { LOOP_DEFAULTS, runLoop } from "../lib/loop.mjs";
 import { ledgerCounts, readLedger } from "../lib/ledger.mjs";
-import { distillTrajectories, readStoreFile } from "../lib/distill.mjs";
+import { distillTrajectories, parseMaxLag, readStoreFile, RRSI_STORE_SCHEMA } from "../lib/distill.mjs";
 import { BASELINE_POLICIES, DEFAULT_BETAS, loadCorpus, scorePolicy } from "../lib/replay.mjs";
 import { runDream, summarizeScore } from "../lib/dream.mjs";
 import {
@@ -52,6 +52,7 @@ commands:
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
   loop    [--repo <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
+          [--candidate-file <path>] [--max-lag <n>]
           [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--proposer-timeout-ms <n>]
           [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
   replay  [--corpus ledger] [--domain <id>] [--policy <id>|B0|B1] [--policy-file <path>] [--policy-dir <path>] [--ledger <path>] [--json]
@@ -64,13 +65,15 @@ commands:
           [--timeout-ms <n>] [--model <pin>] [--prompt <text> | --text-fixture <path>]
           [--live-approved] [--run-root <path>] [--json]
   history [--json] [--ledger <path>]
-  distill [--store <path>] [--ledger <path>] [--objective <id>] [--out <path>] [--json]
+  distill [--store <path>] [--ledger <path>] [--objective <id>] [--domain <id>] [--max-lag <n>] [--out <path>] [--json]
 `;
 
 const VALUED_FLAGS = new Set([
   "--ledger",
   "--store",
   "--objective",
+  "--max-lag",
+  "--candidate-file",
   "--domain",
   "--proposal",
   "--repo",
@@ -446,6 +449,11 @@ async function runLoopCommand(options) {
     process.stderr.write(`${domainError}\n`);
     return 2;
   }
+  const maxLag = parseMaxLag(options["max-lag"]);
+  if (!maxLag.ok) {
+    process.stderr.write(`${maxLag.message}\n`);
+    return 2;
+  }
   const proposer = options.proposer ?? "stub";
   if (proposer !== "stub" && proposer !== "cmd") {
     process.stderr.write(`unknown --proposer: ${proposer} (stub|cmd)\n`);
@@ -483,6 +491,8 @@ async function runLoopCommand(options) {
     cmdProposerTimeoutMs: proposerTimeoutMs ?? undefined,
     stopOnAdopt: options.stopOnAdopt === true,
     install: options.install === true,
+    candidatePath: options["candidate-file"] ? resolve(options["candidate-file"]) : null,
+    maxLag: maxLag.value,
     loopId: options["loop-id"],
     runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
     ledgerPath: options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl"),
@@ -502,6 +512,22 @@ async function runLoopCommand(options) {
 function runDistillCommand(options) {
   const storePath = options.store ? resolve(options.store) : join(homedir(), ".gjc-plugin", "rrsi", "store.json");
   const ledgerPath = options.ledger ? resolve(options.ledger) : DEFAULT_LEDGER;
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
+    return 2;
+  }
+  const maxLag = parseMaxLag(options["max-lag"]);
+  if (!maxLag.ok) {
+    process.stderr.write(`${maxLag.message}\n`);
+    return 2;
+  }
+  const declared = Array.isArray(adapter.objectives) ? adapter.objectives : [];
+  const gated = adapter.probes?.[0]?.objective;
+  if (options.objective && !declared.includes(options.objective)) {
+    process.stderr.write(`distill: objective_not_declared: ${options.objective}\n`);
+    return 2;
+  }
   const read = readStoreFile(storePath);
   if (read.status === "invalid" || read.status === "unavailable") {
     process.stderr.write(`distill: store ${read.status}${read.reason ? ` (${read.reason})` : ""}: ${storePath}\n`);
@@ -514,13 +540,23 @@ function runDistillCommand(options) {
     process.stderr.write(`distill: ledger unreadable: ${error.message}\n`);
     return 3;
   }
-  const result = distillTrajectories({
-    store: read.status === "ok" ? read.store : { schema: "gjc.rrsi.store.v1", episodes: [] },
-    ledgerRows: rows,
-    objective: options.objective ?? null,
-  });
+  let result;
+  try {
+    result = distillTrajectories({
+      store: read.status === "ok" ? read.store : { schema: RRSI_STORE_SCHEMA, episodes: [] },
+      ledgerRows: rows,
+      objective: options.objective ?? null,
+      declaredObjectives: declared,
+      gatedObjective: gated,
+      maxLag: maxLag.value,
+    });
+  } catch (error) {
+    process.stderr.write(`distill: ${error.message}\n`);
+    return 2;
+  }
   const payload = {
     ...result,
+    domain: adapter.id,
     store: { ...result.store, status: read.status, path: storePath },
     ledger: { ...result.ledger, path: ledgerPath },
   };
@@ -538,16 +574,19 @@ function runDistillCommand(options) {
   if (options.json) {
     process.stdout.write(text);
   } else {
+    const projection = payload.projection;
     process.stdout.write(
-      `store=${read.status} attempts=${payload.store.attempts} ledgerSeq=${payload.ledger.seq} ` +
-        `candidates=${payload.candidates.length} skipped=${payload.skipped.length}` +
+      `domain=${payload.domain} store=${read.status} projection=${projection.maxDrawnFrom ?? "-"} head=${projection.ledgerHead} ` +
+        `lag=${projection.storeLag ?? "-"} label=${projection.label} candidates=${payload.candidates.length} ` +
+        `withheld=${payload.withheld.length} skipped=${payload.skipped.length} ` +
+        `undeclared=${payload.undeclared.groups}(${payload.undeclared.attempts})` +
         `${options.out ? ` out=${resolve(options.out)}` : ""}\n`,
     );
     for (const candidate of payload.candidates) {
       process.stdout.write(`- ${candidate.objective} [${candidate.contrast.feature.kind}] ${candidate.rule}\n`);
     }
     for (const skip of payload.skipped) {
-      process.stdout.write(`- ${skip.objective} skipped (${skip.reason})\n`);
+      process.stdout.write(`- ${skip.objective} skipped (${skip.reason}${skip.lag === null || skip.lag === undefined ? "" : `, lag ${skip.lag}`})\n`);
     }
   }
   return 0;

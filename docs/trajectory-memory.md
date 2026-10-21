@@ -1,125 +1,149 @@
 # Trajectory memory: from attempts to gated rules
 
-Status: layer 1 implemented (`self-improve/lib/distill.mjs`). Tracking ticket: JJO-394.
+Status: layer 1 implemented as `distill.v2` (`self-improve/lib/distill.mjs`,
+`self-improve/scripts/run.mjs distill`). The candidate handoff is proven by a
+hermetic integration test; the live guard-tier dry run (E5b) has **not** been
+executed and is labelled unproven below. Follow-up to JJO-394.
 
-The repository already stores exploration attempts (`rrsi`) and already gates
-changes (`self-improve`). What it does not have is the layer that turns a
-success/failure contrast into a reusable rule. This note fixes that contract
-before any code exists.
+The repository stores exploration attempts (`rrsi`) and gates changes
+(`self-improve`). Layer 1 turns a success/failure contrast into a candidate
+rule; it is deliberately strict, so most runs emit nothing.
 
 ## Layers
 
 | Layer | Owner | State |
 | --- | --- | --- |
-| 0. Capture trajectories | `rrsi` store (`capture`, `import`; attempt shape) | implemented |
-| 1. Distill contrastive rules | `self-improve/lib/distill.mjs` (`distill` command) | implemented |
+| 0. Capture trajectories | `rrsi` store (`capture`, `import`) | implemented |
+| 1. Distill contrastive rules | `self-improve/lib/distill.mjs` (`distill`) | implemented (v2) |
 | 2. Promote under gates | `self-improve` (guards, probes, ledger) | implemented |
 
 Layer 1 produces candidates only. It never edits source, never writes to the
-store, and never bypasses layer 2.
+store or ledger, and never bypasses layer 2.
 
 ## Contract
 
-Inputs, read-only:
+Inputs, read-only: attempts from the `rrsi` store, `self-improve/ledger.jsonl`
+cycle rows, and the domain adapter's declared objectives. `declaredObjectives`
+is required; an empty list means nothing is declared and yields zero candidates.
 
-- attempts from the `rrsi` store: `objective`, `decision`, `wallMs`,
-  `guardFailures`, `budgetRung`, `files`, `hunks`, plus provenance ids;
-- `self-improve/ledger.jsonl` rows (decision, verdict, guards that failed);
-- optionally the jev-advisor journal projection already produced by `rrsi
-  import`.
+### Emission
 
-A candidate carries:
+A group is one objective's attempts. Every adopt × reject pair must agree on
+one non-null feature (`guardFailures` → `budgetRung` → `hypothesisNovelty`).
 
-- `objective`: the existing probe id the rule is scoped to;
-- `contrast`: one adopting attempt and one rejecting attempt on the same
-  objective, with the single differing feature named;
-- `rule`: one imperative sentence, scoped to that objective;
-- `evidence`: attempt ids and the projection digest the contrast was drawn
-  from;
-- `expires`: a supersede condition (source hash or ledger epoch), not a
-  wall-clock date alone.
+Classification order is fixed:
 
-The candidate is the input to a proposal, not a proposal itself. Patch
-synthesis stays with the existing proposer seam (`loop --proposer cmd` or a
-human), and admission runs through `cycle --dry-run` and the existing guard
-set. There is no second evaluator and no second store schema.
+1. any pair with **no** differing feature → `contradicted`;
+2. otherwise, more than one distinct feature → `inconsistent_contrast`;
+3. otherwise → emitted.
+
+A null pair is checked first because it is strictly stronger evidence against a
+rule than a second signature. Cost (`wallMs`) and edit size never justify a
+rule. Counters are distinct attempts per side, plus a `pairs` audit block; the
+dominant feature is the one with the most pairs, ties broken by the feature
+order above.
+
+### Evidence and freshness
+
+Each group's `drawnFrom` is the highest ledger cycle seq represented by that
+group's provenance. `evidence.ledgerSeq == expires.after == drawnFrom`, never
+the ledger head. Attempts without ledger provenance are unbound: a declared,
+gated group containing any unbound attempt is skipped as `unbound_evidence` and
+never emitted.
+
+One `--max-lag` authority (default 0) exists on both `distill` and
+`loop --candidate-file`. A group whose lag exceeds it is `withheld`
+(`store_stale`). The store-level `projection` block is context only; no emission
+decision reads it. `expires.after = drawnFrom` means valid for the same epoch at
+`--max-lag 0`; a positive `--max-lag N` widens the consume window to N epochs.
+
+### Scope
+
+Only the gated primary objective (`adapter.probes[0].objective`) can become a
+candidate. Other declared objectives are `objective_not_gated`; undeclared
+groups are a counted aggregate with a bounded sample and never become
+candidates. `probe.heldout_coverage` is excluded on purpose: held-out is an
+admission veto, not a proposal target.
+
+### Handoff
+
+`loop --candidate-file <path>` accepts a bare `candidate.v2` or a `distill.v2`
+payload with exactly one candidate. All checks live in `loop.mjs`:
+schema, gated objective, zero contradiction/unexplained, rule length, evidence
+digest shape, recomputed content id (`candidate_tampered`), and freshness
+(`candidate_stale`). A valid candidate pins the objective, adds an optional
+`contrast` field to the v1 proposer request, and stops the loop with
+`candidate_consumed` after one cycle. Requests without a candidate keep their
+previous shape.
 
 ## Command
 
 ```sh
 node self-improve/scripts/run.mjs distill [--store <path>] [--ledger <path>]
-  [--objective <id>] [--out <path>] [--json]
+  [--objective <id>] [--domain <id>] [--max-lag <n>] [--out <path>] [--json]
 ```
 
-- Defaults: `~/.gjc-plugin/rrsi/store.json` and `self-improve/ledger.jsonl`.
-- The store is read-only; a missing store is a normal first-run state and a
-  corrupt or unsafe one exits 3 without repair.
-- Objectives are processed in sorted order. Within an objective the first
-  adopting and first rejected attempt are the contrast pair. A candidate is
-  emitted only when `guardFailures`, `budgetRung`, or `hypothesisNovelty`
-  separates them; cost-only and size-only differences are skipped.
-- Output contains no clock value, so identical inputs produce byte-identical
-  JSON. `expires.after` is the highest cycle `seq` read from the ledger.
+- Defaults: `~/.gjc-plugin/rrsi/store.json`, `self-improve/ledger.jsonl`, domain
+  `gjc-plugin`.
+- Exit codes: 0 normal (including a missing store); 2 unknown domain, objective
+  outside the declaration, or invalid `--max-lag`; 3 corrupt or unreadable
+  inputs.
+- Output carries no clock value, so identical inputs produce byte-identical
+  JSON.
+- Projection refresh: run the rrsi `import` action with
+  `ledgerPath: self-improve/ledger.jsonl` (or wait for the due-gated
+  `session_start` refresh), then `distill`, then `loop --candidate-file`.
+  `rrsi import` projects an existing ledger; it does not create ledger rows.
+
+## Measured result (frozen inputs, 2026-10-21)
+
+Inputs frozen at `.gjc/distill-demo/inputs/` from the live store and ledger:
+
+| Field | Value |
+| --- | --- |
+| `store.attempts` / `undeclared` | 212 / 42 groups, 198 attempts |
+| `projection` | `maxDrawnFrom 16`, `ledgerHead 31`, `storeLag 15`, `label stale` |
+| `candidates` / `withheld` / `skipped` | 0 / 0 / 3 |
+| `probe.decision_accuracy` | `contradicted`, `drawnFrom 14`, lag 17, support 1/1, contradiction 1/4, unexplained 1/1 (6 pairs) |
+| `probe.extract_coverage` | `objective_not_gated`, `drawnFrom 16`, lag 15 |
+| `probe.egress_boundary` | `objective_not_gated`, `drawnFrom 9`, lag 22 |
+
+Zero candidates is the intended outcome: the only group with both decisions is
+refuted by four of its six pairs.
 
 ## Non-goals
 
 - weight updates, fine-tuning, or model routing changes;
 - a consolidated enterprise/ontology store;
 - replacing retrieval or removing RAG;
-- new gate thresholds, a new frozen corpus, or weakening an existing guard.
-
-## Failure modes the contract must encode
-
-- **Error reproduction.** An abstraction persisted after a single success gets
-  reused and re-derives the same mistake. Requiring a success/failure contrast,
-  not one sample, is the minimum defence.
-- **False applicability.** Similar-looking attempts are not applicable
-  attempts. The match key is `objective` plus `guardFailures` class, not text
-  similarity.
-- **Staleness.** A rule outlives the code that justified it. Expiry is tied to
-  the source hash or ledger epoch that produced the contrast.
-- **Metric gaming.** The objective must be an existing probe. A new
-  self-reported score is not admissible evidence.
+- new gate thresholds, a new frozen corpus, or weakening an existing guard;
+- rrsi store schema or new store fields;
+- capture-goal → objective classification.
 
 ## Verification
 
-Offline and keyless.
-
-- Unit (`tests/unit/distill.test.mjs`): candidate generation is deterministic and
-  byte-identical across runs; missing adopt/reject, cost-only differences, and
-  malformed stores are handled without synthesis or repair.
-- CLI: `distill --json` and `distill --out` exit 0 with a parseable payload; a
-  corrupt store exits 3. A read-only run over the real `~/.gjc-plugin/rrsi`
-  store produced one candidate and 44 skips without writing either input.
-- Not yet exercised: a candidate turned into a proposal patch and passed through
-  `cycle --dry-run`. Until that runs, the adoption half of this contract is
-  unproven; a rejection would be recorded as rejected, not repaired by loosening
-  a guard.
-- No change to `replay-protocol.json`, the frozen corpus, or the guard set.
+- Unit (`tests/unit/distill.test.mjs`, 22 cases): unanimity, contradicted
+  counters, inconsistent contrast, unbound evidence, gated scope, undeclared
+  aggregate, per-group lag, `parseMaxLag`, deterministic output, CLI exit codes,
+  candidate tamper/contradiction/staleness.
+- Unit (`tests/unit/propose-contrast.test.mjs`): the contrast field is additive;
+  requests without it keep their previous shape.
+- Integration (`tests/integration/distill-handoff.test.mjs`): fixture store and
+  ledger → candidate → real request → composer script → validation → engine
+  **dry-run** decision, with the contrast present in the request and the ledger
+  unchanged. This is E5a and it is hermetic (no model, no network).
+- **Not executed:** E5b, the live `cmd` proposer plus build/test tier. Until it
+  runs, the guard-tier dry run is **unproven**; the E5a test is never described
+  as a guard-tier run.
+- All suites: `verify-unit.mjs` and `verify-integration.mjs` report ALL PASS.
 
 ## Evidence
 
-- REM, arXiv 2610.27377: phase-structured consolidation of trajectories;
-  reported 68.7% vs 55.6% match@1 and 27.6% vs 24.9% end-task at 17% lower cost.
+- REM, arXiv 2610.27377: phase-structured consolidation; reported 68.7% vs
+  55.6% match@1 and 27.6% vs 24.9% end-task at 17% lower cost.
 - MemDev-Bench, arXiv 2610.27524: unrelated history increases failures; agents
-  reuse memory without reassessing applicability; raw trajectories reduce
-  steps relative to memory systems.
-- More Memory, Worse Agents, arXiv 2610.27406: persisting abstractions
-  reproduces errors; separate experience accumulation from abstraction
-  persistence.
+  reuse memory without reassessing applicability.
+- More Memory, Worse Agents, arXiv 2610.27406: persisted abstractions reproduce
+  errors; keep accumulation and abstraction persistence separate.
 
-Numbers above are the sources' own reports, not measurements in this
-repository.
-
-## Decisions taken
-
-- Distillation is a deterministic heuristic over `guardFailures` ->
-  `budgetRung` -> `hypothesisNovelty`, not a contrast prompt. No model call is
-  involved, which keeps the layer keyless and reproducible.
-- All objectives are processed by default; `--objective` narrows to one.
-- Candidates are emitted to stdout or `--out`; they are not stored. The
-  proposer seam remains the only path that produces a patch.
-
-Remaining open: which objective should be the first to run end to end, and
-whether a candidate should become a `loop` request payload rather than an
-operator-authored proposal.
+Numbers above are the sources' own reports, not measurements here.
