@@ -1,14 +1,14 @@
 $ bun run test
-✔ docs:check passes resolvable links and ignores external links and code (58.416333ms)
-✔ docs:check fails on missing targets, reference links, escapes and bad encoding (56.404542ms)
-✔ evidence:check allows repository-relative paths and the two hash-bound files (57.332625ms)
-✔ evidence:check fails on absolute home paths in any other tracked file (57.982458ms)
-✔ paths:check passes repository-relative paths and allowlisted hash-bound files (60.619708ms)
-✔ paths:check fails on absolute home paths outside the allowlist (57.961083ms)
-✔ audit-claims checker validates a row and rejects an unlisted sentence (75.752834ms)
-✔ every plugin build --check passes in sync and fails on generated-surface drift (255.52025ms)
-✔ policy:check passes the committed workflows (22.337541ms)
-✔ policy:check rejects every unsafe change to the closer or CI triggers (152.430292ms)
+✔ docs:check passes resolvable links and ignores external links and code (74.85225ms)
+✔ docs:check fails on missing targets, reference links, escapes and bad encoding (73.725625ms)
+✔ evidence:check allows repository-relative paths and the two hash-bound files (79.564209ms)
+✔ evidence:check fails on absolute home paths in any other tracked file (81.233667ms)
+✔ paths:check passes repository-relative paths and allowlisted hash-bound files (82.918208ms)
+✔ paths:check fails on absolute home paths outside the allowlist (83.246959ms)
+✔ audit-claims checker validates a row and rejects an unlisted sentence (108.926958ms)
+✔ every plugin build --check passes in sync and fails on generated-surface drift (366.004125ms)
+✔ policy:check passes the committed workflows (33.626667ms)
+✔ policy:check rejects every unsafe change to the closer or CI triggers (217.762292ms)
 ℹ tests 10
 ℹ suites 0
 ℹ pass 10
@@ -16,7 +16,7 @@ $ bun run test
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 887.791125
+ℹ duration_ms 1242.18925
 bun test v1.4.0 (34cbb9a40)
 ok 1 egress allowlist and credentials/redirect boundary
 ok 2 config precedence, disabled/missing key and versioned paths
@@ -160,7 +160,7 @@ ok 20 skill payload matches the frontmatter and tool contract
 ALL PASS (20 cases)
 ALL PASS (136 cases)
 ALL PASS (45 cases)
-# integration guards: build=pass(168ms) test=pass(70684ms) validator=pass(56ms) smoke-verification=pass(4726ms) smoke-loop=pass(1508ms) smoke-advisor=pass(2379ms) smoke-metrics=pass(2164ms)
+# integration guards: build=pass(281ms) test=pass(92743ms) validator=pass(71ms) smoke-verification=pass(7838ms) smoke-loop=pass(2123ms) smoke-advisor=pass(2585ms) smoke-metrics=pass(2609ms)
 # plan: build,test,validator,smoke-verification,smoke-loop,smoke-advisor,smoke-metrics
 ok 1 manifest declares one tool, one session_start hook (no target/phase), and the four actions
 ok 2 status on an empty store reports missing storage without creating one
@@ -248,173 +248,173 @@ $ bun test shared/tests/results.test.ts
  43 pass
  0 fail
  523 expect() calls
-Ran 43 tests across 1 file. [1203.00ms]
+Ran 43 tests across 1 file. [2.02s]
 $ bun jev-advisor/scripts/verify.ts
 $ bun verification-receipts/scripts/verify.ts
 
 tests/adapters.test.ts:
-(pass) run/status automatically assess pass failure no-tests stale and rejected execution [982.77ms]
-(pass) generated standalone run/status persist private envelopes and reobserve ignored inputs [467.66ms]
-(pass) post-execution repository loss preserves observations and journals the outcome [174.00ms]
+(pass) run/status automatically assess pass failure no-tests stale and rejected execution [1643.34ms]
+(pass) generated standalone run/status persist private envelopes and reobserve ignored inputs [802.82ms]
+(pass) post-execution repository loss preserves observations and journals the outcome [298.33ms]
 
 tests/receipts.test.ts:
-(pass) actual repo identity and private immutable envelope storage [108.36ms]
-(pass) working bytes, deletion, untracked, mode, spec and index stale evidence [226.62ms]
-(pass) HEAD change invalidates freshness [106.60ms]
-(pass) credential and result exclusions explicit; ordinary symlink text never followed [112.08ms]
-(pass) during-run unavailable and guidance are independent from execution [109.95ms]
-(pass) locked store never stolen; corrupt metadata not accepted [75.75ms]
-(pass) symlink and permissive store rejected without writes [57.25ms]
-(pass) cross repository and imported extra fields rejected [102.95ms]
-(pass) concurrent admissions do not join or overwrite [80.68ms]
-(pass) count capacity warns at 180, admits 200 and preserves history at 201 [751.33ms]
-(pass) extra raw execution fields, missing counts and low-score guidance rejected honestly [63.70ms]
-(pass) fingerprints reject nested raw canaries, missing keys, mismatched status and resource bounds on admission and load [335.05ms]
-(pass) Node exact fields and passed invariants reject corrupt metadata but preserve nonpass placeholder counts [263.37ms]
-(pass) UI exact fields and actual passed observations reject impossible passes while preserving partial failures [265.88ms]
-(pass) status hides corrupt nested evidence and returns unavailable without raw fields [162.31ms]
-(pass) explicit ignored test actually passes, becomes stale on ignored-only mutation and then fails [317.44ms]
-(pass) selected inputs normalize once and ignored-only changes during a run remain changed_during_run [202.54ms]
-(pass) unsafe, sensitive, excluded, duplicate and oversized selections never silently fall back [141.10ms]
-(pass) missing, tampered, misbound, noncanonical and bare legacy manifests are unavailable [289.19ms]
-(pass) entire envelope counts toward the 32KiB record bound [61.42ms]
-(pass) byte capacity includes manifests, warns at ninety percent and never deletes history [316.33ms]
-(pass) source byte and enumeration bounds include explicitly selected ignored files [138.34ms]
-(pass) hardlinks, permissive receipt files and symlink ancestors fail closed without external writes [85.95ms]
-(pass) default root never loads or migrates legacy receipts and refuses unsafe new-root ancestors [101.17ms]
-(pass) metadata getters, custom serializers and hidden raw fields are not invoked or stored [53.09ms]
-(pass) source replacement between lstat and descriptor inspection is unavailable [56.74ms]
-(pass) staged write or fsync failures do not publish partial receipts or delete prior history [82.13ms]
+(pass) actual repo identity and private immutable envelope storage [193.45ms]
+(pass) working bytes, deletion, untracked, mode, spec and index stale evidence [377.86ms]
+(pass) HEAD change invalidates freshness [165.08ms]
+(pass) credential and result exclusions explicit; ordinary symlink text never followed [179.24ms]
+(pass) during-run unavailable and guidance are independent from execution [182.58ms]
+(pass) locked store never stolen; corrupt metadata not accepted [125.31ms]
+(pass) symlink and permissive store rejected without writes [92.97ms]
+(pass) cross repository and imported extra fields rejected [164.25ms]
+(pass) concurrent admissions do not join or overwrite [134.54ms]
+(pass) count capacity warns at 180, admits 200 and preserves history at 201 [1249.38ms]
+(pass) extra raw execution fields, missing counts and low-score guidance rejected honestly [91.43ms]
+(pass) fingerprints reject nested raw canaries, missing keys, mismatched status and resource bounds on admission and load [486.70ms]
+(pass) Node exact fields and passed invariants reject corrupt metadata but preserve nonpass placeholder counts [392.75ms]
+(pass) UI exact fields and actual passed observations reject impossible passes while preserving partial failures [415.37ms]
+(pass) status hides corrupt nested evidence and returns unavailable without raw fields [216.57ms]
+(pass) explicit ignored test actually passes, becomes stale on ignored-only mutation and then fails [452.24ms]
+(pass) selected inputs normalize once and ignored-only changes during a run remain changed_during_run [274.18ms]
+(pass) unsafe, sensitive, excluded, duplicate and oversized selections never silently fall back [191.76ms]
+(pass) missing, tampered, misbound, noncanonical and bare legacy manifests are unavailable [446.23ms]
+(pass) entire envelope counts toward the 32KiB record bound [98.30ms]
+(pass) byte capacity includes manifests, warns at ninety percent and never deletes history [580.44ms]
+(pass) source byte and enumeration bounds include explicitly selected ignored files [247.38ms]
+(pass) hardlinks, permissive receipt files and symlink ancestors fail closed without external writes [155.06ms]
+(pass) default root never loads or migrates legacy receipts and refuses unsafe new-root ancestors [191.19ms]
+(pass) metadata getters, custom serializers and hidden raw fields are not invoked or stored [88.71ms]
+(pass) source replacement between lstat and descriptor inspection is unavailable [84.97ms]
+(pass) staged write or fsync failures do not publish partial receipts or delete prior history [124.17ms]
 
 tests/gate-hook.test.ts:
-(pass) hooks gate only observed completions, dedup repeats and never leak the original content [297.73ms]
-(pass) terminal gates dedup across job and subagent polling and skip failed entries [178.24ms]
-(pass) compact no-change gates resolve immediately and state drops stay factual and fail-open [147.05ms]
-(pass) loop tool blocks outside a repository, rejects parameters and keeps a bounded honest contract [16.05ms]
-(pass) before hook stays within its wall-clock budget under a hanging git [3052.86ms]
-(pass) loop tool drives a real gate to clean through verification_run and stamps the receipt [462.71ms]
+(pass) hooks gate only observed completions, dedup repeats and never leak the original content [495.84ms]
+(pass) terminal gates dedup across job and subagent polling and skip failed entries [310.44ms]
+(pass) compact no-change gates resolve immediately and state drops stay factual and fail-open [249.87ms]
+(pass) loop tool blocks outside a repository, rejects parameters and keeps a bounded honest contract [24.71ms]
+(pass) before hook stays within its wall-clock budget under a hanging git [3088.51ms]
+(pass) loop tool drives a real gate to clean through verification_run and stamps the receipt [542.99ms]
 
 tests/loop.test.ts:
-(pass) gate text full and compact stay bounded, deterministic and free of absolute paths [62.59ms]
-(pass) git delta facts cover dirty, commit, mixed, missing-baseline and non-repository fixtures [223.31ms]
-(pass) state files are private, writer-owned, cap-bounded and fail open on corruption [322.17ms]
-(pass) dedup keys canonicalize across job and subagent terminals and pending launches are consumed once [83.32ms]
-(pass) evaluation classifies every receipt gap kind and resolves covering receipts [1399.09ms]
-(pass) changed test files must be covered and binding evidence blocks no-change resolution [524.93ms]
-(pass) carry-forward reads other sessions read-only and honestly flags truncated scans [314.58ms]
-(pass) latest receipt summary classifies none, present, fresh_passed and unavailable without leaking paths [137.52ms]
-(pass) evaluation enforces its wall-clock budget and never reports a false clean [110.59ms]
-(pass) session scans include the own file under truncation and order by mtime [161.78ms]
-(pass) deleted test files are excluded from coverage demands [227.81ms]
-(pass) ui-regression receipts never resolve verification gates and never surface as the latest receipt [115.61ms]
-(pass) interleaved concurrent state writes never corrupt the file or lose acknowledged entries [90.89ms]
-(pass) git delta facts ignore session noise paths and mark resolution attempts honestly [200.68ms]
-(pass) coverage resolution requires available git facts [3241.08ms]
+(pass) gate text full and compact stay bounded, deterministic and free of absolute paths [76.75ms]
+(pass) git delta facts cover dirty, commit, mixed, missing-baseline and non-repository fixtures [289.75ms]
+(pass) state files are private, writer-owned, cap-bounded and fail open on corruption [454.84ms]
+(pass) dedup keys canonicalize across job and subagent terminals and pending launches are consumed once [127.80ms]
+(pass) evaluation classifies every receipt gap kind and resolves covering receipts [1912.05ms]
+(pass) changed test files must be covered and binding evidence blocks no-change resolution [702.20ms]
+(pass) carry-forward reads other sessions read-only and honestly flags truncated scans [424.92ms]
+(pass) latest receipt summary classifies none, present, fresh_passed and unavailable without leaking paths [183.19ms]
+(pass) evaluation enforces its wall-clock budget and never reports a false clean [132.37ms]
+(pass) session scans include the own file under truncation and order by mtime [207.77ms]
+(pass) deleted test files are excluded from coverage demands [323.24ms]
+(pass) ui-regression receipts never resolve verification gates and never surface as the latest receipt [184.52ms]
+(pass) interleaved concurrent state writes never corrupt the file or lose acknowledged entries [127.87ms]
+(pass) git delta facts ignore session noise paths and mark resolution attempts honestly [285.76ms]
+(pass) coverage resolution requires available git facts [3349.47ms]
 
 tests/runner.test.ts:
-(pass) native Node verification runner > uses cumulative counts once across files and nested tests [65.07ms]
-(pass) native Node verification runner > skip and TODO are not successful execution [64.76ms]
-(pass) native Node verification runner > empty files cannot pass through native file placeholders [122.30ms]
-(pass) native Node verification runner > mixed passing, skipped and TODO tests retain only actual passes [65.04ms]
-(pass) native Node verification runner > failures and native cancellations never pass or leak diagnostics [229.95ms]
-(pass) native Node verification runner > spoofed stdout and diagnostics do not establish a pass [65.84ms]
-(pass) native Node verification runner > strips credentials and runtime injection environment [64.28ms]
-(pass) native Node verification runner > enforces timeout and waits for owned termination [1016.21ms]
-(pass) native Node verification runner > cancels a running child and rejects pre-aborted execution [1004.80ms]
-(pass) native Node verification runner > caps output and native count overflow [737.34ms]
-(pass) native Node verification runner > a crash is not a passing result [59.40ms]
-(pass) native Node verification runner > rejects escapes, flags, unsupported files, symlinks, missing and duplicate files [1.48ms]
+(pass) native Node verification runner > uses cumulative counts once across files and nested tests [97.11ms]
+(pass) native Node verification runner > skip and TODO are not successful execution [94.47ms]
+(pass) native Node verification runner > empty files cannot pass through native file placeholders [182.33ms]
+(pass) native Node verification runner > mixed passing, skipped and TODO tests retain only actual passes [93.35ms]
+(pass) native Node verification runner > failures and native cancellations never pass or leak diagnostics [288.79ms]
+(pass) native Node verification runner > spoofed stdout and diagnostics do not establish a pass [94.10ms]
+(pass) native Node verification runner > strips credentials and runtime injection environment [97.60ms]
+(pass) native Node verification runner > enforces timeout and waits for owned termination [1023.75ms]
+(pass) native Node verification runner > cancels a running child and rejects pre-aborted execution [1007.25ms]
+(pass) native Node verification runner > caps output and native count overflow [1147.08ms]
+(pass) native Node verification runner > a crash is not a passing result [104.96ms]
+(pass) native Node verification runner > rejects escapes, flags, unsupported files, symlinks, missing and duplicate files [2.65ms]
 
 tests/smoke-environment.test.ts:
-(pass) test model persistence stays inside private agent root despite inherited overrides [9.15ms]
-(pass) live HOME and either live agent override are refused before spawning [1.72ms]
-(pass) a symlinked private agent cannot redirect the child to user configuration [1.02ms]
-(pass) extra overrides, external providers and real credentials fail closed [1.86ms]
+(pass) test model persistence stays inside private agent root despite inherited overrides [20.71ms]
+(pass) live HOME and either live agent override are refused before spawning [3.26ms]
+(pass) a symlinked private agent cannot redirect the child to user configuration [1.86ms]
+(pass) extra overrides, external providers and real credentials fail closed [3.23ms]
 
 tests/decision.test.ts:
-(pass) adequacy Decisions contract > nonpassing stale and unavailable evidence still calls Jev without becoming sufficient [0.65ms]
-(pass) adequacy Decisions contract > omitted context automatically calls Jev with explicit missing provenance [0.15ms]
-(pass) adequacy Decisions contract > UI assertion IDs kinds and outcomes are host facts while semantic notes remain caller authored [0.18ms]
-(pass) adequacy Decisions contract > official choice shape, fixed endpoint, and allowlisted caller context [0.08ms]
-(pass) adequacy Decisions contract > independent low confidence and selected probabilities are preserved [0.08ms]
-(pass) adequacy Decisions contract > absent and partial scores remain valid unscored choices [0.10ms]
-(pass) adequacy Decisions contract > none and unknown remain uncertain [0.05ms]
-(pass) adequacy Decisions contract > malformed IDs, type, label, scores, and JSON never return provider data [0.23ms]
-(pass) adequacy Decisions contract > HTTP failures and redirects have bounded receipts and no retries [0.11ms]
-(pass) adequacy Decisions contract > streaming and declared response caps [0.11ms]
-(pass) adequacy Decisions contract > timeout bounds even an injected fetch that ignores abort [0.10ms]
-(pass) adequacy Decisions contract > encoded request cap rejects without transport [0.26ms]
-(pass) adequacy Decisions contract > off, missing key, invalid facts and rejected context make zero calls [0.17ms]
-(pass) adequacy Decisions contract > secret, raw source, path, log and diff canaries are rejected rather than truncated [0.10ms]
-(pass) adequacy Decisions contract > per-variable environment precedence and Jev key priority without configuration changes [0.36ms]
+(pass) adequacy Decisions contract > nonpassing stale and unavailable evidence still calls Jev without becoming sufficient [1.12ms]
+(pass) adequacy Decisions contract > omitted context automatically calls Jev with explicit missing provenance [0.27ms]
+(pass) adequacy Decisions contract > UI assertion IDs kinds and outcomes are host facts while semantic notes remain caller authored [0.34ms]
+(pass) adequacy Decisions contract > official choice shape, fixed endpoint, and allowlisted caller context [0.15ms]
+(pass) adequacy Decisions contract > independent low confidence and selected probabilities are preserved [0.14ms]
+(pass) adequacy Decisions contract > absent and partial scores remain valid unscored choices [0.18ms]
+(pass) adequacy Decisions contract > none and unknown remain uncertain [0.10ms]
+(pass) adequacy Decisions contract > malformed IDs, type, label, scores, and JSON never return provider data [0.45ms]
+(pass) adequacy Decisions contract > HTTP failures and redirects have bounded receipts and no retries [0.55ms]
+(pass) adequacy Decisions contract > streaming and declared response caps [0.50ms]
+(pass) adequacy Decisions contract > timeout bounds even an injected fetch that ignores abort [0.31ms]
+(pass) adequacy Decisions contract > encoded request cap rejects without transport [0.64ms]
+(pass) adequacy Decisions contract > off, missing key, invalid facts and rejected context make zero calls [0.32ms]
+(pass) adequacy Decisions contract > secret, raw source, path, log and diff canaries are rejected rather than truncated [0.20ms]
+(pass) adequacy Decisions contract > per-variable environment precedence and Jev key priority without configuration changes [0.66ms]
 
  82 pass
  0 fail
  1128 expect() calls
-Ran 82 tests across 7 files. [21.19s]
+Ran 82 tests across 7 files. [27.94s]
 $ bun ui-regression/scripts/verify.ts
 
 tests/aside.test.ts:
-(pass) Generated Aside interpreter guards > rejects missing click targets before any mutation [1.63ms]
-(pass) Generated Aside interpreter guards > rejects ambiguous click targets before any mutation [0.16ms]
-(pass) Generated Aside interpreter guards > rejects hidden click targets before any mutation [0.14ms]
-(pass) Generated Aside interpreter guards > rejects missing fill targets before any mutation [0.41ms]
-(pass) Generated Aside interpreter guards > rejects ambiguous fill targets before any mutation [0.08ms]
-(pass) Generated Aside interpreter guards > rejects hidden fill targets before any mutation [0.10ms]
-(pass) Generated Aside interpreter guards > stops immediately when a permitted click navigates outside the initial origin [0.19ms]
-(pass) Generated Aside interpreter guards > rejects name controls before click [0.13ms]
-(pass) Generated Aside interpreter guards > rejects name controls before fill [0.12ms]
-(pass) Generated Aside interpreter guards > rejects id controls before click [0.08ms]
-(pass) Generated Aside interpreter guards > rejects id controls before fill [0.08ms]
-(pass) Generated Aside interpreter guards > rejects autocomplete controls before click [0.07ms]
-(pass) Generated Aside interpreter guards > rejects autocomplete controls before fill [0.12ms]
-(pass) Generated Aside interpreter guards > rejects text controls before click [0.11ms]
-(pass) Generated Aside interpreter guards > rejects text controls before fill [0.09ms]
-(pass) Generated Aside interpreter guards > rejects password type controls before click [0.07ms]
-(pass) Generated Aside interpreter guards > rejects password type controls before fill [0.12ms]
-(pass) Generated Aside interpreter guards > rejects file type controls before click [0.08ms]
-(pass) Generated Aside interpreter guards > rejects file type controls before fill [0.08ms]
-(pass) Generated Aside interpreter guards > rejects submit type controls before click [0.08ms]
-(pass) Generated Aside interpreter guards > rejects submit type controls before fill [0.08ms]
-(pass) Generated Aside interpreter guards > rejects external target controls before click [0.14ms]
-(pass) Generated Aside interpreter guards > rejects external target controls before fill [0.14ms]
-(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful click [0.44ms]
-(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful fill [0.33ms]
-(pass) Generated Aside interpreter guards > executes exact text semantics for " Ready\r\n" [0.31ms]
-(pass) Generated Aside interpreter guards > executes exact text semantics for "Ready now" [0.19ms]
-(pass) Generated Aside interpreter guards > executes substring text semantics for " Ready now\r\n" [0.26ms]
-(pass) Generated Aside interpreter guards > executes substring text semantics for "Not yet" [0.16ms]
-(pass) Generated Aside interpreter guards > keeps quote and backslash-bearing DSL strings as data in the generated interpreter [0.34ms]
-(pass) Aside observation boundary > requires ordered terminal and cleanup observations plus successful exit [0.14ms]
-(pass) Aside observation boundary > rejects malformed, spoofed, oversized and mismatched frames [0.18ms]
-(pass) Aside observation boundary > never passes origin_drift [0.01ms]
-(pass) Aside observation boundary > never passes missing_target
+(pass) Generated Aside interpreter guards > rejects missing click targets before any mutation [5.32ms]
+(pass) Generated Aside interpreter guards > rejects ambiguous click targets before any mutation [0.30ms]
+(pass) Generated Aside interpreter guards > rejects hidden click targets before any mutation [0.23ms]
+(pass) Generated Aside interpreter guards > rejects missing fill targets before any mutation [0.75ms]
+(pass) Generated Aside interpreter guards > rejects ambiguous fill targets before any mutation [0.16ms]
+(pass) Generated Aside interpreter guards > rejects hidden fill targets before any mutation [0.17ms]
+(pass) Generated Aside interpreter guards > stops immediately when a permitted click navigates outside the initial origin [0.35ms]
+(pass) Generated Aside interpreter guards > rejects name controls before click [0.25ms]
+(pass) Generated Aside interpreter guards > rejects name controls before fill [0.22ms]
+(pass) Generated Aside interpreter guards > rejects id controls before click [0.14ms]
+(pass) Generated Aside interpreter guards > rejects id controls before fill [0.22ms]
+(pass) Generated Aside interpreter guards > rejects autocomplete controls before click [0.20ms]
+(pass) Generated Aside interpreter guards > rejects autocomplete controls before fill [0.18ms]
+(pass) Generated Aside interpreter guards > rejects text controls before click [0.15ms]
+(pass) Generated Aside interpreter guards > rejects text controls before fill [0.16ms]
+(pass) Generated Aside interpreter guards > rejects password type controls before click [0.13ms]
+(pass) Generated Aside interpreter guards > rejects password type controls before fill [0.16ms]
+(pass) Generated Aside interpreter guards > rejects file type controls before click [0.14ms]
+(pass) Generated Aside interpreter guards > rejects file type controls before fill [0.15ms]
+(pass) Generated Aside interpreter guards > rejects submit type controls before click [0.15ms]
+(pass) Generated Aside interpreter guards > rejects submit type controls before fill [0.13ms]
+(pass) Generated Aside interpreter guards > rejects external target controls before click [0.13ms]
+(pass) Generated Aside interpreter guards > rejects external target controls before fill [0.15ms]
+(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful click [0.70ms]
+(pass) Generated Aside interpreter guards > takes fresh snapshots before each lookup and after a successful fill [0.55ms]
+(pass) Generated Aside interpreter guards > executes exact text semantics for " Ready\r\n" [0.52ms]
+(pass) Generated Aside interpreter guards > executes exact text semantics for "Ready now" [0.37ms]
+(pass) Generated Aside interpreter guards > executes substring text semantics for " Ready now\r\n" [0.55ms]
+(pass) Generated Aside interpreter guards > executes substring text semantics for "Not yet" [0.33ms]
+(pass) Generated Aside interpreter guards > keeps quote and backslash-bearing DSL strings as data in the generated interpreter [0.63ms]
+(pass) Aside observation boundary > requires ordered terminal and cleanup observations plus successful exit [0.26ms]
+(pass) Aside observation boundary > rejects malformed, spoofed, oversized and mismatched frames [0.29ms]
+(pass) Aside observation boundary > never passes origin_drift [0.03ms]
+(pass) Aside observation boundary > never passes missing_target [0.01ms]
 (pass) Aside observation boundary > never passes ambiguous_target
 (pass) Aside observation boundary > never passes hidden_target
 (pass) Aside observation boundary > never passes unsupported_control
 (pass) Aside observation boundary > never passes assertion_failed
-(pass) Aside observation boundary > generates a local fixed interpreter with owned-tab lifecycle and no attachment [0.04ms]
-(pass) Aside invocation lifecycle > rejects total timeout beyond 90 seconds without invocation [0.35ms]
-(pass) Aside invocation lifecycle > invokes exactly once and excludes private values from receipts [2.50ms]
-(pass) Aside invocation lifecycle > does not steal existing locks or invoke on pre-cancellation [1.22ms]
-(pass) Aside invocation lifecycle > preserves a replaced foreign lock and actual browser observations [1.92ms]
-(pass) Aside invocation lifecycle > does not remove a lock that acquires another hardlink during execution [1.78ms]
-(pass) Aside invocation lifecycle > classifies timeout and mid-run cancellation without raw errors [8.33ms]
-(pass) Aside invocation lifecycle > bounds combined fake capture and rejects missing CLI [3.43ms]
-(pass) Aside invocation lifecycle > bounds mocks that ignore cancellation [108.15ms]
-(pass) Aside invocation lifecycle > rejects symlink ancestors before invoking [1.00ms]
+(pass) Aside observation boundary > generates a local fixed interpreter with owned-tab lifecycle and no attachment [0.31ms]
+(pass) Aside invocation lifecycle > rejects total timeout beyond 90 seconds without invocation [0.68ms]
+(pass) Aside invocation lifecycle > invokes exactly once and excludes private values from receipts [4.53ms]
+(pass) Aside invocation lifecycle > does not steal existing locks or invoke on pre-cancellation [2.33ms]
+(pass) Aside invocation lifecycle > preserves a replaced foreign lock and actual browser observations [3.21ms]
+(pass) Aside invocation lifecycle > does not remove a lock that acquires another hardlink during execution [3.16ms]
+(pass) Aside invocation lifecycle > classifies timeout and mid-run cancellation without raw errors [10.97ms]
+(pass) Aside invocation lifecycle > bounds combined fake capture and rejects missing CLI [7.80ms]
+(pass) Aside invocation lifecycle > bounds mocks that ignore cancellation [111.19ms]
+(pass) Aside invocation lifecycle > rejects symlink ancestors before invoking [1.64ms]
 
 tests/adapters.test.ts:
-(pass) closed run adapter rejects passed imports missing account and no assertion [44.66ms]
-(pass) empty substring input is rejected without invoking the browser and is journaled [7.59ms]
-(pass) UI status metadata fixture remains historical and source scoped [229.73ms]
-(pass) standalone generated UI tools load with only declared installed files [3.92ms]
+(pass) closed run adapter rejects passed imports missing account and no assertion [75.50ms]
+(pass) empty substring input is rejected without invoking the browser and is journaled [12.58ms]
+(pass) UI status metadata fixture remains historical and source scoped [482.86ms]
+(pass) standalone generated UI tools load with only declared installed files [7.05ms]
 
 tests/scenario.test.ts:
-(pass) UI scenario closed DSL > accepts local synthetic steps and literal punctuation without interpretation [0.07ms]
-(pass) UI scenario closed DSL > accepts explicit local URL http://127.0.0.1:4317/demo [0.02ms]
-(pass) UI scenario closed DSL > accepts explicit local URL https://[::1]:4317/demo
-(pass) UI scenario closed DSL > rejects unsafe URL javascript:alert(1) [0.02ms]
+(pass) UI scenario closed DSL > accepts local synthetic steps and literal punctuation without interpretation [0.11ms]
+(pass) UI scenario closed DSL > accepts explicit local URL http://127.0.0.1:4317/demo [0.03ms]
+(pass) UI scenario closed DSL > accepts explicit local URL https://[::1]:4317/demo [0.02ms]
+(pass) UI scenario closed DSL > rejects unsafe URL javascript:alert(1) [0.04ms]
 (pass) UI scenario closed DSL > rejects unsafe URL data:text/html,hello
 (pass) UI scenario closed DSL > rejects unsafe URL file:///tmp/demo
 (pass) UI scenario closed DSL > rejects unsafe URL https://example.com/demo
@@ -429,20 +429,20 @@ tests/scenario.test.ts:
 (pass) UI scenario closed DSL > rejects unsafe URL http://localhost/%6cogin
 (pass) UI scenario closed DSL > rejects unsafe URL http://localhost/credentials
 (pass) UI scenario closed DSL > rejects unsafe URL http://localhost/upload
-(pass) UI scenario closed DSL > rejects origin drift http://127.0.0.1:4317/demo [0.02ms]
+(pass) UI scenario closed DSL > rejects origin drift http://127.0.0.1:4317/demo [0.03ms]
 (pass) UI scenario closed DSL > rejects origin drift http://localhost:4318/demo
 (pass) UI scenario closed DSL > rejects origin drift https://localhost:4317/demo
-(pass) UI scenario closed DSL > requires first navigation and an assertion [0.03ms]
-(pass) UI scenario closed DSL > rejects observations, code, predicates, prose and all extra fields [0.08ms]
-(pass) UI scenario closed DSL > rejects getters without executing them [0.02ms]
-(pass) UI scenario closed DSL > enforces bounds at both sides [0.84ms]
+(pass) UI scenario closed DSL > requires first navigation and an assertion [0.05ms]
+(pass) UI scenario closed DSL > rejects observations, code, predicates, prose and all extra fields [0.14ms]
+(pass) UI scenario closed DSL > rejects getters without executing them [0.04ms]
+(pass) UI scenario closed DSL > enforces bounds at both sides [1.54ms]
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector javascript:alert(1) [0.02ms]
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector ${run()}
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector expression(alert(1))
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector [data-ref="e1"]
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector @e1
-(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector e12
-(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector input[type="password"]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector e12 [0.01ms]
+(pass) UI scenario closed DSL > rejects executable, stale or sensitive selector input[type="password"] [0.01ms]
 (pass) UI scenario closed DSL > rejects executable, stale or sensitive selector button[type="submit"]
 (pass) UI scenario closed DSL > rejects detected sensitive fill demo@example.com [0.02ms]
 (pass) UI scenario closed DSL > rejects detected sensitive fill password: demo
@@ -452,18 +452,18 @@ tests/scenario.test.ts:
 (pass) UI scenario closed DSL > rejects detected sensitive fill ghp_12345678901234567890
 (pass) UI scenario closed DSL > rejects detected sensitive fill 4111 1111 1111 1111
 (pass) UI scenario closed DSL > rejects detected sensitive fill demo label
-(pass) UI scenario closed DSL > rejects invalid assertion variants [0.02ms]
-(pass) UI scenario closed DSL > rejects normalized-empty substring expectations "" [0.05ms]
-(pass) UI scenario closed DSL > rejects normalized-empty substring expectations " "
+(pass) UI scenario closed DSL > rejects invalid assertion variants [0.04ms]
+(pass) UI scenario closed DSL > rejects normalized-empty substring expectations "" [0.08ms]
+(pass) UI scenario closed DSL > rejects normalized-empty substring expectations " " [0.01ms]
 (pass) UI scenario closed DSL > rejects normalized-empty substring expectations "\r\n\t"
-(pass) UI scenario closed DSL > preserves meaningful exact-empty and empty-fill cases [0.02ms]
-(pass) literal UI text and fingerprint > normalizes only line endings and surrounding whitespace [0.02ms]
-(pass) literal UI text and fingerprint > SHA256 hashes the validated JSON and changes with behavior [0.04ms]
+(pass) UI scenario closed DSL > preserves meaningful exact-empty and empty-fill cases [0.04ms]
+(pass) literal UI text and fingerprint > normalizes only line endings and surrounding whitespace [0.03ms]
+(pass) literal UI text and fingerprint > SHA256 hashes the validated JSON and changes with behavior [0.06ms]
 
  100 pass
  0 fail
  606 expect() calls
-Ran 100 tests across 3 files. [438.00ms]
+Ran 100 tests across 3 files. [762.00ms]
 $ bun wiki/scripts/verify.ts
 $ bun rea/scripts/verify.ts
 $ bun backplan/scripts/verify.ts
@@ -473,5 +473,5 @@ $ bun rrsi/scripts/verify.ts && bun test rrsi/tests/readme-contract.test.ts
  4 pass
  0 fail
  11 expect() calls
-Ran 4 tests across 1 file. [10.00ms]
+Ran 4 tests across 1 file. [23.00ms]
 $ bun aside-memory/scripts/verify.ts
