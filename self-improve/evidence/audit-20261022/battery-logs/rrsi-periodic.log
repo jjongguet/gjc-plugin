@@ -1,6 +1,6 @@
 $ node --test rrsi/tests/periodic.test.mjs
-✔ hermetic rrsi acceptance (incl. periodic invariants) passes under bun (4218.51775ms)
-✔ periodic cycle observed directly: no_input -> ran -> skipped_due -> unchanged with byte-stable store (54.336458ms)
+✔ hermetic rrsi acceptance (incl. periodic invariants) passes under bun (11154.966042ms)
+✔ periodic cycle observed directly: no_input -> ran -> skipped_due -> unchanged with byte-stable store (318.60375ms)
 ℹ tests 2
 ℹ suites 0
 ℹ pass 2
@@ -8,4 +8,4 @@ $ node --test rrsi/tests/periodic.test.mjs
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 4304.2435
+ℹ duration_ms 11536.212458

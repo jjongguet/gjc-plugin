@@ -17,8 +17,11 @@ if (!carrier || !source || !literal) {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "..");
 const text = readFileSync(path.join(repoRoot, source), "utf8");
+const exact = text.includes(literal);
+// A numeric literal must stand as a whole number, not inside a longer one:
+// "12" must not be satisfied by "128". Separators are ignored on both sides.
 const normalized = literal.replace(/[,._]/g, "");
-const variants = new Set([literal, literal.replace(/,/g, ""), literal.replace(/_/g, "")]);
-const found = [...variants].some((variant) => text.includes(variant)) || text.replace(/[,._]/g, "").includes(normalized);
+const bounded = new RegExp(`(?<![0-9])${normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![0-9])`).test(text.replace(/[,._]/g, ""));
+const found = exact || bounded;
 process.stdout.write(`${found ? "PASS" : "FAIL"} ${carrier} literal=${literal} source=${source}\n`);
 process.exit(found ? 0 : 1);

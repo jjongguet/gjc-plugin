@@ -389,29 +389,31 @@ for (const [key, group] of byKey) {
         requiredReceipt = UNVERIFIABLE_RECEIPT[carrier];
       } else {
         const numberMatch = quote.match(/\d[\d,._]*/);
-      const source = sourceFor(carrier);
-      const literal = numberMatch ? numberMatch[0] : "";
-      const significant = literal.replace(/[,._]/g, "").length >= 2;
-      if (literal && source !== carrier && significant) {
-        const probe = spawnSync(process.execPath, [CHECK_NUMBER, carrier, source, literal], { cwd: repoRoot, encoding: "utf8" });
-        const output = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.trim();
-        if (probe.status === 0) {
-          binding = `node self-improve/evidence/audit-20261022/tools/check-number.mjs ${carrier} ${source} ${JSON.stringify(literal)}`;
-          observed = output.split("\n")[0] ?? `PASS literal ${literal}`;
-          requiredReceipt = `${source} contains the documented literal`;
-          bindingStrength = "bound";
+        const source = sourceFor(carrier);
+        // Trailing separators belong to the surrounding prose, not to the literal:
+        // "1.0," must bind "1.0", not the comma.
+        const literal = numberMatch ? numberMatch[0].replace(/[,._]+$/, "") : "";
+        const significant = literal.replace(/[,._]/g, "").length >= 2;
+        if (literal && source !== carrier && significant) {
+          const probe = spawnSync(process.execPath, [CHECK_NUMBER, carrier, source, literal], { cwd: repoRoot, encoding: "utf8" });
+          const output = `${probe.stdout ?? ""}${probe.stderr ?? ""}`.trim();
+          if (probe.status === 0) {
+            binding = `node self-improve/evidence/audit-20261022/tools/check-number.mjs ${carrier} ${source} ${JSON.stringify(literal)}`;
+            observed = output.split("\n")[0] ?? `PASS literal ${literal}`;
+            requiredReceipt = `${source} contains the documented literal`;
+            bindingStrength = "bound";
+          } else {
+            binding = ROW_CHECK(id);
+            observed = `literal ${literal} not found in ${source}; quote present at ${carrier}:${fileLine}`;
+            requiredReceipt = "carrier text at the pinned scope (literal mapping failed)";
+            bindingStrength = "self";
+          }
         } else {
           binding = ROW_CHECK(id);
-          observed = `literal ${literal} not found in ${source}; quote present at ${carrier}:${fileLine}`;
-          requiredReceipt = "carrier text at the pinned scope (literal mapping failed)";
+          observed = `quote present at ${carrier}:${fileLine}; no significant literal binding`;
+          requiredReceipt = "carrier text at the pinned scope";
           bindingStrength = "self";
         }
-      } else {
-        binding = ROW_CHECK(id);
-        observed = `quote present at ${carrier}:${fileLine}; no significant literal binding`;
-        requiredReceipt = "carrier text at the pinned scope";
-        bindingStrength = "self";
-      }
       }
     }
 

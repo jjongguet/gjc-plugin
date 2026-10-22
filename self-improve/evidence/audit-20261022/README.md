@@ -72,7 +72,7 @@ evidence; the recovered 13-attempt receipt is the exception and is committed at
   passed for that sha. No frozen path changed: `0` hits from
   `git diff --name-only e74140c..HEAD` against the frozen prefixes.
 - Battery ([`battery-results.json`](battery-results.json), `executedAt`
-  `2026-10-21T23:30:27Z`): 12/12 commands exit 0 and every recorded `logSha256`
+  `2026-10-21T23:49:05.988Z`): 12/12 commands exit 0 and every recorded `logSha256`
   recomputes from `battery-logs/`; [`battery.md`](battery.md) is rendered from it.
 - Bound sweep: **175/175 rows, 0 failing commands**
   ([`reproductions/bound-sweep.txt`](reproductions/bound-sweep.txt)).

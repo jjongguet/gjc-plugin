@@ -1,4 +1,4 @@
 $ bun run evidence:check
-evidence:check ok: 119 tracked self-improve files, 2 allowlisted hash-bound files
+evidence:check ok: 121 tracked self-improve files, 2 allowlisted hash-bound files
 
 $ node scripts/check-evidence-paths.mjs
