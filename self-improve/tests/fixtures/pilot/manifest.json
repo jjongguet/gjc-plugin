@@ -1,0 +1,59 @@
+{
+  "schema": "harness2.pilot.v1",
+  "tasks": [
+    {
+      "id": "artifact-valid",
+      "klass": "artifact-check",
+      "split": "development",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/artifact-check-dev.json"
+      }
+    },
+    {
+      "id": "artifact-invalid",
+      "klass": "artifact-check",
+      "split": "holdout",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/artifact-check-holdout.json"
+      }
+    },
+    {
+      "id": "adequacy-gap",
+      "klass": "eligible-adequacy",
+      "split": "development",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/adequacy-dev.json"
+      }
+    },
+    {
+      "id": "adequacy-aligned",
+      "klass": "eligible-adequacy",
+      "split": "holdout",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/adequacy-holdout.json"
+      }
+    },
+    {
+      "id": "repo-parser",
+      "klass": "small-repo-task",
+      "split": "development",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/repo-task-dev.json"
+      }
+    },
+    {
+      "id": "repo-boundary",
+      "klass": "small-repo-task",
+      "split": "holdout",
+      "oracle": {
+        "kind": "json-expectation",
+        "path": "self-improve/tests/fixtures/pilot/oracle/repo-task-holdout.json"
+      }
+    }
+  ]
+}

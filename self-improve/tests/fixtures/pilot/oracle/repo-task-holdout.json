@@ -1,0 +1,9 @@
+{
+  "schema": "harness2.oracle.v1",
+  "task": "repo-boundary",
+  "independent": true,
+  "expected": {
+    "tests": "pass",
+    "boundaryCase": "empty input"
+  }
+}

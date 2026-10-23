@@ -1,0 +1,11 @@
+{
+  "schema": "harness2.oracle.v1",
+  "task": "artifact-invalid",
+  "independent": true,
+  "expected": {
+    "decision": "invalid",
+    "errorsInclude": [
+      "plan.end_state: required"
+    ]
+  }
+}

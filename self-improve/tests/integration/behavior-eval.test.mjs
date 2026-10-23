@@ -1,0 +1,120 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import {
+  admitCall,
+  isolationPreflight,
+  manifestDigest,
+  pairedBenefit,
+  planTrial,
+  selectLessons,
+  validateManifest,
+  validateTrialReceipt,
+} from "../../lib/behavior-eval.mjs";
+
+const SELF_IMPROVE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const manifest = JSON.parse(readFileSync(join(SELF_IMPROVE, "tests/fixtures/pilot/manifest.json"), "utf8"));
+
+test("the frozen pilot manifest is valid, balanced and digest-pinned", () => {
+  const result = validateManifest(manifest);
+  assert.deepEqual(result.errors, []);
+  assert.equal(result.ok, true);
+  for (const klass of Object.keys(result.counts)) assert.deepEqual(result.counts[klass], { development: 1, holdout: 1 });
+  assert.match(result.digest, /^[a-f0-9]{64}$/);
+  assert.equal(result.digest, manifestDigest(manifest));
+  // Every oracle is a repository file with an independent expectation.
+  for (const task of manifest.tasks) {
+    const oracle = JSON.parse(readFileSync(join(SELF_IMPROVE, "..", task.oracle.path), "utf8"));
+    assert.equal(oracle.independent, true, task.id);
+    assert.equal(oracle.task, task.id);
+  }
+});
+
+test("manifest validation rejects holdout leakage, duplicates and an unbalanced class", () => {
+  const leaked = { schema: "harness2.pilot.v1", tasks: manifest.tasks.map((task) => task.split === "holdout" ? { ...task, oracle: { ...task.oracle, path: "scratch/oracle.json" } } : task) };
+  assert.match(validateManifest(leaked).errors.join("\n"), /must stay under self-improve\/tests\/fixtures\/pilot|never live inside the trial mount/);
+  const duplicate = { schema: "harness2.pilot.v1", tasks: [manifest.tasks[0], { ...manifest.tasks[1], id: manifest.tasks[0].id }] };
+  assert.match(validateManifest(duplicate).errors.join("\n"), /duplicates/);
+  const oneClass = { schema: "harness2.pilot.v1", tasks: manifest.tasks.filter((task) => task.klass === "artifact-check") };
+  assert.match(validateManifest(oneClass).errors.join("\n"), /needs at least one development task/);
+});
+
+test("B1 and B2 plan under the same ceiling and count every stage", () => {
+  const digest = manifestDigest(manifest);
+  const b0 = planTrial({ arm: "B0", manifestDigest: digest, totalResourceMs: 60_000 });
+  const b1 = planTrial({ arm: "B1", manifestDigest: digest, totalResourceMs: 60_000 });
+  const b2 = planTrial({ arm: "B2", manifestDigest: digest, totalResourceMs: 60_000 });
+  assert.equal(b0.plan.selection, "single-attempt");
+  assert.equal(b1.plan.selection, "first-public-check-pass");
+  assert.equal(b1.plan.actualSpendMs, 0);
+  assert.equal(b2.plan.countsAllStages, true);
+  assert.equal(b1.plan.totalResourceMs, b2.plan.totalResourceMs);
+  assert.equal(planTrial({ arm: "B9", manifestDigest: digest, totalResourceMs: 1 }).reason, "unknown_arm");
+  assert.equal(planTrial({ arm: "B1", manifestDigest: digest, totalResourceMs: 0 }).reason, "invalid_ceiling");
+});
+
+test("spending admission fails closed on unknown price, usage or cap", () => {
+  assert.equal(admitCall({ capUsd: 5, priceUsd: 0.2, reservationUsd: 0.3 }).allowed, true);
+  assert.equal(admitCall({ capUsd: 5, priceUsd: Number.NaN, reservationUsd: 0.3 }).reason, "unknown_price");
+  assert.equal(admitCall({ capUsd: 5, priceUsd: 0.2, reservationUsd: 0.3, unresolvedUsd: Number.NaN }).reason, "unknown_usage");
+  assert.equal(admitCall({ capUsd: 5, priceUsd: 4, reservationUsd: 4, spentUsd: 3 }).reason, "cap_exceeded");
+  assert.equal(admitCall({ capUsd: -1, priceUsd: 0.1, reservationUsd: 0.1 }).reason, "missing_cap");
+});
+
+test("a trial is invalid without loading, isolation, budget or measured cost evidence", () => {
+  const good = {
+    loadingReceipt: { sha256: "a".repeat(64) },
+    isolation: { denyProbesPassed: true },
+    oracle: { independent: true },
+    budget: { admitted: true },
+    holdout: { usedEarly: false },
+    outcomes: [{ task: "t", passed: true }],
+    cost: { measured: true },
+  };
+  assert.deepEqual(validateTrialReceipt(good), { valid: true, failures: [] });
+  const bad = { ...good, isolation: { denyProbesPassed: false }, cost: { measured: false }, holdout: { usedEarly: true } };
+  assert.deepEqual(validateTrialReceipt(bad).failures, ["isolation_not_proven", "holdout_used_early", "cost_not_measured"]);
+});
+
+test("component wins never rescue a regressing or costlier composite", () => {
+  const compositeRegression = [
+    { task: "a", qualityDelta: 0.5, costRatio: 0.9 },
+    { task: "b", qualityDelta: -0.2, costRatio: 0.9 },
+  ];
+  assert.deepEqual(pairedBenefit(compositeRegression).verdict, "no-gain");
+  assert.equal(pairedBenefit(compositeRegression).reason, "regression");
+  assert.equal(pairedBenefit([{ task: "a", qualityDelta: 0.1, costRatio: 0.9 }]).verdict, "insufficient");
+  assert.equal(pairedBenefit([{ task: "a", qualityDelta: 0.1, costRatio: 1.4 }, { task: "b", qualityDelta: 0.1, costRatio: 1.4 }]).reason, "cost_ratio");
+  assert.equal(pairedBenefit([{ task: "a", qualityDelta: 0.2, costRatio: 0.8 }, { task: "b", qualityDelta: 0.1, costRatio: 0.9 }]).verdict, "pass");
+});
+
+test("lesson reuse is bounded by objective, version, count and bytes, and withholds bad lessons", () => {
+  const scope = { objective: "probe.docs_links", version: "1.2.3" };
+  const lessons = [
+    { id: "l1", ...scope, outcome: "supported", lesson: "check anchors first", cue: "docs", evidence: "t1" },
+    { id: "l2", ...scope, outcome: "contradicted", lesson: "skip anchors", cue: "docs", evidence: "t2" },
+    { id: "l3", ...scope, outcome: "stale", lesson: "old rule", cue: "docs", evidence: "t3" },
+    { id: "l4", ...scope, outcome: "supported", lesson: "x".repeat(1500), cue: "docs", evidence: "t4" },
+    { id: "l5", ...scope, outcome: "supported", lesson: "ok", cue: "docs", evidence: "t5" },
+    { id: "l6", objective: "other", version: "1.2.3", outcome: "supported", lesson: "n/a", cue: "x", evidence: "t6" },
+  ];
+  const chosen = selectLessons(lessons, { ...scope });
+  assert.deepEqual(chosen.selected.map((lesson) => lesson.id), ["l1", "l4", "l5"]);
+  assert.deepEqual(chosen.withheld.map((entry) => entry.reason).sort(), ["contradicted", "not_applicable", "stale"]);
+  const tight = selectLessons(lessons, { ...scope, maxBytes: 120 });
+  assert.deepEqual(tight.selected.map((lesson) => lesson.id), ["l1", "l5"]);
+  assert.ok(tight.withheld.some((entry) => entry.reason === "byte_bound"));
+  assert.ok(chosen.bytes <= 2048);
+  const capped = selectLessons(lessons.filter((lesson) => lesson.outcome === "supported" && lesson.objective === scope.objective), { ...scope, maxLessons: 1 });
+  assert.equal(capped.selected.length, 1);
+  assert.ok(capped.withheld.some((entry) => entry.reason === "count_bound"));
+});
+
+test("live trials stay forbidden without an enforceable runtime and passing deny probes", () => {
+  assert.deepEqual(isolationPreflight({}), { status: "unavailable", reason: "no_enforceable_runtime", liveTrialsAllowed: false });
+  assert.equal(isolationPreflight({ runtime: "container-run" }).reason, "no_deny_probes");
+  assert.equal(isolationPreflight({ runtime: "container-run", denyProbes: [{ id: "host-file", passed: false }] }).status, "fail");
+  assert.equal(isolationPreflight({ runtime: "container-run", denyProbes: [{ id: "host-file", passed: true }, { id: "egress", passed: true }] }).liveTrialsAllowed, true);
+});

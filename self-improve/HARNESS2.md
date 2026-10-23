@@ -1,5 +1,20 @@
 # Harness² and self-improve
 
+## Offline machinery (not a live result)
+
+`lib/behavior-eval.mjs` implements the protocol this proposal describes without
+calling a model: it validates a frozen pilot manifest (balanced classes,
+independent oracles outside any trial mount), plans arms B0, B1 and B2 under one
+shared resource ceiling, admits spending before a call and fails closed on an
+unknown price or usage, checks trial validity (loading receipt, isolation deny
+probes, independent oracle, admitted budget, holdout untouched, measured cost),
+computes the paired benefit verdict, and bounds lesson reuse to three lessons
+and 2 KiB while withholding contradicted, stale or inapplicable lessons. The
+integration suite `tests/integration/behavior-eval.test.mjs` covers each rule.
+No live trial has run; every efficacy statement in this document remains a
+proposal, and a live run needs an enforceable isolation runtime plus a separate
+owner-approved budget.
+
 ## Decision and evidence boundary
 
 Selectively adapt Harness²'s execution-evidence approach inside the existing

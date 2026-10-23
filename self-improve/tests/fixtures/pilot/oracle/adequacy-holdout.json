@@ -1,0 +1,9 @@
+{
+  "schema": "harness2.oracle.v1",
+  "task": "adequacy-aligned",
+  "independent": true,
+  "expected": {
+    "decision": "aligned",
+    "independent": true
+  }
+}

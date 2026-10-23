@@ -1,0 +1,9 @@
+{
+  "schema": "harness2.oracle.v1",
+  "task": "repo-parser",
+  "independent": true,
+  "expected": {
+    "tests": "pass",
+    "forbiddenSideEffects": 0
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "schema": "harness2.oracle.v1",
+  "task": "adequacy-gap",
+  "independent": true,
+  "expected": {
+    "decision": "gap",
+    "independent": true
+  }
+}
