@@ -21,7 +21,7 @@
     "test:verification": "bun verification-receipts/scripts/verify.ts",
     "build:ui": "bun ui-regression/scripts/build.mjs",
     "test:ui": "bun ui-regression/scripts/verify.ts",
-    "test:shared": "bun test shared/tests/results.test.ts",
+    "test:shared": "bun test shared/tests/results.test.ts shared/tests/decision-contract.test.ts",
     "build:wiki": "bun wiki/scripts/build.mjs",
     "test:wiki": "bun wiki/scripts/verify.ts",
     "build:rea": "bun rea/scripts/build.mjs",

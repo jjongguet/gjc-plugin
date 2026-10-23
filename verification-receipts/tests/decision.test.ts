@@ -14,16 +14,15 @@ function harness(payload: unknown = { answers: choices() }, status = 200) {
  return { calls, deps: { fetch: transport, env: environment, envFile: "/nonexistent/synthetic-env" } };
 }
 describe("adequacy Decisions contract", () => {
- test('nonpassing stale and unavailable evidence still calls Jev without becoming sufficient',async()=>{
-  for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(1);expect(JSON.parse(String(h.calls[0].options.body)).state.observed.status).toBe(status);}
-  for(const freshness of ['stale','changed_during_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,freshness},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(h.calls.length).toBe(1);expect(JSON.parse(String(h.calls[0].options.body)).state.observed.freshness).toBe(freshness);}
+ test('nonpassing stale and unavailable evidence is decided before any call',async()=>{
+  for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(0);}
+  for(const freshness of ['stale','changed_during_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,freshness},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(h.calls.length).toBe(0);}
  });
- test('omitted context automatically calls Jev with explicit missing provenance',async()=>{
+ test('omitted context is decided before any call',async()=>{
   const h=harness();const result=await assessAdequacy(undefined,facts,h.deps);
-  expect(h.calls.length).toBe(1);expect(result.status).toBe('unknown');expect(result.reason).toBe('missing_context');
-  const body=JSON.parse(String(h.calls[0].options.body));expect(body.state.explicitContext).toEqual({authorship:'not_supplied'});expect(body.state.observed.counts).toEqual(facts.counts);
+  expect(h.calls.length).toBe(0);expect(result.status).toBe('unknown');expect(result.reason).toBe('missing_context');
   for(const observed of [{status:'incomplete',counts:null,freshness:'unavailable',assertions:[]},{status:'not_run',counts:null,freshness:'unavailable'},{...facts,counts:{...facts.counts,passed:0}}]){
-   const other=harness();expect((await assessAdequacy(undefined,observed,other.deps)).reason).toBe('insufficient_evidence');expect(other.calls.length).toBe(1);
+   const other=harness();expect((await assessAdequacy(undefined,observed,other.deps)).reason).toBe('insufficient_evidence');expect(other.calls.length).toBe(0);
   }
  });
  test('UI assertion IDs kinds and outcomes are host facts while semantic notes remain caller authored',async()=>{
@@ -32,7 +31,7 @@ describe("adequacy Decisions contract", () => {
   const h=harness();const result=await assessAdequacy(input,{status:'passed',counts:null,freshness:'fresh',caseIds:['step-1'],assertions:assertions.map(a=>({...a,rawText:'PRIVATE_CANARY'}))},h.deps);
   expect(result.status).toBe('unscored');expect(h.calls.length).toBe(1);const body=JSON.parse(String(h.calls[0].options.body));expect(body.state.observed.assertions).toEqual(assertions);expect(body.state.explicitContext.authorship).toBe('caller_authored');expect(String(h.calls[0].options.body)).not.toContain('PRIVATE_CANARY');
   for(const invalid of [[{...assertions[0],id:'unknown'}],[{...assertions[0],kind:'source_canary'}],[...assertions,...assertions]]){const other=harness();expect((await assessAdequacy(input,{status:'passed',counts:null,freshness:'fresh',caseIds:['step-1'],assertions:invalid as any},other.deps)).status).toBe('invalid_input');expect(other.calls.length).toBe(0);}
-  const other=harness();expect((await assessAdequacy(input,{status:'passed',counts:null,freshness:'fresh',caseIds:['step-1'],assertions:[{...assertions[0],status:'failed'}]},other.deps)).reason).toBe('insufficient_evidence');expect(other.calls.length).toBe(1);
+  const other=harness();expect((await assessAdequacy(input,{status:'passed',counts:null,freshness:'fresh',caseIds:['step-1'],assertions:[{...assertions[0],status:'failed'}]},other.deps)).reason).toBe('insufficient_evidence');expect(other.calls.length).toBe(0);
  });
  test("official choice shape, fixed endpoint, and allowlisted caller context", async () => {
   const h = harness();

@@ -1,3 +1,4 @@
+import { isAllowedDecisionEndpoint, validateProbabilityMap } from "../../shared/lib/decision-contract";
 import { readFileSync as adequacyReadFileSync } from "node:fs";
 import { homedir as adequacyHomedir } from "node:os";
 import { join as adequacyJoin } from "node:path";
@@ -61,9 +62,9 @@ function adequacyAnswer(value: unknown, labels: readonly string[]): AdequacyChoi
  const result: AdequacyChoice<string> = { type: "choice", choice: value.choice };
  if (value.confidence !== undefined) { if (!adequacyScore(value.confidence)) return; result.confidence = value.confidence; }
  if (value.probabilities !== undefined) {
-  if (!adequacyObject(value.probabilities)) return;
-  result.probabilities = {};
-  for (const [label, number] of Object.entries(value.probabilities)) { if (!labels.includes(label) || !adequacyScore(number)) return; result.probabilities[label] = number; }
+  const checked = validateProbabilityMap(labels, value.probabilities);
+  if (!checked.ok) return;
+  result.probabilities = checked.probabilities;
  }
  return result;
 }
@@ -80,6 +81,10 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
  if (variable("JEV_ADVISOR_PROVIDER")?.trim().toLowerCase() === "off") return { status: "unavailable", reason: "off" };
  const key = variable("JEV_ADVISOR_API_KEY")?.trim() || variable("OPENROUTER_API_KEY")?.trim();
  if (!key) return { status: "unavailable", reason: "missing_key" };
+ // Deterministic ineligibility: with a key available, no call is made when the
+ // evidence cannot support a decision or no caller context was supplied.
+ if (evidenceIncomplete) return { status: "unknown", reason: "insufficient_evidence" };
+ if (input === undefined) return { status: "unknown", reason: "missing_context" };
  const explicitContext = input === undefined ? { authorship: "not_supplied" } : { authorship: "caller_authored", ...(input as AssessmentInput) };
  const body = JSON.stringify({ model: "typesafe/jev-1.13", state: { explicitContext, observed }, questions: {
   coverage_alignment: { type: "choice", instructions: "Assess whether caller-authored expected behavior and case notes align with the change. Counts are execution evidence, not proof of quality. If context is not_supplied, choose unknown. Failed, absent or stale execution is never a current passing verification.", criteria: { aligned: "Evidence aligns with expected behavior.", gap: "A coverage gap is evident.", none: "No applicable coverage evidence.", unknown: "Insufficient information." } },
@@ -91,7 +96,9 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
  const timeout = new Promise<AssessmentResult>(resolve => { timer = setTimeout(() => { controller.abort(); resolve({ status: "unavailable", reason: "timeout" }); }, 8000); });
  const request = async (): Promise<AssessmentResult> => {
   try {
-   const response = await (deps.fetch ?? fetch)("https://openrouter.ai/api/alpha/decisions", { method: "POST", redirect: "manual", signal: controller.signal, headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body });
+   const endpoint = "https://openrouter.ai/api/alpha/decisions";
+   if (!isAllowedDecisionEndpoint(endpoint)) return { status: "unavailable", reason: "transport" };
+   const response = await (deps.fetch ?? fetch)(endpoint, { method: "POST", redirect: "manual", signal: controller.signal, headers: { "content-type": "application/json", authorization: `Bearer ${key}` }, body });
    if (controller.signal.aborted) return { status: "unavailable", reason: "timeout" };
    if (response.status >= 300 && response.status < 400 || response.redirected) { await response.body?.cancel(); return { status: "unavailable", reason: "redirect" }; }
    if (!response.ok) { await response.body?.cancel(); return { status: "unavailable", reason: response.status === 401 ? "http_auth" : response.status === 402 ? "http_credit" : response.status === 429 ? "http_rate" : response.status >= 500 ? "http_server" : "http_error" }; }
@@ -106,8 +113,6 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
    const boundary = adequacyAnswer(parsed.answers.boundary_evidence, adequacyLabels.boundary_evidence);
    if (!coverage || !boundary) return { status: "invalid_response", reason: "invalid_answer" };
    const answers = { coverage_alignment: coverage, boundary_evidence: boundary } as NonNullable<AssessmentResult["answers"]>;
-   if (evidenceIncomplete) return { status: "unknown", reason: "insufficient_evidence", answers };
-   if (input === undefined) return { status: "unknown", reason: "missing_context", answers };
    if ([coverage.choice, boundary.choice].some(choice => choice === "none" || choice === "unknown")) return { status: "unknown", reason: "unknown_choice", answers };
    const scored = [coverage, boundary].every(answer => answer.confidence !== undefined && answer.probabilities !== undefined && Object.keys(answer.probabilities).length === 4);
    return { status: scored ? "scored" : "unscored", reason: scored ? "scored" : "optional_scores_missing", answers };

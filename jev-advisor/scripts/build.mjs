@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const resultsCore = await readFile(path.join(pluginRoot, "../shared/lib/results.ts"), "utf8");
+const decisionContract = await readFile(path.join(pluginRoot, "../shared/lib/decision-contract.ts"), "utf8");
 
 const surfaces = [
 	{ core: "lib/decision.ts", adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
@@ -44,7 +45,7 @@ for (const surface of surfaces) {
 	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
 	const header = banner.replace("{ADAPTER}", surface.adapter);
 	const file = path.join(pluginRoot, surface.out);
-	const text = `${header}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
+	const text = `${header}\n${decisionContract.trimEnd()}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
 	if (check) {
 		const existing = await readFile(file, "utf8").catch(() => null);
 		if (existing !== text) {

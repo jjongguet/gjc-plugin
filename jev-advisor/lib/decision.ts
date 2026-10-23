@@ -1,3 +1,4 @@
+import { isAllowedDecisionEndpoint } from "../../shared/lib/decision-contract";
 /**
  * jev-advisor shared source. scripts/build.mjs inlines this file into the
  * generated hook and tool surfaces; edit this source, never the generated files.
@@ -267,24 +268,16 @@ export const PROVIDERS: Record<
 	ollaya: { endpoint: "http://127.0.0.1:11435/v1/systemone", style: "systemone", keyless: true, model: "laya" },
 };
 
-const ALLOWED_ORIGINS = new Set(["https://openrouter.ai", "https://api.typesafe.ai"]);
+// The advisor implements only these two providers; the shared contract owns the
+// URL rules and the loopback exception used by fixtures.
+const ADVISOR_DECISION_ORIGINS = Object.freeze(["https://openrouter.ai", "https://api.typesafe.ai"]);
 const ATTRIBUTION_HEADERS: Record<string, string> = {
 	"http-referer": "https://github.com/jjongguet/gjc-plugin",
 	"x-title": "jev-advisor",
 };
-const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 export function isAllowedEndpoint(endpoint: string): boolean {
-	try {
-		const url = new URL(endpoint);
-		if (url.username || url.password) return false;
-		if (url.protocol === "https:") return ALLOWED_ORIGINS.has(url.origin);
-		if (url.protocol === "http:")
-			return LOOPBACK_HOSTS.has(url.hostname) && url.username === "" && url.password === "";
-		return false;
-	} catch {
-		return false;
-	}
+	return isAllowedDecisionEndpoint(endpoint, { origins: ADVISOR_DECISION_ORIGINS });
 }
 
 export function providerPromptLimit(cfg: Pick<AdvisorConfig, "provider">): 1900 | 4000 {

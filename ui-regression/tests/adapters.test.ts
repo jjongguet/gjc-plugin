@@ -30,7 +30,7 @@ test('closed run adapter rejects passed imports missing account and no assertion
   const result=parse(await tool.execute('fixture',input as any));expect(result.execution.status).toBe('not_run');expect(result.advisoryOnly).toBe(true);expect(result.recommendedNextActions.length).toBeGreaterThan(0);expect(result.assessment.reason).toBe('insufficient_evidence');
   expect(result.journalStorage.persisted).toBe(true);
  }
- expect(calls.length).toBe(4);expect(calls.every(c=>c.state.observed.status==='not_run')).toBe(true);expect(JSON.stringify(calls)).not.toContain('localhost');
+ expect(calls.length).toBe(0);
 });
 test('empty substring input is rejected without invoking the browser and is journaled',async()=>{
  const result=parse(await uiRun({cwd:process.cwd(),typebox:{Type}}).execute('empty-substring',{account:'route',scenario:{id:'empty',expectedBehavior:'Required text is present',steps:[{action:'goto',url:'http://127.0.0.1:4311/'},{action:'assert',selector:'#result',kind:'text',match:'substring',expected:'   '}]}}));
@@ -44,10 +44,10 @@ test('UI status metadata fixture remains historical and source scoped',async()=>
   const specDigest=specFingerprint({fixture:'metadata-only'}),fp=await fingerprintSource(root,specDigest);
   const receipt=createReceipt({plugin:'ui-regression',toolCallId:'metadata-fixture',repositoryDigest:await repositoryDigest(root),durationMs:1,specDigest,before:fp,after:fp,freshness:'fresh',execution:{status:'passed',reason:'complete',exitCode:0,signal:null,runnerVersion:null,counts:null,assertions:[{step:1,id:'step-1',kind:'text_exact',status:'passed'}],steps:[{step:0,action:'goto',status:'passed'},{step:1,action:'assert',status:'passed'}],cleanup:'confirmed',currentUiState:'not_reobserved',browserBuildBinding:'unverified',scenarioDigest:specDigest},warnings:[],limitations:['Test fixture metadata, not live browser evidence.']});
   expect((await persistReceipt(receipt)).persisted).toBe(true);const tool=uiStatus({cwd:root,typebox:{Type}});
-  const fresh=parse(await tool.execute('status',{receiptId:receipt.id}));expect(fresh.freshness).toBe('fresh');expect(fresh.currentUiState).toBe('not_reobserved');expect(fresh.browserBuildBinding).toBe('unverified');expect(fresh.assessment.reason).toBe('missing_context');expect(calls.length).toBe(1);
+  const fresh=parse(await tool.execute('status',{receiptId:receipt.id}));expect(fresh.freshness).toBe('fresh');expect(fresh.currentUiState).toBe('not_reobserved');expect(fresh.browserBuildBinding).toBe('unverified');expect(fresh.assessment.reason).toBe('missing_context');expect(calls.length).toBe(0);
   await fs.writeFile(path.join(root,'fixture.js'),'changed');const stale=parse(await tool.execute('stale',{receiptId:receipt.id}));expect(stale.freshness).toBe('stale');expect(stale.receipt.execution.status).toBe('passed');expect(stale.warnings).toContain('source_not_fresh');
   const missing=parse(await tool.execute('missing',{receiptId:'../escape'}));expect(missing.execution.status).toBe('unavailable');
-  expect(calls.length).toBe(3);expect(calls[0].state.observed.assertions).toEqual([{step:1,id:'step-1',kind:'text_exact',status:'passed'}]);expect(calls[1].state.observed.freshness).toBe('stale');expect(calls[2].state.observed.status).toBe('unavailable');expect(stale.assessment.reason).toBe('insufficient_evidence');
+  expect(calls.length).toBe(0);expect(stale.assessment.reason).toBe('insufficient_evidence');
  }finally{if(old===undefined)delete process.env.HOME;else process.env.HOME=old;await fs.rm(owned,{recursive:true,force:true});}
 });
 test('standalone generated UI tools load with only declared installed files',async()=>{
