@@ -37,6 +37,7 @@ Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four ho
 
 - `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing.
 - `bun run test` runs the root chain: fixture tests for the repository check scripts (`scripts/tests/`), shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks.
+- `scripts/tests/ultragoal-gate.test.mjs` checks the installed `gjc` against the ultragoal gate evidence contract in [docs/ultragoal-gate-evidence.md](docs/ultragoal-gate-evidence.md); it fails when a `gjc` release changes that contract and skips when no `gjc` is on `PATH`.
 - Suites are hermetic: disposable repositories/homes, synthetic or disabled transport, isolated fake CLIs. Live credentials, real personal data and production services are never required and never used in tests.
 - Maintainers additionally run the workspace-standard validator, which lives outside this repository (`node ../shared/workspace-standard/validator/cli.mjs validate --root .`, profile `plugin-ts`). It is not required for external use.
 
@@ -57,8 +58,8 @@ The onboarding smoke installs `backplan` from the checkout into a throwaway GJC 
 
 `.github/workflows/ci.yml` runs on every push to `main` (the only automatic trigger in this repository): `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`. It has no `pull_request` trigger, and neither does any other workflow. Two
 check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke
-guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case self-skips with a
-recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its
+guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case and the ultragoal
+gate contract fixture self-skip with a recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its
 local tree sits beside the repository (`self-improve/lib/guards.mjs`); the test wrapper prints the
 planned guard ids, guard statuses and skip counts, so green runs disclose what was planned out and
 what was skipped instead of hiding it. The workflow also creates an empty, never-committed `AGENTS.md`

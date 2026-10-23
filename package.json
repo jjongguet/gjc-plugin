@@ -15,7 +15,7 @@
     "demo": "bun scripts/demo.mjs",
     "onboarding:smoke": "node scripts/onboarding-smoke.mjs",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
-    "test:scripts": "node --test scripts/tests/checks.test.mjs",
+    "test:scripts": "node --test scripts/tests/checks.test.mjs scripts/tests/ultragoal-gate.test.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",
     "build:verification": "bun verification-receipts/scripts/build.mjs",
     "test:verification": "bun verification-receipts/scripts/verify.ts",
