@@ -233,6 +233,9 @@ test("policy:check rejects unsafe changes to the owner-dispatched pull-request l
 		["verify checks out pull-request code", { file: lane, edit: text => text.replace("    steps:\n      - name: Check out trusted main\n        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n        with:\n          persist-credentials: false\n", "    steps:\n      - name: Check out trusted main\n        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n        with:\n          persist-credentials: false\n          ref: refs/pull/1/head\n") }, /verify must not check out pull-request code/],
 		["receipt status write removed", { file: lane, edit: text => text.replace("      statuses: write\n", "") }, /verify must hold contents: read and statuses: write only/],
 		["automatic trigger added", { file: lane, edit: text => text.replace("on:\n  workflow_dispatch:", "on:\n  pull_request:\n  workflow_dispatch:") }, /must not trigger on pull_request/],
+		["flow-style pull_request trigger", { file: lane, edit: text => text.replace("on:\n  workflow_dispatch:", "on: {pull_request: {}}\n  workflow_dispatch:") }, /must not trigger on pull_request/],
+		["inline array pull_request trigger", { file: lane, edit: text => text.replace("on:\n  workflow_dispatch:", "on: [push, pull_request]\n  workflow_dispatch:") }, /must not trigger on pull_request/],
+		["single-line run interpolation", { file: lane, edit: text => text.replace('      - name: Assert the checkout is the reviewed SHA\n', '      - name: Assert the checkout is the reviewed SHA\n        run: echo "${{ inputs.pr_number }}"\n') }, /run blocks must read inputs from env/],
 	];
 	for (const [name, mutate, pattern] of mutations) {
 		const root = policyFixture(mutate);

@@ -57,14 +57,32 @@ function jobs(text) {
 function runBlocksInterpolate(text) {
 	const lines = text.split("\n");
 	for (let index = 0; index < lines.length; index += 1) {
-		const match = /^(\s*)run:\s*[|>]/.exec(lines[index]);
+		const line = lines[index];
+		const match = /^(\s*)(?:- )?run:\s*([|>])?/.exec(line);
 		if (!match) continue;
 		const indent = match[1].length;
-		for (let next = index + 1; next < lines.length; next += 1) {
-			const line = lines[next];
-			if (line.trim() !== "" && line.search(/\S/) <= indent) break;
-			if (/\$\{\{/.test(line)) return line.trim();
+		// Single-line `run:` carries the same shell-injection risk as a block.
+		if (!match[2]) {
+			if (/\$\{\{/.test(line.slice(match[0].length))) return line.trim();
+			continue;
 		}
+		for (let next = index + 1; next < lines.length; next += 1) {
+			const body = lines[next];
+			if (body.trim() !== "" && body.search(/\S/) <= indent) break;
+			if (/\$\{\{/.test(body)) return body.trim();
+		}
+	}
+	return null;
+}
+
+// `on:` may be block style, flow style (`on: {pull_request: ...}`) or an
+// inline array (`on: [push, pull_request]`). All three carry the same risk.
+function automaticTrigger(text) {
+	const flow = /^on:\s*[\[{](.*)$/m.exec(text);
+	if (flow) {
+		const rest = flow[1];
+		const match = /\b(pull_request|pull_request_target)\b/.exec(rest);
+		if (match) return match[1];
 	}
 	return null;
 }
@@ -78,6 +96,9 @@ try {
 
 for (const name of names) {
 	const text = code(name);
+	const flowTrigger = automaticTrigger(text);
+	if (flowTrigger === "pull_request") report(`${name}: must not trigger on pull_request`);
+	if (flowTrigger === "pull_request_target" && name !== "close-external-prs.yml") report(`${name}: only close-external-prs.yml may use pull_request_target`);
 	if (/^\s{0,2}pull_request:/m.test(text)) report(`${name}: must not trigger on pull_request`);
 	if (/^\s{0,2}pull_request_target:/m.test(text) && name !== "close-external-prs.yml") report(`${name}: only close-external-prs.yml may use pull_request_target`);
 	for (const line of text.split("\n")) {
