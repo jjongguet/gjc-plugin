@@ -6,7 +6,17 @@ Thanks for contributing to `gjc-plugin`. This repository ships plugins for [gaja
 
 - **Bugs and feature requests:** open an [issue](https://github.com/jjongguet/gjc-plugin/issues/new/choose) using one of the forms.
 - **Security problems:** report privately as described in [SECURITY.md](SECURITY.md); never in a public issue.
-- **Pull requests:** not accepted from outside the maintainers. Pull-request creation is limited to collaborators, and a workflow closes any pull request whose author is not the owner, a member or a collaborator, with a pointer to issues. The workflow never checks out or runs pull-request code.
+- **Pull requests:** accepted, with owner-controlled execution.
+
+## Pull requests
+
+1. Open the pull request against `main`. Nothing runs automatically: there is no `pull_request` trigger anywhere in this repository.
+2. The owner reviews the diff and dispatches **Validate pull request (owner dispatch)** from `main` with the pull request number and the reviewed 40-hex head SHA:
+   `gh workflow run pr-validate.yml --ref main -f pr_number=<n> -f head_sha=<sha>`
+3. A trusted preflight checks the dispatch actor, repository, `main` ref and that the SHA is still the pull request head.
+4. The candidate job checks out that SHA on a GitHub-hosted runner with no secrets, no write token, no cached dependencies and no self-hosted runner, then runs the build, checks, tests and demo.
+5. A trusted verifier re-reads the head SHA, runs this repository's policy checker over the pull request's workflow files as data, and posts a `owner-pr-validation` status bound to the reviewed SHA.
+6. Pushing new commits changes the head SHA; the owner re-dispatches for the new one. The receipt of an older SHA never carries over.
 
 Maintainers land changes on `main` with conventional commit subjects in English. Repository rules for agents and contributors are in [docs/agent-rules.md](docs/agent-rules.md).
 
@@ -45,7 +55,7 @@ The onboarding smoke installs `backplan` from the checkout into a throwaway GJC 
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push to `main`: `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`. It has no `pull_request` trigger. Two
+`.github/workflows/ci.yml` runs on every push to `main` (the only automatic trigger in this repository): `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`. It has no `pull_request` trigger, and neither does any other workflow. Two
 check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke
 guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case self-skips with a
 recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its

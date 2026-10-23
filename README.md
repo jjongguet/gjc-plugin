@@ -152,7 +152,7 @@ bun run demo             # keyless end-to-end demo in a temporary HOME
 bun run onboarding:smoke # README quick start in a throwaway GJC root (needs gjc)
 bun run docs:check       # every relative Markdown link resolves
 bun run evidence:check   # committed self-improve evidence has no absolute home paths
-bun run policy:check     # the external-PR closer workflow keeps its safety properties
+bun run policy:check     # the pull-request lane and CI keep their safety properties
 bun <plugin>/scripts/verify.ts   # one plugin's suite
 ```
 
@@ -181,7 +181,7 @@ All plugin-owned result and state writes go to `~/.gjc-plugin/` (owned `0700` di
 
 ## Contributing and security
 
-Issues are welcome; pull requests from outside the maintainers are not accepted and are closed automatically. See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and the test matrix, [docs/agent-rules.md](docs/agent-rules.md) for the repository rules, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.
+Issues and pull requests are welcome. Pull-request code never runs automatically: the owner dispatches **Validate pull request (owner dispatch)** from `main` with the pull request number and the reviewed head SHA, and a trusted verifier posts a SHA-bound receipt when the checks pass. See [CONTRIBUTING.md](CONTRIBUTING.md#pull-requests) for the flow, [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [docs/agent-rules.md](docs/agent-rules.md) for the repository rules, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.
 
 ## License
 

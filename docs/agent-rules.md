@@ -27,7 +27,7 @@ These are the working rules for agents and contributors changing this repository
 
 - Never commit credentials, `.env` files or local key files; plugins read keys only from their documented locations outside the repository.
 - Tests and demos run in disposable homes with synthetic or disabled transport; they must not write to a real `~/.gjc-plugin/` store or call a live provider.
-- External pull requests are not accepted; report problems through issues.
+- External pull requests are accepted only through the owner-dispatched `pr-validate.yml` lane: their code never runs automatically, on the self-hosted runner, with secrets, or with a persistent cache.
 
 ## Records
 

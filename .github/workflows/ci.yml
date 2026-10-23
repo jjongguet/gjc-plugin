@@ -45,7 +45,7 @@ jobs:
       - name: Documentation link check
         run: bun run docs:check
 
-      - name: External-PR closer safety check
+      - name: Workflow safety check (pull-request lane and push CI)
         run: bun run policy:check
 
       - name: Build
