@@ -546,4 +546,79 @@ export function summarizeReceipt(receipt) {
   };
 }
 
+// --- Quality cohort ---------------------------------------------------------
+// The operational journal projection above records that an advice answer was
+// returned. That is availability telemetry, not task quality. Efficacy ranking
+// may only use this separate, versioned cohort: immutable trial receipts with
+// an independent outcome, a complete resource measurement and pinned source and
+// harness digests. Unknown outcomes and unmeasured costs stay out and are
+// counted as exclusions.
+
+export const RRSI_QUALITY_SCHEMA = "rrsi.quality_trial.v1";
+
+export type QualityExclusion =
+  | "unknown_outcome"
+  | "missing_cost"
+  | "non_independent_oracle"
+  | "missing_identity"
+  | "invalid";
+
+export type QualityAttempt = {
+  provenance: string;
+  objective: string;
+  decision: "adopt" | "reject";
+  wallMs: number;
+  costMeasured: true;
+  sourceDigest: string;
+  harnessDigest: string;
+};
+
+export type QualityCohort = {
+  schema: typeof RRSI_QUALITY_SCHEMA;
+  admissible: QualityAttempt[];
+  excluded: { reason: QualityExclusion; count: number }[];
+  total: number;
+  efficacyClaimsAllowed: boolean;
+};
+
+const QUALITY_DIGEST = /^[a-f0-9]{64}$/;
+const qualityText = (value: unknown, max: number): string | null =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
+
+export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
+  const admissible: QualityAttempt[] = [];
+  const counts = new Map<QualityExclusion, number>();
+  const exclude = (reason: QualityExclusion) => counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  let total = 0;
+  for (const record of records) {
+    if (total >= limit) break;
+    total += 1;
+    if (record === null || typeof record !== "object" || Array.isArray(record)) { exclude("invalid"); continue; }
+    const row = record as Record<string, unknown>;
+    if (row.schema !== RRSI_QUALITY_SCHEMA) { exclude("invalid"); continue; }
+    const trialId = qualityText(row.trialId, RRSI_LIMITS.maxIdChars);
+    const objective = qualityText(row.objective, RRSI_LIMITS.maxTextChars);
+    const sourceDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.sourceDigest, 64);
+    const harnessDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.harnessDigest, 64);
+    if (!trialId || !objective || !sourceDigest || !harnessDigest || !QUALITY_DIGEST.test(sourceDigest) || !QUALITY_DIGEST.test(harnessDigest)) { exclude("missing_identity"); continue; }
+    const oracle = row.oracle as Record<string, unknown> | undefined;
+    if (oracle?.independent !== true) { exclude("non_independent_oracle"); continue; }
+    const outcome = oracle?.status;
+    if (outcome !== "passed" && outcome !== "failed") { exclude("unknown_outcome"); continue; }
+    const cost = row.cost as Record<string, unknown> | undefined;
+    const wallMs = typeof cost?.wallMs === "number" ? cost.wallMs : Number.NaN;
+    const measured = cost?.measured === true && Number.isFinite(wallMs) && wallMs >= 0;
+    const zeroNeedsReason = measured && wallMs === 0 && qualityText(cost?.zeroCostRationale, 200) === null;
+    if (!measured || zeroNeedsReason) { exclude("missing_cost"); continue; }
+    admissible.push({ provenance: trialId, objective, decision: outcome === "passed" ? "adopt" : "reject", wallMs, costMeasured: true, sourceDigest, harnessDigest });
+  }
+  return {
+    schema: RRSI_QUALITY_SCHEMA,
+    admissible,
+    excluded: [...counts].map(([reason, count]) => ({ reason, count })),
+    total,
+    efficacyClaimsAllowed: admissible.length >= 2,
+  };
+}
+
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);

@@ -29,7 +29,7 @@
     "build:backplan": "bun backplan/scripts/build.mjs",
     "test:backplan": "bun backplan/scripts/verify.ts",
     "build:rrsi": "bun rrsi/scripts/build.mjs",
-    "test:rrsi": "bun rrsi/scripts/verify.ts && bun test rrsi/tests/readme-contract.test.ts",
+    "test:rrsi": "bun rrsi/scripts/verify.ts && bun test rrsi/tests/readme-contract.test.ts rrsi/tests/quality-cohort.test.ts",
     "build:aside-memory": "bun aside-memory/scripts/build.mjs",
     "test:aside-memory": "bun aside-memory/scripts/verify.ts",
     "test:self-improve": "node self-improve/scripts/verify-unit.mjs && node self-improve/scripts/verify-integration.mjs",
