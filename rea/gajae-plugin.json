@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "rea",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "tools": [
     {
       "name": "rea_readiness",

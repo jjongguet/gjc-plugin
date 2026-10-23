@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "wiki",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "tools": [
     {
       "name": "wiki_query",

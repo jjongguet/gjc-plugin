@@ -2,6 +2,53 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.11] - 2026-10-24
+
+Plugins: jev-advisor 0.0.9 · verification-receipts 0.0.5 · ui-regression 0.0.5 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
+
+### Added
+
+- **verification-receipts**: `verification_run` and `verification_status` take an optional `repository`, a work-tree root that is the session repository or lies inside the session directory, so a session started in a non-Git workspace root can record and read receipts.
+- **verification-receipts**: a failing test that could not start a program missing from the runner `PATH` is recorded as a `missing_binary:<name>` receipt warning, and the execution reason is `missing_binary` when every failure has that cause.
+- `docs/ultragoal-gate-evidence.md` documents the evidence the ultragoal quality gate accepts; `scripts/tests/ultragoal-gate.test.mjs` checks it against the installed `gjc` and skips without one.
+
+### Changed
+
+- **verification-receipts**: tests receive the host `PATH` (absolute entries only), so suites that start `bun` or `git` run as they do in a shell; `HOME`, credentials and every other variable stay withheld.
+- **verification-receipts**: rejected input names its cause (`not_a_repository`, `missing_test_file`, `invalid_test_path`, …) instead of `invalid_or_unavailable_input`.
+
+### Upgrade notes
+
+- The shared results journal accepts four new execution reasons. Reinstall `jev-advisor` first, then `verification-receipts`, then the rest, and start a new `gjc` session.
+
+## [0.0.10] - 2026-10-23
+
+Plugins: jev-advisor 0.0.8 · verification-receipts 0.0.4 · ui-regression 0.0.4 · wiki 0.0.4 · rea 0.0.4 · backplan 0.0.7 · rrsi 0.0.3 · aside-memory 0.0.2 (unchanged)
+
+### Fixed
+
+- `policy:check` inspects single-line `run:` steps that carry `${{ … }}` and flow-style triggers such as `on: [push, pull_request]`.
+
+## [0.0.9] - 2026-10-23
+
+Plugins: jev-advisor 0.0.8 · verification-receipts 0.0.4 · ui-regression 0.0.4 · wiki 0.0.4 · rea 0.0.4 · backplan 0.0.7 · rrsi 0.0.3 · aside-memory 0.0.2
+
+### Added
+
+- Pull requests are accepted through the owner-dispatched `pr-validate.yml` lane: their code never runs automatically, a GitHub-hosted candidate runs without secrets, a write token or a cache, and a trusted verifier posts `owner-pr-validation` on the reviewed SHA.
+- `scripts/onboarding-smoke.mjs` runs the README quick start end to end in a throwaway GJC root.
+- `shared/lib/decision-contract.ts` records every decision provider; adequacy questions the supplied evidence cannot answer return before any provider call.
+- self-improve: offline Harness² evaluation machinery in `self-improve/lib/behavior-eval.mjs`; no live trial has run.
+
+### Changed
+
+- README rewritten as the public front page with a keyless quick start, a plugin selector and a claim-to-evidence table.
+- **rrsi** separates its operational journal projection from a versioned quality cohort that only admits independent outcomes with a measured cost.
+
+### Fixed
+
+- **shared**: the append lock no longer reports `unsafe_path` when another appender releases it mid-probe.
+
 ## [0.0.8] - 2026-10-20
 
 Plugins: jev-advisor 0.0.7 · verification-receipts 0.0.3 · ui-regression 0.0.3 · wiki 0.0.3 · rea 0.0.3 · backplan 0.0.6 · rrsi 0.0.2 · aside-memory 0.0.1
@@ -102,6 +149,9 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.11]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.10...v0.0.11
+[0.0.10]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.9...v0.0.10
+[0.0.9]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.8...v0.0.9
 [0.0.8]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.7...v0.0.8
 [0.0.7]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.6...v0.0.7
 [0.0.6]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.5...v0.0.6
