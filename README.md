@@ -82,28 +82,34 @@ The `rea_readiness` lines depend on the Node/npx/Bun found on your machine. A tw
 ## How it works
 
 ```mermaid
-flowchart LR
-  subgraph GJC["gjc session"]
-    agent["agent loop"]
-    hooks["hooks: task / subagent / session_start"]
-  end
-  subgraph bundles["plugin bundles (~/.gjc/agent/gjc-plugins/)"]
-    vr["verification-receipts"]
-    ui["ui-regression"]
+flowchart TB
+  session["gjc session<br/>agent tool calls · task, subagent and session hooks"]
+  subgraph offline["Offline and keyless"]
+    direction LR
     bp["backplan"]
-    jev["jev-advisor"]
+    vr["verification-receipts"]
     rr["rrsi"]
-    other["rea · wiki · aside-memory"]
+    rea["rea"]
   end
-  store[("private results<br/>~/.gjc-plugin/ (0700/0600)")]
-  agent -- tool calls --> vr & ui & bp & jev & rr & other
-  hooks --> vr & jev & rr
-  vr & ui & bp & jev & rr & other --> store
-  jev -. optional advisory call .-> openrouter["OpenRouter decision endpoint"]
-  vr & ui -. warning-only adequacy .-> openrouter
-  ui -. loopback scenario .-> aside["Aside browser"]
-  other -. local CLIs .-> ext["rea-agents · wiki.py · aside"]
+  subgraph external["Need extra setup"]
+    direction LR
+    jev["jev-advisor"]
+    ui["ui-regression"]
+    personal["wiki · aside-memory"]
+  end
+  store[("private results<br/>~/.gjc-plugin/ (0700 dirs, 0600 files)")]
+  decisions["decision endpoint<br/>(optional key)"]
+  tools["Aside CLI · wiki.py"]
+  session --> offline
+  session --> external
+  offline --> store
+  external --> store
+  jev -. advisory only .-> decisions
+  ui -. loopback page .-> tools
+  personal -. local CLIs .-> tools
 ```
+
+`verification-receipts` sends warning-only adequacy questions to the decision endpoint when a key is configured; without one it stays offline.
 
 Each bundle's generated `tools/` and `hooks/` are self-contained (sources are inlined at build time), so an installed plugin needs no sibling package. GJC owns the installed code; plugins write only to their own directory under `~/.gjc-plugin/`.
 
