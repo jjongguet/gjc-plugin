@@ -218,3 +218,36 @@ test("policy:check rejects every unsafe change to the closer or CI triggers", ()
 		}
 	}
 });
+
+function fakeGjc(output, status = 0) {
+	const bin = mkdtempSync(join(tmpdir(), "gjc-plugin-fake-gjc-"));
+	writeFileSync(join(bin, "gjc"), `#!/bin/sh\necho '${output}'\nexit ${status}\n`, { mode: 0o755 });
+	return bin;
+}
+
+test("onboarding smoke names the missing or unsupported prerequisite", async () => {
+	const { prerequisiteProblem, MIN_GJC } = await import("../onboarding-smoke.mjs");
+	const empty = mkdtempSync(join(tmpdir(), "gjc-plugin-empty-path-"));
+	const old = fakeGjc("gjc/0.17.9");
+	const current = fakeGjc(`gjc/${MIN_GJC}`);
+	const broken = fakeGjc("boom", 3);
+	try {
+		assert.match(prerequisiteProblem({ PATH: empty }), /`gjc` is not on PATH; install gajae-code/);
+		assert.match(prerequisiteProblem({ PATH: old }), /gjc 0\.17\.9 is older than the verified/);
+		assert.match(prerequisiteProblem({ PATH: broken }), /`gjc --version` failed \(exit 3\)/);
+		assert.match(prerequisiteProblem({ PATH: current }, "20.11.0"), /Node\.js 20\.11\.0 is older than 22/);
+		assert.equal(prerequisiteProblem({ PATH: current }, "22.0.0"), null);
+		const cli = spawnSync(NODE, [join(REPO, "scripts", "onboarding-smoke.mjs")], { encoding: "utf8", env: { PATH: empty, HOME: empty } });
+		assert.equal(cli.status, 2, cli.stderr);
+		assert.match(cli.stderr, /onboarding:smoke: prerequisite — `gjc` is not on PATH/);
+	} finally {
+		for (const dir of [empty, old, current, broken]) rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test("onboarding smoke reads the report and ignores the journal line", async () => {
+	const { parseToolReport } = await import("../onboarding-smoke.mjs");
+	const text = 'backplan_check: invalid\n{"status":"invalid","errors":["plan.end_state: required"]}\n{"journalStorage":{"persisted":true}}';
+	assert.deepEqual(parseToolReport(text), { status: "invalid", errors: ["plan.end_state: required"] });
+	assert.throws(() => parseToolReport("backplan_check: invalid_input — no JSON"), /without a JSON report/);
+});

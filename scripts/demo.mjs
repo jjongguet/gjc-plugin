@@ -84,29 +84,11 @@ async function runDemo(root) {
 
 	console.log("$ backplan_check  (validate a work plan and render Linear-ready payloads)");
 	const backplan = await load("backplan/tools/backplan-check.ts");
-	const plan = {
-		goal: "Fix the broken README link",
-		end_state: "Every relative link in README.md resolves on main",
-		success_criteria: ["bun run docs:check exits 0 on main"],
-		project: { name: "docs", mode: "reuse", reason: "the existing docs project covers README changes" },
-		issues: [
-			{
-				title: "Fix the README link to CONTRIBUTING.md",
-				objective: "Point the link at the moved file",
-				context: "README.md links to a renamed section",
-				scope_in: ["README.md"],
-				scope_out: ["code changes"],
-				completion_criteria: ["bun run docs:check exits 0"],
-				delivery: "one commit on main",
-			},
-		],
-		policy_decisions: [],
-		automation_candidates: [],
-	};
-	const ok = text(await backplan.execute("demo-1", { plan: JSON.stringify(plan) }));
+	const example = name => readFileSync(path.join(repo, "backplan", "examples", name), "utf8");
+	const ok = text(await backplan.execute("demo-1", { plan: example("valid-plan.json") }));
 	const report = firstJson(ok);
 	console.log(`  status=${report.status} digest=${report.digest.slice(0, 12)}… issues=${report.linear.issues.length} project=${report.linear.project.mode}:${report.linear.project.name}`);
-	const bad = firstJson(text(await backplan.execute("demo-2", { plan: JSON.stringify({ goal: "Fix the link" }) })));
+	const bad = firstJson(text(await backplan.execute("demo-2", { plan: example("invalid-plan.json") })));
 	console.log(`  incomplete plan → status=${bad.status}; first errors: ${bad.errors.slice(0, 3).join("; ")}`);
 
 	console.log("\n$ rrsi  (capture an exploration episode, then replay policies over the store)");

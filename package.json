@@ -13,6 +13,7 @@
     "docs:check": "node scripts/check-doc-links.mjs",
     "policy:check": "node scripts/check-pr-policy.mjs",
     "demo": "bun scripts/demo.mjs",
+    "onboarding:smoke": "node scripts/onboarding-smoke.mjs",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:scripts": "node --test scripts/tests/checks.test.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",

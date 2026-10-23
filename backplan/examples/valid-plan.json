@@ -1,0 +1,19 @@
+{
+  "goal": "Fix the broken README link",
+  "end_state": "Every relative link in README.md resolves on main",
+  "success_criteria": ["bun run docs:check exits 0 on main"],
+  "project": { "name": "docs", "mode": "reuse", "reason": "the existing docs project covers README changes" },
+  "issues": [
+    {
+      "title": "Fix the README link to CONTRIBUTING.md",
+      "objective": "Point the link at the moved file",
+      "context": "README.md links to a renamed section",
+      "scope_in": ["README.md"],
+      "scope_out": ["code changes"],
+      "completion_criteria": ["bun run docs:check exits 0"],
+      "delivery": "one commit on main"
+    }
+  ],
+  "policy_decisions": [],
+  "automation_candidates": []
+}
