@@ -33,6 +33,7 @@ Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four ho
 ## Smoke tests
 
 ```sh
+node scripts/onboarding-smoke.mjs
 node verification-receipts/scripts/smoke-host.mjs --metrics
 node verification-receipts/scripts/smoke-host.mjs --installed
 node verification-receipts/scripts/smoke-host.mjs --installed --advisor
@@ -40,7 +41,7 @@ node jev-advisor/scripts/smoke-results.mjs
 UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui
 ```
 
-Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.
+The onboarding smoke installs `backplan` from the checkout into a throwaway GJC root, calls `backplan_check` with the bundled examples from a fresh `gjc --print` process through a scripted loopback endpoint, uninstalls it and confirms the real plugin registry is unchanged; it proves the README quick start path, not model behaviour. Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.
 
 ## CI
 
