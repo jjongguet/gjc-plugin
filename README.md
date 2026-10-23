@@ -10,7 +10,7 @@ A coding agent's own report ("tests pass", "the UI works", "I followed the plan"
 
 - **Start here:** [Quick start](#quick-start) installs the keyless `backplan` plugin and runs it.
 - **Pick plugins:** [Choose a plugin](#choose-a-plugin) lists what each one proves and what it does not.
-- **Check the claims:** [What is verified](#what-is-verified) maps the claims in this README to commands you can run.
+- **Check the claims:** [What is verified](#what-is-verified) maps each claim in this README to a command you can run.
 
 ## Quick start
 
