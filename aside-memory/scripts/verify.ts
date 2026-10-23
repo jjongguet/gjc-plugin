@@ -389,7 +389,7 @@ if (args[3] === "path") {
 	await check("manifest/index/schema one explicit tool with no hooks and version 0.0.1", () => {
 		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8"));
 		assert.deepEqual(Object.keys(manifest).sort(), ["kind", "name", "tools", "version"]);
-		assert.equal(manifest.version, "0.0.1"); assert.equal(manifest.kind, "gajae-code-plugin");
+		assert.equal(manifest.version, "0.0.2"); assert.equal(manifest.kind, "gajae-code-plugin");
 		assert.deepEqual(manifest.tools.map((tool: any) => tool.name), ["aside_memory"]); assert.equal(generated.name, "aside_memory");
 		assert.deepEqual(manifest.tools[0].schema, generated.parameters);
 		assert.equal((generated.parameters as any).additionalProperties, false);

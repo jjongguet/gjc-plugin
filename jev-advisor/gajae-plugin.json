@@ -1,45 +1,45 @@
 {
-	"kind": "gajae-code-plugin",
-	"name": "jev-advisor",
-	"version": "0.0.7",
-	"hooks": [
-		{
-			"name": "jev-task-advisor",
-			"event": "tool_call",
-			"target": "task",
-			"phase": "before",
-			"path": "hooks/jev-advisor.ts"
-		},
-		{
-			"name": "jev-task-launch-observer",
-			"event": "tool_result",
-			"target": "task",
-			"phase": "after",
-			"path": "hooks/jev-advisor-result.ts"
-		},
-		{
-			"name": "jev-subagent-terminal-observer",
-			"event": "tool_result",
-			"target": "subagent",
-			"phase": "after",
-			"path": "hooks/jev-advisor-result.ts"
-		}
-	],
-	"tools": [
-		{
-			"name": "jev_advise",
-			"path": "tools/jev-advise.ts",
-			"description": "Request task-level effort advice or offline retained correlation coverage; both journal sanitized outcomes under ~/.gjc-plugin, not task-quality accuracy"
-		},
-		{
-			"name": "jev_check",
-			"path": "tools/jev-check.ts",
-			"description": "Ask the decision model to check one artifact against one check question; returns a strict correct/incorrect/unsure verdict with confidence and journals a sanitized check outcome. Not verification evidence; no enforcement or correlation-state writes."
-		},
-		{
-			"name": "plugin_metrics",
-			"path": "tools/plugin-metrics.ts",
-			"description": "One bounded offline aggregate report of the three plugins' retained sanitized journals and Jev's retained v2 correlation state. Strictly read-only: creates nothing, appends nothing, no provider or tests. Missing is not zero; unmeasured is null; descriptive monitoring only, never proof of routing accuracy, task quality or causal benefit."
-		}
-	]
+  "kind": "gajae-code-plugin",
+  "name": "jev-advisor",
+  "version": "0.0.8",
+  "hooks": [
+    {
+      "name": "jev-task-advisor",
+      "event": "tool_call",
+      "target": "task",
+      "phase": "before",
+      "path": "hooks/jev-advisor.ts"
+    },
+    {
+      "name": "jev-task-launch-observer",
+      "event": "tool_result",
+      "target": "task",
+      "phase": "after",
+      "path": "hooks/jev-advisor-result.ts"
+    },
+    {
+      "name": "jev-subagent-terminal-observer",
+      "event": "tool_result",
+      "target": "subagent",
+      "phase": "after",
+      "path": "hooks/jev-advisor-result.ts"
+    }
+  ],
+  "tools": [
+    {
+      "name": "jev_advise",
+      "path": "tools/jev-advise.ts",
+      "description": "Request task-level effort advice or offline retained correlation coverage; both journal sanitized outcomes under ~/.gjc-plugin, not task-quality accuracy"
+    },
+    {
+      "name": "jev_check",
+      "path": "tools/jev-check.ts",
+      "description": "Ask the decision model to check one artifact against one check question; returns a strict correct/incorrect/unsure verdict with confidence and journals a sanitized check outcome. Not verification evidence; no enforcement or correlation-state writes."
+    },
+    {
+      "name": "plugin_metrics",
+      "path": "tools/plugin-metrics.ts",
+      "description": "One bounded offline aggregate report of the three plugins' retained sanitized journals and Jev's retained v2 correlation state. Strictly read-only: creates nothing, appends nothing, no provider or tests. Missing is not zero; unmeasured is null; descriptive monitoring only, never proof of routing accuracy, task quality or causal benefit."
+    }
+  ]
 }

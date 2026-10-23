@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "aside-memory",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "tools": [
     {
       "name": "aside_memory",
@@ -14,7 +14,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 600,
-            "description": "Non-sensitive task query: 1–300 Unicode scalar values, at most 1200 UTF-8 bytes; no controls or leading option syntax."
+            "description": "Non-sensitive task query: 1\u2013300 Unicode scalar values, at most 1200 UTF-8 bytes; no controls or leading option syntax."
           },
           "account": {
             "type": "string",
@@ -28,7 +28,9 @@
             "default": 3
           }
         },
-        "required": ["query"],
+        "required": [
+          "query"
+        ],
         "additionalProperties": false
       }
     }

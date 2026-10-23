@@ -1,17 +1,17 @@
 {
-	"kind": "gajae-code-plugin",
-	"name": "wiki",
-	"version": "0.0.3",
-	"tools": [
-		{
-			"name": "wiki_query",
-			"path": "tools/wiki-query.ts",
-			"description": "Read-only search over the guarded personal wiki: canonical pages only (pending proposals stay invisible), results cite wiki paths and original sources, and not-found is reported explicitly. Wiki text is curated personal knowledge, not verified truth."
-		},
-		{
-			"name": "wiki_propose",
-			"path": "tools/wiki-propose.ts",
-			"description": "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest. Never approves or publishes: publication happens on the configured writer via wiki.py — after a per-digest human approval, or under the owner standing approval recorded in the wiki's REVIEW.md."
-		}
-	]
+  "kind": "gajae-code-plugin",
+  "name": "wiki",
+  "version": "0.0.4",
+  "tools": [
+    {
+      "name": "wiki_query",
+      "path": "tools/wiki-query.ts",
+      "description": "Read-only search over the guarded personal wiki: canonical pages only (pending proposals stay invisible), results cite wiki paths and original sources, and not-found is reported explicitly. Wiki text is curated personal knowledge, not verified truth."
+    },
+    {
+      "name": "wiki_propose",
+      "path": "tools/wiki-propose.ts",
+      "description": "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest. Never approves or publishes: publication happens on the configured writer via wiki.py \u2014 after a per-digest human approval, or under the owner standing approval recorded in the wiki's REVIEW.md."
+    }
+  ]
 }
