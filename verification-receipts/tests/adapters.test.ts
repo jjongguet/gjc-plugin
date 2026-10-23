@@ -58,6 +58,42 @@ test('generated standalone run/status persist private envelopes and reobserve ig
  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
 },30000);
 
+test('a non-Git session directory runs and reads receipts for a repository inside it',async()=>{
+ const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'adapter-non-git-'))),workspace=path.join(owned,'workspace'),repo=path.join(workspace,'lanes','repo'),outside=path.join(owned,'outside'),home=path.join(owned,'home');
+ await fs.mkdir(path.join(repo,'tests'),{recursive:true});await fs.mkdir(path.join(workspace,'plain'));await fs.mkdir(outside);await fs.mkdir(home,{mode:0o700});
+ const oldHome=process.env.HOME,oldProvider=process.env.JEV_ADVISOR_PROVIDER;process.env.HOME=home;process.env.JEV_ADVISOR_PROVIDER='off';
+ const commit=(dir:string)=>{execFileSync('git',['init','-q'],{cwd:dir});execFileSync('git',['add','.'],{cwd:dir});execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:dir});};
+ try {
+  await fs.writeFile(path.join(repo,'tests','sync.test.mjs'),"import test from 'node:test';test('owned workspace case',()=>{});");
+  await fs.writeFile(path.join(repo,'tests','spawn.test.mjs'),"import test from 'node:test';import {execFileSync} from 'node:child_process';test('owned spawn case',()=>{execFileSync('vr-missing-fixture-tool');});");
+  commit(repo);await fs.writeFile(path.join(outside,'case.mjs'),"import test from 'node:test';test('owned outside case',()=>{});");commit(outside);
+  for (const [run,status] of [[verificationRun,verificationStatus],[generatedRun,generatedStatus]] as const) {
+   const tool=run({cwd:workspace,typebox:{Type}}),lookup=status({cwd:workspace,typebox:{Type}});
+   const implicit=parse(await tool.execute('non-git',{files:['tests/sync.test.mjs']}));
+   expect(implicit.execution).toEqual({status:'not_run',reason:'not_a_repository'});expect(implicit.recommendedNextActions[0]).toContain('`repository`');expect(implicit.journalStorage.persisted).toBe(true);
+   const relative=parse(await tool.execute('relative',{repository:'lanes/repo',files:['tests/sync.test.mjs']}));
+   expect(relative.receipt.execution.status).toBe('passed');expect(relative.persisted).toBe(true);expect(relative.journalStorage.persisted).toBe(true);
+   const absolute=parse(await tool.execute('absolute',{repository:repo,files:['tests/sync.test.mjs']}));expect(absolute.receipt.repositoryDigest).toBe(relative.receipt.repositoryDigest);
+   const fresh=parse(await lookup.execute('lookup',{receiptId:relative.receipt.id,repository:'lanes/repo'}));expect(fresh.freshness).toBe('fresh');expect(fresh.receipt.id).toBe(relative.receipt.id);
+   const unscoped=parse(await lookup.execute('unscoped',{receiptId:relative.receipt.id}));expect(unscoped.execution).toEqual({status:'unavailable',reason:'not_a_repository'});expect(unscoped.warnings[0]).toBe('not_a_repository');expect(unscoped.journalStorage.persisted).toBe(true);
+   for (const [repository,reason] of [['lanes/repo/tests','invalid_repository'],['lanes/missing','invalid_repository'],['plain','not_a_repository'],[outside,'repository_outside_session_cwd'],['../outside','repository_outside_session_cwd']]) {
+    const rejected=parse(await tool.execute('rejected',{repository,files:['tests/sync.test.mjs']}));
+    expect(rejected.execution).toEqual({status:'not_run',reason});expect(rejected.journalStorage.persisted).toBe(true);expect(JSON.stringify(rejected)).not.toContain(owned);
+   }
+   expect(parse(await tool.execute('absolute-test',{repository:'lanes/repo',files:[path.join(repo,'tests','sync.test.mjs')]})).execution).toEqual({status:'not_run',reason:'invalid_test_path'});
+   expect(parse(await tool.execute('missing-test',{repository:'lanes/repo',files:['tests/none.test.mjs']})).execution).toEqual({status:'not_run',reason:'missing_test_file'});
+   const spawn=parse(await tool.execute('spawn',{repository:'lanes/repo',files:['tests/spawn.test.mjs']}));
+   expect(spawn.receipt.execution.status).toBe('failed');expect(spawn.receipt.execution.reason).toBe('missing_binary');expect(spawn.receipt.warnings).toEqual(['missing_binary:vr-missing-fixture-tool']);
+   expect(spawn.warnings).toContain('missing_binary');expect(spawn.recommendedNextActions[0]).toContain('vr-missing-fixture-tool');expect(spawn.persisted).toBe(true);expect(spawn.journalStorage.persisted).toBe(true);
+   const stored=parse(await lookup.execute('spawn-lookup',{receiptId:spawn.receipt.id,repository:repo}));expect(stored.receipt.warnings).toEqual(['missing_binary:vr-missing-fixture-tool']);expect(stored.warnings).toContain('missing_binary');
+  }
+  // The session repository stays reachable from a subdirectory, explicitly or by default.
+  const sub=path.join(repo,'tests');
+  expect(parse(await verificationRun({cwd:sub,typebox:{Type}}).execute('own-repo',{repository:'..',files:['tests/sync.test.mjs']})).receipt.execution.status).toBe('passed');
+  expect(parse(await verificationRun({cwd:sub,typebox:{Type}}).execute('default-repo',{files:['tests/sync.test.mjs']})).receipt.execution.status).toBe('passed');
+ } finally {if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
+},60000);
+
 test('post-execution repository loss preserves observations and journals the outcome',async()=>{
  const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'adapter-post-run-'))),root=path.join(owned,'repo'),home=path.join(owned,'home');
  await fs.mkdir(root);await fs.mkdir(home,{mode:0o700});const oldHome=process.env.HOME,oldProvider=process.env.JEV_ADVISOR_PROVIDER;

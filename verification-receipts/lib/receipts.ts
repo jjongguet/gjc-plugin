@@ -24,6 +24,32 @@ export async function actualRepository(cwd: string): Promise<string> {
  const { stdout } = await receiptExec('git', ['rev-parse', '--show-toplevel'], { cwd, env: receiptChildEnv(), timeout: 5000, maxBuffer: 8192 });
  return receiptFs.realpath(stdout.trim());
 }
+export const RECEIPT_REPOSITORY_REASONS = ['not_a_repository', 'invalid_repository', 'repository_outside_session_cwd'] as const;
+function receiptWithin(parent: string, child: string): boolean {
+ const rel = receiptPath.relative(parent, child);
+ return rel === '' || (rel !== '..' && !rel.startsWith(`..${receiptPath.sep}`) && !receiptPath.isAbsolute(rel));
+}
+// Without `repository` the session directory must sit inside a Git work tree. An explicit
+// `repository` (absolute or relative to the session directory) must be a work-tree root that is
+// the session's own repository or lies inside the session directory; nothing outside it is reachable.
+export async function resolveReceiptRepository(cwd: string, repository?: unknown): Promise<string> {
+ const fail = (reason: (typeof RECEIPT_REPOSITORY_REASONS)[number]): never => { throw new Error(reason); };
+ if (repository === undefined) {
+  try { return await actualRepository(cwd); } catch { return fail('not_a_repository'); }
+ }
+ if (typeof repository !== 'string' || !repository || repository.length > 4096 || repository.includes('\0')) return fail('invalid_repository');
+ let session = '', target = '';
+ try {
+  session = await receiptFs.realpath(cwd);
+  target = await receiptFs.realpath(receiptPath.resolve(cwd, repository));
+  if (!(await receiptFs.stat(target)).isDirectory()) throw new Error('not_directory');
+ } catch { return fail('invalid_repository'); }
+ let root = '';
+ try { root = await actualRepository(target); } catch { return fail('not_a_repository'); }
+ if (root !== target) return fail('invalid_repository');
+ if (!receiptWithin(session, root) && !receiptWithin(root, session)) return fail('repository_outside_session_cwd');
+ return root;
+}
 export async function repositoryDigest(root: string): Promise<string> { return receiptDigest(await receiptFs.realpath(root)); }
 function excludedReceiptPath(name: string): boolean {
  return name.split('/').some(p => ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage'].includes(p) || /^\.env/i.test(p) || /credentials|secret|cookie|private/i.test(p) || /\.(pem|key)$/i.test(p));
@@ -145,9 +171,24 @@ export function createReceipt(input: Omit<VerificationReceipt, 'schemaVersion' |
  const { toolCallId, ...rest } = input;
  return { ...rest, schemaVersion: 1, pluginVersion: '0.0.1', id: receiptUUID(), observedAt: new Date().toISOString(), toolCallDigest: receiptDigest(toolCallId), sessionId: null, advisoryOnly: true };
 }
-export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}) {
+const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
+ not_a_repository: 'The directory is not inside a Git work tree; pass `repository` with the root of a repository inside the session directory.',
+ invalid_repository: '`repository` must name an existing Git work-tree root, absolute or relative to the session directory.',
+ repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
+};
+// Rejections raised by validateTestFiles before any test runs.
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = []) {
  const warnings: string[] = [], recommendedNextActions: string[] = [];
- if (execution.status !== 'passed') { warnings.push('execution_not_passed'); recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.'); }
+ const missingBinaries = receiptWarnings.filter(w => w.startsWith('missing_binary:')).map(w => w.slice('missing_binary:'.length));
+ const reason = String(execution.reason);
+ if (execution.status !== 'passed') {
+  warnings.push('execution_not_passed');
+  if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
+  else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
+  else recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.');
+ }
  if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push('Run verification again against the current source.'); }
  if (assessment && (assessment.status !== 'scored' || Object.values(assessment.answers ?? {}).some(a => a.confidence === undefined || a.confidence < 0.8 || a.probabilities?.[a.choice] === undefined || Number(a.probabilities[a.choice]) < 0.8))) { warnings.push('adequacy_unknown'); recommendedNextActions.push('Inspect coverage and boundary evidence; no confident adequacy claim is available.'); }
  else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push('Inspect changed behavior and add relevant boundary tests.'); }

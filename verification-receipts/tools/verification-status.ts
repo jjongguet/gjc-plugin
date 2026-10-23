@@ -192,6 +192,7 @@ const resultsExecutionReasons = [
   'complete', 'origin_drift', 'missing_target', 'ambiguous_target', 'hidden_target', 'assertion_failed', 'unsupported_control',
   'runtime_error', 'missing_observations', 'output_overflow', 'malformed_observations', 'runner_exit', 'partial_observations',
   'missing_account', 'unsafe_lock', 'busy', 'lock_unavailable', 'runner_signal', 'missing_cli', 'runner_unavailable',
+  'missing_binary', 'not_a_repository', 'invalid_repository', 'repository_outside_session_cwd',
 ];
 const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
 const resultsAdviceReasons = ['invalid_task', 'unsupported_input', 'input_too_large', 'batch_limit', 'disabled', 'unconfigured', 'invalid_endpoint', 'rate_limited', 'budget_exceeded', 'already_pending', 'timeout', 'aborted', 'provider_error', 'invalid_response'];
@@ -850,6 +851,32 @@ export async function actualRepository(cwd: string): Promise<string> {
  const { stdout } = await receiptExec('git', ['rev-parse', '--show-toplevel'], { cwd, env: receiptChildEnv(), timeout: 5000, maxBuffer: 8192 });
  return receiptFs.realpath(stdout.trim());
 }
+export const RECEIPT_REPOSITORY_REASONS = ['not_a_repository', 'invalid_repository', 'repository_outside_session_cwd'] as const;
+function receiptWithin(parent: string, child: string): boolean {
+ const rel = receiptPath.relative(parent, child);
+ return rel === '' || (rel !== '..' && !rel.startsWith(`..${receiptPath.sep}`) && !receiptPath.isAbsolute(rel));
+}
+// Without `repository` the session directory must sit inside a Git work tree. An explicit
+// `repository` (absolute or relative to the session directory) must be a work-tree root that is
+// the session's own repository or lies inside the session directory; nothing outside it is reachable.
+export async function resolveReceiptRepository(cwd: string, repository?: unknown): Promise<string> {
+ const fail = (reason: (typeof RECEIPT_REPOSITORY_REASONS)[number]): never => { throw new Error(reason); };
+ if (repository === undefined) {
+  try { return await actualRepository(cwd); } catch { return fail('not_a_repository'); }
+ }
+ if (typeof repository !== 'string' || !repository || repository.length > 4096 || repository.includes('\0')) return fail('invalid_repository');
+ let session = '', target = '';
+ try {
+  session = await receiptFs.realpath(cwd);
+  target = await receiptFs.realpath(receiptPath.resolve(cwd, repository));
+  if (!(await receiptFs.stat(target)).isDirectory()) throw new Error('not_directory');
+ } catch { return fail('invalid_repository'); }
+ let root = '';
+ try { root = await actualRepository(target); } catch { return fail('not_a_repository'); }
+ if (root !== target) return fail('invalid_repository');
+ if (!receiptWithin(session, root) && !receiptWithin(root, session)) return fail('repository_outside_session_cwd');
+ return root;
+}
 export async function repositoryDigest(root: string): Promise<string> { return receiptDigest(await receiptFs.realpath(root)); }
 function excludedReceiptPath(name: string): boolean {
  return name.split('/').some(p => ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage'].includes(p) || /^\.env/i.test(p) || /credentials|secret|cookie|private/i.test(p) || /\.(pem|key)$/i.test(p));
@@ -971,9 +998,24 @@ export function createReceipt(input: Omit<VerificationReceipt, 'schemaVersion' |
  const { toolCallId, ...rest } = input;
  return { ...rest, schemaVersion: 1, pluginVersion: '0.0.1', id: receiptUUID(), observedAt: new Date().toISOString(), toolCallDigest: receiptDigest(toolCallId), sessionId: null, advisoryOnly: true };
 }
-export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}) {
+const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
+ not_a_repository: 'The directory is not inside a Git work tree; pass `repository` with the root of a repository inside the session directory.',
+ invalid_repository: '`repository` must name an existing Git work-tree root, absolute or relative to the session directory.',
+ repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
+};
+// Rejections raised by validateTestFiles before any test runs.
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = []) {
  const warnings: string[] = [], recommendedNextActions: string[] = [];
- if (execution.status !== 'passed') { warnings.push('execution_not_passed'); recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.'); }
+ const missingBinaries = receiptWarnings.filter(w => w.startsWith('missing_binary:')).map(w => w.slice('missing_binary:'.length));
+ const reason = String(execution.reason);
+ if (execution.status !== 'passed') {
+  warnings.push('execution_not_passed');
+  if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
+  else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
+  else recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.');
+ }
  if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push('Run verification again against the current source.'); }
  if (assessment && (assessment.status !== 'scored' || Object.values(assessment.answers ?? {}).some(a => a.confidence === undefined || a.confidence < 0.8 || a.probabilities?.[a.choice] === undefined || Number(a.probabilities[a.choice]) < 0.8))) { warnings.push('adequacy_unknown'); recommendedNextActions.push('Inspect coverage and boundary evidence; no confident adequacy claim is available.'); }
  else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push('Inspect changed behavior and add relevant boundary tests.'); }
@@ -1304,21 +1346,23 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
  return {
   name:'verification_status',label:'Verification Status',
   description:'Read one immutable repository-scoped local verification receipt and recompute source freshness. Historical execution is never rerun. Automatically attempt Jev adequacy on every lookup, including stale or missing evidence, at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Optional assessment supplies non-sensitive context, not an opt-in switch. Only selected summaries/notes and bounded status/counts/freshness leave; no logs, diffs, source, test names, paths, keys or accounts. Missing context, failures and stale evidence cannot establish sufficient current verification. Warning-only; no automatic repair or blocking.',
-  parameters:T.Object({receiptId:T.String(),assessment:T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))},{additionalProperties:false}),
-  async execute(_toolCallId:string,params:{receiptId:string;assessment?:unknown}) {
+  parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'The repository the receipt was recorded for, as passed to verification_run; defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))},{additionalProperties:false}),
+  async execute(_toolCallId:string,params:{receiptId:string;repository?:string;assessment?:unknown}) {
    const text=async(v:Record<string,any>)=>({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','status',v))}]});
    try {
-    if (!params || Object.keys(params).some(k=>!['receiptId','assessment'].includes(k))) throw new Error('invalid_input');
-    const root=await actualRepository(pi.cwd); const receipt=await loadReceipt(root,params.receiptId);
+    if (!params || Object.keys(params).some(k=>!['receiptId','repository','assessment'].includes(k))) throw new Error('invalid_input');
+    const root=await resolveReceiptRepository(pi.cwd,params.repository); const receipt=await loadReceipt(root,params.receiptId);
     if (!receipt || receipt.plugin !== 'verification-receipts') throw new Error('receipt_unavailable');
     const freshness=await currentReceiptFreshness(root,receipt);
     const assessment=await assessAdequacy(params.assessment,{status:String(receipt.execution.status),counts:receipt.execution.counts,freshness,caseIds:['run']});
-    return text({receipt,freshness,assessment,...staticReceiptGuidance(receipt.execution,freshness,assessment)});
-   } catch {
-    const execution={status:'unavailable',reason:'receipt_unavailable'};
+    return text({receipt,freshness,assessment,...staticReceiptGuidance(receipt.execution,freshness,assessment,receipt.warnings)});
+   } catch (error) {
+    const cause=error instanceof Error ? error.message : '';
+    const reason=(RECEIPT_REPOSITORY_REASONS as readonly string[]).includes(cause) ? cause : 'receipt_unavailable';
+    const execution={status:'unavailable',reason};
     const assessment=await assessAdequacy(undefined,{status:execution.status,counts:null,freshness:'unavailable'});
     const guidance=staticReceiptGuidance(execution,'unavailable',assessment);
-    return text({execution,freshness:'unavailable',assessment,...guidance,warnings:['receipt_unavailable',...guidance.warnings]});
+    return text({execution,freshness:'unavailable',assessment,...guidance,warnings:[reason,...guidance.warnings]});
    }
   }
  };

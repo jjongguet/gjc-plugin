@@ -192,6 +192,7 @@ const resultsExecutionReasons = [
   'complete', 'origin_drift', 'missing_target', 'ambiguous_target', 'hidden_target', 'assertion_failed', 'unsupported_control',
   'runtime_error', 'missing_observations', 'output_overflow', 'malformed_observations', 'runner_exit', 'partial_observations',
   'missing_account', 'unsafe_lock', 'busy', 'lock_unavailable', 'runner_signal', 'missing_cli', 'runner_unavailable',
+  'missing_binary', 'not_a_repository', 'invalid_repository', 'repository_outside_session_cwd',
 ];
 const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
 const resultsAdviceReasons = ['invalid_task', 'unsupported_input', 'input_too_large', 'batch_limit', 'disabled', 'unconfigured', 'invalid_endpoint', 'rate_limited', 'budget_exceeded', 'already_pending', 'timeout', 'aborted', 'provider_error', 'invalid_response'];
@@ -850,6 +851,32 @@ export async function actualRepository(cwd: string): Promise<string> {
  const { stdout } = await receiptExec('git', ['rev-parse', '--show-toplevel'], { cwd, env: receiptChildEnv(), timeout: 5000, maxBuffer: 8192 });
  return receiptFs.realpath(stdout.trim());
 }
+export const RECEIPT_REPOSITORY_REASONS = ['not_a_repository', 'invalid_repository', 'repository_outside_session_cwd'] as const;
+function receiptWithin(parent: string, child: string): boolean {
+ const rel = receiptPath.relative(parent, child);
+ return rel === '' || (rel !== '..' && !rel.startsWith(`..${receiptPath.sep}`) && !receiptPath.isAbsolute(rel));
+}
+// Without `repository` the session directory must sit inside a Git work tree. An explicit
+// `repository` (absolute or relative to the session directory) must be a work-tree root that is
+// the session's own repository or lies inside the session directory; nothing outside it is reachable.
+export async function resolveReceiptRepository(cwd: string, repository?: unknown): Promise<string> {
+ const fail = (reason: (typeof RECEIPT_REPOSITORY_REASONS)[number]): never => { throw new Error(reason); };
+ if (repository === undefined) {
+  try { return await actualRepository(cwd); } catch { return fail('not_a_repository'); }
+ }
+ if (typeof repository !== 'string' || !repository || repository.length > 4096 || repository.includes('\0')) return fail('invalid_repository');
+ let session = '', target = '';
+ try {
+  session = await receiptFs.realpath(cwd);
+  target = await receiptFs.realpath(receiptPath.resolve(cwd, repository));
+  if (!(await receiptFs.stat(target)).isDirectory()) throw new Error('not_directory');
+ } catch { return fail('invalid_repository'); }
+ let root = '';
+ try { root = await actualRepository(target); } catch { return fail('not_a_repository'); }
+ if (root !== target) return fail('invalid_repository');
+ if (!receiptWithin(session, root) && !receiptWithin(root, session)) return fail('repository_outside_session_cwd');
+ return root;
+}
 export async function repositoryDigest(root: string): Promise<string> { return receiptDigest(await receiptFs.realpath(root)); }
 function excludedReceiptPath(name: string): boolean {
  return name.split('/').some(p => ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage'].includes(p) || /^\.env/i.test(p) || /credentials|secret|cookie|private/i.test(p) || /\.(pem|key)$/i.test(p));
@@ -971,9 +998,24 @@ export function createReceipt(input: Omit<VerificationReceipt, 'schemaVersion' |
  const { toolCallId, ...rest } = input;
  return { ...rest, schemaVersion: 1, pluginVersion: '0.0.1', id: receiptUUID(), observedAt: new Date().toISOString(), toolCallDigest: receiptDigest(toolCallId), sessionId: null, advisoryOnly: true };
 }
-export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}) {
+const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
+ not_a_repository: 'The directory is not inside a Git work tree; pass `repository` with the root of a repository inside the session directory.',
+ invalid_repository: '`repository` must name an existing Git work-tree root, absolute or relative to the session directory.',
+ repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
+};
+// Rejections raised by validateTestFiles before any test runs.
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = []) {
  const warnings: string[] = [], recommendedNextActions: string[] = [];
- if (execution.status !== 'passed') { warnings.push('execution_not_passed'); recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.'); }
+ const missingBinaries = receiptWarnings.filter(w => w.startsWith('missing_binary:')).map(w => w.slice('missing_binary:'.length));
+ const reason = String(execution.reason);
+ if (execution.status !== 'passed') {
+  warnings.push('execution_not_passed');
+  if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
+  else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
+  else recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.');
+ }
  if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push('Run verification again against the current source.'); }
  if (assessment && (assessment.status !== 'scored' || Object.values(assessment.answers ?? {}).some(a => a.confidence === undefined || a.confidence < 0.8 || a.probabilities?.[a.choice] === undefined || Number(a.probabilities[a.choice]) < 0.8))) { warnings.push('adequacy_unknown'); recommendedNextActions.push('Inspect coverage and boundary evidence; no confident adequacy claim is available.'); }
  else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push('Inspect changed behavior and add relevant boundary tests.'); }
@@ -1146,7 +1188,7 @@ export async function currentReceiptFreshness(root: string, receipt: Verificatio
 }
 
 import { spawn as vrNodeSpawn } from 'node:child_process';
-import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove } from 'node:fs';
+import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove, statSync as vrNodeStat, accessSync as vrNodeAccess, constants as vrNodeConstants } from 'node:fs';
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
@@ -1159,6 +1201,9 @@ export type NodeExecution = {
   runnerVersion: string | null;
   counts: null | { tests: number; suites: number; topLevel: number; passed: number; failed: number; skipped: number; todo: number; cancelled: number };
 };
+// Commands a failing test could not start because they are absent from the runner PATH. Kept out of
+// the execution record, which must stay receipt-shaped, and out of every outbound payload.
+export type NodeRunDiagnostics = { missingBinaries: string[] };
 
 export function validateTestFiles(root: string, files: string[]): string[] {
   const reject = (code: string): never => { throw new Error(code); };
@@ -1190,14 +1235,32 @@ export function validateTestFiles(root: string, files: string[]): string[] {
   return result;
 }
 
-// This reporter forwards only the final native cumulative summary, never names or diagnostics.
+// This reporter forwards only the final native cumulative summary plus the bare command names of
+// spawn ENOENT failures, never test names, messages or other diagnostics.
 const vrNodeReporterSource = `
 export default async function* (source) {
-  let summary = null, bytes = 0, overflow = false, actualPassed = false;
+  let summary = null, bytes = 0, overflow = false, actualPassed = false, failures = 0;
+  const missing = new Map();
+  const commandName = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/;
+  const missingCommand = error => {
+    for (let e = error, depth = 0; e !== null && typeof e === 'object' && depth < 4; e = e.cause, depth++) {
+      if (e.code === 'ENOENT' && typeof e.syscall === 'string' && /^spawn(?:Sync)? /.test(e.syscall) && typeof e.path === 'string' && commandName.test(e.path)) return e.path;
+    }
+    return null;
+  };
   for await (const event of source) {
     if (event.type === 'test:stdout' || event.type === 'test:stderr' || event.type === 'test:diagnostic') {
       bytes += Buffer.byteLength(String(event.data?.message ?? ''));
       if (bytes > 1048576) { overflow = true; yield 'VR_OVERFLOW\\n'; }
+    }
+    if (event.type === 'test:fail') {
+      const error = event.data?.details?.error;
+      const failureType = error?.failureType;
+      if (failureType !== 'subtestsFailed' && failureType !== 'cancelledByParent') {
+        failures++;
+        const name = missingCommand(error);
+        if (name !== null && (missing.has(name) || missing.size < 8)) missing.set(name, (missing.get(name) ?? 0) + 1);
+      }
     }
     if (event.type === 'test:summary' && event.data?.file !== undefined && event.data.counts?.tests > 0 && event.data.counts?.passed > 0) actualPassed = true;
     if (event.type === 'test:summary' && event.data?.file === undefined) {
@@ -1206,18 +1269,33 @@ export default async function* (source) {
       summary = { success: d.success, counts: d.counts };
     }
   }
-  yield 'VR_FRAME_' + NONCE + ':' + JSON.stringify({ summary, overflow, actualPassed }) + '\\n';
+  yield 'VR_FRAME_' + NONCE + ':' + JSON.stringify({ summary, overflow, actualPassed, failures, missing: [...missing] }) + '\\n';
 }
 `;
 
+// Only absolute PATH entries reach tests: a relative entry would resolve inside the repository.
+function vrNodeSearchPath(): string[] {
+  const directories: string[] = [];
+  for (const directory of (process.env.PATH ?? '').split(vrNodeDelimiter)) if (directory && vrNodeAbsolute(directory) && !directories.includes(directory)) directories.push(directory);
+  return directories;
+}
+function vrNodeOnPath(directories: string[], name: string): boolean {
+  for (const directory of directories) {
+    try { const candidate = vrNodeJoin(directory, name); vrNodeAccess(candidate, vrNodeConstants.X_OK); if (vrNodeStat(candidate).isFile()) return true; } catch { /* Try the next directory. */ }
+  }
+  return false;
+}
+
 type VrNodeProcessResult = { code: number | null; signal: string | null; output: string; issue: string | null };
-async function vrNodeProcess(executable: string, args: string[], cwd: string, timeout: number, abort?: AbortSignal): Promise<VrNodeProcessResult> {
+async function vrNodeProcess(executable: string, args: string[], cwd: string, searchPath: string, timeout: number, abort?: AbortSignal): Promise<VrNodeProcessResult> {
   if (abort?.aborted) return { code: null, signal: null, output: '', issue: 'cancelled' };
   return new Promise(resolve => {
     let output = '', bytes = 0, issue: string | null = null, settled = false;
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     let reapTimer: ReturnType<typeof setTimeout> | undefined;
-    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC' }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // PATH lets tests start the same programs a normal shell finds; HOME, credentials and every
+    // other inherited variable stay out of the test process.
+    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     const kill = (sig: NodeJS.Signals) => {
       try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig); else child.kill(sig); }
       catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') issue = 'cleanup_unresolved'; }
@@ -1270,22 +1348,24 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, ti
   });
 }
 
-export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal): Promise<NodeExecution> {
+export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal, diagnostics?: NodeRunDiagnostics): Promise<NodeExecution> {
   const receipt: NodeExecution = { status: 'not_run', reason: 'not_run', exitCode: null, signal: null, runnerVersion: null, counts: null };
+  if (diagnostics) diagnostics.missingBinaries = [];
   let paths: string[];
   try { paths = validateTestFiles(root, files); }
   catch (error) { receipt.reason = error instanceof Error ? error.message : 'invalid_test_path'; return receipt; }
   if (!Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 120000) return { ...receipt, reason: 'invalid_timeout' };
   if (signal?.aborted) return { ...receipt, reason: 'cancelled' };
   if (process.platform === 'win32') return { ...receipt, status: 'unavailable', reason: 'process_groups_unavailable' };
+  const searchPath = vrNodeSearchPath();
   let executable: string | null = null;
-  for (const directory of (process.env.PATH ?? '').split(vrNodeDelimiter)) {
-    if (!directory || !vrNodeAbsolute(directory)) continue;
+  for (const directory of searchPath) {
     try { const candidate = vrNodeRealpath(vrNodeJoin(directory, 'node')); if (vrNodeLstat(candidate).isFile()) { executable = candidate; break; } } catch { /* Try the next explicit PATH directory. */ }
   }
   if (!executable) return { ...receipt, status: 'unavailable', reason: 'node_unavailable' };
+  const childPath = searchPath.join(vrNodeDelimiter);
   const base = vrNodeRealpath(root);
-  const probe = await vrNodeProcess(executable, ['--version'], base, Math.min(timeoutMs, 5000), signal);
+  const probe = await vrNodeProcess(executable, ['--version'], base, childPath, Math.min(timeoutMs, 5000), signal);
   const version = probe.output.trim();
   if (probe.issue || probe.code !== 0 || !/^v\d+\.\d+\.\d+$/.test(version)) return { ...receipt, status: 'unavailable', reason: probe.issue ?? 'invalid_node_version' };
   receipt.runnerVersion = version;
@@ -1296,7 +1376,7 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
     const reporter = vrNodeJoin(directory, 'reporter.mjs');
     const nonce = vrNodeRandom(24).toString('hex');
     vrNodeWrite(reporter, `const NONCE = ${JSON.stringify(nonce)};\n${vrNodeReporterSource}`, { mode: 0o600, flag: 'wx' });
-    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, timeoutMs, signal);
+    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, childPath, timeoutMs, signal);
     receipt.exitCode = execution.code; receipt.signal = execution.signal;
     receipt.status = 'incomplete'; receipt.reason = execution.issue ?? 'missing_summary';
     if (!execution.issue) {
@@ -1308,10 +1388,19 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
           const frame = JSON.parse(frames[0].slice(prefix.length));
           const counts = frame.summary?.counts;
           const keys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'] as const;
+          const bounded = (value: unknown, min: number) => Number.isSafeInteger(value) && Number(value) >= min && Number(value) <= 10000;
+          const missing = frame.missing;
           if (frame.overflow || typeof frame.actualPassed !== 'boolean' || typeof frame.summary?.success !== 'boolean' || !counts || !keys.every(key => Number.isSafeInteger(counts[key]) && counts[key] >= 0 && counts[key] <= 10000)) throw new Error('invalid');
+          if (!bounded(frame.failures, 0) || !Array.isArray(missing) || missing.length > 8 || !missing.every(entry => Array.isArray(entry) && entry.length === 2 && typeof entry[0] === 'string' && /^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$/.test(entry[0]) && bounded(entry[1], 1)) || new Set(missing.map(entry => entry[0])).size !== missing.length) throw new Error('invalid');
           receipt.counts = Object.fromEntries(keys.map(key => [key, counts[key]])) as NonNullable<NodeExecution['counts']>;
           if (execution.signal || execution.code === null) receipt.reason = 'runner_crash';
-          else if (!frame.summary.success || counts.failed > 0 || counts.cancelled > 0 || execution.code !== 0) { receipt.status = 'failed'; receipt.reason = 'native_failure'; }
+          else if (!frame.summary.success || counts.failed > 0 || counts.cancelled > 0 || execution.code !== 0) {
+            // ENOENT also covers a missing spawn cwd, so only names the runner PATH cannot resolve count.
+            const absent = (missing as [string, number][]).filter(([name]) => !vrNodeOnPath(searchPath, name));
+            const attributed = absent.reduce((total, [, count]) => total + count, 0);
+            if (diagnostics) diagnostics.missingBinaries = absent.map(([name]) => name);
+            receipt.status = 'failed'; receipt.reason = attributed > 0 && attributed === frame.failures ? 'missing_binary' : 'native_failure';
+          }
           else if (!frame.actualPassed || counts.tests === 0 || counts.passed === 0) { receipt.status = 'no_tests'; receipt.reason = 'no_actual_passes'; }
           else { receipt.status = 'passed'; receipt.reason = 'native_success'; }
         } catch { receipt.reason = 'invalid_summary_frame'; }
@@ -1479,33 +1568,40 @@ export async function finalizeVerificationOutcome(plugin: 'verification-receipts
 }
 
 
+// Rejections that name their cause instead of the generic invalid_or_unavailable_input.
+const RUN_INPUT_REASONS: readonly string[] = [...RECEIPT_REPOSITORY_REASONS, ...RECEIPT_TEST_PATH_REASONS];
+
 export default function verificationRun(pi: {cwd: string; typebox: {Type: any}}) {
  const T = pi.typebox.Type;
  return {
   name: 'verification_run', label: 'Verification Run',
-  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
+  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
   parameters: T.Object({
    files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs test files; no globs, symlinks, custom flags or loaders.'}),
+   repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
    timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
    assessment: T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))
   }, {additionalProperties:false}),
-  async execute(toolCallId: string, params: {files:string[];timeoutMs?:number;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
+  async execute(toolCallId: string, params: {files:string[];repository?:string;timeoutMs?:number;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
    const started = performance.now();
    let execution: Record<string, any> = {status:'not_run',reason:'invalid_or_unavailable_input'};
    const text = async (value: Record<string, any>) => ({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','run',value))}]});
    try {
-    if (!params || Object.keys(params).some(k => !['files','timeoutMs','assessment'].includes(k)) || (params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000))) throw new Error('invalid_input');
-    const root = await actualRepository(pi.cwd);
+    if (!params || Object.keys(params).some(k => !['files','repository','timeoutMs','assessment'].includes(k)) || (params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000))) throw new Error('invalid_input');
+    const root = await resolveReceiptRepository(pi.cwd, params.repository);
     await validateTestFiles(root, params.files);
     const specDigest = specFingerprint({runner:'node:test',files:params.files,timeoutMs:params.timeoutMs ?? 30000});
     const before = await fingerprintSource(root,specDigest,params.files);
-    execution = await runNodeTests(root,params.files,params.timeoutMs ?? 30000,signal);
+    const diagnostics = {missingBinaries: [] as string[]};
+    execution = await runNodeTests(root,params.files,params.timeoutMs ?? 30000,signal,diagnostics);
     const after = await fingerprintSource(root,specDigest,params.files); const freshness = freshnessFor(before,after);
-    const receipt = createReceipt({plugin:'verification-receipts',toolCallId,repositoryDigest:await repositoryDigest(root),durationMs:Math.round(performance.now()-started),specDigest,before,after,freshness,execution,warnings:[],limitations:['Native counts are not assertion counts or coverage proof.','Excluded credential and cache paths are not freshness-covered.','Local test code is not sandboxed; timestamps are descriptive.']});
+    const receipt = createReceipt({plugin:'verification-receipts',toolCallId,repositoryDigest:await repositoryDigest(root),durationMs:Math.round(performance.now()-started),specDigest,before,after,freshness,execution,warnings:diagnostics.missingBinaries.map(name => `missing_binary:${name}`),limitations:['Native counts are not assertion counts or coverage proof.','Excluded credential and cache paths are not freshness-covered.','Local test code is not sandboxed; timestamps are descriptive.']});
     const storage = await persistReceipt(receipt,undefined,params.files);
     const assessment = await assessAdequacy(params.assessment,{status:execution.status,counts:execution.counts,freshness,caseIds:['run']});
-    return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment)});
-   } catch {
+    return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment,receipt.warnings)});
+   } catch (error) {
+    const reason = error instanceof Error ? error.message : '';
+    if (execution.status === 'not_run' && RUN_INPUT_REASONS.includes(reason)) execution = {status:'not_run',reason};
     const assessment=await assessAdequacy(undefined,{status:execution.status,counts:execution.counts ?? null,freshness:'unavailable'});
     return text({execution,assessment,...staticReceiptGuidance(execution,'unavailable',assessment)});
    }

@@ -1,7 +1,7 @@
 import { describe, test, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync, rmSync, symlinkSync, mkdirSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { runNodeTests, validateTestFiles, type NodeExecution } from '../lib/runner';
 
 async function withRunnerFixture(sources: Record<string, string>, run: (root: string) => Promise<void> | void) {
@@ -12,6 +12,20 @@ async function withRunnerFixture(sources: Record<string, string>, run: (root: st
   } finally { rmSync(root, { recursive: true, force: true }); }
 }
 const passSource = "const { test } = require('node:test'); test('owned pass', () => {});";
+const spawnSource = (command: string, options = '') => `const { test } = require('node:test'); const { execFileSync } = require('node:child_process'); test('owned spawn', () => { execFileSync(${JSON.stringify(command)}, [], { stdio: 'ignore'${options} }); });`;
+// Runs with an extra PATH directory holding an owned fake executable, restoring PATH afterwards.
+async function withToolOnPath(entry: (bin: string) => string, run: (bin: string) => Promise<void>) {
+  const bin = realpathSync(mkdtempSync(join(tmpdir(), 'verification-runner-bin-')));
+  const previous = process.env.PATH;
+  try {
+    writeFileSync(join(bin, 'vr-fixture-tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    process.env.PATH = `${entry(bin)}${delimiter}${previous ?? ''}`;
+    await run(bin);
+  } finally {
+    if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
 function expectNativeRunner(result: NodeExecution) {
   expect(result.runnerVersion).toMatch(/^v(?:2[2-9]|[3-9]\d|\d{3,})\./);
   expect(result.reason).not.toBe('unsupported_node_version');
@@ -80,10 +94,72 @@ describe('native Node verification runner', () => {
   });
 
   test('strips credentials and runtime injection environment', async () => {
-    await withRunnerFixture({ 'env.cjs': "const { test } = require('node:test'); const assert = require('node:assert/strict'); test('owned environment', () => { assert.equal(process.env.OPENROUTER_API_KEY, undefined); assert.equal(process.env.NODE_OPTIONS, undefined); assert.equal(process.env.NODE_PATH, undefined); assert.equal(process.env.AWS_SECRET_ACCESS_KEY, undefined); });" }, async root => {
+    await withRunnerFixture({ 'env.cjs': "const { test } = require('node:test'); const assert = require('node:assert/strict'); test('owned environment', () => { assert.equal(process.env.OPENROUTER_API_KEY, undefined); assert.equal(process.env.NODE_OPTIONS, undefined); assert.equal(process.env.NODE_PATH, undefined); assert.equal(process.env.AWS_SECRET_ACCESS_KEY, undefined); assert.equal(process.env.HOME, undefined); assert.deepEqual(Object.keys(process.env).filter(key => !['LANG', 'TZ', 'PATH', '__CF_USER_TEXT_ENCODING'].includes(key) && !key.startsWith('NODE_TEST_')), []); });" }, async root => {
+      // node:test adds NODE_TEST_* to its own children and macOS injects __CF_USER_TEXT_ENCODING into
+      // every process; nothing else may reach the test, HOME included.
       // Fixture checks inherited variables are absent without creating credentials.
       const result = await runNodeTests(root, ['env.cjs']);
       expect(result.status).toBe('passed');
+    });
+  });
+
+  test('tests start programs from the host PATH', async () => {
+    await withToolOnPath(bin => bin, async () => {
+      await withRunnerFixture({ 'spawn.cjs': spawnSource('vr-fixture-tool') }, async root => {
+        const diagnostics = { missingBinaries: ['stale'] };
+        const result = await runNodeTests(root, ['spawn.cjs'], 30000, undefined, diagnostics);
+        expectNativeRunner(result);
+        expect(result.status).toBe('passed');
+        expect(diagnostics.missingBinaries).toEqual([]);
+      });
+    });
+  });
+
+  test('a failure caused only by a program missing from PATH is named missing_binary', async () => {
+    await withRunnerFixture({ 'missing.cjs': spawnSource('vr-missing-fixture-tool'), 'nested.cjs': "const { test } = require('node:test'); const { execFileSync } = require('node:child_process'); test('owned parent', async t => { await t.test('owned child', () => { execFileSync('vr-missing-fixture-tool'); }); });" }, async root => {
+      const diagnostics = { missingBinaries: [] as string[] };
+      const result = await runNodeTests(root, ['missing.cjs', 'nested.cjs'], 30000, undefined, diagnostics);
+      expectNativeRunner(result);
+      expect(result.status).toBe('failed');
+      expect(result.reason).toBe('missing_binary');
+      expect(Object.keys(result).sort()).toEqual(['counts', 'exitCode', 'reason', 'runnerVersion', 'signal', 'status']);
+      expect(diagnostics.missingBinaries).toEqual(['vr-missing-fixture-tool']);
+      expect(JSON.stringify({ result, diagnostics })).not.toContain('owned');
+    });
+  });
+
+  test('missing programs never hide other failures or misattribute present ones', async () => {
+    await withRunnerFixture({
+      'missing.cjs': spawnSource('vr-missing-fixture-tool'),
+      'assert.cjs': "const { test } = require('node:test'); const assert = require('node:assert/strict'); test('owned assertion', () => { assert.equal(1, 2); });",
+      // ENOENT for a missing spawn cwd names a program that is on PATH: not a missing binary.
+      'cwd.cjs': spawnSource('node', ", cwd: '/nonexistent/verification-runner-cwd'"),
+    }, async root => {
+      const mixedDiagnostics = { missingBinaries: [] as string[] };
+      const mixed = await runNodeTests(root, ['missing.cjs', 'assert.cjs'], 30000, undefined, mixedDiagnostics);
+      expect(mixed.status).toBe('failed');
+      expect(mixed.reason).toBe('native_failure');
+      expect(mixedDiagnostics.missingBinaries).toEqual(['vr-missing-fixture-tool']);
+      const cwdDiagnostics = { missingBinaries: [] as string[] };
+      const cwd = await runNodeTests(root, ['cwd.cjs'], 30000, undefined, cwdDiagnostics);
+      expect(cwd.status).toBe('failed');
+      expect(cwd.reason).toBe('native_failure');
+      expect(cwdDiagnostics.missingBinaries).toEqual([]);
+    });
+  });
+
+  test('relative PATH entries never reach tests', async () => {
+    await withRunnerFixture({ 'relative.cjs': spawnSource('vr-fixture-tool') }, async root => {
+      // The relative entry resolves inside the fixture repository only if the runner forwarded it.
+      mkdirSync(join(root, 'rel-bin'));
+      writeFileSync(join(root, 'rel-bin', 'vr-fixture-tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      await withToolOnPath(() => 'rel-bin', async () => {
+        const diagnostics = { missingBinaries: [] as string[] };
+        const result = await runNodeTests(root, ['relative.cjs'], 30000, undefined, diagnostics);
+        expect(result.status).toBe('failed');
+        expect(result.reason).toBe('missing_binary');
+        expect(diagnostics.missingBinaries).toEqual(['vr-fixture-tool']);
+      });
     });
   });
 
