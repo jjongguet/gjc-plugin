@@ -248,6 +248,46 @@ test('a lock generation replaced during the bounded wait is contention, not subs
   expect((await records(journal)).length).toBe(1);
 });
 
+test('a lock released while the bounded wait probes it is contention, then acquired', async () => {
+  const { baseDir, journal } = await fixture();
+  await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+  const lockPath = path.join(journal, '.append.lock');
+  await fs.writeFile(lockPath, 'RELEASING_HOLDER', { mode: 0o600 });
+  const original = fs.open;
+  let released = false;
+  const probe = spyOn(fs, 'open').mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+    const flags = args[1];
+    const handle = await original(...args);
+    if (!released && String(args[0]) === lockPath && typeof flags === 'number' && (flags & fsConstants.O_WRONLY) === 0) {
+      // The holder unlinks its lock after the probe opened it: the open handle
+      // now reports a link count of zero.
+      released = true;
+      await fs.unlink(lockPath);
+    }
+    return handle;
+  }) as typeof fs.open);
+  let result;
+  try { result = await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 50 }); }
+  finally { probe.mockRestore(); }
+  expect(released).toBe(true);
+  expect(result.persisted).toBe(true);
+  expect(result.reason).toBe('stored');
+  expect((await records(journal)).length).toBe(2);
+  expect(await missing(lockPath)).toBe(true);
+});
+
+test('a hard-linked lock still fails closed during the bounded wait', async () => {
+  const { baseDir, journal } = await fixture();
+  await appendPluginOutcome('verification-receipts', outcome, { baseDir });
+  const lockPath = path.join(journal, '.append.lock');
+  await fs.writeFile(lockPath, 'PLANTED', { mode: 0o600 });
+  const extra = path.join(path.dirname(baseDir), 'planted-link');
+  await fs.link(lockPath, extra);
+  expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 10 })).toEqual({ persisted: false, reason: 'unsafe_path' });
+  expect(await fs.readFile(lockPath, 'utf8')).toBe('PLANTED');
+  expect((await records(journal)).length).toBe(1);
+});
+
 test('record and dependency resource limits reject without allocating journal files', async () => {
   const { baseDir } = await fixture();
   expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, maxRecordBytes: 1 })).toEqual({ persisted: false, reason: 'record_too_large' });

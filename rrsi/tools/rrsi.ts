@@ -253,8 +253,9 @@ export function pluginResultsRoot(): string {
 }
 type ResultsDirectory = { path: string; info: ResultsStats };
 function resultsSame(a: ResultsStats, b: ResultsStats): boolean { return a.dev === b.dev && a.ino === b.ino && a.uid === b.uid && a.mode === b.mode; }
-function resultsPrivateFile(info: ResultsStats): void {
-  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o600 || info.nlink !== 1) resultsFail('unsafe_path');
+function resultsPrivateFile(info: ResultsStats, allowReleased = false): void {
+  const links = info.nlink === 1 || (allowReleased && info.nlink === 0);
+  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o7777) !== 0o600 || !links) resultsFail('unsafe_path');
 }
 async function resultsCheckFile(file: string, expected: ResultsStats): Promise<ResultsStats> {
   const current = await resultsFs.lstat(file);
@@ -324,12 +325,13 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
 // between observations is ordinary contention — the holder released and the next
 // waiter recreated the lock — so this probe never re-validates the live path:
 // it adopts and mutates nothing, and identity is enforced strictly only once this
-// process actually holds the lock. Unsafe plants (symlink, foreign owner, wrong
-// mode, extra links) still fail closed before any generation consideration.
+// process actually holds the lock. A link count of zero is the same contention:
+// the holder unlinked its lock while this probe observed it. Unsafe plants
+// (symlink, foreign owner, wrong mode, extra links) still fail closed.
 async function resultsProbeBusyLock(file: string): Promise<void> {
-  resultsPrivateFile(await resultsFs.lstat(file));
+  resultsPrivateFile(await resultsFs.lstat(file), true);
   const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
-  try { resultsPrivateFile(await handle.stat()); }
+  try { resultsPrivateFile(await handle.stat(), true); }
   finally { await handle.close(); }
 }
 export async function readPrivateResultFile(file: string, maxBytes: number): Promise<Buffer> {
