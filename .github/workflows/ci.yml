@@ -11,18 +11,19 @@ jobs:
   build-and-test:
     runs-on: arc-ci
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
 
       # verification-receipts resolves `node` from absolute PATH entries; the
       # ARC runner image has bun but no Node. Pin it so the native runner tests
       # can spawn the same runtime the plugin targets (>= 22).
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "24"
 
-      - uses: oven-sh/setup-bun@v2
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
           bun-version: "1.4.0"
+          no-cache: true
 
       # AGENTS.md is gitignored (local-only). On hosted runners the
       # workspace-standard validator guard is planned out (no workspace tree

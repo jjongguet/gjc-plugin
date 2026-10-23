@@ -4,7 +4,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -206,6 +206,33 @@ test("policy:check rejects every unsafe change to the closer or CI triggers", ()
 		["owner exemption dropped", { edit: text => text.replace(" &&\n      github.event.pull_request.author_association != 'OWNER'", "").replace("github.event.pull_request.author_association != 'OWNER' &&\n      ", "") }, /must exempt OWNER/],
 		["pull-request content interpolated", { edit: text => text.replace('"$PR_NUMBER" --comment', '"$PR_NUMBER" --comment "${{ github.event.pull_request.title }}"') }, /must not interpolate/],
 		["pull_request trigger in CI", { file: "ci.yml", edit: text => text.replace("on:\n  push:", "on:\n  pull_request:\n  push:") }, /ci\.yml: must not trigger on pull_request/],
+	];
+	const closerExists = existsSync(join(REPO, ".github", "workflows", "close-external-prs.yml"));
+	for (const [name, mutate, pattern] of mutations) {
+		if (!closerExists && (mutate.file ?? "close-external-prs.yml") === "close-external-prs.yml") continue;
+		const root = policyFixture(mutate);
+		try {
+			const result = run("check-pr-policy.mjs", root);
+			assert.equal(result.status, 1, `${name}: ${result.out}`);
+			assert.match(result.out, pattern, name);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}
+});
+
+test("policy:check rejects unsafe changes to the owner-dispatched pull-request lane", () => {
+	const lane = "pr-validate.yml";
+	const mutations = [
+		["unpinned action", { file: lane, edit: text => text.replace("actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5", "actions/checkout@v5") }, /must be pinned to a full commit SHA/],
+		["secret in the candidate job", { file: lane, edit: text => text.replace("    timeout-minutes: 40\n", "    timeout-minutes: 40\n    env:\n      LEAK: ${{ secrets.ANY }}\n") }, /candidate must not read secrets/],
+		["self-hosted candidate", { file: lane, edit: text => text.replace("    needs: preflight\n    runs-on: ubuntu-latest", "    needs: preflight\n    runs-on: arc-ci") }, /candidate must not use the self-hosted runner/],
+		["owner guard dropped", { file: lane, edit: text => text.replace('test "$ACTOR" = "jjongguet" || { echo "dispatch actor must be the repository owner"; exit 1; }\n', "") }, /preflight must require the owner as dispatch actor/],
+		["input interpolated into run", { file: lane, edit: text => text.replace('echo "checked out $actual"', 'echo "checked out ${{ inputs.head_sha }}"') }, /run blocks must read inputs from env/],
+		["cache enabled for the candidate", { file: lane, edit: text => text.replace("          no-cache: true", "          no-cache: false") }, /candidate bun setup must set no-cache: true/],
+		["verify checks out pull-request code", { file: lane, edit: text => text.replace("    steps:\n      - name: Check out trusted main\n        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n        with:\n          persist-credentials: false\n", "    steps:\n      - name: Check out trusted main\n        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5\n        with:\n          persist-credentials: false\n          ref: refs/pull/1/head\n") }, /verify must not check out pull-request code/],
+		["receipt status write removed", { file: lane, edit: text => text.replace("      statuses: write\n", "") }, /verify must hold contents: read and statuses: write only/],
+		["automatic trigger added", { file: lane, edit: text => text.replace("on:\n  workflow_dispatch:", "on:\n  pull_request:\n  workflow_dispatch:") }, /must not trigger on pull_request/],
 	];
 	for (const [name, mutate, pattern] of mutations) {
 		const root = policyFixture(mutate);

@@ -1,0 +1,182 @@
+name: Validate pull request (owner dispatch)
+
+# Outside pull requests are accepted, but their code never runs automatically.
+# The repository owner dispatches this workflow from main with the pull request
+# number and the reviewed head SHA. The candidate job runs that SHA in a
+# disposable GitHub-hosted runner without secrets or write tokens; a separate
+# verifier job, running trusted main code only, re-checks the identity and
+# produces the receipt. scripts/check-pr-policy.mjs asserts these properties.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Pull request number to validate
+        required: true
+        type: string
+      head_sha:
+        description: Reviewed 40-hex head SHA of that pull request
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    name: Trusted preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    outputs:
+      head_sha: ${{ steps.resolve.outputs.head_sha }}
+      head_repo: ${{ steps.resolve.outputs.head_repo }}
+    steps:
+      - name: Require the repository owner to dispatch from main
+        env:
+          ACTOR: ${{ github.actor }}
+          TRIGGERING_ACTOR: ${{ github.triggering_actor }}
+          REPO: ${{ github.repository }}
+          REF: ${{ github.ref }}
+        run: |
+          set -eu
+          test "$ACTOR" = "jjongguet" || { echo "dispatch actor must be the repository owner"; exit 1; }
+          test "$TRIGGERING_ACTOR" = "jjongguet" || { echo "rerun actor must be the repository owner"; exit 1; }
+          test "$REPO" = "jjongguet/gjc-plugin" || { echo "unexpected repository $REPO"; exit 1; }
+          test "$REF" = "refs/heads/main" || { echo "dispatch from main, got $REF"; exit 1; }
+
+      - name: Resolve the pull request head through the API
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEWED_SHA: ${{ inputs.head_sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -eu
+          case "$REVIEWED_SHA" in
+            *[!0-9a-f]*|"") echo "head_sha must be 40 lowercase hex"; exit 1;;
+          esac
+          test "${#REVIEWED_SHA}" -eq 40 || { echo "head_sha must be 40 hex characters"; exit 1; }
+          gh api "repos/$REPO/pulls/$PR_NUMBER" > pr.json
+          state=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.state')
+          head=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
+          head_repo=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.repo.full_name')
+          echo "pr=$PR_NUMBER state=$state head=$head head_repo=$head_repo"
+          test "$state" = "open" || { echo "pull request is not open"; exit 1; }
+          test "$head" = "$REVIEWED_SHA" || { echo "reviewed SHA does not match the current head"; exit 1; }
+          echo "head_sha=$head" >> "$GITHUB_OUTPUT"
+          echo "head_repo=$head_repo" >> "$GITHUB_OUTPUT"
+
+  candidate:
+    name: Candidate checks (no secrets, read-only)
+    needs: preflight
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 40
+    steps:
+      - name: Check out the reviewed pull request head
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          ref: refs/pull/${{ inputs.pr_number }}/head
+          persist-credentials: false
+
+      - name: Assert the checkout is the reviewed SHA
+        env:
+          REVIEWED_SHA: ${{ inputs.head_sha }}
+        run: |
+          set -eu
+          actual=$(git rev-parse HEAD)
+          echo "checked out $actual"
+          test "$actual" = "$REVIEWED_SHA" || { echo "pull request head moved after review"; exit 1; }
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "24"
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+          no-cache: true
+
+      - name: Create local-only AGENTS.md placeholder
+        run: touch AGENTS.md
+
+      - name: Generated-surface drift check
+        run: bun run build:check
+
+      - name: Repository checks
+        run: bun run evidence:check && bun run paths:check && bun run docs:check && bun run policy:check
+
+      - name: Build
+        run: bun run build
+
+      - name: Test (smoke guards skipped - require a local gjc binary)
+        env:
+          SELF_IMPROVE_SKIP_SMOKE: "1"
+        run: bun run test
+
+      - name: Keyless demo
+        run: bun run demo
+
+  verify:
+    name: Trusted verification and receipt
+    needs: [preflight, candidate]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted main
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+
+      - name: Re-check the reviewed SHA and record the receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+          REVIEWED_SHA: ${{ inputs.head_sha }}
+          CANDIDATE_RESULT: ${{ needs.candidate.result }}
+          PREFLIGHT_RESULT: ${{ needs.preflight.result }}
+          REPO: ${{ github.repository }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -eu
+          test "$PREFLIGHT_RESULT" = "success"
+          test "$CANDIDATE_RESULT" = "success"
+          head=$(gh api "repos/$REPO/pulls/$PR_NUMBER" -q '.head.sha')
+          test "$head" = "$REVIEWED_SHA" || { echo "head moved after the candidate run: $head"; exit 1; }
+
+          # PR workflow files are data only: read them through the API and run
+          # the trusted main policy checker against that copy.
+          mkdir -p .pr-head/.github/workflows
+          gh api "repos/$REPO/contents/.github/workflows?ref=$REVIEWED_SHA" \
+            -q '.[] | select(.type=="file") | .name' > pr-workflows.txt
+          while IFS= read -r name; do
+            case "$name" in
+              *.yml|*.yaml) gh api "repos/$REPO/contents/.github/workflows/$name?ref=$REVIEWED_SHA" -H 'Accept: application/vnd.github.raw' > ".pr-head/.github/workflows/$name";;
+            esac
+          done < pr-workflows.txt
+          node scripts/check-pr-policy.mjs --root .pr-head
+
+          {
+            echo "## Pull request validation receipt"
+            echo ""
+            echo "- pull request: #$PR_NUMBER"
+            echo "- reviewed head SHA: \`$REVIEWED_SHA\`"
+            echo "- head SHA re-checked after the candidate run: \`$head\`"
+            echo "- preflight: $PREFLIGHT_RESULT"
+            echo "- candidate checks: $CANDIDATE_RESULT (GitHub-hosted, no secrets, read-only token)"
+            echo "- trusted policy check over the pull request's workflows: passed"
+            echo "- run: $RUN_URL"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          gh api -X POST "repos/$REPO/statuses/$REVIEWED_SHA" \
+            -f state=success \
+            -f context=owner-pr-validation \
+            -f description="Owner-dispatched validation passed for the reviewed SHA" \
+            -f target_url="$RUN_URL" > /dev/null
