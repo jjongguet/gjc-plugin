@@ -26,6 +26,9 @@ import path from "node:path";
 const args = process.argv.slice(2);
 const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
+const caseIndex = args.indexOf("--case");
+const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
+assert.ok(["single", "retry", "degrade"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -33,10 +36,16 @@ const agent = path.join(home, ".gjc", "agent");
 const work = path.join(root, "work");
 await fs.mkdir(agent, { recursive: true, mode: 0o700 });
 await fs.mkdir(work, { recursive: true, mode: 0o700 });
+if (mode === "degrade") {
+  // Occupy the alignment root with a regular file so the journal mkdir must fail.
+  await fs.mkdir(path.join(home, ".gjc-plugin", "jev-advisor"), { recursive: true, mode: 0o700 });
+  await fs.writeFile(path.join(home, ".gjc-plugin", "jev-advisor", "alignment"), "not-a-directory");
+}
 
 const PROMPT = "Read only investigation of this empty directory: do not modify any files.";
 const WRITE_ARGS = JSON.stringify({ path: "blocked.txt", content: "x" });
 const endpoints = [];
+let countWrites = 0;
 const server = http.createServer(async (req, res) => {
   try {
     if (req.method === "GET" && req.url === "/v1/models") {
@@ -48,11 +57,15 @@ const server = http.createServer(async (req, res) => {
     for await (const chunk of req) body += chunk;
     endpoints.push(req.url);
     const responded = body.includes("function_call_output");
+    const emitted = endpoints.filter(url => url === req.url && !responded).length;
+    const writeTurns = mode === "retry" ? 4 : 1;
+    const wantWrite = !responded || (mode === "retry" && countWrites < writeTurns);
     res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache" });
     const send = (type, data) => res.write(`event: ${type}\ndata: ${JSON.stringify({ type, ...data })}\n\n`);
     const response = { id: "resp_local", object: "response", status: "in_progress", model: "gpt-4o", output: [] };
     send("response.created", { response });
-    if (!responded) {
+    if (wantWrite) {
+      countWrites++;
       const item = { id: "fc_local", type: "function_call", status: "completed", call_id: "local_call_0", name: "write", arguments: "" };
       send("response.output_item.added", { output_index: 0, item: { ...item, arguments: "" } });
       send("response.function_call_arguments.delta", { item_id: item.id, output_index: 0, delta: WRITE_ARGS });
@@ -135,6 +148,9 @@ try {
     }
   }
   const recorded = /correction_requested|drift_write_vs_readonly/.test(journal);
+  const retried = /"retryCount":2/.test(journal);
+  const shutdownFlushed = /"kind":"shutdown"/.test(journal);
+  const stopped = /"stopRecommended":true/.test(journal);
   const surfaced = /drift_write_vs_readonly|jev-goal-alignment/.test(`${session.stdout}${session.stderr}`);
 
   console.log(
@@ -148,6 +164,11 @@ try {
         fileWritten: wroteFile,
         hookJournalRecorded: recorded,
         blockReasonSurfaced: surfaced,
+        mode,
+        writeTurns: countWrites,
+        retryRecorded: retried,
+        stopObservedAtHost: stopped,
+        shutdownFlushed,
       },
       null,
       2,
@@ -155,7 +176,16 @@ try {
   );
   if (!recorded) console.log(`stdout:\n${session.stdout}\nstderr:\n${session.stderr}`);
   assert.equal(wroteFile, false, "the host wrote the file despite read-only authority");
-  assert.equal(recorded, true, "no alignment journal evidence in the isolated host session");
+  if (mode === "retry") {
+    assert.equal(stopped, true, "no stopRecommended record");
+    assert.equal(shutdownFlushed, true, "no shutdown flush record");
+    assert.equal(retried, true, "no retryCount:2 record");
+    // stop_recommended は unit fixture(AC-A2.8)で検証済み; host 観測では retryCount までを主張する。
+  } else if (mode === "degrade") {
+    assert.equal(existsSync(journalRoot), false, "degraded storage must not produce a journal directory");
+  } else {
+    assert.equal(recorded, true, "no alignment journal evidence in the isolated host session");
+  }
   console.log("ALL PASS (1 real-host block case)");
 } finally {
   server.close();
