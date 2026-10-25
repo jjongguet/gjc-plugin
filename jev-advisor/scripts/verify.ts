@@ -1322,7 +1322,13 @@ async function runSuite(root: string) {
 		assert.equal(await alignmentShutdownSurface[0].handler(undefined, alignmentContext(entries)), undefined);
 		assert.ok(
 			alignmentEvents().events.some((event: any) => event.kind === "hook_error"),
-			"a thrown handler is recorded as hook_error",
+			"a thrown handler is recorded as hook_error and survives the production reader",
+		);
+		// The production reader (not a raw JSON.parse) must accept the kind.
+		const parsedJournal = alignmentCore.readJournalTexts([alignmentEvents().text], Date.now());
+		assert.ok(
+			parsedJournal.events.some((event: any) => event.kind === "hook_error"),
+			"hook_error survives readJournalTexts",
 		);
 		assert.equal(fetchCalls, before);
 		assert.equal(unexpectedFetches, 0);

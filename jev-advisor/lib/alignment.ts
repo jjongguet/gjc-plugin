@@ -687,7 +687,7 @@ export const ALIGNMENT_LIMITS = {
 	retentionMs: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
-const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown"]);
+const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown", "hook_error"]);
 const RECOVERY_STATUSES = new Set<string>(["correction_recorded", "aligned_admitted", "result_observed", "recovered", "recovery_unverified"]);
 
 function fresh(at: number, now: number): boolean {
