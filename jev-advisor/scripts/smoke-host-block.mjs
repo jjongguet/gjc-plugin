@@ -28,7 +28,7 @@ const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
 const caseIndex = args.indexOf("--case");
 const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
-assert.ok(["single", "retry", "degrade", "concurrent", "scope"].includes(mode), `unknown case: ${mode}`);
+assert.ok(["single", "retry", "degrade", "concurrent", "scope", "subagent"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -73,12 +73,14 @@ const server = http.createServer(async (req, res) => {
     send("response.created", { response });
     if (wantWrite) {
       countWrites++;
-      const item = { id: "fc_local", type: "function_call", status: "completed", call_id: "local_call_0", name: "write", arguments: "" };
+      const toolName = mode === "subagent" ? "subagent" : "write";
+      const toolArgs = mode === "subagent" ? JSON.stringify({ description: "probe", prompt: "Reply with the single word ok." }) : WRITE_ARGS;
+      const item = { id: "fc_local", type: "function_call", status: "completed", call_id: "local_call_0", name: toolName, arguments: "" };
       send("response.output_item.added", { output_index: 0, item: { ...item, arguments: "" } });
-      send("response.function_call_arguments.delta", { item_id: item.id, output_index: 0, delta: WRITE_ARGS });
-      send("response.function_call_arguments.done", { item_id: item.id, output_index: 0, arguments: WRITE_ARGS });
-      send("response.output_item.done", { output_index: 0, item: { ...item, arguments: WRITE_ARGS } });
-      send("response.completed", { response: { ...response, status: "completed", output: [{ ...item, arguments: WRITE_ARGS }] } });
+      send("response.function_call_arguments.delta", { item_id: item.id, output_index: 0, delta: toolArgs });
+      send("response.function_call_arguments.done", { item_id: item.id, output_index: 0, arguments: toolArgs });
+      send("response.output_item.done", { output_index: 0, item: { ...item, arguments: toolArgs } });
+      send("response.completed", { response: { ...response, status: "completed", output: [{ ...item, arguments: toolArgs }] } });
     } else {
       const message = { id: "msg_local", type: "message", status: "completed", role: "assistant", content: [{ type: "output_text", text: "stub finished" }] };
       send("response.output_item.added", { output_index: 0, item: { ...message, content: [] } });
@@ -186,7 +188,7 @@ try {
     "--thinking",
     "off",
     "--tools",
-    "write,read",
+    mode === "subagent" ? "subagent,write,read" : "write,read",
     PROMPT,
   ]);
 
@@ -228,7 +230,10 @@ try {
   );
   if (!recorded) console.log(`stdout:\n${session.stdout}\nstderr:\n${session.stderr}`);
   assert.equal(wroteFile, false, "the host wrote the file despite read-only authority");
-  if (mode === "retry") {
+  if (mode === "subagent") {
+    assert.equal((journal.match(/"kind":"block"/g) ?? []).length, 0, "a subagent tool call must not be blocked");
+    assert.equal(session.status, 0, `subagent session failed: ${session.stderr}`);
+  } else if (mode === "retry") {
     assert.equal(stopped, true, "no stopRecommended record");
     assert.equal(shutdownFlushed, true, "no shutdown flush record");
     assert.equal(retried, true, "no retryCount:2 record");
