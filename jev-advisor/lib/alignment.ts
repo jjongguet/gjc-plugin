@@ -471,7 +471,7 @@ export type AlignmentState = {
 	updatedAt: number;
 };
 
-export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown";
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error";
 
 export type AlignmentCounts = {
 	corrections: number;
@@ -849,4 +849,61 @@ export function planJournalAppend(existingText: string | null, events: readonly 
 	}
 	const rotate = records + lines.length > ALIGNMENT_LIMITS.maxRecords || bytes + Buffer.byteLength(body, "utf8") > ALIGNMENT_LIMITS.maxTotalBytes;
 	return { text: body, rotate, appended: lines.length, skipped };
+}
+
+/** A fail-open handler failure: recorded so a silent throw is auditable. */
+export function recordHookError(input: { errorClass: string; now: number }): AlignmentEvent {
+	return { v: 1, kind: "hook_error", at: input.now, errorClass: input.errorClass.slice(0, 64) } as AlignmentEvent;
+}
+
+/** Semantic advisory contract (AC-A3). Advisory only: it can never block. */
+export type SemanticEnvelopeStatus = "ok" | "precision_anomaly" | "invalid_response" | "outbound_suppressed";
+
+export type SemanticEnvelope = {
+	status: SemanticEnvelopeStatus;
+	/** Provider-returned score, preserved verbatim; never redefined as a margin. */
+	confidence: number | null;
+	/** Raw probabilities, preserved verbatim (no clamping or normalisation). */
+	probabilities: Record<string, number> | null;
+	/** True only when the caller opted in AND the envelope validated. */
+	outbound: boolean;
+	/** Sum of the probabilities, reported so a 1.0001 payload stays visible. */
+	probabilitySum: number | null;
+};
+
+/**
+ * Validate one provider envelope for the advisory path.
+ *
+ * `sendAuthorityText` is the outbound opt-in: without it nothing leaves the
+ * process, so the status is `outbound_suppressed` and no request may be made.
+ * A probability sum outside 1e-6 is reported as `precision_anomaly` instead of
+ * being clamped, and the provider confidence is returned untouched so callers
+ * cannot mistake a derived margin for calibration.
+ */
+export function validateSemanticEnvelope(input: {
+	sendAuthorityText: boolean;
+	confidence?: unknown;
+	probabilities?: unknown;
+	labels: readonly string[];
+	tolerance?: number;
+}): SemanticEnvelope {
+	if (input.sendAuthorityText !== true)
+		return { status: "outbound_suppressed", confidence: null, probabilities: null, outbound: false, probabilitySum: null };
+	const confidence = typeof input.confidence === "number" && Number.isFinite(input.confidence) ? input.confidence : null;
+	const raw = asRecord(input.probabilities);
+	if (!raw) return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
+	const probabilities: Record<string, number> = {};
+	for (const [label, value] of Object.entries(raw)) {
+		if (!input.labels.includes(label)) return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
+		if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1)
+			return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
+		probabilities[label] = value;
+	}
+	if (input.labels.some(label => probabilities[label] === undefined))
+		return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
+	const probabilitySum = Object.values(probabilities).reduce((total, value) => total + value, 0);
+	const tolerance = typeof input.tolerance === "number" && input.tolerance > 0 ? input.tolerance : 1e-6;
+	if (Math.abs(probabilitySum - 1) > tolerance)
+		return { status: "precision_anomaly", confidence, probabilities, outbound: true, probabilitySum };
+	return { status: "ok", confidence, probabilities, outbound: true, probabilitySum };
 }

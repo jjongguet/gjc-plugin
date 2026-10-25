@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 /** Offline generated-package acceptance. No product import before child isolation. */
 import assert from "node:assert/strict";
+import { validateSemanticEnvelope } from "../lib/alignment";
+
 import fs from "node:fs";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync, statSync, symlinkSync, linkSync, copyFileSync, realpathSync, renameSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -1318,8 +1320,36 @@ async function runSuite(root: string) {
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-branch-throw", "src/demo.ts"), { sessionManager: { getBranch() { throw new Error("no branch"); } } }), undefined, "a throwing branch facade never blocks");
 		assert.equal(await alignmentAfter[0].handler(null, alignmentContext(entries)), undefined);
 		assert.equal(await alignmentShutdownSurface[0].handler(undefined, alignmentContext(entries)), undefined);
+		assert.ok(
+			alignmentEvents().events.some((event: any) => event.kind === "hook_error"),
+			"a thrown handler is recorded as hook_error",
+		);
 		assert.equal(fetchCalls, before);
 		assert.equal(unexpectedFetches, 0);
+	});
+
+	await check("AC-A3 semantic advisory never leaves the process without opt-in", async () => {
+		const suppressed = validateSemanticEnvelope({ sendAuthorityText: false, confidence: 0.9, probabilities: { aligned: 1 }, labels: ["aligned", "drift"] });
+		assert.equal(suppressed.status, "outbound_suppressed");
+		assert.equal(suppressed.outbound, false);
+		assert.equal(suppressed.confidence, null);
+	});
+
+	await check("AC-A3 precision anomaly keeps the raw envelope instead of clamping it", async () => {
+		const anomalous = validateSemanticEnvelope({
+			sendAuthorityText: true,
+			confidence: 0.9989,
+			probabilities: { aligned: 0.0001, drift: 0.9993, uncertain: 0.0007 },
+			labels: ["aligned", "drift", "uncertain"],
+		});
+		assert.equal(anomalous.status, "precision_anomaly");
+		assert.equal(anomalous.confidence, 0.9989, "provider confidence is preserved verbatim");
+		assert.deepEqual(anomalous.probabilities, { aligned: 0.0001, drift: 0.9993, uncertain: 0.0007 }, "no normalisation");
+		assert.equal(Number(anomalous.probabilitySum?.toFixed(4)), 1.0001);
+		const exact = validateSemanticEnvelope({ sendAuthorityText: true, confidence: 0.9681, probabilities: { aligned: 0.9788, drift: 0.0022, uncertain: 0.019 }, labels: ["aligned", "drift", "uncertain"] });
+		assert.equal(exact.status, "ok");
+		assert.equal(exact.confidence, 0.9681);
+		assert.equal(validateSemanticEnvelope({ sendAuthorityText: true, confidence: 0.5, probabilities: { aligned: 1 }, labels: ["aligned", "drift"] }).status, "invalid_response");
 	});
 
 	await check("AC-A1 alignment shadow: metadata-only journal never blocks", async () => {

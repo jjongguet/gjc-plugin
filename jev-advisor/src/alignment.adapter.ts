@@ -118,8 +118,14 @@ export default function register(api: {
 			// Degraded storage keeps the retry chain in process memory so a repeated
 			// violation still reaches stop_recommended; it never changes the verdict.
 			if (evaluation.block && (!loaded.available || !stored)) alignmentRememberDegradedRetry(evaluation.retryKey, blockRetryCount);
-		} catch {
+		} catch (error) {
 			// hook_error: a thrown handler is fail-open and can never block a tool.
+			// Record the failure class so a silent throw stays auditable.
+			try {
+				await alignmentAppendEvents(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now());
+			} catch {
+				// The recorder itself must never change the verdict.
+			}
 			return undefined;
 		}
 		// shadow journals the same block record but never enforces it.
