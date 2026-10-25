@@ -1045,7 +1045,15 @@ function alignmentObservation(state: AlignmentState, result: Record<string, any>
 	if (criterion.kind === "exit_zero") {
 		const details = alignmentAsRecord(result.details) ?? {};
 		const code = details.exitCode ?? details.exit_code ?? details.code;
-		return typeof code === "number" && Number.isFinite(code) ? (code === 0 ? "true" : "false") : "unknown";
+		if (!(typeof code === "number" && Number.isFinite(code))) return "unknown";
+		// Bind the exit code to the command the criterion named: an unrelated
+		// command exiting 0 must not satisfy it.
+		const input = alignmentAsRecord(result.input) ?? {};
+		if (typeof input.command === "string") {
+			const observedDigest = digestTarget(normalizeTarget(input.command));
+			if (observedDigest && criterion.targetDigest && observedDigest !== criterion.targetDigest) return "unknown";
+		}
+		return code === 0 ? "true" : "false";
 	}
 	const direct = alignmentWritePaths(result.input).find(value => digestTarget(value) === criterion.targetDigest);
 	const target = direct ?? alignmentReadAuthority(ctx)?.targets.find(item => item.digest === criterion.targetDigest)?.path ?? null;

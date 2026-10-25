@@ -219,3 +219,13 @@ here is a measured outcome.
 
 The quality-evidence side of this work is a separate decision:
 [ADR 0003](0003-quality-trial-evidence-boundary.md).
+
+## Recovery criterion limits
+
+`exit_zero` is bound to the command named in the criterion: an observation whose
+command digest differs is `unknown`, never a success. On the current surfaces it
+is nonetheless **unreachable as a completion criterion**, because recovery is
+only admitted for write-class actions and a write tool result carries no exit
+code. Use `artifact_exists` or `criterion_file` (a <=4 KiB JSON with an explicit
+`satisfied` boolean) for write-surface recovery; `exit_zero` remains valid only
+if a future surface admits command results into the same state machine.
