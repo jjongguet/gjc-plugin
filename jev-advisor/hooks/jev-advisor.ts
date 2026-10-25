@@ -49,7 +49,7 @@ export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 		provider: "opengateway",
 		model: "sionic-ai/jev-omni",
 		endpoint: "https://apis.opengateway.ai/v1/decisions",
-		authEnv: ["OPEN_GATEWAY_API_KEY", "OPENAI_API_KEY"],
+		authEnv: ["OPENGATEWAY_API_KEY"],
 		status: "candidate_unverified",
 		contextTokens: 32768,
 		note: "Catalog candidate (openai-compatible decisions endpoint, input text/image/audio/video). Envelope and confidence semantics are not yet verified; unusable until a consumer verifies them.",
@@ -59,7 +59,7 @@ export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 		provider: "opengateway",
 		model: "sionic-ai/decider-4b",
 		endpoint: "https://apis.opengateway.ai/v1/decisions",
-		authEnv: ["OPEN_GATEWAY_API_KEY", "OPENAI_API_KEY"],
+		authEnv: ["OPENGATEWAY_API_KEY"],
 		status: "candidate_unverified",
 		contextTokens: 65536,
 		note: "Catalog candidate (openai-compatible decisions endpoint, text input). Envelope and confidence semantics are not yet verified.",
@@ -1165,7 +1165,7 @@ export function readConfig(
 		provider,
 		mode,
 		endpoint: trim(merged.JEV_ADVISOR_ENDPOINT) || trim(PROVIDERS[provider]?.endpoint),
-		apiKey: trim(merged.JEV_ADVISOR_API_KEY) || trim(merged.OPENROUTER_API_KEY),
+		apiKey: resolveApiKey(merged, provider),
 		model: trim(merged.JEV_ADVISOR_MODEL) || trim(PROVIDERS[provider]?.model) || DEFAULTS.model,
 		timeoutMs: Math.min(positiveNumber(merged.JEV_ADVISOR_TIMEOUT_MS, DEFAULTS.timeoutMs), INVOCATION_BUDGET_MS),
 		minIntervalMs: Number.isFinite(intervalRaw) && intervalRaw >= 0 ? intervalRaw : DEFAULTS.minIntervalMs,
@@ -1177,6 +1177,33 @@ export function readConfig(
 		memoryMaxKeys: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_KEYS, DEFAULTS.memoryMaxKeys, MAX_GROUPS),
 		memoryMaxEvents: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_EVENTS, DEFAULTS.memoryMaxEvents, MAX_TASKS_PER_GROUP),
 	};
+}
+
+/**
+ * Credential variables per provider, highest precedence first. A provider never borrows another
+ * provider's key: sending an OpenRouter token to api.typesafe.ai (or an OpenAI key to a gateway)
+ * only produces a 401 far from the misconfiguration that caused it. `JEV_ADVISOR_API_KEY` is the
+ * explicit override and outranks every entry here.
+ */
+const PROVIDER_KEY_ENV: Record<string, readonly string[]> = {
+	jev: ["OPENROUTER_API_KEY"],
+	openrouter: ["OPENROUTER_API_KEY"],
+	"typesafe-jev": ["TYPESAFE_API_KEY"],
+	ollaya: [],
+};
+
+export function providerKeyEnv(provider: string): readonly string[] {
+	return PROVIDER_KEY_ENV[provider] ?? [];
+}
+
+function resolveApiKey(merged: Env, provider: string): string {
+	const explicit = (merged.JEV_ADVISOR_API_KEY ?? "").trim();
+	if (explicit) return explicit;
+	for (const name of providerKeyEnv(provider)) {
+		const value = (merged[name] ?? "").trim();
+		if (value) return value;
+	}
+	return "";
 }
 
 export function isConfigured(cfg: AdvisorConfig): boolean {

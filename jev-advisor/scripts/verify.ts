@@ -281,6 +281,25 @@ async function runSuite(root: string) {
 		assert.equal(rows.find(r => r.ref.taskIndex === 1).advice.tier, "strong");
 		assert.equal(rows.find(r => r.ref.taskIndex === 4).advice.reason, "batch_limit");
 	});
+	await check("credentials are provider-scoped and never borrowed across providers", async () => {
+		const jevFromOpenRouter = cfg({ JEV_ADVISOR_API_KEY: "", OPENROUTER_API_KEY: "synthetic-or" });
+		assert.equal(jevFromOpenRouter.apiKey, "synthetic-or");
+		assert.equal(core.isConfigured(jevFromOpenRouter), true);
+		const typesafeBorrowing = cfg({ JEV_ADVISOR_API_KEY: "", JEV_ADVISOR_PROVIDER: "typesafe-jev", OPENROUTER_API_KEY: "synthetic-or" });
+		assert.equal(typesafeBorrowing.apiKey, "", "typesafe-jev must not send the OpenRouter key to api.typesafe.ai");
+		assert.equal(core.isConfigured(typesafeBorrowing), false);
+		const typesafeOwn = cfg({ JEV_ADVISOR_API_KEY: "", JEV_ADVISOR_PROVIDER: "typesafe-jev", TYPESAFE_API_KEY: "synthetic-ts" });
+		assert.equal(typesafeOwn.apiKey, "synthetic-ts");
+		assert.equal(core.isConfigured(typesafeOwn), true);
+		const explicitOverride = cfg({ JEV_ADVISOR_PROVIDER: "typesafe-jev" });
+		assert.equal(explicitOverride.apiKey, "synthetic-key", "JEV_ADVISOR_API_KEY outranks the provider variable");
+		assert.deepEqual(core.providerKeyEnv("typesafe-jev"), ["TYPESAFE_API_KEY"]);
+		assert.deepEqual(core.providerKeyEnv("ollaya"), []);
+		const contract = await import(pathToFileURL(path.join(plugin, "../shared/lib/decision-contract.ts")).href);
+		for (const id of ["opengateway/sionic-ai/jev-omni", "opengateway/sionic-ai/decider-4b"]) {
+			assert.deepEqual(contract.decisionProvider(id).authEnv, ["OPENGATEWAY_API_KEY"], id);
+		}
+	});
 	await check("provider off, missing key and memory off have no prohibited writes", async () => {
 		for (const mode of ["off", "missing", "memory-off"]) {
 			env(mode === "off" ? { JEV_ADVISOR_PROVIDER: "off" } : mode === "memory-off" ? { JEV_ADVISOR_MEMORY: "off" } : {});
