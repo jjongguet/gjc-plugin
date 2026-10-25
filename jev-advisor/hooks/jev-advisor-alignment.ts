@@ -872,6 +872,22 @@ export function recordHookError(input: { errorClass: string; now: number }): Ali
 	return { v: 1, kind: "hook_error", at: input.now, errorClass: input.errorClass.slice(0, 64) } as AlignmentEvent;
 }
 
+/** Resolve with `fallback` when `work` has not settled within `ms`. */
+export async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+	const budget = Number.isFinite(ms) && ms >= 0 ? Math.trunc(ms) : 0;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([
+			work,
+			new Promise<T>(resolve => {
+				timer = setTimeout(() => resolve(fallback), budget);
+			}),
+		]);
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+	}
+}
+
 /** Deterministic evaluation exceeded its latency budget: allow and record it. */
 export function recordLatencyExceeded(input: { elapsedMs: number; budgetMs: number; now: number }): AlignmentEvent {
 	return { v: 1, kind: "latency_exceeded", at: input.now, elapsedMs: Math.max(0, Math.trunc(input.elapsedMs)), budgetMs: Math.max(0, Math.trunc(input.budgetMs)) } as AlignmentEvent;
@@ -1033,7 +1049,10 @@ export default function register(api: {
 				blockReason = null;
 				events.push(recordLatencyExceeded({ elapsedMs, budgetMs, now }));
 			}
-			const stored = await alignmentAppendEvents(ctx, events, now);
+			// A hung store must not hold the tool call: the verdict is already
+			// decided, so a slow append degrades to "not stored" instead of delay.
+			const appendBudgetMs = Number(process.env.JEV_ALIGNMENT_APPEND_TIMEOUT_MS ?? 100);
+			const stored = await withDeadline(alignmentAppendEvents(ctx, events, now), appendBudgetMs, false);
 			// Degraded storage keeps the retry chain in process memory so a repeated
 			// violation still reaches stop_recommended; it never changes the verdict.
 			if (evaluation.block && (!loaded.available || !stored)) {

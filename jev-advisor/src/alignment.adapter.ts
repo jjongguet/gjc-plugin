@@ -123,7 +123,10 @@ export default function register(api: {
 				blockReason = null;
 				events.push(recordLatencyExceeded({ elapsedMs, budgetMs, now }));
 			}
-			const stored = await alignmentAppendEvents(ctx, events, now);
+			// A hung store must not hold the tool call: the verdict is already
+			// decided, so a slow append degrades to "not stored" instead of delay.
+			const appendBudgetMs = Number(process.env.JEV_ALIGNMENT_APPEND_TIMEOUT_MS ?? 100);
+			const stored = await withDeadline(alignmentAppendEvents(ctx, events, now), appendBudgetMs, false);
 			// Degraded storage keeps the retry chain in process memory so a repeated
 			// violation still reaches stop_recommended; it never changes the verdict.
 			if (evaluation.block && (!loaded.available || !stored)) {

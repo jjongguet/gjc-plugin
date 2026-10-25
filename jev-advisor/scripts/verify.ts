@@ -1442,6 +1442,16 @@ async function runSuite(root: string) {
 		assert.equal(evaluation.block, false, "truncated authority never blocks");
 	});
 
+	await check("N3 a hung journal append degrades instead of delaying the verdict", async () => {
+		const fast = await alignmentCore.withDeadline(Promise.resolve("stored"), 50, "timeout");
+		assert.equal(fast, "stored", "a completing append wins");
+		const startedAt = Date.now();
+		const hung = await alignmentCore.withDeadline(new Promise<string>(() => {}), 30, "timeout");
+		const elapsed = Date.now() - startedAt;
+		assert.equal(hung, "timeout", "a hung append resolves to the fallback");
+		assert.ok(elapsed < 1000, `the deadline must actually bound the wait (took ${elapsed}ms)`);
+	});
+
 	await check("AC-A2.2 default allow is never stage-2", async () => {
 		env();
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-authority", "src/demo.ts"), alignmentContext([])), undefined);
