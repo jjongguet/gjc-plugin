@@ -159,6 +159,8 @@ export type Authority = {
 	scopeDigests: readonly string[];
 	release: ReleaseMode;
 	criterion: CriterionState | null;
+	/** True when older branch entries were not scanned, so constraints may be unseen. */
+	authorityTruncated: boolean;
 };
 
 function asRecord(value: unknown): Record<string, any> | null {
@@ -241,14 +243,18 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 	const windowSize = Math.min(64, Math.max(1, Math.trunc(Number(options.windowSize) || WINDOW_SIZE)));
 	const entries: { id: string; text: string }[] = [];
 	let scanned = 0;
-	for (let index = list.length - 1; index >= 0 && scanned < MAX_SCAN_ENTRIES && entries.length < windowSize; index--) {
+	let cursor = list.length - 1;
+	for (; cursor >= 0 && scanned < MAX_SCAN_ENTRIES && entries.length < windowSize; cursor--) {
 		scanned++;
-		const entry = asRecord(list[index]);
+		const entry = asRecord(list[cursor]);
 		if (!entry) continue;
 		const text = entryText(entry);
 		if (text === null) continue;
-		entries.push({ id: entryIdentity(entry, text, index), text });
+		entries.push({ id: entryIdentity(entry, text, cursor), text });
 	}
+	// Unscanned entries remain when the window or the scan cap stopped us early:
+	// the authority view is incomplete and must not be read as "no constraint".
+	const authorityTruncated = cursor >= 0;
 	if (entries.length === 0) return null;
 	entries.reverse();
 
@@ -322,6 +328,7 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 		scopeDigests: targets.map(target => target.digest),
 		release,
 		criterion,
+		authorityTruncated,
 	};
 }
 
@@ -393,7 +400,12 @@ export function evaluateAction(input: {
 		return drift("drift_write_forbidden_target");
 	}
 	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
-	if (targetDigest && authority.scopeDigests.includes(targetDigest)) {
+	if (targetDigest && authority.scopeDigests.includes(targetDigest) && authority.authorityTruncated) {
+		// Older entries were not scanned, so an unseen constraint may exist:
+		// never claim alignment, never block.
+		return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "evaluated", stage2Admissible: false, block: false };
+	}
+	if (targetDigest && authority.scopeDigests.includes(targetDigest) && !authority.authorityTruncated) {
 		return {
 			...base,
 			ruleId: "aligned_write_within_requested_scope",

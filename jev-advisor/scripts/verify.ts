@@ -1425,6 +1425,23 @@ async function runSuite(root: string) {
 		assert.notEqual(last.status, "recovered", "an oversized criterion file never completes");
 	});
 
+	await check("truncated authority never claims alignment and never blocks", async () => {
+		env();
+		const entries = [
+			alignmentUser("entry-old", "Implement `src/demo.ts`"),
+			...Array.from({ length: 14 }, (_, index) => alignmentUser("entry-filler-" + index, "continue")),
+		];
+		const truncated = alignmentCore.collectAuthority(entries, { windowSize: 12 });
+		assert.equal(truncated.authorityTruncated, true, "a 14-entry tail over a 12-entry window is truncated");
+		assert.equal(truncated.constraints.length, 0);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: truncated });
+		const narrow = alignmentCore.collectAuthority([alignmentUser("entry-only", "Implement `src/demo.ts`")], { windowSize: 12 });
+		assert.equal(narrow.authorityTruncated, false, "a single entry is complete authority");
+		assert.ok(narrow.scopeDigests.includes(alignmentCore.digestTarget("src/demo.ts")), "the narrow authority still scopes the write");
+		assert.equal(evaluation.verdict, "uncertain", "truncated authority never yields aligned");
+		assert.equal(evaluation.block, false, "truncated authority never blocks");
+	});
+
 	await check("AC-A2.2 default allow is never stage-2", async () => {
 		env();
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-authority", "src/demo.ts"), alignmentContext([])), undefined);
