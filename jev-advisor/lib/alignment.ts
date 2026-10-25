@@ -169,7 +169,11 @@ function boundedId(value: unknown): string | null {
 
 function isUserEntry(entry: Record<string, any>): boolean {
 	if (entry.type === "assistant" || entry.role === "assistant") return false;
+	// Host session entries wrap the message: { type: "message", message: { role, content } }.
+	const message = asRecord(entry.message);
+	if (message?.role === "assistant") return false;
 	if (entry.type === "user" || entry.role === "user") return true;
+	if (message?.role === "user") return true;
 	const info = asRecord(entry.info);
 	return info?.role === "user";
 }
@@ -194,6 +198,16 @@ function entryText(entry: Record<string, any>): string | null {
 		for (const part of entry.content) {
 			const record = asRecord(part);
 			if (record && (record.type === "text" || record.type === "input_text")) push(record.text);
+		}
+	}
+	const message = asRecord(entry.message);
+	if (message) {
+		if (typeof message.content === "string") push(message.content);
+		else if (Array.isArray(message.content)) {
+			for (const part of message.content) {
+				const record = asRecord(part);
+				if (record && (record.type === "text" || record.type === "input_text")) push(record.text);
+			}
 		}
 	}
 	const joined = chunks.join("\n").trim();

@@ -59,8 +59,8 @@ is out of scope and unprovided.
 - **Coverage labels.** The periodic receipt carries `projection`
   `{records, projected, omitted, ratio, limited}`, `limited_projection` and
   `incomplete_prefix`; omitted records are labeled in the periodic receipt,
-  never silently dropped by that path; `import` returns journal coverage as
-  `projection`. The same projection is stored as `lastProjection` for
+  never silently dropped by that path; `import` returns journal coverage as `projection`.
+  The same projection is stored as `lastProjection` for
   `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
