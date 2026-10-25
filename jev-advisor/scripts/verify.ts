@@ -1394,6 +1394,37 @@ async function runSuite(root: string) {
 		assert.deepEqual([last.status, last.step, last.criterion.kind], ["recovered", 4, "artifact_exists"]);
 	});
 
+	await check("S07-D criterion_file binds an explicit satisfied boolean", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "criterion.json");
+		const ctx = alignmentContext([alignmentUser("entry-critfile", "Create `" + target + "` with criterion=criterion_file:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile", target), ctx), undefined);
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, JSON.stringify({ satisfied: false }), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile", target), ctx), undefined);
+		let last = alignmentEvents().events.at(-1).state;
+		assert.deepEqual([last.status, last.step], ["result_observed", 3], "satisfied:false must not complete");
+		// A fresh session where the criterion file is absent at correction time and
+		// satisfied:true is observed afterwards must complete the chain.
+		rmSync(target, { force: true });
+		env();
+		const ctxTrue = alignmentContext([alignmentUser("entry-critfile-true", "Create `" + target + "` with criterion=criterion_file:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile-true", target), ctxTrue), undefined);
+		writeFileSync(target, JSON.stringify({ satisfied: true }), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile-true", target), ctxTrue), undefined);
+		last = alignmentEvents().events.at(-1).state;
+		assert.deepEqual([last.status, last.step], ["recovered", 4], "the false->true transition completes the chain");
+		env();
+		const big = path.join(process.env.HOME!, "artifact", "big.json");
+		const ctx2 = alignmentContext([alignmentUser("entry-critfile-big", "Create `" + big + "` with criterion=criterion_file:" + big)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile-big", big), ctx2), undefined);
+		mkdirSync(path.dirname(big), { recursive: true, mode: 0o700 });
+		writeFileSync(big, "x".repeat(5000), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile-big", big), ctx2), undefined);
+		last = alignmentEvents().events.at(-1).state;
+		assert.notEqual(last.status, "recovered", "an oversized criterion file never completes");
+	});
+
 	await check("AC-A2.2 default allow is never stage-2", async () => {
 		env();
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-authority", "src/demo.ts"), alignmentContext([])), undefined);

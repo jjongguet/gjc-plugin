@@ -919,7 +919,7 @@ export function validateSemanticEnvelope(input: {
 // Goal-alignment after-tool surface. Binds one admitted write to its result,
 // observes the declared criterion and completes the recovery only on a
 // false|unknown → true transition. Never rewrites a tool result; never blocks.
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import path from "node:path";
@@ -1050,6 +1050,19 @@ function alignmentObservation(state: AlignmentState, result: Record<string, any>
 	const direct = alignmentWritePaths(result.input).find(value => digestTarget(value) === criterion.targetDigest);
 	const target = direct ?? alignmentReadAuthority(ctx)?.targets.find(item => item.digest === criterion.targetDigest)?.path ?? null;
 	if (!target) return "unknown";
+	if (criterion.kind === "criterion_file") {
+		// A criterion file is a bounded JSON verdict: only an explicit boolean
+		// `satisfied` counts, and an oversized or malformed file is `unknown`.
+		try {
+			const body = readFileSync(target, "utf8");
+			if (Buffer.byteLength(body, "utf8") > 4096) return "unknown";
+			const parsed = alignmentAsRecord(JSON.parse(body));
+			if (!parsed || typeof parsed.satisfied !== "boolean") return "unknown";
+			return parsed.satisfied ? "true" : "false";
+		} catch {
+			return "unknown";
+		}
+	}
 	try {
 		return existsSync(target) ? "true" : "false";
 	} catch {
