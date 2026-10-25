@@ -1452,6 +1452,19 @@ async function runSuite(root: string) {
 		assert.ok(elapsed < 1000, `the deadline must actually bound the wait (took ${elapsed}ms)`);
 	});
 
+	await check("the observe surface records hook_error when its input throws", async () => {
+		env();
+		const entries = [alignmentUser("entry-observe-throw", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")];
+		const ctx = alignmentContext(entries);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-observe-throw", "src/demo.ts"), ctx), undefined);
+		const before = alignmentEvents().events.filter((event: any) => event.kind === "hook_error").length;
+		const revoked = Proxy.revocable({}, {});
+		revoked.revoke();
+		assert.equal(await alignmentAfter[0].handler(revoked.proxy, ctx), undefined, "the observe surface stays fail-open");
+		const after = alignmentEvents().events.filter((event: any) => event.kind === "hook_error").length;
+		assert.equal(after, before + 1, "the thrown observe input is journaled as hook_error");
+	});
+
 	await check("AC-A2.2 default allow is never stage-2", async () => {
 		env();
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-authority", "src/demo.ts"), alignmentContext([])), undefined);
