@@ -36,6 +36,13 @@ function fixture() {
 	};
 	git("init", "-q", "-b", "main");
 	git("-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "--allow-empty", "-m", "fixture");
+	// The gate resolves an authoritative integration base (`origin/<integration>`).
+	// A fixture without a remote cannot satisfy that contract, so model a real one.
+	const remote = join(owned, "origin.git");
+	const bare = spawnSync("git", ["init", "--bare", "-q", remote], { encoding: "utf8" });
+	assert.equal(bare.status, 0, bare.stderr);
+	git("remote", "add", "origin", remote);
+	git("push", "-q", "origin", "main");
 	const gjc = (...args) => spawnSync(GJC, args, { cwd: repo, env, encoding: "utf8", timeout: 60000 });
 	let serial = 0;
 	// Gate files live outside the repository: anything inside it is part of the hashed source basis.
