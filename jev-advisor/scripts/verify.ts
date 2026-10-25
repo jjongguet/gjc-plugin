@@ -1441,6 +1441,26 @@ async function runSuite(root: string) {
 		assert.deepEqual([last.status, last.reason], ["recovery_unverified", "baseline_true"]);
 	});
 
+	await check("V-E2E 18 over-budget evaluation allows the write and records latency_exceeded", async () => {
+		await withAlignmentMode("deterministic", async () => {
+			env();
+			process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS = "-1";
+			try {
+				const ctx = alignmentContext([alignmentUser("entry-latency", "This is read-only; do not modify anything.")]);
+				const output = await alignmentBefore[0].handler(alignmentWrite("call-latency", "src/demo.ts"), ctx);
+				assert.equal(output, undefined, "an over-budget evaluation must not block");
+				const events = alignmentEvents();
+				assert.ok(events.events.some((event: any) => event.kind === "block"), "the violation was still evaluated");
+				assert.ok(events.events.some((event: any) => event.kind === "latency_exceeded"), "the overrun is recorded");
+				const record = alignmentCore.recordLatencyExceeded({ elapsedMs: 1, budgetMs: -1, now: Date.now() });
+				const roundTrip = alignmentCore.readJournalTexts([`${alignmentCore.serializeEvent(record)}\n`], Date.now());
+				assert.deepEqual(roundTrip.events.map((event: any) => event.kind), ["latency_exceeded"], "the production reader accepts latency_exceeded");
+			} finally {
+				delete process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS;
+			}
+		});
+	});
+
 	await check("AC-A2.5/AC-A2.6 degraded storage still blocks a write and always allows a read", async () => {
 		await withAlignmentMode("deterministic", async () => {
 			env();
