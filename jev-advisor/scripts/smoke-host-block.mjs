@@ -28,7 +28,7 @@ const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
 const caseIndex = args.indexOf("--case");
 const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
-assert.ok(["single", "retry", "degrade", "concurrent", "scope", "subagent", "throw"].includes(mode), `unknown case: ${mode}`);
+assert.ok(["single", "retry", "degrade", "concurrent", "scope", "subagent", "throw", "recover"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -49,8 +49,11 @@ if (mode === "degrade") {
   await fs.writeFile(path.join(home, ".gjc-plugin", "jev-advisor", "alignment"), "not-a-directory");
 }
 
+const RECOVER_PATH = "crit.txt";
 const PROMPT = "Read only investigation of this empty directory: do not modify any files.";
+const RECOVER_PROMPT = "Create `" + RECOVER_PATH + "` with criterion=criterion_file:" + RECOVER_PATH;
 const WRITE_ARGS = JSON.stringify({ path: "blocked.txt", content: "x" });
+const RECOVER_ARGS = JSON.stringify({ path: RECOVER_PATH, content: JSON.stringify({ satisfied: true }) });
 const endpoints = [];
 let countWrites = 0;
 const server = http.createServer(async (req, res) => {
@@ -74,7 +77,7 @@ const server = http.createServer(async (req, res) => {
     if (wantWrite) {
       countWrites++;
       const toolName = mode === "subagent" ? "subagent" : "write";
-      const toolArgs = mode === "subagent" ? JSON.stringify({ description: "probe", prompt: "Reply with the single word ok." }) : WRITE_ARGS;
+      const toolArgs = mode === "subagent" ? JSON.stringify({ description: "probe", prompt: "Reply with the single word ok." }) : mode === "recover" ? RECOVER_ARGS : WRITE_ARGS;
       const item = { id: "fc_local", type: "function_call", status: "completed", call_id: "local_call_0", name: toolName, arguments: "" };
       send("response.output_item.added", { output_index: 0, item: { ...item, arguments: "" } });
       send("response.function_call_arguments.delta", { item_id: item.id, output_index: 0, delta: toolArgs });
@@ -189,7 +192,7 @@ try {
     "off",
     "--tools",
     mode === "subagent" ? "subagent,write,read" : "write,read",
-    PROMPT,
+    mode === "recover" ? RECOVER_PROMPT : PROMPT,
   ]);
 
   const wroteFile = existsSync(path.join(work, "blocked.txt"));
@@ -230,7 +233,10 @@ try {
   );
   if (!recorded) console.log(`stdout:\n${session.stdout}\nstderr:\n${session.stderr}`);
   if (mode !== "throw") assert.equal(wroteFile, false, "the host wrote the file despite read-only authority");
-  if (mode === "throw") {
+  if (mode === "recover") {
+    assert.match(journal, /"status":"recovered"/, "the recovery chain reaches recovered in a real host session");
+    assert.equal(existsSync(path.join(work, RECOVER_PATH)), true, "the aligned write executed");
+  } else if (mode === "throw") {
     // A poisoned copy (hook throws) must still let the host run the tool: fail-open.
     assert.equal(wroteFile, true, "a throwing hook must not block the tool (fail-open)");
     assert.equal(session.status, 0, "the session must still complete");
