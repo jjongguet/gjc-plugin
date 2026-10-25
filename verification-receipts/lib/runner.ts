@@ -122,9 +122,13 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, se
     // PATH lets tests start the same programs a normal shell finds; HOME, credentials and every
     // other inherited variable stay out of the test process.
     const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // The first reason wins: cleanup trouble cannot mask the abort, timeout or
+    // output cap that already made this run incomplete, and a run that is
+    // incomplete never turns clean either way.
+    const flag = (reason: string) => { if (!issue) issue = reason; };
     const kill = (sig: NodeJS.Signals) => {
       try { if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, sig); else child.kill(sig); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') issue = 'cleanup_unresolved'; }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') flag('cleanup_unresolved'); }
     };
     const finish = (code: number | null, sig: string | null) => {
       if (settled) return;
@@ -140,12 +144,12 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, se
         }
         try { process.kill(-child.pid, 0); }
         catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') issue = 'cleanup_unconfirmed';
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') flag('cleanup_unconfirmed');
           resolve({ code, signal: sig, output, issue });
           return;
         }
         if (Date.now() >= cleanupDeadline) {
-          issue = 'cleanup_unconfirmed';
+          flag('cleanup_unconfirmed');
           resolve({ code, signal: sig, output, issue });
           return;
         }
@@ -157,7 +161,7 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, se
       if (issue) return;
       issue = why; kill('SIGTERM');
       forceTimer = setTimeout(() => kill('SIGKILL'), 150);
-      reapTimer = setTimeout(() => { issue = 'cleanup_unresolved'; child.stdout.destroy(); child.stderr.destroy(); child.unref(); finish(null, null); }, 2500);
+      reapTimer = setTimeout(() => { flag('cleanup_unresolved'); child.stdout.destroy(); child.stderr.destroy(); child.unref(); finish(null, null); }, 2500);
     };
     const cancel = () => stop('cancelled');
     const timer = setTimeout(() => stop('timeout'), timeout);
