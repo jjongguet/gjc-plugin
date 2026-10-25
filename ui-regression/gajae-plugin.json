@@ -1,0 +1,9 @@
+{
+ "kind":"gajae-code-plugin",
+ "name":"ui-regression",
+ "version":"0.0.1",
+ "tools":[
+  {"name":"ui_regression_run","path":"tools/ui-regression-run.ts","description":"Execute one bounded local Aside scenario with actual DOM assertions and metadata-only receipts."},
+  {"name":"ui_regression_status","path":"tools/ui-regression-status.ts","description":"Inspect historical UI evidence and current source freshness; no browser reobservation."}
+ ]
+}

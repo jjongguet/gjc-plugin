@@ -1,0 +1,37 @@
+import { actualRepository, repositoryDigest, specFingerprint, fingerprintSource, freshnessFor, createReceipt, persistReceipt, staticReceiptGuidance } from '../lib/receipts';
+import { runNodeTests, validateTestFiles } from '../lib/runner';
+import { assessAdequacy } from '../lib/decision';
+
+export default function verificationRun(pi: {cwd: string; typebox: {Type: any}}) {
+ const T = pi.typebox.Type;
+ return {
+  name: 'verification_run', label: 'Verification Run',
+  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
+  parameters: T.Object({
+   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs test files; no globs, symlinks, custom flags or loaders.'}),
+   timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
+   assessment: T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))
+  }, {additionalProperties:false}),
+  async execute(toolCallId: string, params: {files:string[];timeoutMs?:number;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
+   const started = performance.now();
+   const text = (value: unknown) => ({content:[{type:'text',text:JSON.stringify(value)}]});
+   try {
+    if (!params || Object.keys(params).some(k => !['files','timeoutMs','assessment'].includes(k)) || (params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000))) throw new Error('invalid_input');
+    const root = await actualRepository(pi.cwd);
+    await validateTestFiles(root, params.files);
+    const specDigest = specFingerprint({runner:'node:test',files:params.files,timeoutMs:params.timeoutMs ?? 30000});
+    const before = await fingerprintSource(root,specDigest);
+    const execution = await runNodeTests(root,params.files,params.timeoutMs ?? 30000,signal);
+    const after = await fingerprintSource(root,specDigest); const freshness = freshnessFor(before,after);
+    const receipt = createReceipt({plugin:'verification-receipts',toolCallId,repositoryDigest:await repositoryDigest(root),durationMs:Math.round(performance.now()-started),specDigest,before,after,freshness,execution,warnings:[],limitations:['Native counts are not assertion counts or coverage proof.','Excluded credential and cache paths are not freshness-covered.','Local test code is not sandboxed; timestamps are descriptive.']});
+    const storage = await persistReceipt(receipt);
+    const assessment = await assessAdequacy(params.assessment,{status:execution.status,counts:execution.counts,freshness,caseIds:['run']});
+    return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment)});
+   } catch {
+    const execution={status:'not_run',reason:'invalid_or_unavailable_input'};
+    const assessment=await assessAdequacy(undefined,{status:execution.status,counts:null,freshness:'unavailable'});
+    return text({execution,assessment,...staticReceiptGuidance(execution,'unavailable',assessment)});
+   }
+  }
+ };
+}

@@ -5,7 +5,13 @@
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
   "scripts": {
-    "build": "cd jev-advisor && bun scripts/build.mjs",
-    "test": "cd jev-advisor && bun scripts/verify.ts"
+    "build": "bun run build:advisor && bun run build:verification && bun run build:ui",
+    "test": "bun run test:advisor && bun run test:verification && bun run test:ui",
+    "build:advisor": "cd jev-advisor && bun scripts/build.mjs",
+    "test:advisor": "cd jev-advisor && bun scripts/verify.ts",
+    "build:verification": "bun verification-receipts/scripts/build.mjs",
+    "test:verification": "bun verification-receipts/scripts/verify.ts",
+    "build:ui": "bun ui-regression/scripts/build.mjs",
+    "test:ui": "bun ui-regression/scripts/verify.ts"
   }
 }

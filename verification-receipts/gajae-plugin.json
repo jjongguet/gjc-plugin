@@ -1,0 +1,9 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "verification-receipts",
+  "version": "0.0.1",
+  "tools": [
+    { "name": "verification_run", "path": "tools/verification-run.ts", "description": "Run explicit Node JS tests and return native counts, immutable local evidence and warning-only guidance." },
+    { "name": "verification_status", "path": "tools/verification-status.ts", "description": "Read a repository-scoped receipt and recompute source freshness; optional explicit bounded Jev adequacy." }
+  ]
+}
