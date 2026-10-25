@@ -475,7 +475,7 @@ export type AlignmentState = {
 	updatedAt: number;
 };
 
-export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error";
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded";
 
 export type AlignmentCounts = {
 	corrections: number;
@@ -860,6 +860,11 @@ export function recordHookError(input: { errorClass: string; now: number }): Ali
 	return { v: 1, kind: "hook_error", at: input.now, errorClass: input.errorClass.slice(0, 64) } as AlignmentEvent;
 }
 
+/** Deterministic evaluation exceeded its latency budget: allow and record it. */
+export function recordLatencyExceeded(input: { elapsedMs: number; budgetMs: number; now: number }): AlignmentEvent {
+	return { v: 1, kind: "latency_exceeded", at: input.now, elapsedMs: Math.max(0, Math.trunc(input.elapsedMs)), budgetMs: Math.max(0, Math.trunc(input.budgetMs)) } as AlignmentEvent;
+}
+
 /** Semantic advisory contract (AC-A3). Advisory only: it can never block. */
 export type SemanticEnvelopeStatus = "ok" | "precision_anomaly" | "invalid_response" | "outbound_suppressed";
 
@@ -976,7 +981,8 @@ export default function register(api: {
 			const actionClass = alignmentClassifyAction(call.toolName);
 			// read_allow / bash_observe: never blocked, never journaled.
 			if (actionClass !== "write") return undefined;
-			const now = Date.now();
+			const startedAt = Date.now();
+			const now = startedAt;
 			const authority = alignmentReadAuthority(ctx);
 			const paths = alignmentWritePaths(call.input);
 			const targetDigest = paths.length === 1 ? digestTarget(paths[0]) : paths.length > 1 ? digestText(paths.join("\n")) : null;
@@ -1006,6 +1012,14 @@ export default function register(api: {
 			} else if (evaluation.stage2Admissible && state) {
 				const admission = admitAlignedAction({ state, evaluation, targetDigest, toolCallIdDigest, now });
 				if (admission.applied && admission.event) events.push(admission.event);
+			}
+			// A deterministic evaluation that overruns its budget must never block:
+			// record the overrun, then fall through to the default allow.
+			const budgetMs = Number(process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS ?? 250);
+			const elapsedMs = Date.now() - startedAt;
+			if (blockReason && Number.isFinite(budgetMs) && elapsedMs > budgetMs) {
+				blockReason = null;
+				events.push(recordLatencyExceeded({ elapsedMs, budgetMs, now }));
 			}
 			const stored = await alignmentAppendEvents(ctx, events, now);
 			// Degraded storage keeps the retry chain in process memory so a repeated

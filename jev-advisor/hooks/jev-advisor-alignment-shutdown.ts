@@ -475,7 +475,7 @@ export type AlignmentState = {
 	updatedAt: number;
 };
 
-export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error";
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded";
 
 export type AlignmentCounts = {
 	corrections: number;
@@ -858,6 +858,11 @@ export function planJournalAppend(existingText: string | null, events: readonly 
 /** A fail-open handler failure: recorded so a silent throw is auditable. */
 export function recordHookError(input: { errorClass: string; now: number }): AlignmentEvent {
 	return { v: 1, kind: "hook_error", at: input.now, errorClass: input.errorClass.slice(0, 64) } as AlignmentEvent;
+}
+
+/** Deterministic evaluation exceeded its latency budget: allow and record it. */
+export function recordLatencyExceeded(input: { elapsedMs: number; budgetMs: number; now: number }): AlignmentEvent {
+	return { v: 1, kind: "latency_exceeded", at: input.now, elapsedMs: Math.max(0, Math.trunc(input.elapsedMs)), budgetMs: Math.max(0, Math.trunc(input.budgetMs)) } as AlignmentEvent;
 }
 
 /** Semantic advisory contract (AC-A3). Advisory only: it can never block. */

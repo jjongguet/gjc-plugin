@@ -83,7 +83,8 @@ export default function register(api: {
 			const actionClass = alignmentClassifyAction(call.toolName);
 			// read_allow / bash_observe: never blocked, never journaled.
 			if (actionClass !== "write") return undefined;
-			const now = Date.now();
+			const startedAt = Date.now();
+			const now = startedAt;
 			const authority = alignmentReadAuthority(ctx);
 			const paths = alignmentWritePaths(call.input);
 			const targetDigest = paths.length === 1 ? digestTarget(paths[0]) : paths.length > 1 ? digestText(paths.join("\n")) : null;
@@ -113,6 +114,14 @@ export default function register(api: {
 			} else if (evaluation.stage2Admissible && state) {
 				const admission = admitAlignedAction({ state, evaluation, targetDigest, toolCallIdDigest, now });
 				if (admission.applied && admission.event) events.push(admission.event);
+			}
+			// A deterministic evaluation that overruns its budget must never block:
+			// record the overrun, then fall through to the default allow.
+			const budgetMs = Number(process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS ?? 250);
+			const elapsedMs = Date.now() - startedAt;
+			if (blockReason && Number.isFinite(budgetMs) && elapsedMs > budgetMs) {
+				blockReason = null;
+				events.push(recordLatencyExceeded({ elapsedMs, budgetMs, now }));
 			}
 			const stored = await alignmentAppendEvents(ctx, events, now);
 			// Degraded storage keeps the retry chain in process memory so a repeated
