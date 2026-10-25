@@ -1,111 +1,80 @@
 # jev-advisor
 
-GJC ([gajae-code](https://github.com/Yeachan-Heo/gajae-code)) plugin: decision-model advisories for subagent `task`
-delegation — the Kev/Jev idea from gajae-code#5842, re-implemented as a
-user-owned plugin so the upstream data-scope decision stays untouched.
+[GJC](https://github.com/Yeachan-Heo/gajae-code) plugin for task-level
+`fast` / `balanced` / `strong` delegation advice and local execution metadata.
+Advice is not model selection, process completion is not accepted code quality,
+and confidence is not a probability of task success.
 
-- **Hook** (`tool_call` / `task` / before): asks a decision model for a
-  `fast|balanced|strong` tier recommendation on every task call.
-  `shadow` (default) → status line; `hint` → non-blocking notify;
-  `enforce` → blocks only when a task requested a WEAKER tier than
-  recommended and the confidence clears `JEV_ADVISOR_MIN_CONFIDENCE`.
-  The question carries the prior outcomes of the *identical* assignment
-  from the local evidence memory (see below) — recommendations are
-  grounded in observed evidence, and the status line shows `· n prior`
-  when the assignment has n recorded outcomes.
-- **Hook** (`tool_result` / `task` / after): outcome review — feeds the
-  completed delegation's assignment plus its outcome (statuses, durations,
-  error flag, result head) to the same decision model and surfaces a re-tier
-  recommendation for the next identical delegation. Observe-only: it never
-  rewrites the tool result, and there is nothing to block post-hoc. The
-  outcome (error flag, total subagent time, re-tier advice) is recorded to
-  the evidence memory regardless of the rate limit.
-- **Tool** `jev_advise`: explicit ask for an assignment/role pair — or
-  `report="calibration"` for the local predicted-vs-outcome statistics
-  (offline, works unconfigured; manual asks are not recorded).
+## Behavior
 
-Fail-open by construction: the hook swallows every error and returns
-`undefined`, so it can never break delegation (gjc treats hook errors as
-fail-closed). Unconfigured, it performs zero network calls and zero writes
-(state writes begin only once a provider is configured); force it inert any
-time with `JEV_ADVISOR_PROVIDER=off`.
+- **Before `task`:** ask separately for each eligible child. Normalize at most
+  32 entries; dispatch at most four sequential requests within an eight-second
+  batch budget. Later or invalid entries receive explicit no-decision reasons.
+  Each prompt contains that child's role, description, assignment and shared
+  context, without requested tiers, invocation IDs or previous results.
+- **After `task`:** observe a launch receipt, not a completed delegation.
+- **After `subagent`:** observe structured `completed`, `failed` or `cancelled`
+  snapshots. Running, paused, queued, missing and unknown states are not terminal.
+  Result hooks never call a provider, re-tier, or rewrite a tool result.
+- **`jev_advise`:** explicitly request advice for one assignment/role, or use
+  `report="calibration"` for an offline descriptive report. Manual advice does
+  not create a delegation record.
 
-The hook is a **legacy plugin hook** (no `capabilities` declared — gjc v0.18.0
-refuses to execute function hooks in the host realm: they require an isolate
-runtime the host does not provide). Network egress is restricted in code:
-`isAllowedEndpoint` only allows `https://openrouter.ai` and
-`https://api.typesafe.ai`, plus loopback HTTP for local servers — for hook
-AND tool alike.
+`shadow` is the source default; `hint` adds a non-blocking notification.
+`enforce` can block a whole task call only when an individual complete task has
+an explicit requested tier weaker than its own recommendation and its confidence
+meets the configured gate. Unknown, invalid, oversized or unavailable advice
+cannot justify blocking. Neither mode rewrites input or chooses an actual model.
+No routing settings are enabled by this plugin.
 
-## Architecture
+One pre-hook invocation reserves the cooldown before dispatch, including failed
+requests. Cached complete advice is still evaluated for enforcement; a genuinely
+rate-limited task has no new recommendation and fails open. Manual requests are
+independent of this hook cooldown. Storage/provider errors fail open and are
+reported as unavailable/no-decision, not successful observations.
 
-```
-lib/decision.ts        single source of truth: config parsing, PROVIDERS registry,
-                       REQUEST_STYLES (wire formats), decision parsing, summary format,
-                       evidence memory (fingerprint, bounded store, calibration math)
-src/hook.adapter.ts    hook adapter: legacy host-realm hook (api.on tool_call) + fail-open wrapper
-src/tool.adapter.ts    tool adapter: typebox parameters + global fetch injection
-src/result.adapter.ts  outcome-review adapter (api.on tool_result) — observe-only re-tier
-scripts/build.mjs      inlines the four files above into the surface files
-hooks/jev-advisor.ts   generated surface (do not edit by hand)
-tools/jev-advise.ts    generated surface (do not edit by hand)
-hooks/jev-advisor-result.ts  generated surface (do not edit by hand)
-```
-The evidence memory persists to `~/.gjc/agent/jev-advisor/state.json` —
-outside the installed tree, so it survives upgrades. There is deliberately
-**no module-level mutable state** in the core or adapters: each generated
-surface inlines its own copy of the core, so the disk store is the only
-channel shared by the two hooks and the tool (atomic unique-tmp rename,
-mode `0600`, last-writer-wins across surfaces).
+## Complete inputs and provider responses
 
-**Why generated surfaces:** the gjc installer copies only manifest-declared
-files (`compiler.ts` builds `files` from the manifest; `installer.ts` copies
-exactly that set — undeclared files are never copied). A shared `lib/` module
-therefore cannot be imported at runtime from an installed surface. The build
-inlines the core into each surface instead, so the repo stays DRY while every
-installed file is self-contained.
+Complete encoded prompts are bounded to **4,000 characters** for hosted Jev,
+TypeSafe Jev and chat, and **1,900** for Ollaya's local constraint. These are plugin
+admission budgets, not claims about maximum hosted model context. Inputs above
+the applicable bound are rejected without a request; shared context is never
+silently sliced away. Full semantic input is fingerprinted independently of
+invocation IDs, requested tier and task order; fingerprints never join executions.
 
-**To change anything:** edit `lib/decision.ts` or `src/*.adapter.ts`, run
-`bun scripts/build.mjs` (keyless — always), and commit the regenerated
-surfaces; `gjc plugin upgrade jev-advisor --user` picks them up. There is no
-owner-specific build: keys live in `~/.gjc/agent/jev-advisor/.env` for
-everyone.
+Confidence must be a finite number in `[0,1]`; missing, coerced or out-of-range
+values are rejected. A supplied probability distribution must contain exactly the
+three tiers, finite probabilities in `[0,1]`, and sum to one within `0.001`.
+Validated distributions are retained unchanged; missing ones are not invented.
+Chat requires final content, not a reasoning-only fallback. Provider errors,
+invalid/partial responses, response overflow, timeout and cancellation yield
+explicit no-decision. There are no retries or automatic provider fallbacks.
+
+Systemone choice confidence and chat self-reported confidence have different
+semantics. Neither is independent correctness evidence. Validate any enforcement
+policy independently; a confidence threshold alone does not establish safety.
 
 ## Providers
 
-| Provider | Endpoint | Model (default) | Key |
+| Provider | Endpoint | Default model | Key |
 | --- | --- | --- | --- |
-| `jev` (default) | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.13` | OpenRouter key |
-| `openrouter` | OpenRouter `/api/v1/chat/completions` | `openai/gpt-5-mini` | OpenRouter key |
-| `typesafe-jev` | `https://api.typesafe.ai/v1/systemone` | `jev-latest` | TypeSafe key |
-| `ollaya` | local `127.0.0.1:11435/v1/systemone` | `laya` | none |
+| `jev` | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.13` | OpenRouter |
+| `openrouter` | OpenRouter `/api/v1/chat/completions` | `openai/gpt-5-mini` | OpenRouter |
+| `typesafe-jev` | `https://api.typesafe.ai/v1/systemone` | `jev-latest` | TypeSafe |
+| `ollaya` | `http://127.0.0.1:11435/v1/systemone` | `laya` | none |
 
-Notes:
-
-- `jev` — TypeSafe Jev served on OpenRouter via the decisions API: decision
-  models are rejected by `chat/completions` with HTTP 400, while the decisions
-  API speaks the same `state` + typed `questions` wire as the systemone style.
-  ~$0.042/M input tokens, $0/M output — roughly $0.000015 per advisory.
-- `openrouter` — generic chat fallback. The `openai-chat` style budgets
-  `max_tokens: 1024` and falls back to parsing `message.reasoning` when
-  `content` comes back null (reasoning models).
-- `typesafe-jev` / `ollaya` — the TypeSafe `systemone` wire format
-  (`state` + typed `questions`). A local server is the zero-cost, private
-  path (`ollaya run laya`).
-- OpenRouter-bound calls carry `HTTP-Referer`/`X-Title` so advisories show up
-  under a `jev-advisor` app on the OpenRouter dashboard instead of the
-  anonymous "Unknown" bucket; other targets never receive these headers.
+Jev uses `state` plus typed `questions`, not chat completions. Provider/model
+selection remains explicit. Egress permits only HTTPS `openrouter.ai` and
+`api.typesafe.ai`, or loopback HTTP; redirects are rejected. OpenRouter alone
+receives attribution headers (`HTTP-Referer` and `X-Title`).
 
 ## Configuration
 
-**Default state: inert until a key exists.** A fresh install makes zero
-network calls and zero writes; local state writes begin only once a provider
-is configured. To force it off entirely, set `JEV_ADVISOR_PROVIDER=off`.
-
-There is exactly one key registration channel — the file
-`~/.gjc/agent/jev-advisor/.env` (KEY=VALUE lines). It lives outside the
-installed tree because the installer replaces that tree wholesale on every
-install/upgrade:
+Configuration lives outside the replaceable installation tree in
+`~/.gjc/agent/jev-advisor/.env`. Process environment overrides same-named file
+values; the merged `JEV_ADVISOR_API_KEY` takes priority over `OPENROUTER_API_KEY`.
+No key and no keyless provider means zero hook network calls or state writes.
+`JEV_ADVISOR_PROVIDER=off` disables hooks; an explicit offline report still works.
 
 ```sh
 mkdir -p ~/.gjc/agent/jev-advisor
@@ -113,112 +82,124 @@ printf 'OPENROUTER_API_KEY=sk-or-v1-...\n' >> ~/.gjc/agent/jev-advisor/.env
 chmod 600 ~/.gjc/agent/jev-advisor/.env
 ```
 
-Key resolution precedence: `JEV_ADVISOR_API_KEY` (env) → `OPENROUTER_API_KEY`
-(env; the same variable gjc itself reads) → the same two in the `.env` file →
-empty (inert).
-
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `JEV_ADVISOR_PROVIDER` | `jev` | `jev` \| `openrouter` \| `typesafe-jev` \| `ollaya` \| `off` |
-| `JEV_ADVISOR_MODEL` | per provider | decision model id |
-| `JEV_ADVISOR_MODE` | `shadow` | `shadow` \| `hint` \| `enforce` |
-| `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | enforce deny threshold |
-| `JEV_ADVISOR_TIMEOUT_MS` | `8000` | decision request timeout |
-| `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | rate limit between advisory calls |
-| `JEV_ADVISOR_ENDPOINT` | per provider | endpoint override (subject to the egress allowlist) |
-| `JEV_ADVISOR_MEMORY` | `on` | evidence-memory kill switch (`off` stops all local recording and evidence injection) |
-| `JEV_ADVISOR_STATE` | `~/.gjc/agent/jev-advisor/state.json` | store path override (also the test-isolation channel) |
-| `JEV_ADVISOR_MEMORY_MAX_KEYS` | `200` | max tracked assignments (oldest `updatedAt` evicted) |
-| `JEV_ADVISOR_MEMORY_MAX_EVENTS` | `10` | events kept per assignment (ring) |
-| `JEV_ADVISOR_MEMORY_HEAD_CHARS` | `120` | assignment-head chars stored locally; `0` → fingerprints only |
+| `JEV_ADVISOR_PROVIDER` | `jev` | `jev`, `openrouter`, `typesafe-jev`, `ollaya`, `off` |
+| `JEV_ADVISOR_MODEL` | per provider | Advisor model, not delegated execution model |
+| `JEV_ADVISOR_MODE` | `shadow` | `shadow`, `hint`, `enforce` |
+| `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | Per-task enforcement confidence gate |
+| `JEV_ADVISOR_TIMEOUT_MS` | `8000` | Per-request timeout, also bounded by remaining hook budget |
+| `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | Pre-hook batch cooldown; zero disables cooldown |
+| `JEV_ADVISOR_ENDPOINT` | per provider | Override subject to egress restrictions |
+| `JEV_ADVISOR_MEMORY` | `on` | `off` disables hook store access/writes |
+| `JEV_ADVISOR_STATE` | `~/.gjc/agent/jev-advisor/state.json` | Legacy base path; v2 sibling is derived without accessing the base |
+| `JEV_ADVISOR_MEMORY_MAX_KEYS` | `200` | Retained semantic groups, hard ceiling 200 |
+| `JEV_ADVISOR_MEMORY_MAX_EVENTS` | `10` | Task records per group, hard ceiling 10 |
 
-Do not enable `enforce` until the thresholds are validated on your own data
-(the `0.6` gate compares chat-model self-reported confidence and systemone
-normalized confidence on different scales — recalibrate when switching
-providers). Task assignment text is transmitted to the configured remote
-provider whenever a key is registered; use `off` or the keyless local
-`ollaya` provider for sensitive material.
+`JEV_ADVISOR_MEMORY_HEAD_CHARS` is no longer used: v2 stores no assignment heads.
+Existing configuration and legacy memory are not changed or migrated.
 
-## Evidence memory
+## Private versioned evidence
 
-Once a provider is configured, every `task` delegation is fingerprinted
-(sha256 of the whitespace-collapsed assignment text, first 16 hex chars) and
-remembered in `~/.gjc/agent/jev-advisor/state.json`:
+The default store is `~/.gjc/agent/jev-advisor/state.v2.json`. For a custom base
+`/x/my.json` the new path is `/x/my.v2.json`; `/x/custom` becomes `/x/custom.v2`.
+The base file is never read, rewritten or silently converted. Existing v1 data
+remains untouched and is not counted as verified v2 evidence.
 
-- **Pre-call hook** records a `pre` event (requested tiers, recommendation
-  once the provider answers) *before* the rate-limit gate, and injects a
-  bounded evidence block (`prior outcomes (n=…): [fast→ok 12s, …] last
-  re-tier: …`, ≤ 200 chars) ahead of the assignment so the decision model
-  recommends from observed outcomes of the identical assignment. The status
-  line gains a `· n prior` suffix when there is history.
-- **Post-call hook** records a `post` event (error flag, total subagent
-  time, re-tier advice) regardless of the rate limit, and pairs it with the
-  latest unjoined recommendation-bearing `pre` of the same fingerprint.
-- Bounds: 200 assignments × 10 events (≤ a few hundred KB), assignment
-  heads capped at 120 chars (or fingerprints-only with
-  `JEV_ADVISOR_MEMORY_HEAD_CHARS=0`), atomic `0600` writes, deterministic
-  eviction. Kill switch: `JEV_ADVISOR_MEMORY=off`.
-- The store never leaves the machine and manual `jev_advise` asks are not
-  recorded — only real delegations feed it.
+- Task records use exact `(sessionId, toolCallId, taskIndex)` identity. Terminal
+  records use `(sessionId, jobId)`; a resumed job is a different execution.
+- Only a valid **original singleton** task launch with an explicit job ID and no
+  scheduling failures can join to a terminal observation. A batch with one valid
+  child after filtering is still a batch. Multi-child mappings are not inferred
+  from text, caller IDs, array positions or fingerprints.
+- Repeated inspect/list/await observations enrich one retained job, including
+  terminal-before-launch delivery. Missing correlation stays unjoined. Missing
+  session/job identity cannot be counted as a distinct retained execution.
+- Requested tier, advisor recommendation, requested model, observed effective
+  model and terminal status remain separate. Actual tier and independent quality
+  remain unknown. Contradictory observations are flagged, not overwritten into a
+  success story. Conflicted measurements are excluded from their aggregates.
+- The store contains bounded metadata, fingerprints and validated advice, not
+  assignment/context/result prose, rationale, provider payloads or credentials.
+  Retention and eviction limit deduplication to the retained window.
 
-## Calibration report
+Updates acquire a private exclusive lock, load the latest state, synchronously
+mutate it and atomically rename a unique `0600` temporary file. No network await
+holds a transaction or a stale state snapshot. Lock waiting is bounded to 100 ms;
+foreign or abandoned locks are never stolen. Corrupt, unsupported, oversized or
+unsafe stores remain unavailable rather than being reset. Recovery requires an
+explicit operator decision; do not delete memory just to silence an error.
 
-```
+The job table is bounded by the effective task budget (at most 2,000 jobs), and
+the serialized store by 2 MiB. Zero retention keeps no records. New plugin-owned
+directories use `0700`; unrelated existing parents are not chmodded. Memory off,
+store failure, missing identity and eviction limit persistent replay suppression.
+
+## Offline report
+
+```text
 jev_advise report="calibration"
 ```
 
-Renders the accumulated predicted-vs-outcome statistics from the local
-store: matched pairs, requested-vs-recommended agreement rate, error rate
-and mean total subagent time per recommended tier, re-tier distribution,
-and totals-only counts (unmatched outcomes, advisory calls without a
-recommendation). Pure local read — works unconfigured and with
-`JEV_ADVISOR_PROVIDER=off`; it is how you check whether the advisor's
-recommendations are actually any good before trusting `enforce`.
+The existing parameter is retained, but output is **descriptive retained-window
+coverage**, not an accuracy or savings benchmark. It separates advice/no-decision,
+launch visibility, blocked calls, exact joins, unjoined terminals, conflicts,
+process statuses and observed/unknown effective model coverage. It reports
+requested-vs-recommended agreement only for individual records with both values.
+Agreement is not correctness or evidence that a recommended model actually ran.
 
-## Verification
+Duration means use only positive, nonconflicted observed durations: a 12-second
+job plus an unknown-duration job has a 12-second mean over one measured job.
+All-missing means unknown, not zero. Unobserved terminals and missing-identity
+observations are outside report coverage. No automatic NEXT recommendation,
+prior-outcome prompt injection, accepted-quality or cost-saving claim is made.
 
-Offline suite — no network, no API spend (egress gate, config precedence,
-both wire formats against a mock server, payload extraction, evidence-memory
-store/eviction/join/calibration math, adapter harness over the concatenated
-surfaces, generated-file tripwires):
+## Architecture and verification
+
+```text
+lib/decision.ts             Config, task inputs, providers, v2 transactions/report
+src/hook.adapter.ts         Per-task pre-call advice and optional enforcement
+src/result.adapter.ts       Provider-free task/subagent receipt observer
+src/tool.adapter.ts         Explicit advice and offline report
+scripts/build.mjs           Keyless concatenation of core and adapters
+hooks/jev-advisor.ts         Generated pre-call surface
+hooks/jev-advisor-result.ts  Generated result surface, two manifest targets
+tools/jev-advise.ts          Generated explicit-tool surface
+```
+
+Installed surfaces are self-contained because the installer copies only
+manifest-declared files. Edit core/adapters, never generated outputs by hand.
+The surfaces share disk transactions, not an in-memory evidence cache.
 
 ```sh
-cd jev-advisor && bun scripts/verify.ts   # expects: ALL PASS
-gjc plugin list && gjc plugin doctor      # installed-surface health
+bun scripts/build.mjs
+bun scripts/verify.ts
 ```
+
+The verifier starts an isolated child with fresh HOME/environment/cwd before
+product imports. It uses synthetic credentials, temporary state and scripted
+in-memory fetch only: no real provider, local-model server or user memory.
+It exercises actual generated adapters, strict parsing, mixed/oversized tasks,
+throttle/enforce boundaries, terminal identity/replays/conflicts, concurrent
+writes, legacy preservation, unavailable stores and report denominators. It
+compares all three generated files byte-for-byte against the unchanged builder
+run in a temporary fixture, including a deliberately stale candidate.
+
+These checks establish local package behavior, not installed-host dispatch,
+real-provider conformance or actual task efficacy. The manifest declares legacy
+before-task and after-task/after-subagent hooks. Public host source exposes scoped
+session identity and structured terminal snapshots; unavailable runtime fields
+remain unknown. The plugin does not scrape private histories or install itself.
 
 ## Install
 
-See the [repository README](../README.md#install) for the one-command GitHub
-install and key registration. Local development:
+See the [repository README](../README.md#install). Installation and activation are
+separate operator actions, not part of building or offline verification:
 
 ```sh
-gjc plugin install "$(pwd)" --user     # from inside jev-advisor/
-gjc plugin upgrade jev-advisor --user  # after rebuilds
+gjc plugin install "$(pwd)" --user     # from jev-advisor/, fresh install
+gjc plugin upgrade jev-advisor --user
+gjc plugin list && gjc plugin doctor
 ```
 
-## Extension points
-
-| Want to… | Do this |
-| --- | --- |
-| Add a provider (e.g. a local server) | one `PROVIDERS` entry in `lib/decision.ts` — `openai-chat` or `systemone` style; loopback HTTP endpoints pass the egress gate, remote ones must be HTTPS |
-| Add a non-OpenAI wire format | one `REQUEST_STYLES` entry, reference it from the provider |
-| Add a tunable | `DEFAULTS` + `readConfig()` — config parsing exists in exactly one place |
-| Change advisory wording / deny guidance | `formatSummary` / `ENFORCE_GUIDANCE` |
-| Change tiers | `TIERS` (note: this changes the contract vocabulary gjc's task tool understands) |
-
-Deliberately NOT built (no current requirement): gjc plugin settings-schema
-plumbing (env config serves both hook and tool with one parser), multi-model
-ensembles, local Kev supervisor (upstream owns that design), and a fix-mode
-that rewrites the requested tier in place — the latter rides an undocumented
-input-mutation channel and waits until the calibration report shows a
-persistent requested-vs-recommended mismatch worth acting on.
-
-## Platform constraints (gjc 0.18.0)
-
-- Installer copies manifest-declared files only → shared code must be inlined (see Architecture).
-- Hook `networkDestinations` must be full HTTPS origins — bare hostnames are rejected.
-- `subskills` surface requires frontmatter `binds_to`/`phase`/`activation_arg`
-  (it extends the four workflow skills / four role agents; not usable for a
-  standalone advisor doc, so usage policy lives in this README and the tool
-  description instead).
+Health labels alone do not prove terminal observation coverage or model routing.

@@ -11,9 +11,16 @@
       "path": "hooks/jev-advisor.ts"
     },
     {
-      "name": "jev-task-outcome-advisor",
+      "name": "jev-task-launch-observer",
       "event": "tool_result",
       "target": "task",
+      "phase": "after",
+      "path": "hooks/jev-advisor-result.ts"
+    },
+    {
+      "name": "jev-subagent-terminal-observer",
+      "event": "tool_result",
+      "target": "subagent",
       "phase": "after",
       "path": "hooks/jev-advisor-result.ts"
     }
@@ -22,7 +29,7 @@
     {
       "name": "jev_advise",
       "path": "tools/jev-advise.ts",
-      "description": "Ask the configured decision model for a subagent delegation tier recommendation, or pass report=\"calibration\" for local evidence-memory statistics (offline, no key)"
+      "description": "Request task-level effort advice, or pass report=\"calibration\" for offline advisory and terminal-observation coverage; not task-quality accuracy"
     }
   ]
 }

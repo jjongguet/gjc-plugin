@@ -5,11 +5,15 @@ Each subdirectory carrying a `gajae-plugin.json` is an independently installable
 
 | Plugin | Purpose |
 | --- | --- |
-| [`jev-advisor`](jev-advisor/) | Decision-model advisories for subagent `task` delegation — recommends a `fast` / `balanced` / `strong` tier via TypeSafe Jev on OpenRouter, a generic chat model, or a local server, and remembers delegation outcomes locally so recommendations and a calibration report are grounded in evidence. Shadow by default. |
+| [`jev-advisor`](jev-advisor/) | Bounded per-child `fast` / `balanced` / `strong` advice via Jev, chat or a local server, with exact-or-unjoined terminal metadata and an offline coverage report. Completion and recommendation agreement are not task-quality evidence. Shadow by default. |
 
 ## Install
 
 Requires [gajae-code](https://github.com/Yeachan-Heo/gajae-code) **≥ 0.18.0** (legacy hook contract) and `git` on PATH — URL installs clone through it.
+
+Terminal coverage additionally depends on structured `subagent` result snapshots
+and public session identity. Offline package checks do not establish installed-host
+dispatch; absent identity remains unknown rather than being inferred.
 
 ```sh
 gjc plugin install https://github.com/jjongguet/gjc-plugin --user
@@ -56,34 +60,50 @@ Notes:
 | --- | --- | --- | --- |
 | `~/.gjc/agent/gjc-plugins/jev-advisor/` | installed plugin code | no (removed) | no (replaced wholesale) |
 | `~/.gjc/agent/jev-advisor/.env` | your key + config | yes | yes |
-| `~/.gjc/agent/jev-advisor/state.json` | local evidence memory (bounded, `0600`) | yes | yes |
+| `~/.gjc/agent/jev-advisor/state.json` | legacy memory, preserved and not migrated | yes | yes |
+| `~/.gjc/agent/jev-advisor/state.v2.json` | bounded metadata-only evidence, `0600` | yes | yes |
 
 ## Evidence memory & calibration
 
-Once a provider is configured, the advisor keeps a bounded local record per delegation (`~/.gjc/agent/jev-advisor/state.json`, ≤ 200 assignments × 10 events, assignment heads capped at 120 chars). Pre-call advisories include the prior outcomes of the *identical* assignment; the status line shows `· n prior` when there are n. Ask for the predicted-vs-outcome statistics any time — offline, no key needed:
+Advice is task-scoped: at most four sequential requests share an eight-second
+hook budget, with explicit no-decision for invalid, oversized or unadmitted tasks.
+Complete prompt limits are 4,000 characters for hosted Jev/TypeSafe/chat and 1,900
+for Ollaya; no shared context is silently truncated.
+
+The separate v2 store preserves old memory. It records requested/recommended
+tiers separately from observed terminal status and optional effective model.
+Only exact scoped singleton launch/job mappings join; batch terminals remain
+unjoined. Repeated observations are deduplicated within bounded retention.
+Running launches are not outcomes, and result hooks make no provider calls.
+Ask for descriptive retained-window coverage — offline, no key needed:
 
 ```
 jev_advise report="calibration"
 ```
 
-Turn the memory off with `JEV_ADVISOR_MEMORY=off`; store only fingerprints (no assignment text) with `JEV_ADVISOR_MEMORY_HEAD_CHARS=0`.
+The report shows unknowns, conflicts, joins, per-task recommendation agreement
+and measured-duration denominators, not accuracy, quality or savings. Actual
+execution tier is unknown. Turn hook storage off with `JEV_ADVISOR_MEMORY=off`.
+V2 stores no assignment/result prose; `JEV_ADVISOR_MEMORY_HEAD_CHARS` is obsolete.
+Custom state bases derive a separate `.v2` sibling without reading or modifying
+the base. See the [full storage contract](jev-advisor/README.md#private-versioned-evidence).
 
 ## Privacy & data flow
 
 - **Nothing leaves the machine until a key exists** (or you select the local `ollaya` provider). A fresh install performs zero network calls and zero writes.
-- Once configured, task assignment text (role, task ids/descriptions/assignments/tiers, shared context; capped) is transmitted to the configured provider on advisory calls. Default provider `jev` sends it to OpenRouter. Use `JEV_ADVISOR_PROVIDER=off` for sensitive material.
-- The evidence memory never leaves the machine. It starts writing only once a provider is configured, stores bounded assignment heads (reducible to fingerprints only), never stores keys, and is file-mode `0600`.
+- Once configured, one task's role, description, assignment and shared context are transmitted on pre-call/manual advisories. Requested tiers and invocation IDs are excluded. Oversized complete inputs are refused, not sliced. Default `jev` sends text to OpenRouter; use `off` for sensitive material.
+- V2 evidence stays local and contains metadata/fingerprints, not assignment heads, result prose, rationale or keys. It starts writing only once a provider is configured and uses private transactional writes. There is no prior-outcome prompt injection or automatic NEXT/re-tier request.
 - Egress is allowlisted in code: HTTPS `openrouter.ai` / `api.typesafe.ai` plus loopback HTTP for local servers; every other destination is refused before any request is sent. Attribution headers (`HTTP-Referer`, `X-Title`) go to OpenRouter only.
 
 ## Troubleshoot
 
 | Symptom | Cause → fix |
 | --- | --- |
-| No advisories at all | Fresh install is inert until a key exists — see Configure. Or the 15 s per-surface rate limit is suppressing repeats; it counts per surface, not per session. |
-| Advisories appear but nothing blocks | `shadow` is the default — status line only. `hint` notifies; `enforce` blocks only weaker-than-recommended tiers at confidence ≥ `JEV_ADVISOR_MIN_CONFIDENCE`. |
+| No advisories at all | Check configuration and explicit no-decision reasons: batch cooldown, input size, request budget or provider failure. The default cooldown is 15 s per pre-hook instance; manual requests are independent. |
+| Advisories appear but nothing blocks | Shadow/hint do not block. Enforce requires a complete task, explicit weaker requested tier and that task's valid recommendation at the confidence gate. This does not enable model autorouting. |
 | `provider returned HTTP 401` | Bad or expired key — fix the `.env` entry. |
-| `report="calibration"` says no data | Memory starts empty and only hooks feed it (manual `jev_advise` asks are not recorded); run a real `task` delegation first. |
-| `state.json` looks corrupt | Delete it — the store auto-resets to empty and rebuilds from new events. |
+| `report="calibration"` says no data | V2 starts separately and does not import legacy outcomes. Manual advice is not a delegation. Missing identity/unobserved terminals and retention limit coverage. |
+| V2 store is corrupt, unsafe or locked | Storage reports unavailable and delegation fails open. Do not automatically delete/reset memory or steal locks; inspect and authorize recovery separately. Legacy state is untouched. |
 | Upgrade fails on missing recorded source | Uninstall + install from the URL again (see Manage); `.env` and `state.json` survive. |
 
 ## Develop
