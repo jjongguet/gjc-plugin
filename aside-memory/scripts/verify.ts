@@ -396,7 +396,10 @@ if (args[3] === "path") {
 		assert.deepEqual(Object.keys((generated.parameters as any).properties).sort(), ["account", "max_results", "query"]);
 		assert.ok(JSON.parse(readFileSync(path.join(plugin, "../gjc-plugin.json"), "utf8")).plugins.includes("aside-memory/gajae-plugin.json"));
 		const scripts = JSON.parse(readFileSync(path.join(plugin, "../package.json"), "utf8")).scripts;
-		assert.match(scripts.build, /build:aside-memory$/); assert.match(scripts.test, /test:aside-memory$/);
+		assert.match(scripts.build, /build:aside-memory$/);
+		// The root test entry runs every `test:*` script concurrently (scripts/run-checks.mjs), so this plugin's suite joins it through its own step.
+		assert.equal(scripts["test:aside-memory"], "bun aside-memory/scripts/verify.ts");
+		assert.match(scripts.test, /node scripts\/run-checks\.mjs$/);
 	});
 	await check("keyless generated rebuild byte equality and check mode", () => {
 		const output = path.join(plugin, "tools/aside-memory.ts"); const before = readFileSync(output);
