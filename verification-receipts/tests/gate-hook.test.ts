@@ -191,6 +191,39 @@ test('loop tool blocks outside a repository, rejects parameters and keeps a boun
 	expect(rows.find(row => row.operation === 'loop_run')!.loop.status).toBe('blocked');
 });
 
+test('loop accepts an explicit repository and never reports an ungated non-Git session clean', async () => {
+	const home = await makeHome();
+	const workspace = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'gate-loop-workspace-')));
+	owned.push(workspace);
+	const repo = path.join(workspace, 'lanes', 'repo');
+	const outside = path.join(workspace, '..', `gate-loop-outside-${process.pid}`);
+	await fs.mkdir(path.join(workspace, 'lanes'), { recursive: true });
+	await fs.mkdir(repo);
+	await fs.mkdir(outside);
+	owned.push(outside);
+	git(repo, 'init', '-q');
+	git(outside, 'init', '-q');
+	const tool = verificationLoop({ cwd: workspace, typebox: { Type } });
+	const ctx = ctxFor('session-ungated', workspace);
+	const scoped = JSON.parse(textsOf(await (tool as any).execute('loop-repo', { repository: 'lanes/repo' }, undefined, ctx))[0]);
+	expect(scoped.status).toBe('blocked');
+	expect(scoped.reason).toBe('not_a_repository');
+	expect(scoped.gapKinds).toContain('not_a_repository');
+	expect(scoped.gaps[0].detail).toContain('session cwd is not inside a Git work tree');
+	expect(scoped.warnings).toContain('ungated_session_cwd');
+	expect(scoped.requiredActions.join(' ')).toContain('ungated');
+	const invalid = JSON.parse(textsOf(await (tool as any).execute('loop-bad', { repository: 'lanes/missing' }, undefined, ctx))[0]);
+	expect(invalid.status).toBe('blocked');
+	expect(invalid.reason).toBe('invalid_repository');
+	expect(invalid.warnings).toEqual(['invalid_repository']);
+	const escaped = JSON.parse(textsOf(await (tool as any).execute('loop-outside', { repository: outside }, undefined, ctx))[0]);
+	expect(escaped.status).toBe('blocked');
+	expect(escaped.reason).toBe('repository_outside_session_cwd');
+	expect(escaped.warnings).toEqual(['repository_outside_session_cwd']);
+	const rows = await journal(home);
+	expect(rows.filter(row => row.operation === 'loop_run').map(row => row.loop.status)).toEqual(['blocked', 'blocked', 'blocked']);
+});
+
 test('before hook stays within its wall-clock budget under a hanging git', async () => {
 	const home = await makeHome();
 	const root = await makeRepo();

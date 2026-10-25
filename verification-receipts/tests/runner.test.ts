@@ -19,6 +19,7 @@ async function withToolOnPath(entry: (bin: string) => string, run: (bin: string)
   const previous = process.env.PATH;
   try {
     writeFileSync(join(bin, 'vr-fixture-tool'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    writeFileSync(join(bin, 'vr-fixture-tool-fails'), '#!/bin/sh\nexit 3\n', { mode: 0o755 });
     process.env.PATH = `${entry(bin)}${delimiter}${previous ?? ''}`;
     await run(bin);
   } finally {
@@ -60,6 +61,34 @@ describe('native Node verification runner', () => {
       expectNativeRunner(result);
       expect(result.status).toBe('no_tests');
       expect((await runNodeTests(root, ['empty.mjs', 'skip.cjs'])).status).toBe('no_tests');
+    });
+  });
+
+  test('a shell command missing from PATH is named missing_binary', async () => {
+    await withRunnerFixture({ 'shell.cjs': "const { test } = require('node:test'); const { execSync } = require('node:child_process'); test('owned shell', () => { execSync('vr-missing-shell-tool'); });" }, async root => {
+      const diagnostics = { missingBinaries: [] as string[] };
+      const result = await runNodeTests(root, ['shell.cjs'], 30000, undefined, diagnostics);
+      expectNativeRunner(result);
+      expect(result.status).toBe('failed');
+      expect(result.reason).toBe('missing_binary');
+      expect(diagnostics.missingBinaries).toEqual(['vr-missing-shell-tool']);
+      expect(JSON.stringify({ result, diagnostics })).not.toContain('owned');
+    });
+  });
+
+  test('a shell command present on PATH that exits non-zero stays native_failure', async () => {
+    await withToolOnPath(bin => bin, async () => {
+      await withRunnerFixture({ 'exit.cjs': "const { test } = require('node:test'); const { execSync } = require('node:child_process'); test('owned exit', () => { execSync('vr-fixture-tool-fails'); });", 'builtin.cjs': "const { test } = require('node:test'); const { execSync } = require('node:child_process'); test('owned builtin', () => { execSync('exit 127'); });" }, async root => {
+        const diagnostics = { missingBinaries: [] as string[] };
+        const exited = await runNodeTests(root, ['exit.cjs'], 30000, undefined, diagnostics);
+        expectNativeRunner(exited);
+        expect(exited.status).toBe('failed');
+        expect(exited.reason).toBe('native_failure');
+        expect(diagnostics.missingBinaries).toEqual([]);
+        const builtin = await runNodeTests(root, ['builtin.cjs'], 30000, undefined, { missingBinaries: [] as string[] });
+        expect(builtin.status).toBe('failed');
+        expect(builtin.reason).toBe('native_failure');
+      });
     });
   });
 

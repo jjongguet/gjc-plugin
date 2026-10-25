@@ -17,6 +17,8 @@ Requires a connected Aside profile for runs (explicit ephemeral account routing)
 
 Text matching preserves case and internal whitespace, normalizing only line endings and surrounding whitespace. **Normalized-empty substring expectations are rejected**; exact-empty assertions and empty fills remain meaningful supported cases.
 
+Both tools take an optional `repository`: a Git work-tree root, absolute or relative to the session directory, that is the session repository or lies inside it. Pass it when the session directory is not inside a work tree (a workspace root holding several repositories). Without it the run is `not_run` / `not_a_repository` and status is `unavailable` / `not_a_repository`; a repository outside the session directory is `repository_outside_session_cwd`, and a path that is not an existing work-tree root is `invalid_repository`. Pass the same `repository` to `ui_regression_status` that `ui_regression_run` received.
+
 ## Boundaries
 
 Runs are limited to loopback and non-sensitive inputs; they are not a general browser-testing surface and provide no screenshot diffing or visual-regression baselines. Like `verification_run`, the tool automatically attempts warning-only Jev adequacy via the fixed OpenRouter decision endpoint when configured; omitted context or weak evidence never establishes sufficient verification. Private storage layout and retention: [`../docs/private-results.md`](../docs/private-results.md).

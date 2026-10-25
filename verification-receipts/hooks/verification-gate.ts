@@ -1830,7 +1830,7 @@ export function requiredActionsFor(kinds: LoopGapKindName[]): string[] {
   if (kind === 'no_receipt_after_gate' || kind === 'changed_test_uncovered') actions.push('Run verification_run over the changed test files (or explain in the final report why verification does not apply).');
   else if (kind === 'receipt_not_passed' || kind === 'receipt_no_tests' || kind === 'receipt_incomplete') actions.push('Fix the failing or incomplete verification and rerun verification_run, then re-run verification_loop.');
   else if (kind === 'receipt_stale' || kind === 'receipt_changed_during_run' || kind === 'receipt_freshness_unavailable') actions.push('Re-run verification_run against the current source, then re-run verification_loop.');
-  else if (kind === 'not_a_repository') actions.push('Run verification_loop from inside the repository that received the delegated work.');
+  else if (kind === 'not_a_repository') actions.push('Run verification_loop from inside the repository that received the delegated work, or pass `repository` when the session directory is not a Git work tree.');
   else if (kind === 'state_unavailable') actions.push('Loop state or repository facts are unreadable; inspect the verification-receipts store and re-run verification_loop once facts are available.');
  }
  return [...new Set(actions)].slice(0, 4);

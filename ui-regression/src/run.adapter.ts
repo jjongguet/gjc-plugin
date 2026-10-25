@@ -1,4 +1,4 @@
-import { actualRepository, repositoryDigest, specFingerprint, fingerprintSource, freshnessFor, createReceipt, persistReceipt, staticReceiptGuidance } from '../../verification-receipts/lib/receipts';
+import { resolveReceiptRepository, RECEIPT_REPOSITORY_REASONS, repositoryDigest, specFingerprint, fingerprintSource, freshnessFor, createReceipt, persistReceipt, staticReceiptGuidance } from '../../verification-receipts/lib/receipts';
 import { assessAdequacy } from '../../verification-receipts/lib/decision';
 import { validateScenario } from '../lib/scenario';
 import { runAsideScenario } from '../lib/aside';
@@ -19,15 +19,16 @@ export default function uiRegressionRun(pi:{cwd:string;typebox:{Type:any}}) {
     T.Object({action:T.Literal('assert'),selector:T.String({maxLength:256}),kind:T.Literal('text'),match:T.Union([T.Literal('exact'),T.Literal('substring')]),expected:T.String({maxLength:2000})},{additionalProperties:false})
    ]),{minItems:1,maxItems:20})},{additionalProperties:false}),
    timeoutMs:T.Optional(T.Number({minimum:1,maximum:90000,description:'Total timeout default 60,000 ms, maximum 90,000 ms, below Aside 120 seconds.'})),
+   repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to record against, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
    assessment:T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))
   },{additionalProperties:false}),
-  async execute(toolCallId:string,params:{account:string;scenario:unknown;timeoutMs?:number;assessment?:unknown},_update?:unknown,_ctx?:unknown,signal?:AbortSignal) {
+  async execute(toolCallId:string,params:{account:string;scenario:unknown;timeoutMs?:number;repository?:string;assessment?:unknown},_update?:unknown,_ctx?:unknown,signal?:AbortSignal) {
    const started=performance.now();
    let execution: Record<string, any> = {status:'not_run',reason:'invalid_or_unavailable_input'};
    const text=async(value:Record<string,any>)=>({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('ui-regression','run',value))}]});
    try {
-    if(!params||Object.keys(params).some(k=>!['account','scenario','timeoutMs','assessment'].includes(k))||typeof params.account!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(params.account)||(params.timeoutMs!==undefined&&(!Number.isSafeInteger(params.timeoutMs)||params.timeoutMs<1||params.timeoutMs>90000))) throw Error('invalid_input');
-    const scenario=validateScenario(params.scenario);const root=await actualRepository(pi.cwd);
+    if(!params||Object.keys(params).some(k=>!['account','scenario','timeoutMs','repository','assessment'].includes(k))||typeof params.account!=='string'||!/^[a-zA-Z0-9_-]{1,64}$/.test(params.account)||(params.timeoutMs!==undefined&&(!Number.isSafeInteger(params.timeoutMs)||params.timeoutMs<1||params.timeoutMs>90000))) throw Error('invalid_input');
+    const scenario=validateScenario(params.scenario);const root=await resolveReceiptRepository(pi.cwd,params.repository);
     const specDigest=specFingerprint({scenario,timeoutMs:params.timeoutMs??60000});const before=await fingerprintSource(root,specDigest);
     execution=await runAsideScenario(scenario,params.account,params.timeoutMs??60000,signal);
     const after=await fingerprintSource(root,specDigest),freshness=freshnessFor(before,after);
@@ -35,7 +36,9 @@ export default function uiRegressionRun(pi:{cwd:string;typebox:{Type:any}}) {
     const storage=await persistReceipt(receipt);
     const assessment=await assessAdequacy(params.assessment,{status:execution.status,counts:null,freshness,caseIds:execution.assertions.map(a=>a.id),assertions:execution.assertions});
     return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment)});
-   }catch{
+   }catch(error){
+    const cause=error instanceof Error ? error.message : '';
+    if (execution.status==='not_run' && (RECEIPT_REPOSITORY_REASONS as readonly string[]).includes(cause)) execution={status:'not_run',reason:cause};
     const assessment=await assessAdequacy(undefined,{status:execution.status,counts:null,freshness:'unavailable',...(execution.assertions ? {assertions:execution.assertions} : {})});
     return text({execution,assessment,...staticReceiptGuidance(execution,'unavailable',assessment)});
    }

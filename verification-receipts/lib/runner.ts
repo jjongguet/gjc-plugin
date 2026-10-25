@@ -59,6 +59,21 @@ export default async function* (source) {
     }
     return null;
   };
+  // exec/execSync surface a missing program as shell output, not an ENOENT error object. Only the
+  // explicit "not found" line is trusted, and only one distinct name per failure so a single
+  // failure still accounts for a single attributed cause; the parent checks it is absent from PATH.
+  const missingShellCommand = error => {
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (!message || message.length > 65536 || !message.includes('Command failed:')) return null;
+    const names = new Set();
+    for (const line of message.split('\\n').slice(0, 40)) {
+      let match = /(?:^|[\\s:])([A-Za-z0-9][A-Za-z0-9._+-]{0,63}): (?:command )?not found(?=$|[\\s])/.exec(line);
+      if (!match) match = /command not found: ([A-Za-z0-9][A-Za-z0-9._+-]{0,63})/.exec(line);
+      if (match) names.add(match[1]);
+      if (names.size > 1) return null;
+    }
+    return names.size === 1 ? [...names][0] : null;
+  };
   for await (const event of source) {
     if (event.type === 'test:stdout' || event.type === 'test:stderr' || event.type === 'test:diagnostic') {
       bytes += Buffer.byteLength(String(event.data?.message ?? ''));
@@ -69,7 +84,7 @@ export default async function* (source) {
       const failureType = error?.failureType;
       if (failureType !== 'subtestsFailed' && failureType !== 'cancelledByParent') {
         failures++;
-        const name = missingCommand(error);
+        const name = missingCommand(error) ?? missingShellCommand(error);
         if (name !== null && (missing.has(name) || missing.size < 8)) missing.set(name, (missing.get(name) ?? 0) + 1);
       }
     }

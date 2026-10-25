@@ -50,6 +50,33 @@ test('UI status metadata fixture remains historical and source scoped',async()=>
   expect(calls.length).toBe(0);expect(stale.assessment.reason).toBe('insufficient_evidence');
  }finally{if(old===undefined)delete process.env.HOME;else process.env.HOME=old;await fs.rm(owned,{recursive:true,force:true});}
 });
+test('non-Git session cwd records and reads ui receipts through repository',async()=>{
+ const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'ui-repository-'))),workspace=path.join(owned,'workspace'),repo=path.join(workspace,'lanes','repo'),outside=path.join(owned,'outside'),home=path.join(owned,'home'),bin=path.join(owned,'bin');
+ await fs.mkdir(path.join(workspace,'lanes'),{recursive:true});await fs.mkdir(repo);await fs.mkdir(outside);await fs.mkdir(home,{mode:0o700});await fs.mkdir(bin);
+ await fs.writeFile(path.join(bin,'aside'),'#!/bin/sh\nexit 1\n',{mode:0o755});
+ const oldHome=process.env.HOME,oldPath=process.env.PATH,oldProvider=process.env.JEV_ADVISOR_PROVIDER;
+ process.env.HOME=home;process.env.PATH=`${bin}${path.delimiter}${oldPath??''}`;process.env.JEV_ADVISOR_PROVIDER='off';
+ const scenario={id:'repository',expectedBehavior:'Fixture page renders',steps:[{action:'goto',url:'http://127.0.0.1:4311/'},{action:'assert',selector:'#result',kind:'visible'}]};
+ try{
+  execFileSync('git',['init','-q'],{cwd:repo});await fs.writeFile(path.join(repo,'fixture.js'),'fixture');execFileSync('git',['add','.'],{cwd:repo});execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:repo});
+  await fs.mkdir(path.join(repo,'nested'));await fs.writeFile(path.join(outside,'case.js'),'outside');execFileSync('git',['init','-q'],{cwd:outside});
+  const run=uiRun({cwd:workspace,typebox:{Type}}),lookup=uiStatus({cwd:workspace,typebox:{Type}});
+  const implicit=parse(await run.execute('non-git',{account:'route',scenario}));
+  expect(implicit.execution).toEqual({status:'not_run',reason:'not_a_repository'});expect(implicit.journalStorage.persisted).toBe(true);
+  const relative=parse(await run.execute('relative',{account:'route',scenario,repository:'lanes/repo'}));
+  expect(relative.receipt.repositoryDigest).toBe(await repositoryDigest(repo));expect(relative.journalStorage.persisted).toBe(true);
+  expect(relative.receipt.execution.status).toBe('incomplete');expect(relative.persisted).toBe(true);
+  const absolute=parse(await run.execute('absolute',{account:'route',scenario,repository:repo}));expect(absolute.receipt.repositoryDigest).toBe(relative.receipt.repositoryDigest);
+  const fresh=parse(await lookup.execute('lookup',{receiptId:relative.receipt.id,repository:'lanes/repo'}));expect(fresh.receipt.id).toBe(relative.receipt.id);expect(fresh.freshness).toBe('fresh');expect(fresh.currentUiState).toBe('not_reobserved');
+  const unscoped=parse(await lookup.execute('unscoped',{receiptId:relative.receipt.id}));expect(unscoped.execution).toEqual({status:'unavailable',reason:'not_a_repository'});expect(unscoped.warnings[0]).toBe('not_a_repository');expect(unscoped.journalStorage.persisted).toBe(true);
+  for(const [repository,reason] of [['lanes/repo/nested','invalid_repository'],['lanes/missing','invalid_repository'],['lanes','not_a_repository'],[outside,'repository_outside_session_cwd'],['../outside','repository_outside_session_cwd']] as const){
+   const rejected=parse(await run.execute('rejected',{account:'route',scenario,repository}));
+   expect(rejected.execution).toEqual({status:'not_run',reason});expect(rejected.journalStorage.persisted).toBe(true);expect(JSON.stringify(rejected)).not.toContain(owned);
+   const unreadable=parse(await lookup.execute('rejected-lookup',{receiptId:relative.receipt.id,repository}));expect(unreadable.execution).toEqual({status:'unavailable',reason});expect(unreadable.warnings[0]).toBe(reason);
+  }
+ }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldPath===undefined)delete process.env.PATH;else process.env.PATH=oldPath;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
+},60000);
+
 test('standalone generated UI tools load with only declared installed files',async()=>{
  const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'ui-standalone-')));
  try{for(const [file,name] of [['ui-regression-run.ts','ui_regression_run'],['ui-regression-status.ts','ui_regression_status']]){await fs.copyFile(path.resolve(import.meta.dir,'../tools',file),path.join(owned,file));const module=await import(path.join(owned,file));expect(module.default({cwd:process.cwd(),typebox:{Type}}).name).toBe(name);}}
