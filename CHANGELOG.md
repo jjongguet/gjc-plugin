@@ -2,6 +2,19 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.13] - 2026-10-26
+
+Plugins: jev-advisor 0.0.10 · verification-receipts 0.0.6 · ui-regression 0.0.6 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
+
+### Fixed
+
+- **jev-advisor**: `JEV_ADVISOR_PROVIDER=typesafe-jev` no longer sends the OpenRouter key to `api.typesafe.ai`. Each provider reads only its own variable (`OPENROUTER_API_KEY` for `jev`/`openrouter`, `TYPESAFE_API_KEY` for `typesafe-jev`), `JEV_ADVISOR_API_KEY` stays the explicit override, and a missing key reports `unconfigured` instead of a 401 from the wrong service.
+- **jev-advisor**: the shared decision-provider record named `OPEN_GATEWAY_API_KEY` and `OPENAI_API_KEY` for the OpenGateway candidates; it now names `OPENGATEWAY_API_KEY` alone.
+
+### Upgrade notes
+
+- Reinstall `jev-advisor` (`gjc plugin upgrade jev-advisor --user`) and start a new `gjc` session: hooks are read at session start.
+
 ## [0.0.12] - 2026-10-25
 
 Plugins: jev-advisor 0.0.9 · verification-receipts 0.0.6 · ui-regression 0.0.6 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
