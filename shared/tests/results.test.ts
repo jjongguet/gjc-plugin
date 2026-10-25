@@ -266,9 +266,14 @@ test('a lock released while the bounded wait probes it is contention, then acqui
     }
     return handle;
   }) as typeof fs.open);
+  // The wait budget is measured on the monotonic clock, not by syscall speed:
+  // a probe that outlives the budget under parallel suite load would flip this
+  // success path to store_busy. Freezing the clock keeps the contention-then-acquire
+  // contract intact; exhausted budgets stay asserted by the store_busy timeout test.
+  const clock = spyOn(performance, 'now').mockImplementation(() => 0);
   let result;
   try { result = await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 50 }); }
-  finally { probe.mockRestore(); }
+  finally { probe.mockRestore(); clock.mockRestore(); }
   expect(released).toBe(true);
   expect(result.persisted).toBe(true);
   expect(result.reason).toBe('stored');
