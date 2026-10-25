@@ -11,7 +11,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,7 +42,7 @@ function resolveBun() {
 
 const bun = resolveBun();
 
-test("hermetic rrsi acceptance (incl. periodic invariants) passes under bun", () => {
+test("hermetic rrsi acceptance (incl. periodic invariants) passes under bun", { timeout: 300000 }, () => {
 	const result = spawnSync(bun, [path.join(plugin, "scripts/verify.ts")], { encoding: "utf8", timeout: 300000, env: { ...process.env } });
 	assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 	const periodicCases = (result.stdout.match(/ok \d+ periodic/g) || []).length;
@@ -58,9 +58,8 @@ test("hermetic rrsi acceptance (incl. periodic invariants) passes under bun", ()
 	assert.ok(summary.cases >= 25, `cases=${summary.cases}`);
 });
 
-test("periodic cycle observed directly: no_input -> ran -> skipped_due -> unchanged with byte-stable store", () => {
-	const child = path.join(plugin, "tests", "periodic-harness-child.mjs");
-	const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rrsi-periodic-child-")));
+test("periodic cycle observed directly: no_input -> ran -> skipped_due -> unchanged with byte-stable store", { timeout: 300000 }, () => {
+	const child = path.join(plugin, "tests", "periodic-harness-child.mjs");	const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rrsi-periodic-child-")));
 	try {
 		const result = spawnSync(bun, [child], { encoding: "utf8", timeout: 180000, env: { ...process.env, HOME: home, TMPDIR: home } });
 		assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
@@ -78,4 +77,17 @@ test("periodic cycle observed directly: no_input -> ran -> skipped_due -> unchan
 	} finally {
 		rmSync(home, { recursive: true, force: true });
 	}
+});
+
+test("the generated hook surface carries the v2 quality contract and the prefix-cut flag", () => {
+	const hook = readFileSync(path.join(plugin, "hooks", "rrsi-periodic.ts"), "utf8");
+	const tool = readFileSync(path.join(plugin, "tools", "rrsi.ts"), "utf8");
+	for (const surface of [hook, tool]) {
+		// The canonical gjc.quality_trial.v2 validator is inlined, and the v1
+		// boolean permission field is gone from every generated surface.
+		assert.ok(surface.includes('"gjc.quality_trial.v2"'), "v2 trial schema is inlined");
+		assert.ok(surface.includes("conflicting_duplicate"), "duplicate exclusion taxonomy is inlined");
+		assert.equal(surface.includes("efficacyClaimsAllowed"), false, "no boolean efficacy permission survives");
+	}
+	assert.ok(hook.includes("incomplete_prefix"), "the periodic surface reports a prefix cut");
 });

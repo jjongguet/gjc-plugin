@@ -332,16 +332,19 @@ export async function runLoop(input) {
     const loaded = loadCandidatePayload(candidateText);
     if (!loaded.ok) return refuse(loaded.reason);
     let expectedStoreDigest = null;
+    let storeAttempts = null;
     if (storePath) {
       const storeRead = readStoreFile(storePath);
       if (storeRead.status !== "ok") return refuse("candidate_store_unavailable");
-      expectedStoreDigest = sha256Hex(JSON.stringify(flattenAttempts(storeRead.store)));
+      storeAttempts = flattenAttempts(storeRead.store);
+      expectedStoreDigest = sha256Hex(JSON.stringify(storeAttempts));
     }
     const candidateReason = validateCandidate(loaded.candidate, {
       gatedObjective: adapter.probes?.[0]?.objective,
       ledgerHead: ledgerEpoch(readLedger(ledgerPath)),
       maxLag,
       expectedStoreDigest,
+      attempts: storeAttempts,
     });
     if (candidateReason) return refuse(candidateReason);
     candidate = loaded.candidate;

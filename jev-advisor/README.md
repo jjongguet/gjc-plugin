@@ -41,7 +41,7 @@ and confidence is not a probability of task success.
 
 **UI surface.** A batch with a non-empty summary draws one keyed widget (`jev-advisor`) above the editor with its per-task advisories. The widget is batch-scoped and event-driven: it clears when the launch receipt shows the call ended (sync/error/abort/block) or when the batch's observed children reach terminal closure (async batches), is replaced when a newer batch supersedes it, and is disposed by session transitions (`/new`, `/drop`, fork/session switch, restart — `/clear` keeps the session id and the widget). For async batches, each child observed `completed`, `failed`, or `cancelled` removes its row immediately and redraws the widget with the remaining rows; removing the last row clears the widget and drops the lifecycle entry even before whole-batch closure. Jobs bind to rows only through structured launch progress (`index`/`id`) and subagent snapshot `id`/`label` values; an unknown job, unmappable observation, duplicate task label, or contradictory binding retains its row (retention is the safe default). Lifecycle state is in-process only: not persisted, no task text beyond the bounded rendered rows, and a process restart simply degrades to replace-on-next-batch. Residuals are advisory-only: never-observed or unmappable children keep their rows until the next batch or session transition, and a foreign terminal counted for never-listed children can satisfy the closure count early.
 
-`shadow` is the source default; `hint` adds one bounded single-line notification (multi-line payloads are never emitted because a printed chat entry cannot be removed), and `enforce` keeps the same single-line warning shape.
+`JEV_ADVISOR_MODE=shadow` is the source default for tier advice; `hint` adds one bounded single-line notification (multi-line payloads are never emitted because a printed chat entry cannot be removed), and `enforce` keeps the same single-line warning shape.
 `enforce` can block a whole task call only when an individual complete task has
 an explicit requested tier weaker than its own recommendation and its confidence
 meets the configured gate. Unknown, invalid, oversized or unavailable advice
@@ -122,7 +122,7 @@ chmod 600 ~/.gjc/agent/jev-advisor/.env
 | --- | --- | --- |
 | `JEV_ADVISOR_PROVIDER` | `jev` | `jev`, `openrouter`, `typesafe-jev`, `ollaya`, `off` |
 | `JEV_ADVISOR_MODEL` | per provider | Advisor model, not delegated execution model |
-| `JEV_ADVISOR_MODE` | `shadow` | `shadow`, `hint`, `enforce` |
+| `JEV_ADVISOR_MODE` | `shadow` | `shadow`, `hint`, `enforce` (tier advice only) |
 | `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | Per-task enforcement confidence gate |
 | `JEV_ADVISOR_TIMEOUT_MS` | `8000` | Per-request timeout, also bounded by remaining hook budget |
 | `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | Pre-hook batch cooldown; zero disables cooldown |
@@ -130,6 +130,7 @@ chmod 600 ~/.gjc/agent/jev-advisor/.env
 | `JEV_ADVISOR_MEMORY` | `on` | `off` disables hook correlation-state access/writes, not sanitized outcome journaling |
 | `JEV_ADVISOR_MEMORY_MAX_KEYS` | `200` | Retained semantic groups, hard ceiling 200 |
 | `JEV_ADVISOR_MEMORY_MAX_EVENTS` | `10` | Task records per group, hard ceiling 10 |
+| `JEV_ALIGNMENT_MODE` | `shadow` | `off`, `shadow`, `deterministic` for the goal-alignment hook; unrelated to `JEV_ADVISOR_MODE` |
 
 `JEV_ADVISOR_MEMORY_HEAD_CHARS` is no longer used: v2 stores no assignment heads.
 Existing configuration and legacy memory are not changed or migrated.
@@ -315,13 +316,20 @@ comparison, not this report.
 ## Architecture and verification
 ```text
 lib/decision.ts             Config, task inputs, providers, v2 transactions/report
+lib/alignment.ts            Goal-alignment authority, ordered rules, recovery transitions, journal caps
 src/hook.adapter.ts         Per-task pre-call advice and optional enforcement
+src/alignment.adapter.ts    Write-class gate, mode resolution, degraded retry counters
+src/alignment-observe.adapter.ts    Result binding, criterion observation, completion
+src/alignment-shutdown.adapter.ts   Idempotent flush of unresolved recoveries
 src/result.adapter.ts       Provider-free task/subagent receipt observer
 src/tool.adapter.ts         Explicit advice and offline report
 src/check.adapter.ts        Explicit one-shot artifact check
 src/metrics.adapter.ts      Thin read-only plugin_metrics tool adapter
 scripts/build.mjs           Keyless embedding of shared results, core and adapters
 hooks/jev-advisor.ts         Generated pre-call surface
+hooks/jev-advisor-alignment.ts         Generated alignment before-tool surface
+hooks/jev-advisor-alignment-observe.ts Generated alignment result surface
+hooks/jev-advisor-alignment-shutdown.ts Generated alignment session-shutdown surface
 hooks/jev-advisor-result.ts  Generated result surface, two manifest targets
 tools/jev-advise.ts          Generated explicit-tool surface
 tools/jev-check.ts           Generated explicit check surface
@@ -361,6 +369,102 @@ remain unknown. The plugin does not scrape private histories or install itself.
   correlation state strictly read-only. During a live append window a read can
   transiently report `store_corrupt`; the store is fail-closed and never
   repaired automatically.
+
+## Goal alignment (write-class authority boundary)
+
+`lib/alignment.ts` plus `src/alignment{,-observe,-shutdown}.adapter.ts` add a
+deterministic, keyless surface over the session's own user entries: it makes no
+provider call, reads no credential or configuration file, and is independent of
+tier advice. The full boundary, including the rejected alternatives, is
+[ADR 0002](../docs/adr/0002-goal-alignment-authority-boundary.md).
+
+- **Modes** (`JEV_ALIGNMENT_MODE`, resolved per tool call). `shadow` is the
+default and the fallback for an unset or unrecognised value: it evaluates and
+journals but never blocks, so a would-be block is still recorded. `deterministic`
+may block the three drift rules; it is explicit opt-in for dogfood and
+end-to-end checks, not a default. `off` is a kill switch: no evaluation, no
+journal, no block. `JEV_ADVISOR_MODE` (`shadow` / `hint` / `enforce`) belongs to
+tier advice and is never read by this path — the two switches are unrelated.
+- **Semantic enforcement is not implemented.** There is no model-based
+alignment mode and no semantic setting; the layer is deterministic only.
+- **Rule ids** (`evaluateAction`, first match wins):
+
+| Rule id | Verdict | Coverage | Blocks |
+| --- | --- | --- | --- |
+| `drift_write_vs_readonly` | drift | evaluated | yes |
+| `drift_write_forbidden_target` | drift | evaluated | yes |
+| `drift_write_after_stop` | drift | evaluated | yes |
+| `aligned_write_within_requested_scope` | aligned | evaluated | no (stage-2 admissible) |
+| `uncertain_authority_ambiguous` | uncertain | coverage_gap | no |
+| `read_allow` | allow | evaluated | no |
+| `bash_observe` | allow | coverage_gap | no |
+| `unknown_authority` | uncertain | coverage_gap | no |
+
+- **Authority.** Only host session user entries are authority. Assistant turns,
+tool output, todo lists and subagent output are data, never authority; a branch
+with no user entry yields no authority, which is uncertain and never a block.
+Recognised constraints are read-only, stop and a do-not-touch target; only an
+explicit release clears them. Hedged release wording is recorded but not
+applied, and a plain "continue" never clears read-only.
+- **Targets and criteria.** Targets are only explicit machine-shaped tokens
+(backticked paths, slash paths, filenames with a known extension); free prose
+never becomes one. A completion criterion is declared in the user entry as
+`criterion=exit_zero`, `criterion=artifact_exists:<path>` or
+`criterion=criterion_file:<path>`.
+- **Recovery.** correction → admission → observation → completion, all journaled
+as typed transitions. `recovered` requires the declared criterion's
+`false|unknown → true` transition; a missing criterion, a baseline that was
+already true, or a tool-call id that does not match ends as
+`recovery_unverified` instead. The result observer never rewrites a tool result
+and never blocks.
+- **Coverage limits.** Reads and bash are never evaluated: a bash call is
+observe-only and reports `coverage_gap`, so a mutation performed inside bash is
+not classified, blocked or journaled. An answer-only turn produces no
+evaluation at all, an action that is already running is not re-evaluated, an
+unknown tool name is not evaluated, only a single-target write can reach the
+recovery chain, and work inside a subagent is covered only insofar as its tool
+calls reach this surface with a readable session branch. An ambiguous write is
+allowed and reported as `coverage_gap` rather than guessed at.
+- **Journal.** `~/.gjc-plugin/jev-advisor/alignment/v1/<sessionDigest>/events.jsonl`
+with one rotated predecessor `events.1.jsonl`; `<sessionDigest>` is the first 16
+hex characters of the session-id digest, or `default` when the session id is
+unreadable. Directories `0700`, files `0600`. Caps: 200 records, 2048 bytes per
+record, 256 KiB total, two segments, seven-day retention (plus 60 s future-skew
+tolerance). Records carry digests, ids and typed statuses only — never raw user
+text — and an over-cap record is dropped rather than truncated. The journal is
+best effort: a storage failure can neither create nor suppress a block, and
+retry counters fall back to bounded in-process state. The session-shutdown
+surface flushes one record per still-unresolved recovery, idempotently.
+
+### Rebuild, install and rollback order
+
+```sh
+bun scripts/build.mjs          # regenerate all surfaces, including the three alignment hooks
+bun scripts/build.mjs --check  # non-mutating drift gate
+bun scripts/verify.ts          # isolated acceptance suite, including the alignment cases
+```
+
+Install and activation are separate operator actions. Reinstall in this order:
+
+```sh
+gjc plugin uninstall jev-advisor --user    # an installed plugin is refused, so replace it
+gjc plugin install "$(pwd)" --user         # 1. jev-advisor first
+gjc plugin uninstall verification-receipts --user && gjc plugin install <verification-receipts-path> --user  # 2. second
+# 3. then the remaining plugins
+```
+
+`jev-advisor` goes first and `verification-receipts` second because an older
+`jev-advisor` reading journal records written by a newer
+`verification-receipts` fails closed with `store_corrupt`; the repository
+[install order](../CONTRIBUTING.md#install-order-and-replacement) owns that rule.
+Hooks and tools load at session start, so a rebuild or reinstall only takes
+effect in a **new** `gjc` process — restart the session before judging the
+surface.
+
+Rollback is local and immediate: `JEV_ALIGNMENT_MODE=off` disables evaluation,
+journaling and blocking without uninstalling, and `gjc plugin uninstall
+jev-advisor --user` removes the surfaces. Existing alignment journal files are
+left in place until an operator removes them.
 
 ## Install
 

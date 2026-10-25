@@ -63,6 +63,17 @@ const dreamRsiModules = [
 	"self-improve/lib/policy.mjs",
 ];
 
+// Canonical quality-evidence contract (gjc.quality_trial.v2) consumed by
+// lib/rrsi.ts. Inlined like the Dream-RSI core so the generated surfaces stay
+// self-contained.
+const inlineModules = ["self-improve/lib/quality-trial.mjs"];
+
+const inlineParts = [];
+for (const relative of inlineModules) {
+	const text = await readFile(path.join(repoRoot, relative), "utf8");
+	inlineParts.push(`// ---- inlined from ${relative} (canonical quality-evidence contract, keyless plain ESM) ----\n${stripLocalImports(text).trimEnd()}`);
+}
+
 const dreamParts = [];
 for (const relative of dreamRsiModules) {
 	const text = await readFile(path.join(repoRoot, relative), "utf8");
@@ -111,7 +122,8 @@ const compose = (bannerText, parts, tail = "") => {
 const toolBanner = [
 	"// GENERATED FILE — do not edit by hand.",
 	"// Core: lib/rrsi.ts + adapter: src/rrsi.adapter.ts",
-	"// Inlined: shared/lib/results.ts and self-improve/lib/{types,ledger,replay,dream,policy}.mjs",
+	"// Inlined: shared/lib/results.ts, self-improve/lib/{types,ledger,replay,dream,policy}.mjs and",
+	"//          self-improve/lib/quality-trial.mjs (gjc.quality_trial.v2)",
 	"// Rebuild with: bun scripts/build.mjs",
 	"",
 ].join("\n");
@@ -119,21 +131,22 @@ const toolBanner = [
 const hookBanner = [
 	"// GENERATED FILE — do not edit by hand.",
 	"// Core: lib/rrsi.ts + lib/periodic.ts + adapter: src/periodic.adapter.ts",
-	"// Inlined: shared/lib/results.ts and self-improve/lib/{types,ledger,replay,dream,policy}.mjs",
+	"// Inlined: shared/lib/results.ts, self-improve/lib/{types,ledger,replay,dream,policy}.mjs and",
+	"//          self-improve/lib/quality-trial.mjs (gjc.quality_trial.v2)",
 	"// Rebuild with: bun scripts/build.mjs",
 	"// One session_start registration; doubles as the detached worker CLI (RRSI_PERIODIC_WORKER=1).",
 	"",
 ].join("\n");
 
-const toolText = compose(toolBanner, [sharedCore.trimEnd(), ...dreamParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/rrsi.adapter.ts", { trimStart: true })]);
+const toolText = compose(toolBanner, [sharedCore.trimEnd(), ...dreamParts, ...inlineParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/rrsi.adapter.ts", { trimStart: true })]);
 const hookText = compose(
 	hookBanner,
-	[sharedCore.trimEnd(), ...dreamParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/periodic.adapter.ts", { trimStart: true })],
+	[sharedCore.trimEnd(), ...dreamParts, ...inlineParts, await pluginPart("lib/rrsi.ts"), await pluginPart("lib/periodic.ts"), await pluginPart("src/periodic.adapter.ts", { trimStart: true })],
 	workerTail,
 );
 
 const outputs = [
-	{ file: path.join(pluginRoot, "tools/rrsi.ts"), text: toolText, label: `tools/rrsi.ts (keyless; ${dreamRsiModules.length} core modules inlined)` },
+	{ file: path.join(pluginRoot, "tools/rrsi.ts"), text: toolText, label: `tools/rrsi.ts (keyless; ${dreamRsiModules.length} core modules + ${inlineModules.length} quality module inlined)` },
 	{ file: path.join(pluginRoot, "hooks/rrsi-periodic.ts"), text: hookText, label: "hooks/rrsi-periodic.ts (keyless; one session_start registration + worker tail)" },
 ];
 

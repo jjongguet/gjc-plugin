@@ -7,9 +7,10 @@
  */
 import { createHash } from "node:crypto";
 import path from "node:path";
+import { isDigestHex, QUALITY_ARMS } from "./quality-trial.mjs";
 
 export const PILOT_SCHEMA = "harness2.pilot.v1";
-export const ARMS = Object.freeze(["B0", "B1", "B2"]);
+export const ARMS = QUALITY_ARMS;
 export const TASK_CLASSES = Object.freeze(["artifact-check", "eligible-adequacy", "small-repo-task"]);
 export const SPLITS = Object.freeze(["development", "holdout"]);
 
@@ -86,13 +87,17 @@ export function planTrial({ arm, manifestDigest: digest, totalResourceMs, repeat
 
 /**
  * Pre-call spending admission. Unknown price or unsettled charges fail closed
- * before any call is sent.
+ * before any call is sent, and negative components are refused outright: a
+ * refund-shaped offset must never reduce the projected spend of a live call.
  */
 export function admitCall({ capUsd, spentUsd = 0, unresolvedUsd = 0, reservationUsd, cleanupUsd = 0, priceUsd }) {
   if (!Number.isFinite(capUsd) || capUsd < 0) return { allowed: false, reason: "missing_cap" };
   if (!Number.isFinite(priceUsd) || priceUsd < 0) return { allowed: false, reason: "unknown_price" };
   if (!Number.isFinite(reservationUsd) || reservationUsd < 0) return { allowed: false, reason: "invalid_reservation" };
-  if (![spentUsd, unresolvedUsd, cleanupUsd].every(Number.isFinite)) return { allowed: false, reason: "unknown_usage" };
+  if (![spentUsd, unresolvedUsd, cleanupUsd].every((value) => Number.isFinite(value) && value >= 0)) {
+    return { allowed: false, reason: "unknown_usage" };
+  }
+  // Every component is finite and non-negative here, so the sum cannot shrink.
   const projected = spentUsd + unresolvedUsd + Math.max(reservationUsd, priceUsd) + cleanupUsd;
   if (projected > capUsd) return { allowed: false, reason: "cap_exceeded", projected };
   return { allowed: true, projected, remaining: capUsd - projected };
@@ -110,38 +115,92 @@ export function isolationPreflight({ runtime = null, denyProbes = [] } = {}) {
   return { status: "pass", runtime, probes: denyProbes.length, liveTrialsAllowed: true };
 }
 
-/** E-valid: every trial receipt must prove loading, isolation and a clean denominator. */
+/**
+ * E-valid: every trial receipt must prove loading, isolation, pinned
+ * source/harness digests, an independent verifier with its own evidence, a
+ * complete denominator and a measured non-negative cost. A bare
+ * `oracle.independent === true` is never enough.
+ */
 export function validateTrialReceipt(receipt) {
   const failures = [];
   if (!receipt || typeof receipt !== "object") return { valid: false, failures: ["missing_receipt"] };
-  if (!isText(receipt.loadingReceipt?.sha256, 64)) failures.push("missing_loading_receipt");
+  if (!isDigestHex(receipt.loadingReceipt?.sha256)) failures.push("missing_loading_receipt");
+  if (!isDigestHex(receipt.harness?.sourceDigest)) failures.push("missing_source_digest");
+  if (!isDigestHex(receipt.harness?.harnessDigest)) failures.push("missing_harness_digest");
   if (receipt.isolation?.denyProbesPassed !== true) failures.push("isolation_not_proven");
-  if (receipt.oracle?.independent !== true) failures.push("oracle_not_independent");
+
+  // Independence is a relationship, not a boolean: the verifier has to be a
+  // named actor distinct from both the producer and the executor, and carry the
+  // evidence it judged instead of asserting the result.
+  const oracle = receipt.oracle ?? {};
+  const producerId = receipt.producer?.id;
+  const executorId = receipt.executor?.id;
+  const verifierId = oracle.verifierId;
+  const verifierNamed = isText(verifierId, 64);
+  if (oracle.independent !== true || !verifierNamed || verifierId === producerId || verifierId === executorId) {
+    failures.push("oracle_not_independent");
+  }
+  if (!verifierNamed) failures.push("oracle_verifier_missing");
+  if (!isText(oracle.kind, 40)) failures.push("oracle_kind_missing");
+  if (!isDigestHex(oracle.evidenceDigest)) failures.push("oracle_evidence_missing");
+  if (!isDigestHex(receipt.executor?.receiptDigest)) failures.push("missing_executor_receipt_digest");
+
   if (receipt.budget?.admitted !== true) failures.push("budget_not_admitted");
   if (receipt.holdout?.usedEarly === true) failures.push("holdout_used_early");
-  if (!Array.isArray(receipt.outcomes) || receipt.outcomes.length === 0) failures.push("missing_outcomes");
-  if (!receipt.cost?.measured) failures.push("cost_not_measured");
+
+  const outcomes = receipt.outcomes;
+  if (!Array.isArray(outcomes) || outcomes.length === 0) failures.push("missing_outcomes");
+  const denominator = receipt.denominator;
+  const parts = ["planned", "passed", "failed", "error", "skipped"].map((key) => denominator?.[key]);
+  const counted = parts.every((value) => Number.isSafeInteger(value) && value >= 0);
+  if (!counted || denominator.planned < 1 || denominator.passed + denominator.failed + denominator.error + denominator.skipped !== denominator.planned) {
+    failures.push("denominator_mismatch");
+  } else if (Array.isArray(outcomes) && outcomes.length !== denominator.planned) {
+    failures.push("denominator_mismatch");
+  }
+
+  if (receipt.cost?.measured !== true) failures.push("cost_not_measured");
+  else if (![receipt.cost.usd, receipt.cost.wallMs].every((value) => Number.isFinite(value) && value >= 0)) {
+    failures.push("invalid_cost");
+  }
   return { valid: failures.length === 0, failures };
 }
 
 /**
- * Paired task-level benefit with a predeclared rule: no regressions, no lower
- * coverage on decidable tasks, quality delta not below -0 with a cost ratio
- * under 1. Component gains never substitute for the composite result.
+ * Paired task-level benefit with a predeclared rule: every declared pair must
+ * arrive, pair ids must be unique, and each pair must carry a usable cost
+ * ratio. A missing ratio is never defaulted to 1, a negative ratio is not a
+ * saving, and a zero baseline makes the ratio undefined rather than perfect.
+ * Only then does the composite rule apply: no regressions, no lower coverage on
+ * decidable tasks, quality delta not below -0 with a cost ratio under 1.
  */
-export function pairedBenefit(pairs, { maxCostRatio = 1, minQualityDelta = 0 } = {}) {
+export function pairedBenefit(pairs, { maxCostRatio = 1, minQualityDelta = 0, plannedPairs = null } = {}) {
   if (!Array.isArray(pairs) || pairs.length === 0) return { verdict: "insufficient", reason: "no_pairs" };
-  const complete = pairs.filter((pair) => pair && Number.isFinite(pair.qualityDelta) && Number.isFinite(pair.costRatio ?? 1));
-  if (complete.length < 2) return { verdict: "insufficient", reason: "too_few_pairs", pairs: complete.length };
-  const qualityDelta = complete.reduce((sum, pair) => sum + pair.qualityDelta, 0) / complete.length;
-  const costRatio = complete.reduce((sum, pair) => sum + (pair.costRatio ?? 1), 0) / complete.length;
-  const regressions = complete.filter((pair) => pair.qualityDelta < 0).length;
-  const lowerCoverage = complete.filter((pair) => pair.coverageDelta !== undefined && pair.coverageDelta < 0).length;
+  const declared = plannedPairs ?? pairs.length;
+  if (!Number.isSafeInteger(declared) || declared < 1) return { verdict: "insufficient", reason: "invalid_planned_pairs" };
+  if (pairs.length < declared) return { verdict: "insufficient", reason: "incomplete_pairs", plannedPairs: declared, pairs: pairs.length };
+  if (pairs.length > declared) return { verdict: "insufficient", reason: "unexpected_pairs", plannedPairs: declared, pairs: pairs.length };
+  if (pairs.length < 2) return { verdict: "insufficient", reason: "too_few_pairs", pairs: pairs.length };
+  const ids = pairs.map((pair) => pair?.id).filter((id) => typeof id === "string" && id.length > 0);
+  if (new Set(ids).size !== ids.length) return { verdict: "insufficient", reason: "duplicate_pairs", pairs: ids.length };
+  for (const pair of pairs) {
+    if (!pair || typeof pair !== "object" || !Number.isFinite(pair.qualityDelta)) {
+      return { verdict: "insufficient", reason: "invalid_pairs", plannedPairs: declared };
+    }
+    if (pair.baselineCost === 0) return { verdict: "insufficient", reason: "baseline_zero", plannedPairs: declared };
+    if (!Number.isFinite(pair.costRatio) || pair.costRatio < 0) {
+      return { verdict: "insufficient", reason: "invalid_cost_ratio", plannedPairs: declared };
+    }
+  }
+  const qualityDelta = pairs.reduce((sum, pair) => sum + pair.qualityDelta, 0) / pairs.length;
+  const costRatio = pairs.reduce((sum, pair) => sum + pair.costRatio, 0) / pairs.length;
+  const regressions = pairs.filter((pair) => pair.qualityDelta < 0).length;
+  const lowerCoverage = pairs.filter((pair) => pair.coverageDelta !== undefined && pair.coverageDelta < 0).length;
   if (regressions > 0) return { verdict: "no-gain", reason: "regression", regressions, qualityDelta, costRatio };
   if (lowerCoverage > 0) return { verdict: "no-gain", reason: "lower_coverage", lowerCoverage, qualityDelta, costRatio };
   if (qualityDelta < minQualityDelta) return { verdict: "no-gain", reason: "quality_delta", qualityDelta, costRatio };
   if (!(costRatio < maxCostRatio)) return { verdict: "no-gain", reason: "cost_ratio", qualityDelta, costRatio };
-  return { verdict: "pass", qualityDelta, costRatio, pairs: complete.length };
+  return { verdict: "pass", qualityDelta, costRatio, pairs: pairs.length };
 }
 
 /**

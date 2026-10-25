@@ -20,6 +20,11 @@ import { createHash } from "node:crypto";
 import { sha256Hex } from "../../self-improve/lib/types.mjs";
 import { corpusFromAttempts } from "../../self-improve/lib/replay.mjs";
 import { runDream } from "../../self-improve/lib/dream.mjs";
+import {
+  projectQualityTrialCohort as projectTrialCohort,
+  QUALITY_COHORT_SCHEMA,
+  QUALITY_TRIAL_SCHEMA,
+} from "../../self-improve/lib/quality-trial.mjs";
 
 export const RRSI_STORE_SCHEMA = "gjc.rrsi.store.v1";
 
@@ -257,22 +262,55 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
 }
 
 /**
+ * The advice entries a journal record actually carries. The jev-advisor
+ * producer writes a compact `taskAdvice[]` batch (one entry per delegated
+ * task); `advice` is the older single-answer field and is read only when the
+ * batch field is absent. No entry is invented when neither exists.
+ */
+function journalAdviceEntries(record) {
+  const batch = record?.taskAdvice;
+  if (Array.isArray(batch)) {
+    const entries = batch.filter((entry) => entry && typeof entry === "object");
+    if (entries.length > 0) return entries;
+  }
+  if (record?.advice && typeof record.advice === "object") return [record.advice];
+  if (record?.assessment && typeof record.assessment === "object") return [record.assessment];
+  return [];
+}
+
+/**
  * Journal record -> attempt projection (bounded, flattened for the replay core):
- *   branch objective = "<operation>:<tier|advice-status>"
+ *   advice entries = taskAdvice[] when present, else advice/assessment
+ *   branch objective = "<operation>:<tier|status>" of the representative entry
+ *     (the first real decision, else the first entry)
  *   hypothesisNovelty = first record of that branch in the read order
  *   priorFailures = count of earlier records of that branch whose advice was not a decision
- *   decision = "adopt" when the record carries a decision else "reject"
+ *   decision = "adopt" when the representative entry is a decision else "reject"
  *   wallMs = durationMs; provenance = the journal record id
+ *
+ * One record is one attempt. `scanned` counts inspected records and `truncated`
+ * reports a prefix cut: the retained bound was reached while newer records were
+ * still unread, so this projection is an incomplete prefix of the journal.
  */
 export function projectJournalRecords(records, { limit = 4000 } = {}) {
+  const input = Array.isArray(records) ? records : [];
   const seen = new Map();
   const attempts = [];
-  for (const record of records) {
-    if (attempts.length >= limit) break;
+  let scanned = 0;
+  let truncated = false;
+  for (const record of input) {
+    if (attempts.length >= limit) {
+      truncated = true;
+      break;
+    }
+    scanned += 1;
     if (!record || typeof record !== "object") continue;
+    const entries = journalAdviceEntries(record);
+    const entry = entries.find((candidate) => candidate.status === "decision") ?? entries[0] ?? {};
+    const decision = entry.status === "decision";
     const operation = boundedText(record.operation, 40) || "unknown";
-    const status = boundedText(record.advice?.status ?? record.assessment?.status ?? "unknown", 40) || "unknown";
-    const tier = boundedText(record.advice?.tier, 16) || status;
+    const status = boundedText(entry.status, 40) || "unknown";
+    const tier = boundedText(entry.tier, 16) || status;
     const objective = `${operation}:${tier}`;
     const branch = seen.get(objective) ?? { records: 0, failures: 0 };
     attempts.push(
@@ -280,7 +318,7 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
         {
           objective,
           hypothesisNovelty: branch.records === 0,
-          decision: record.advice?.status === "decision" ? "adopt" : "reject",
+          decision: decision ? "adopt" : "reject",
           wallMs: boundedInteger(record.durationMs, 86_400_000),
           guardFailures: [],
           budgetRung: 0,
@@ -291,9 +329,9 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
         attempts.length,
       ),
     );
-    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (record.advice?.status === "decision" ? 0 : 1) });
+    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
   }
-  return { attempts, branches: seen.size };
+  return { attempts, branches: seen.size, scanned, truncated };
 }
 
 /** Ledger cycle rows -> attempts (read-only summary of the repo search history). */
@@ -548,77 +586,55 @@ export function summarizeReceipt(receipt) {
 
 // --- Quality cohort ---------------------------------------------------------
 // The operational journal projection above records that an advice answer was
-// returned. That is availability telemetry, not task quality. Efficacy ranking
-// may only use this separate, versioned cohort: immutable trial receipts with
-// an independent outcome, a complete resource measurement and pinned source and
-// harness digests. Unknown outcomes and unmeasured costs stay out and are
-// counted as exclusions.
+// returned. That is availability telemetry, not task quality. Quality evidence
+// may only come from the separate, versioned trial cohort validated by the
+// canonical `gjc.quality_trial.v2` contract (self-improve/lib/quality-trial.mjs,
+// inlined at build time): an independent producer/executor/verifier split, a
+// complete denominator, a measured non-negative cost and pinned source and
+// harness digests. This projection exposes counts only — there is no
+// "efficacy claims allowed" boolean, and admissibility is never inferred from
+// row counts; a consumer that wants a claim has to read the cohort it has.
 
-export const RRSI_QUALITY_SCHEMA = "rrsi.quality_trial.v1";
+export const RRSI_QUALITY_SCHEMA = QUALITY_TRIAL_SCHEMA;
+export const RRSI_QUALITY_COHORT_SCHEMA = QUALITY_COHORT_SCHEMA;
 
 export type QualityExclusion =
-  | "unknown_outcome"
-  | "missing_cost"
+  | "legacy_schema"
+  | "conflicting_duplicate"
+  | "non_independent_producer"
   | "non_independent_oracle"
-  | "missing_identity"
-  | "invalid";
+  | "unknown_outcome"
+  | "negative_cost"
+  | "missing_cost"
+  | "denominator_mismatch";
 
 export type QualityAttempt = {
   provenance: string;
   objective: string;
+  taskVersion: string;
+  split: "training" | "development" | "holdout";
+  arm: "B0" | "B1" | "B2";
+  repeat: number;
+  executionKey: string;
   decision: "adopt" | "reject";
   wallMs: number;
+  usd: number;
   costMeasured: true;
   sourceDigest: string;
   harnessDigest: string;
 };
 
 export type QualityCohort = {
-  schema: typeof RRSI_QUALITY_SCHEMA;
+  schema: string;
+  total: number;
   admissible: QualityAttempt[];
   excluded: { reason: QualityExclusion; count: number }[];
-  total: number;
-  efficacyClaimsAllowed: boolean;
+  duplicate: number;
 };
 
-const QUALITY_DIGEST = /^[a-f0-9]{64}$/;
-const qualityText = (value: unknown, max: number): string | null =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
-
+/** Counts-only cohort over `gjc.quality_trial.v2` records (delegates to the canonical validator). */
 export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
-  const admissible: QualityAttempt[] = [];
-  const counts = new Map<QualityExclusion, number>();
-  const exclude = (reason: QualityExclusion) => counts.set(reason, (counts.get(reason) ?? 0) + 1);
-  let total = 0;
-  for (const record of records) {
-    if (total >= limit) break;
-    total += 1;
-    if (record === null || typeof record !== "object" || Array.isArray(record)) { exclude("invalid"); continue; }
-    const row = record as Record<string, unknown>;
-    if (row.schema !== RRSI_QUALITY_SCHEMA) { exclude("invalid"); continue; }
-    const trialId = qualityText(row.trialId, RRSI_LIMITS.maxIdChars);
-    const objective = qualityText(row.objective, RRSI_LIMITS.maxTextChars);
-    const sourceDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.sourceDigest, 64);
-    const harnessDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.harnessDigest, 64);
-    if (!trialId || !objective || !sourceDigest || !harnessDigest || !QUALITY_DIGEST.test(sourceDigest) || !QUALITY_DIGEST.test(harnessDigest)) { exclude("missing_identity"); continue; }
-    const oracle = row.oracle as Record<string, unknown> | undefined;
-    if (oracle?.independent !== true) { exclude("non_independent_oracle"); continue; }
-    const outcome = oracle?.status;
-    if (outcome !== "passed" && outcome !== "failed") { exclude("unknown_outcome"); continue; }
-    const cost = row.cost as Record<string, unknown> | undefined;
-    const wallMs = typeof cost?.wallMs === "number" ? cost.wallMs : Number.NaN;
-    const measured = cost?.measured === true && Number.isFinite(wallMs) && wallMs >= 0;
-    const zeroNeedsReason = measured && wallMs === 0 && qualityText(cost?.zeroCostRationale, 200) === null;
-    if (!measured || zeroNeedsReason) { exclude("missing_cost"); continue; }
-    admissible.push({ provenance: trialId, objective, decision: outcome === "passed" ? "adopt" : "reject", wallMs, costMeasured: true, sourceDigest, harnessDigest });
-  }
-  return {
-    schema: RRSI_QUALITY_SCHEMA,
-    admissible,
-    excluded: [...counts].map(([reason, count]) => ({ reason, count })),
-    total,
-    efficacyClaimsAllowed: admissible.length >= 2,
-  };
+  return projectTrialCohort(records, { limit }) as QualityCohort;
 }
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);

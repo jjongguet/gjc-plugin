@@ -20,16 +20,20 @@ const resultsCore = await readFile(path.join(pluginRoot, "../shared/lib/results.
 const decisionContract = await readFile(path.join(pluginRoot, "../shared/lib/decision-contract.ts"), "utf8");
 
 const surfaces = [
-	{ core: "lib/decision.ts", adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
-	{ core: "lib/decision.ts", adapter: "src/tool.adapter.ts", out: "tools/jev-advise.ts" },
-	{ core: "lib/decision.ts", adapter: "src/check.adapter.ts", out: "tools/jev-check.ts" },
-	{ core: "lib/decision.ts", adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
-	{ core: "lib/decision.ts", adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/tool.adapter.ts", out: "tools/jev-advise.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/check.adapter.ts", out: "tools/jev-check.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
+	// Goal alignment: deterministic and keyless, so no provider prelude is inlined.
+	{ cores: ["lib/alignment.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false },
+	{ cores: ["lib/alignment.ts"], adapter: "src/alignment-observe.adapter.ts", out: "hooks/jev-advisor-alignment-observe.ts", shared: false },
+	{ cores: ["lib/alignment.ts"], adapter: "src/alignment-shutdown.adapter.ts", out: "hooks/jev-advisor-alignment-shutdown.ts", shared: false },
 ];
 
 const banner = [
 	"// GENERATED FILE — do not edit by hand.",
-	"// Core: lib/decision.ts + adapter: {ADAPTER}",
+	"// Core: {CORES} + adapter: {ADAPTER}",
 	"// Rebuild with: bun scripts/build.mjs",
 	"",
 ].join("\n");
@@ -38,14 +42,26 @@ const keysBlock =
 	"\n// Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /\n// OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).\n";
 
 const check = process.argv.includes("--check");
-const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
+const stripLocalImports = text =>
+	text
+		.replace(/^import\s*\{[^}]*\}\s*from\s*["']\.[^"']*["'];?[ \t]*\r?\n/gm, "")
+		.replace(/^import\s+[^;{\n]*?\s+from\s*["']\.[^"']*["'];?[ \t]*\r?\n/gm, "");
 let drift = false;
 for (const surface of surfaces) {
-	const core = stripLocalImports(await readFile(path.join(pluginRoot, surface.core), "utf8"));
+	const cores = surface.cores;
+	const core = [];
+	for (const file of cores) core.push(stripLocalImports(await readFile(path.join(pluginRoot, file), "utf8")));
 	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
-	const header = banner.replace("{ADAPTER}", surface.adapter);
+	const header = banner
+		.replace("{CORES}", cores.join(" + "))
+		.replace("{ADAPTER}", surface.adapter);
 	const file = path.join(pluginRoot, surface.out);
-	const text = `${header}\n${decisionContract.trimEnd()}\n${resultsCore.trimEnd()}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
+	const parts = [header];
+	if (surface.shared !== false) parts.push(decisionContract.trimEnd(), resultsCore.trimEnd());
+	for (const text of core) parts.push(text.trimEnd());
+	if (surface.shared !== false) parts.push(keysBlock);
+	parts.push(adapter.trimStart());
+	const text = parts.join("\n");
 	if (check) {
 		const existing = await readFile(file, "utf8").catch(() => null);
 		if (existing !== text) {

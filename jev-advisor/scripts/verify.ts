@@ -1,6 +1,8 @@
 #!/usr/bin/env bun
 /** Offline generated-package acceptance. No product import before child isolation. */
 import assert from "node:assert/strict";
+import { validateSemanticEnvelope } from "../lib/alignment";
+
 import fs from "node:fs";
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync, readdirSync, statSync, symlinkSync, linkSync, copyFileSync, realpathSync, renameSync } from "node:fs";
 import { syncBuiltinESMExports } from "node:module";
@@ -54,6 +56,10 @@ async function runSuite(root: string) {
 	const resultModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-result.ts")).href);
 	const toolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-advise.ts")).href);
 	const checkToolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-check.ts")).href);
+	const alignmentCore = await import(pathToFileURL(path.join(plugin, "lib/alignment.ts")).href);
+	const alignmentHookModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment.ts")).href);
+	const alignmentObserveModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment-observe.ts")).href);
+	const alignmentShutdownModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment-shutdown.ts")).href);
 	const sharedResults = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
 	const appendPluginOutcome = sharedResults.appendPluginOutcome as (plugin: any, outcome: any, deps?: any) => Promise<{ persisted: boolean; id?: string; reason?: string }>;
 	assert.ok(core.pluginEnvFile().startsWith(path.join(root, "home") + path.sep));
@@ -1104,29 +1110,567 @@ async function runSuite(root: string) {
 		(globalThis as any)[slotKey] = undefined;
 		core.widgetLifecycleResetForTests();
 	});
-	await check("canonical builder exact bytes for all five surfaces and stale candidate", () => {
+	await check("canonical builder exact bytes for all eight surfaces and stale candidate", () => {
 		const fixture = path.join(root, "builder");
 		for (const dir of ["scripts", "lib", "src", "hooks", "tools"]) mkdirSync(path.join(fixture, dir), { recursive: true });
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
 		copyFileSync(path.join(plugin, "../shared/lib/decision-contract.ts"), path.join(root, "shared/lib/decision-contract.ts"));
-		for (const file of ["scripts/build.mjs", "lib/decision.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "lib/decision.ts", "lib/alignment.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
-		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts"]) {
+		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts", "hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
 			const expected = readFileSync(path.join(fixture, file)); const actual = readFileSync(path.join(plugin, file)); assert.deepEqual(actual, expected, file);
 			assert.notDeepEqual(Buffer.concat([actual, Buffer.from(" ")]), expected); console.log(`artifact-sync ${file}: exact`);
 		}
 	});
 	await check("manifest surfaces and release version", () => {
 		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.9");
-		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [["tool_call", "task", "before"], ["tool_result", "task", "after"], ["tool_result", "subagent", "after"]]);
-		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 3);
+		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
+			["tool_call", "task", "before"],
+			["tool_result", "task", "after"],
+			["tool_result", "subagent", "after"],
+			["tool_call", "*", "before"],
+			["tool_result", "*", "after"],
+			["session_shutdown", undefined, undefined],
+		]);
+		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 6);
+		for (const name of ["jev-goal-alignment", "jev-goal-alignment-observe", "jev-goal-alignment-shutdown"]) assert.ok(manifest.hooks.some((h: any) => h.name === name), name);
 		const toolNames = manifest.tools.map((t: any) => t.name);
 		assert.deepEqual(toolNames.sort(), ["jev_advise", "jev_check", "plugin_metrics"]);
 		const checkToolEntry = manifest.tools.find((t: any) => t.name === "jev_check"); assert.equal(checkToolEntry.path, "tools/jev-check.ts");
 		const metricsTool = manifest.tools.find((t: any) => t.name === "plugin_metrics"); assert.equal(metricsTool.path, "tools/plugin-metrics.ts");
 	});
+	const alignmentUser = (id: string, text: string) => ({ type: "user", id, parts: [{ type: "text", text }] });
+	const alignmentSurface = (module: any) => {
+		const handlers: { event: string; handler: any }[] = [];
+		module.default({ on: (event: string, handler: any) => { handlers.push({ event, handler }); } });
+		return handlers;
+	};
+	const alignmentBefore = alignmentSurface(alignmentHookModule);
+	const alignmentAfter = alignmentSurface(alignmentObserveModule);
+	const alignmentShutdownSurface = alignmentSurface(alignmentShutdownModule);
+	const alignmentContext = (entries: unknown) => ({ sessionManager: { getBranch: () => entries }, ui: { notify() {}, setWidget() {}, setStatus() {} } });
+	const alignmentHome = (session = "default") => path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "alignment", "v1", session);
+	const alignmentEvents = () => {
+		const directory = alignmentHome();
+		const read = (name: string) => { try { return readFileSync(path.join(directory, name), "utf8"); } catch { return ""; } };
+		const text = read("events.1.jsonl") + read("events.jsonl");
+		return { text, events: text.split("\n").filter(line => line.trim()).map(line => JSON.parse(line)) };
+	};
+	const alignmentWrite = (id: string, filePath: string) => ({ type: "tool_call", toolName: "write", toolCallId: id, input: { filePath } });
+	const alignmentResult = (id: string, filePath: string) => ({ type: "tool_result", toolName: "write", toolCallId: id, input: { filePath }, details: {}, isError: false });
+	const withAlignmentMode = async <T>(mode: string | undefined, fn: () => T | Promise<T>): Promise<T> => {
+		const previous = process.env.JEV_ALIGNMENT_MODE;
+		if (mode === undefined) delete process.env.JEV_ALIGNMENT_MODE;
+		else process.env.JEV_ALIGNMENT_MODE = mode;
+		try { return await fn(); }
+		finally {
+			if (previous === undefined) delete process.env.JEV_ALIGNMENT_MODE;
+			else process.env.JEV_ALIGNMENT_MODE = previous;
+		}
+	};
+
+	await check("goal alignment core: user-entry authority, digests only and ordered rules", () => {
+		assert.deepEqual(alignmentBefore.map(entry => entry.event), ["tool_call"]);
+		assert.deepEqual(alignmentAfter.map(entry => entry.event), ["tool_result"]);
+		assert.deepEqual(alignmentShutdownSurface.map(entry => entry.event), ["session_shutdown"]);
+		const authority = alignmentCore.collectAuthority([
+			alignmentUser("entry-alpha", "Please implement `src/demo.ts` with criterion=artifact_exists:src/demo.ts and do not touch src/other.ts"),
+			{ type: "assistant", id: "entry-agent", parts: [{ type: "text", text: "read-only note written by the agent" }] },
+			{ type: "tool", id: "entry-tool", parts: [{ type: "text", text: "read-only tool output" }] },
+		]);
+		assert.equal(authority.latestUserEntryId, "entry-alpha");
+		assert.equal(authority.userEntries, 1, "assistant and tool entries are never authority");
+		const serialized = JSON.stringify(authority);
+		for (const canary of ["Please implement", "read-only note", "read-only tool output"]) assert.ok(!serialized.includes(canary), canary);
+		assert.equal(authority.criterion.kind, "artifact_exists");
+		assert.equal(authority.criterion.targetDigest, alignmentCore.digestTarget("src/demo.ts"));
+		const aligned = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
+		assert.deepEqual([aligned.ruleId, aligned.verdict, aligned.coverage, aligned.stage2Admissible, aligned.block], ["aligned_write_within_requested_scope", "aligned", "evaluated", true, false]);
+		const forbidden = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/other.ts"), authority });
+		assert.deepEqual([forbidden.ruleId, forbidden.verdict, forbidden.coverage, forbidden.stage2Admissible, forbidden.block], ["drift_write_forbidden_target", "drift", "evaluated", false, true]);
+		const ambiguous = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/unrequested.ts"), authority });
+		assert.deepEqual([ambiguous.ruleId, ambiguous.verdict, ambiguous.coverage, ambiguous.stage2Admissible, ambiguous.block], ["uncertain_authority_ambiguous", "uncertain", "coverage_gap", false, false]);
+		const read = alignmentCore.evaluateAction({ actionClass: "read", targetDigest: null, authority });
+		assert.deepEqual([read.ruleId, read.verdict, read.coverage, read.stage2Admissible, read.block], ["read_allow", "allow", "evaluated", false, false]);
+		const bash = alignmentCore.evaluateAction({ actionClass: "bash", targetDigest: null, authority });
+		assert.deepEqual([bash.ruleId, bash.verdict, bash.coverage, bash.stage2Admissible, bash.block], ["bash_observe", "allow", "coverage_gap", false, false]);
+		const missing = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: null });
+		assert.deepEqual([missing.ruleId, missing.block, missing.stage2Admissible], ["unknown_authority", false, false]);
+		assert.equal(alignmentCore.collectAuthority([]), null);
+		assert.equal(alignmentCore.collectAuthority(undefined), null);
+		// The branch head is not part of the retry identity; the user entry is.
+		const grown = alignmentCore.collectAuthority([
+			alignmentUser("entry-alpha", "Please implement `src/demo.ts` with criterion=artifact_exists:src/demo.ts and do not touch src/other.ts"),
+			{ type: "tool", id: "branch-head-1", parts: [] },
+			{ type: "assistant", id: "branch-head-2", parts: [{ type: "text", text: "done" }] },
+		]);
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: grown }).retryKey, aligned.retryKey);
+		assert.match(aligned.retryKey, /^[a-f0-9]{32}$/);
+	});
+
+	await check("goal alignment core: continue never clears read-only, an explicit release does, a hedged one is ambiguous", () => {
+		const readOnlyEntry = "This is read-only; do not modify anything.";
+		const writeOf = (authority: any) => alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
+		const readOnly = alignmentCore.collectAuthority([alignmentUser("u-ro", readOnlyEntry)]);
+		assert.equal(readOnly.constraints.some((constraint: any) => constraint.kind === "read_only"), true);
+		assert.equal(writeOf(readOnly).ruleId, "drift_write_vs_readonly");
+		const continued = alignmentCore.collectAuthority([alignmentUser("u-ro", readOnlyEntry), alignmentUser("u-continue", "continue")]);
+		assert.equal(continued.changeSemantics, "unknown");
+		assert.equal(continued.constraints.some((constraint: any) => constraint.kind === "read_only"), true, "continue keeps read-only active");
+		assert.equal(writeOf(continued).block, true, "a later continue never clears read-only");
+		const released = alignmentCore.collectAuthority([alignmentUser("u-ro", readOnlyEntry), alignmentUser("u-release", "The read-only restriction is released; you may write.")]);
+		assert.equal(released.release, "explicit");
+		assert.equal(released.constraints.some((constraint: any) => constraint.kind === "read_only"), false);
+		assert.equal(writeOf(released).block, false, "an explicit release unblocks writes");
+		const hedged = alignmentCore.collectAuthority([alignmentUser("u-ro", readOnlyEntry), alignmentUser("u-hedge", "You may write if you want?")]);
+		assert.equal(hedged.release, "release_ambiguous");
+		assert.equal(hedged.constraints.some((constraint: any) => constraint.kind === "read_only"), true, "an unclear release never clears read-only");
+		assert.equal(writeOf(hedged).block, true);
+		const stopped = alignmentCore.collectAuthority([alignmentUser("u-stop", "stop the current work")]);
+		assert.deepEqual([stopped.changeSemantics, writeOf(stopped).ruleId], ["cancel", "drift_write_after_stop"]);
+	});
+
+	await check("goal alignment core: typed transition chain, mismatch, baseline and missing criterion", () => {
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-chain", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")]);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
+		const correction = alignmentCore.recordCorrection({ authority, baseline: "false", now: 1000 });
+		assert.equal(correction.applied, true);
+		assert.equal(correction.state.status, "correction_recorded");
+		assert.equal(correction.state.step, 1);
+		assert.equal(correction.state.criterionBaseline, "false");
+		const same = alignmentCore.recordCorrection({ authority, baseline: "false", now: 1001, previous: correction.state });
+		assert.deepEqual([same.applied, same.reason], [false, "same_authority"]);
+		const targetMismatch = alignmentCore.admitAlignedAction({ state: correction.state, evaluation, targetDigest: alignmentCore.digestTarget("src/other.ts"), toolCallIdDigest: alignmentCore.digestText("call-1"), now: 1002 });
+		assert.deepEqual([targetMismatch.applied, targetMismatch.reason], [false, "target_mismatch"]);
+		const notAdmissible = alignmentCore.admitAlignedAction({ state: correction.state, evaluation: alignmentCore.evaluateAction({ actionClass: "read", targetDigest: null, authority }), targetDigest: null, toolCallIdDigest: alignmentCore.digestText("call-1"), now: 1002 });
+		assert.deepEqual([notAdmissible.applied, notAdmissible.reason], [false, "not_stage2_admissible"]);
+		const missingCall = alignmentCore.admitAlignedAction({ state: correction.state, evaluation, targetDigest: alignmentCore.digestTarget("src/demo.ts"), toolCallIdDigest: null, now: 1002 });
+		assert.deepEqual([missingCall.applied, missingCall.reason], [false, "missing_tool_call"]);
+		const admitted = alignmentCore.admitAlignedAction({ state: correction.state, evaluation, targetDigest: alignmentCore.digestTarget("src/demo.ts"), toolCallIdDigest: alignmentCore.digestText("call-1"), now: 1003 });
+		assert.deepEqual([admitted.applied, admitted.state.status, admitted.state.step], [true, "aligned_admitted", 2]);
+		const mismatch = alignmentCore.observeResult({ state: admitted.state, toolCallIdDigest: alignmentCore.digestText("call-2"), observation: "true", now: 1004 });
+		assert.deepEqual([mismatch.applied, mismatch.state.status, mismatch.state.step, mismatch.reason], [true, "recovery_unverified", 4, "tool_call_mismatch"]);
+		const observedFalse = alignmentCore.observeResult({ state: admitted.state, toolCallIdDigest: alignmentCore.digestText("call-1"), observation: "false", now: 1005 });
+		assert.deepEqual([observedFalse.applied, observedFalse.state.status, observedFalse.state.step], [true, "result_observed", 3]);
+		const pending = alignmentCore.evaluateCompletion({ state: observedFalse.state, now: 1006 });
+		assert.deepEqual([pending.applied, pending.reason, pending.state.status], [false, "criterion_not_true", "result_observed"]);
+		const observed = alignmentCore.observeResult({ state: admitted.state, toolCallIdDigest: alignmentCore.digestText("call-1"), observation: "true", now: 1007 });
+		const recovered = alignmentCore.evaluateCompletion({ state: observed.state, now: 1008 });
+		assert.deepEqual([recovered.applied, recovered.state.status, recovered.state.step], [true, "recovered", 4]);
+		assert.equal(recovered.event.kind, "complete");
+		const baselineTrue = alignmentCore.evaluateCompletion({ state: { ...observed.state, criterionBaseline: "true" }, now: 1009 });
+		assert.deepEqual([baselineTrue.state.status, baselineTrue.reason], ["recovery_unverified", "baseline_true"]);
+		const noCriterion = alignmentCore.evaluateCompletion({ state: { ...observed.state, criterion: null }, now: 1010 });
+		assert.deepEqual([noCriterion.state.status, noCriterion.reason], ["recovery_unverified", "no_declared_criterion"]);
+		const outOfOrder = alignmentCore.evaluateCompletion({ state: correction.state, now: 1011 });
+		assert.deepEqual([outOfOrder.applied, outOfOrder.reason], [false, "not_observed_stage"]);
+	});
+
+	await check("goal alignment journal: record caps, rotation, retention and idempotent stop", () => {
+		const now = Date.UTC(2026, 9, 25, 8, 0, 0);
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-journal", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")]);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
+		const block = alignmentCore.recordBlock({ evaluation, retryCount: 1, now });
+		assert.ok(Buffer.byteLength(alignmentCore.serializeEvent(block), "utf8") <= 2048);
+		assert.equal(alignmentCore.serializeEvent({ ...block, retryKey: "x".repeat(3000) }), null, "over-cap records are refused");
+		const expired = { ...block, at: now - 8 * 24 * 60 * 60 * 1000 };
+		const retained = alignmentCore.readJournalTexts([`${JSON.stringify(expired)}\n${JSON.stringify(block)}\n`], now);
+		assert.deepEqual([retained.dropped, retained.events.length, retained.retryCounts[evaluation.retryKey]], [1, 1, 1], "7-day retention keeps only the fresh record");
+		const lines = Array.from({ length: 200 }, (_, index) => alignmentCore.serializeEvent({ ...block, at: now - 1000 + index }));
+		const full = `${lines.join("\n")}\n`;
+		const plan = alignmentCore.planJournalAppend(full, [{ ...block, at: now }], now);
+		assert.deepEqual([plan.rotate, plan.appended], [true, 1], "the 201st record rotates the active segment");
+		const compacted = alignmentCore.compactJournalText(full, now);
+		assert.equal(compacted.trimEnd().split("\n").length, 200, "compaction keeps the newest 200 records");
+		assert.ok(Buffer.byteLength(compacted, "utf8") <= alignmentCore.ALIGNMENT_LIMITS.maxTotalBytes);
+		const correction = alignmentCore.recordCorrection({ authority, baseline: "false", now });
+		const shutdown = alignmentCore.recordShutdown({ state: correction.state, counts: { corrections: 1, blocks: 1, recovered: 0, unverified: 0, unresolved: 1 }, now });
+		const snapshot = alignmentCore.readJournalTexts([`${alignmentCore.serializeEvent(correction.event)}\n${alignmentCore.serializeEvent(shutdown)}\n`], now);
+		assert.equal(snapshot.shutdownFor[correction.state.recoveryId], true, "the stop record is keyed by recovery id");
+		assert.equal(snapshot.counts.unresolved, 1);
+	});
+
+	await check("goal alignment journal rotation keeps two bounded segments", async () => {
+		env();
+		const directory = alignmentHome();
+		mkdirSync(directory, { recursive: true, mode: 0o700 });
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-rotate", "Please improve the feature")]);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
+		const now = Date.now();
+		const lines = Array.from({ length: 200 }, (_, index) => alignmentCore.serializeEvent(alignmentCore.recordBlock({ evaluation, retryCount: index + 1, now: now - 500 + index })));
+		writeFileSync(path.join(directory, "events.jsonl"), lines.join("\n") + "\n", { mode: 0o600 });
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-rotate", "src/demo.ts"), alignmentContext([alignmentUser("entry-rotate", "Please improve the feature")])), undefined);
+		const current = readFileSync(path.join(directory, "events.jsonl"), "utf8").trimEnd().split("\n");
+		const rotated = readFileSync(path.join(directory, "events.1.jsonl"), "utf8").trimEnd().split("\n");
+		assert.equal(current.length, 1, "the new record starts a fresh active segment");
+		assert.equal(JSON.parse(current[0]).kind, "correction");
+		assert.ok(rotated.length <= 200, "the retained segment stays within the record cap");
+		assert.deepEqual(readdirSync(directory).sort(), ["events.1.jsonl", "events.jsonl"], "rotation keeps two segments");
+	});
+
+	await check("goal alignment hooks fail open on a thrown handler", async () => {
+		env();
+		const before = fetchCalls;
+		const entries = [alignmentUser("entry-error", "This is read-only; do not modify anything.")];
+		const revoked = Proxy.revocable({}, {});
+		revoked.revoke();
+		assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "write", toolCallId: "call-throw", input: revoked.proxy }, alignmentContext(entries)), undefined, "a throwing input never blocks");
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-branch-throw", "src/demo.ts"), { sessionManager: { getBranch() { throw new Error("no branch"); } } }), undefined, "a throwing branch facade never blocks");
+		assert.equal(await alignmentAfter[0].handler(null, alignmentContext(entries)), undefined);
+		assert.equal(await alignmentShutdownSurface[0].handler(undefined, alignmentContext(entries)), undefined);
+		assert.ok(
+			alignmentEvents().events.some((event: any) => event.kind === "hook_error"),
+			"a thrown handler is recorded as hook_error and survives the production reader",
+		);
+		// The production reader (not a raw JSON.parse) must accept the kind.
+		const parsedJournal = alignmentCore.readJournalTexts([alignmentEvents().text], Date.now());
+		assert.ok(
+			parsedJournal.events.some((event: any) => event.kind === "hook_error"),
+			"hook_error survives readJournalTexts",
+		);
+		assert.equal(fetchCalls, before);
+		assert.equal(unexpectedFetches, 0);
+	});
+
+	await check("AC-A3 semantic advisory never leaves the process without opt-in", async () => {
+		const suppressed = validateSemanticEnvelope({ sendAuthorityText: false, confidence: 0.9, probabilities: { aligned: 1 }, labels: ["aligned", "drift"] });
+		assert.equal(suppressed.status, "outbound_suppressed");
+		assert.equal(suppressed.outbound, false);
+		assert.equal(suppressed.confidence, null);
+	});
+
+	await check("AC-A3 precision anomaly keeps the raw envelope instead of clamping it", async () => {
+		const anomalous = validateSemanticEnvelope({
+			sendAuthorityText: true,
+			confidence: 0.9989,
+			probabilities: { aligned: 0.0001, drift: 0.9993, uncertain: 0.0007 },
+			labels: ["aligned", "drift", "uncertain"],
+		});
+		assert.equal(anomalous.status, "precision_anomaly");
+		assert.equal(anomalous.confidence, 0.9989, "provider confidence is preserved verbatim");
+		assert.deepEqual(anomalous.probabilities, { aligned: 0.0001, drift: 0.9993, uncertain: 0.0007 }, "no normalisation");
+		assert.equal(Number(anomalous.probabilitySum?.toFixed(4)), 1.0001);
+		const exact = validateSemanticEnvelope({ sendAuthorityText: true, confidence: 0.9681, probabilities: { aligned: 0.9788, drift: 0.0022, uncertain: 0.019 }, labels: ["aligned", "drift", "uncertain"] });
+		assert.equal(exact.status, "ok");
+		assert.equal(exact.confidence, 0.9681);
+		assert.equal(validateSemanticEnvelope({ sendAuthorityText: true, confidence: 0.5, probabilities: { aligned: 1 }, labels: ["aligned", "drift"] }).status, "invalid_response");
+	});
+
+	await check("AC-A1 alignment shadow: metadata-only journal never blocks", async () => {
+		env();
+		const before = fetchCalls;
+		const ctx = alignmentContext([alignmentUser("entry-shadow", "PRIVATE_REQUEST_CANARY improve the tool")]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shadow", "src/unrequested.ts"), ctx), undefined, "an uncertain write is allowed");
+		const journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction"]);
+		assert.equal(typeof journal.events[0].at, "number");
+		assert.ok(!journal.text.includes("PRIVATE_REQUEST_CANARY"));
+		assert.ok(!journal.text.includes("improve the tool"));
+		for (const line of journal.text.split("\n").filter(Boolean)) assert.ok(Buffer.byteLength(line, "utf8") <= 2048, "record cap");
+		assert.equal(statSync(alignmentHome()).mode & 0o777, 0o700, "journal directory is private");
+		assert.equal(statSync(path.join(alignmentHome(), "events.jsonl")).mode & 0o777, 0o600, "journal records are private");
+		assert.equal(fetchCalls, before, "no provider call");
+		assert.equal(unexpectedFetches, 0);
+	});
+
+	await check("AC-A2.1 in-scope write reaches recovered", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "demo.txt");
+		const ctx = alignmentContext([alignmentUser("entry-aligned", "Create the artifact `" + target + "` with criterion=artifact_exists:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-aligned", target), ctx), undefined, "an aligned write is allowed");
+		let journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction", "admit"]);
+		assert.equal(journal.events[1].state.status, "aligned_admitted");
+		assert.equal(journal.events[1].state.toolCallIdDigest, alignmentCore.digestText("call-aligned"));
+		assert.equal(journal.events[1].state.criterionBaseline, "false");
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, "artifact\n", { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-aligned", target), ctx), undefined);
+		journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction", "admit", "observe", "complete"]);
+		const last = journal.events[journal.events.length - 1].state;
+		assert.deepEqual([last.status, last.step, last.criterion.kind], ["recovered", 4, "artifact_exists"]);
+	});
+
+	await check("S07-D criterion_file binds an explicit satisfied boolean", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "criterion.json");
+		const ctx = alignmentContext([alignmentUser("entry-critfile", "Create `" + target + "` with criterion=criterion_file:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile", target), ctx), undefined);
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, JSON.stringify({ satisfied: false }), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile", target), ctx), undefined);
+		let last = alignmentEvents().events.at(-1).state;
+		assert.deepEqual([last.status, last.step], ["result_observed", 3], "satisfied:false must not complete");
+		// A fresh session where the criterion file is absent at correction time and
+		// satisfied:true is observed afterwards must complete the chain.
+		rmSync(target, { force: true });
+		env();
+		const ctxTrue = alignmentContext([alignmentUser("entry-critfile-true", "Create `" + target + "` with criterion=criterion_file:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile-true", target), ctxTrue), undefined);
+		writeFileSync(target, JSON.stringify({ satisfied: true }), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile-true", target), ctxTrue), undefined);
+		last = alignmentEvents().events.at(-1).state;
+		assert.deepEqual([last.status, last.step], ["recovered", 4], "the false->true transition completes the chain");
+		env();
+		const big = path.join(process.env.HOME!, "artifact", "big.json");
+		const ctx2 = alignmentContext([alignmentUser("entry-critfile-big", "Create `" + big + "` with criterion=criterion_file:" + big)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-critfile-big", big), ctx2), undefined);
+		mkdirSync(path.dirname(big), { recursive: true, mode: 0o700 });
+		writeFileSync(big, "x".repeat(5000), { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-critfile-big", big), ctx2), undefined);
+		last = alignmentEvents().events.at(-1).state;
+		assert.notEqual(last.status, "recovered", "an oversized criterion file never completes");
+	});
+
+	await check("truncated authority never claims alignment and never blocks", async () => {
+		env();
+		const entries = [
+			alignmentUser("entry-old", "Implement `src/demo.ts`"),
+			...Array.from({ length: 14 }, (_, index) => alignmentUser("entry-filler-" + index, "continue")),
+		];
+		const truncated = alignmentCore.collectAuthority(entries, { windowSize: 12 });
+		assert.equal(truncated.authorityTruncated, true, "a 14-entry tail over a 12-entry window is truncated");
+		assert.equal(truncated.constraints.length, 0);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: truncated });
+		const narrow = alignmentCore.collectAuthority([alignmentUser("entry-only", "Implement `src/demo.ts`")], { windowSize: 12 });
+		assert.equal(narrow.authorityTruncated, false, "a single entry is complete authority");
+		assert.ok(narrow.scopeDigests.includes(alignmentCore.digestTarget("src/demo.ts")), "the narrow authority still scopes the write");
+		assert.equal(evaluation.verdict, "uncertain", "truncated authority never yields aligned");
+		assert.equal(evaluation.block, false, "truncated authority never blocks");
+	});
+
+	await check("N3 a hung journal append degrades instead of delaying the verdict", async () => {
+		const fast = await alignmentCore.withDeadline(Promise.resolve("stored"), 50, "timeout");
+		assert.equal(fast, "stored", "a completing append wins");
+		const startedAt = Date.now();
+		const hung = await alignmentCore.withDeadline(new Promise<string>(() => {}), 30, "timeout");
+		const elapsed = Date.now() - startedAt;
+		assert.equal(hung, "timeout", "a hung append resolves to the fallback");
+		assert.ok(elapsed < 1000, `the deadline must actually bound the wait (took ${elapsed}ms)`);
+	});
+
+	await check("the observe surface records hook_error when its input throws", async () => {
+		env();
+		const entries = [alignmentUser("entry-observe-throw", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")];
+		const ctx = alignmentContext(entries);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-observe-throw", "src/demo.ts"), ctx), undefined);
+		const before = alignmentEvents().events.filter((event: any) => event.kind === "hook_error").length;
+		const revoked = Proxy.revocable({}, {});
+		revoked.revoke();
+		assert.equal(await alignmentAfter[0].handler(revoked.proxy, ctx), undefined, "the observe surface stays fail-open");
+		const after = alignmentEvents().events.filter((event: any) => event.kind === "hook_error").length;
+		assert.equal(after, before + 1, "the thrown observe input is journaled as hook_error");
+	});
+
+	await check("AC-A2.2 default allow is never stage-2", async () => {
+		env();
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-authority", "src/demo.ts"), alignmentContext([])), undefined);
+		assert.equal(existsSync(alignmentHome()), false, "missing authority writes no journal");
+		const entries = [alignmentUser("entry-scope", "Please improve the feature")];
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-no-scope", "src/demo.ts"), alignmentContext(entries)), undefined);
+		const journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction"], "no admission without a requested target");
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: alignmentCore.collectAuthority(entries) });
+		assert.deepEqual([evaluation.verdict, evaluation.stage2Admissible, evaluation.block], ["uncertain", false, false]);
+		const defaultCount = alignmentEvents().events.length;
+		const sessionContext = { sessionManager: { getSessionId: () => "session-alpha", getBranch: () => entries }, ui: {} };
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-session-alpha", "src/demo.ts"), sessionContext), undefined);
+		assert.equal(alignmentEvents().events.length, defaultCount, "another session keeps its own segment");
+		assert.equal(existsSync(alignmentHome(alignmentCore.digestText("session-alpha").slice(0, 16))), true, "a session gets its own bounded segment");
+	});
+
+	await check("AC-A2.3 read and bash are never stage-2 and bash is a coverage gap", async () => {
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-read", "Please improve the feature")]);
+		const read = alignmentCore.evaluateAction({ actionClass: "read", targetDigest: null, authority });
+		const bash = alignmentCore.evaluateAction({ actionClass: "bash", targetDigest: null, authority });
+		assert.deepEqual([read.ruleId, read.coverage, read.stage2Admissible], ["read_allow", "evaluated", false]);
+		assert.deepEqual([bash.ruleId, bash.coverage, bash.stage2Admissible], ["bash_observe", "coverage_gap", false]);
+		env();
+		const ctx = alignmentContext([alignmentUser("entry-read", "Please improve the feature")]);
+		assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "read", toolCallId: "call-read", input: { filePath: "src/demo.ts" } }, ctx), undefined);
+		assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "bash", toolCallId: "call-bash", input: { command: "ls" } }, ctx), undefined);
+		assert.equal(existsSync(alignmentHome()), false, "read and bash never enter the recovery chain");
+	});
+
+	await check("AC-A2.4 a criterion that was already true stays recovery_unverified", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "existing.txt");
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, "already here\n", { mode: 0o600 });
+		const ctx = alignmentContext([alignmentUser("entry-baseline", "Update `" + target + "` with criterion=artifact_exists:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-baseline", target), ctx), undefined);
+		let journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction", "admit"]);
+		assert.equal(journal.events[0].state.criterionBaseline, "true");
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-baseline", target), ctx), undefined);
+		journal = alignmentEvents();
+		assert.deepEqual(journal.events.map((event: any) => event.kind), ["correction", "admit", "observe", "unverified"]);
+		const last = journal.events[journal.events.length - 1].state;
+		assert.deepEqual([last.status, last.reason], ["recovery_unverified", "baseline_true"]);
+	});
+
+	await check("V-E2E 18 over-budget evaluation allows the write and records latency_exceeded", async () => {
+		await withAlignmentMode("deterministic", async () => {
+			env();
+			process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS = "-1";
+			try {
+				const ctx = alignmentContext([alignmentUser("entry-latency", "This is read-only; do not modify anything.")]);
+				const output = await alignmentBefore[0].handler(alignmentWrite("call-latency", "src/demo.ts"), ctx);
+				assert.equal(output, undefined, "an over-budget evaluation must not block");
+				const events = alignmentEvents();
+				assert.ok(events.events.some((event: any) => event.kind === "block"), "the violation was still evaluated");
+				assert.ok(events.events.some((event: any) => event.kind === "latency_exceeded"), "the overrun is recorded");
+				const record = alignmentCore.recordLatencyExceeded({ elapsedMs: 1, budgetMs: -1, now: Date.now() });
+				const roundTrip = alignmentCore.readJournalTexts([`${alignmentCore.serializeEvent(record)}\n`], Date.now());
+				assert.deepEqual(roundTrip.events.map((event: any) => event.kind), ["latency_exceeded"], "the production reader accepts latency_exceeded");
+			} finally {
+				delete process.env.JEV_ALIGNMENT_LATENCY_BUDGET_MS;
+			}
+		});
+	});
+
+	await check("AC-A2.5/AC-A2.6 degraded storage still blocks a write and always allows a read", async () => {
+		await withAlignmentMode("deterministic", async () => {
+			env();
+			const alignmentRoot = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor");
+			mkdirSync(alignmentRoot, { recursive: true, mode: 0o700 });
+			writeFileSync(path.join(alignmentRoot, "alignment"), "occupied\n", { mode: 0o600 });
+			const before = fetchCalls;
+			const ctx = alignmentContext([alignmentUser("entry-degraded", "This is read-only; do not modify anything.")]);
+			const output = await alignmentBefore[0].handler(alignmentWrite("call-degraded", "src/demo.ts"), ctx);
+			assert.equal(output?.block, true, "the write violation still blocks without a store");
+			assert.ok(String(output.reason).includes("drift_write_vs_readonly"));
+			assert.ok(String(output.reason).includes("entry-de"), "reason carries the 8-char entry id prefix");
+			assert.ok(String(output.reason).includes("[storage_degraded]"), "a degraded store is named in the reason instead of being silent");
+			assert.ok(!String(output.reason).includes("do not modify anything"), "reason carries no raw user text");
+			assert.equal(existsSync(alignmentHome()), false, "the blocked store path holds no journal");
+			assert.equal(statSync(path.join(alignmentRoot, "alignment")).isFile(), true);
+			const repeated = await alignmentBefore[0].handler(alignmentWrite("call-degraded-2", "src/demo.ts"), ctx);
+			assert.equal(repeated?.block, true);
+			assert.ok(String(repeated.reason).includes("stop_recommended"), "in-process counters keep the retry chain alive");
+			assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "read", toolCallId: "call-degraded-read", input: { filePath: "src/demo.ts" } }, ctx), undefined, "reads are never blocked");
+			assert.equal(fetchCalls, before);
+		});
+	});
+
+	await check("AC-A2.7 read-only allows bash", async () => {
+		env();
+		const ctx = alignmentContext([alignmentUser("entry-bash-ro", "This is read-only; do not modify anything.")]);
+		assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "bash", toolCallId: "call-bash-ro", input: { command: "bun test" } }, ctx), undefined);
+		assert.equal(existsSync(alignmentHome()), false, "bash never writes the alignment journal");
+	});
+
+	await check("AC-A2.8 two repeated blocks stop_recommended with zero provider calls; a new entry resets", async () => {
+		await withAlignmentMode("deterministic", async () => {
+			env();
+			const entries = [alignmentUser("entry-retry", "This is read-only; do not modify anything.")];
+			const before = fetchCalls;
+			const first = await alignmentBefore[0].handler(alignmentWrite("call-retry-1", "src/demo.ts"), alignmentContext(entries));
+			assert.equal(first.block, true);
+			assert.ok(!String(first.reason).includes("stop_recommended"), "the first block is not a stop recommendation");
+			const second = await alignmentBefore[0].handler(alignmentWrite("call-retry-2", "src/demo.ts"), alignmentContext(entries));
+			assert.equal(second.block, true);
+			assert.ok(String(second.reason).includes("stop_recommended"), "the second repeated block recommends stopping");
+			const blocks = alignmentEvents().events.filter((event: any) => event.kind === "block");
+			assert.deepEqual(blocks.map((event: any) => event.retryCount), [1, 2]);
+			assert.deepEqual(blocks.map((event: any) => event.stopRecommended), [false, true]);
+			assert.equal(fetchCalls, before, "alignment never calls a provider");
+			const reset = await alignmentBefore[0].handler(alignmentWrite("call-retry-3", "src/demo.ts"), alignmentContext([...entries, alignmentUser("entry-retry-new", "continue")]));
+			assert.equal(reset.block, true);
+			assert.ok(!String(reset.reason).includes("stop_recommended"), "a new user entry starts a new retry chain");
+			const lastBlock = alignmentEvents().events.filter((event: any) => event.kind === "block").pop();
+			assert.equal(lastBlock.retryCount, 1);
+		});
+	});
+
+	await check("alignment mode: unset or unknown resolves to shadow with journal but no block", async () => {
+		await withAlignmentMode(undefined, async () => {
+			env();
+			const ctx = alignmentContext([alignmentUser("entry-shadow-mode", "This is read-only; do not modify anything.")]);
+			assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shadow-mode", "src/demo.ts"), ctx), undefined, "shadow never blocks");
+			const journal = alignmentEvents();
+			const block = journal.events.find((event: any) => event.kind === "block");
+			assert.equal(block.ruleId, "drift_write_vs_readonly", "shadow still journals the would-be block");
+			assert.equal(block.retryCount, 1);
+			assert.ok(!journal.text.includes("do not modify anything"), "shadow journal carries no raw user text");
+		});
+		await withAlignmentMode(" BOGUS ", async () => {
+			env();
+			const ctx = alignmentContext([alignmentUser("entry-shadow-bogus", "This is read-only; do not modify anything.")]);
+			assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shadow-bogus", "src/demo.ts"), ctx), undefined, "an unknown mode falls back to shadow");
+			assert.equal(alignmentEvents().events.some((event: any) => event.kind === "block"), true);
+		});
+	});
+
+	await check("alignment mode off disables evaluation, journal and block", async () => {
+		await withAlignmentMode("  OFF ", async () => {
+			env();
+			const ctx = alignmentContext([alignmentUser("entry-off", "This is read-only; do not modify anything.")]);
+			assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-off", "src/demo.ts"), ctx), undefined, "off never blocks");
+			assert.equal(existsSync(alignmentHome()), false, "off performs no journal write");
+			assert.equal(await alignmentBefore[0].handler({ type: "tool_call", toolName: "read", toolCallId: "call-off-read", input: { filePath: "src/demo.ts" } }, ctx), undefined);
+			assert.equal(existsSync(alignmentHome()), false, "off writes nothing for reads either");
+		});
+	});
+
+	await check("alignment mode deterministic blocks with the reason contract", async () => {
+		await withAlignmentMode("Deterministic", async () => {
+			env();
+			const before = fetchCalls;
+			const ctx = alignmentContext([alignmentUser("entry-deterministic", "This is read-only; do not modify anything.")]);
+			const output = await alignmentBefore[0].handler(alignmentWrite("call-deterministic", "src/demo.ts"), ctx);
+			assert.equal(output?.block, true, "deterministic enforces the drift verdict");
+			const reason = String(output.reason);
+			assert.ok(reason.includes("drift_write_vs_readonly"), "reason carries the rule id");
+			assert.ok(reason.includes("entry-de"), "reason carries the 8-char entry id prefix");
+			assert.ok(reason.includes("explicit release"), "reason carries recovery guidance");
+			assert.ok(!reason.includes("do not modify anything"), "reason carries no raw user text");
+			const block = alignmentEvents().events.find((event: any) => event.kind === "block");
+			assert.equal(block.ruleId, "drift_write_vs_readonly");
+			assert.equal(block.retryCount, 1);
+			assert.equal(fetchCalls, before, "mode resolution never calls a provider");
+		});
+		assert.equal(process.env.JEV_ALIGNMENT_MODE, undefined, "the mode env var is restored after the case");
+	});
+
+	await check("goal alignment toolCallId binding: a different call is ignored, an unbound result is unverified", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "bound.txt");
+		const ctx = alignmentContext([alignmentUser("entry-bind", "Create `" + target + "` with criterion=artifact_exists:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-bound", target), ctx), undefined);
+		const beforeMismatch = alignmentEvents().events.length;
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-other", target), ctx), undefined);
+		assert.equal(alignmentEvents().events.length, beforeMismatch, "a different call is not this recovery");
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, "created\n", { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler({ type: "tool_result", toolName: "write", input: { filePath: target }, details: {}, isError: false }, ctx), undefined);
+		const last = alignmentEvents().events.pop().state;
+		assert.deepEqual([last.status, last.reason], ["recovery_unverified", "tool_call_mismatch"]);
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-bind", "Create `" + target + "` with criterion=artifact_exists:" + target)]);
+		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget(target), authority });
+		const correction = alignmentCore.recordCorrection({ authority, baseline: "false", now: 1 });
+		const admitted = alignmentCore.admitAlignedAction({ state: correction.state, evaluation, targetDigest: alignmentCore.digestTarget(target), toolCallIdDigest: alignmentCore.digestText("call-bound"), now: 2 });
+		const mismatch = alignmentCore.observeResult({ state: admitted.state, toolCallIdDigest: alignmentCore.digestText("call-other"), observation: "true", now: 3 });
+		assert.deepEqual([mismatch.applied, mismatch.state.status, mismatch.reason], [true, "recovery_unverified", "tool_call_mismatch"]);
+	});
+
+	await check("goal alignment shutdown flushes unresolved counts idempotently", async () => {
+		env();
+		const target = path.join(process.env.HOME!, "artifact", "shutdown.txt");
+		const ctx = alignmentContext([alignmentUser("entry-shutdown", "Create `" + target + "` with criterion=artifact_exists:" + target)]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shutdown", target), ctx), undefined);
+		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, ctx), undefined);
+		const first = alignmentEvents().events;
+		const shutdowns = first.filter((event: any) => event.kind === "shutdown");
+		assert.equal(shutdowns.length, 1);
+		assert.equal(shutdowns[0].counts.unresolved, 1);
+		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, ctx), undefined);
+		assert.equal(alignmentEvents().events.length, first.length, "a repeated shutdown appends nothing");
+	});
+
 	await check("no unexpected fetch and no owned transaction residue", () => {
 		assert.equal(unexpectedFetches, 0);
 		const walk = (dir: string) => { for (const item of readdirSync(dir, { withFileTypes: true })) { const file = path.join(dir, item.name); if (item.isDirectory()) walk(file); else assert.ok(!item.name.endsWith(".lock") && !item.name.endsWith(".tmp"), file); } };
@@ -1598,7 +2142,7 @@ async function seedStateWithZeroDuration(file: string): Promise<void> {
 	state.jobs[JSON.stringify(["s", "j0"])] = { ref: { sessionId: "s", jobId: "j0" }, status: "completed", statusObservations: ["completed"], durationObservations: [], requestedModelObservations: [], effectiveModelObservations: [], allocatedChildIds: [], actualTier: null, observedAt: Date.now(), taskKey: null, conflicts: [] };
 	writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
 }
-	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 5 }));
+	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 8 }));
 	console.log(failures ? `FAILED ${failures}/${cases}` : `ALL PASS (${cases} cases)`);
 	process.exitCode = failures || cases === 0 ? 1 : 0;
 }

@@ -484,7 +484,16 @@ export function distillTrajectories({
       continue;
     }
 
-    candidates.push(buildCandidate({ objective: key, separation, storeDigest, drawnFrom, ledgerHead }));
+    const candidate = buildCandidate({ objective: key, separation, storeDigest, drawnFrom, ledgerHead });
+    // Emission is still gated on re-derivation from the same attempt set: a
+    // candidate that cannot be reproduced is skipped, never emitted, and an
+    // all-skipped run is a normal empty result.
+    const derived = rederiveSupport(candidate, attempts);
+    if (!derived.ok) {
+      skipped.push({ ...common, reason: "support_not_rederivable", detail: derived.reason });
+      continue;
+    }
+    candidates.push(candidate);
     if (candidates.length >= DISTILL_LIMITS.maxCandidates) break;
   }
 
@@ -542,11 +551,45 @@ export function loadCandidatePayload(text) {
 }
 
 /**
+ * Content re-derivation: every referenced attempt id must resolve to an
+ * attempt of this objective on the declared side, and each side's declared
+ * count must equal the number of such attempts in the referenced evidence.
+ * A candidate whose support cannot be reproduced from the store is a claim,
+ * not a lesson.
+ */
+export function rederiveSupport(candidate, attempts) {
+  const rows = Array.isArray(attempts) ? attempts : [];
+  const byId = new Map();
+  for (const row of rows) {
+    if (isPlainObject(row) && typeof row.id === "string") byId.set(row.id, row);
+  }
+  const contrast = candidate?.contrast;
+  if (!isPlainObject(contrast) || !isPlainObject(contrast.adopt) || !isPlainObject(contrast.reject)) {
+    return { ok: false, reason: "support_missing" };
+  }
+  for (const side of ["adopt", "reject"]) {
+    const ids = contrast[side].attemptIds;
+    if (!Array.isArray(ids) || ids.length === 0) return { ok: false, reason: "support_missing" };
+    for (const id of ids) {
+      const row = byId.get(id);
+      if (!row || row.objective !== candidate.objective || row.decision !== side) {
+        return { ok: false, reason: "support_unresolved" };
+      }
+    }
+    const total = rows.filter((row) => row.objective === candidate.objective && row.decision === side).length;
+    if (total !== contrast[side].count) return { ok: false, reason: "support_count_mismatch" };
+    if (contrast.support?.[`${side}s`] !== contrast[side].count) return { ok: false, reason: "support_count_mismatch" };
+  }
+  return { ok: true };
+}
+
+/**
  * Structural checks shared by the loader and the loop. `expectedStoreDigest` is
  * required in candidate-file mode: the loop recomputes it from the store so a
- * forged digest cannot reach the proposer.
+ * forged digest cannot reach the proposer. `attempts` is optional; when given
+ * (the loop always has the store), the contrast support is re-derived from it.
  */
-export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLag, expectedStoreDigest = null }) {
+export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLag, expectedStoreDigest = null, attempts = null }) {
   if (!isPlainObject(candidate)) return "candidate_unreadable";
   if (candidate.schema !== CANDIDATE_SCHEMA) return "candidate_schema_unknown";
   if (candidate.objective !== gatedObjective) return "objective_not_gated";
@@ -580,6 +623,8 @@ export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLa
     }
     if (side.attemptIds.some((id) => typeof id !== "string" || id.length === 0)) return "candidate_contrast_invalid";
     if (new Set(side.attemptIds).size !== side.attemptIds.length) return "candidate_contrast_invalid";
+    // Support must be re-derivable, so at least one referenced attempt is required.
+    if (side.attemptIds.length === 0) return "candidate_contrast_invalid";
     if (side.attemptIds.length > side.count) return "candidate_contrast_invalid";
   }
   if (contrast.adopt.count !== contrast.support.adopts || contrast.reject.count !== contrast.support.rejects) {
@@ -592,8 +637,17 @@ export function validateCandidate(candidate, { gatedObjective, ledgerHead, maxLa
   const after = candidate.expires?.kind === "ledger_seq" ? candidate.expires.after : null;
   if (!Number.isInteger(after)) return "candidate_expiry_invalid";
   if (ledgerHead - after > maxLag) return "candidate_stale";
+  // A future expiry never becomes stale, and an expiry before the candidate's own
+  // evidence is not an increasing sequence: both would outlive the proof.
+  if (after > ledgerHead) return "candidate_expiry_invalid";
+  const drawnFrom = candidate.evidence?.ledgerSeq;
+  if (Number.isInteger(drawnFrom) && after < drawnFrom) return "candidate_expiry_invalid";
   if (typeof expectedStoreDigest === "string" && expectedStoreDigest !== candidate.evidence.storeDigest) {
     return "candidate_store_mismatch";
+  }
+  if (attempts !== null) {
+    const derived = rederiveSupport(candidate, attempts);
+    if (!derived.ok) return "candidate_support_not_rederivable";
   }
   return null;
 }

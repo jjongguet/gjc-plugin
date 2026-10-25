@@ -66,16 +66,37 @@ test("spending admission fails closed on unknown price, usage or cap", () => {
 test("a trial is invalid without loading, isolation, budget or measured cost evidence", () => {
   const good = {
     loadingReceipt: { sha256: "a".repeat(64) },
+    harness: { sourceDigest: "b".repeat(64), harnessDigest: "c".repeat(64) },
     isolation: { denyProbesPassed: true },
-    oracle: { independent: true },
+    producer: { id: "producer-a" },
+    executor: { id: "executor-a", receiptDigest: "d".repeat(64) },
+    oracle: { independent: true, kind: "artifact-check", verifierId: "verifier-a", evidenceDigest: "e".repeat(64) },
     budget: { admitted: true },
     holdout: { usedEarly: false },
     outcomes: [{ task: "t", passed: true }],
-    cost: { measured: true },
+    denominator: { planned: 1, passed: 1, failed: 0, error: 0, skipped: 0 },
+    cost: { measured: true, usd: 0.01, wallMs: 1200 },
   };
   assert.deepEqual(validateTrialReceipt(good), { valid: true, failures: [] });
   const bad = { ...good, isolation: { denyProbesPassed: false }, cost: { measured: false }, holdout: { usedEarly: true } };
   assert.deepEqual(validateTrialReceipt(bad).failures, ["isolation_not_proven", "holdout_used_early", "cost_not_measured"]);
+
+  // A boolean is not independence evidence, and the identity/measurement pins are required.
+  const bareBoolean = { ...good, oracle: { independent: true } };
+  assert.deepEqual(validateTrialReceipt(bareBoolean).failures, [
+    "oracle_not_independent",
+    "oracle_verifier_missing",
+    "oracle_kind_missing",
+    "oracle_evidence_missing",
+  ]);
+  const selfVerified = { ...good, oracle: { ...good.oracle, verifierId: "producer-a" } };
+  assert.deepEqual(validateTrialReceipt(selfVerified).failures, ["oracle_not_independent"]);
+  const missingPins = { ...good, harness: {}, executor: { id: "executor-a" } };
+  assert.deepEqual(validateTrialReceipt(missingPins).failures, ["missing_source_digest", "missing_harness_digest", "missing_executor_receipt_digest"]);
+  const shortDenominator = { ...good, outcomes: [{ task: "a", passed: true }], denominator: { planned: 2, passed: 1, failed: 0, error: 0, skipped: 0 } };
+  assert.deepEqual(validateTrialReceipt(shortDenominator).failures, ["denominator_mismatch"]);
+  const negativeCost = { ...good, cost: { measured: true, usd: -0.01, wallMs: 1200 } };
+  assert.deepEqual(validateTrialReceipt(negativeCost).failures, ["invalid_cost"]);
 });
 
 test("component wins never rescue a regressing or costlier composite", () => {
