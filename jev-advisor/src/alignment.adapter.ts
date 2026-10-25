@@ -117,7 +117,12 @@ export default function register(api: {
 			const stored = await alignmentAppendEvents(ctx, events, now);
 			// Degraded storage keeps the retry chain in process memory so a repeated
 			// violation still reaches stop_recommended; it never changes the verdict.
-			if (evaluation.block && (!loaded.available || !stored)) alignmentRememberDegradedRetry(evaluation.retryKey, blockRetryCount);
+			if (evaluation.block && (!loaded.available || !stored)) {
+				alignmentRememberDegradedRetry(evaluation.retryKey, blockRetryCount);
+				// The verdict is unchanged, but the reason carries the observable
+				// storage_degraded code so the degradation is not silent.
+				if (blockReason) blockReason = `${blockReason} [storage_degraded]`;
+			}
 		} catch (error) {
 			// hook_error: a thrown handler is fail-open and can never block a tool.
 			// Record the failure class so a silent throw stays auditable.

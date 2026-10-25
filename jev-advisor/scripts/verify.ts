@@ -1453,6 +1453,7 @@ async function runSuite(root: string) {
 			assert.equal(output?.block, true, "the write violation still blocks without a store");
 			assert.ok(String(output.reason).includes("drift_write_vs_readonly"));
 			assert.ok(String(output.reason).includes("entry-de"), "reason carries the 8-char entry id prefix");
+			assert.ok(String(output.reason).includes("[storage_degraded]"), "a degraded store is named in the reason instead of being silent");
 			assert.ok(!String(output.reason).includes("do not modify anything"), "reason carries no raw user text");
 			assert.equal(existsSync(alignmentHome()), false, "the blocked store path holds no journal");
 			assert.equal(statSync(path.join(alignmentRoot, "alignment")).isFile(), true);

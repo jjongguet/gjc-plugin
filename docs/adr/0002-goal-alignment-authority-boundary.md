@@ -182,7 +182,7 @@ here is a measured outcome.
 - The journal is a retained window, not a lifetime audit log. Rotation and the
   seven-day retention mean `reduceJournal` counts describe retained records
   only.
-- Turning the layer off is local and immediate (`JEV_ALIGNMENT_MODE=off`).
+- Turning the layer off is effective from the next host process (`JEV_ALIGNMENT_MODE=off`).
   Uninstalling the plugin removes the surfaces; existing alignment journal
   files remain until an operator removes them.
 
