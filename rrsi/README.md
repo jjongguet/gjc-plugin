@@ -57,15 +57,16 @@ is out of scope and unprovided.
   (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`, spawned by the hook,
   re-running under the same locks) instead of inside the session.
 - **Coverage labels.** The periodic receipt carries `projection`
-  `{records, projected, omitted, ratio, limited}` and `limited_projection`;
-  omitted records are labeled in the periodic receipt, never silently dropped
-  by that path; `import` returns journal coverage as `projection`. The same
-  projection is stored as `lastProjection` for `rrsi status`.
+  `{records, projected, omitted, ratio, limited}`, `limited_projection` and
+  `incomplete_prefix`; omitted records are labeled in the periodic receipt,
+  never silently dropped by that path; `import` returns journal coverage as
+  `projection`. The same projection is stored as `lastProjection` for
+  `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
   `consecutiveFailures`, `lastReceiptId`, `lastProjectionDigest`, `storeWrite`,
-  `derivedChunks` and `intervalMs`. Run receipts live in
+  `derivedChunks`, `incomplete_prefix` and `intervalMs`. Run receipts live in
   `~/.gjc-plugin/rrsi/runs/v1/<receiptId>.json` (schema
   `gjc.rrsi.periodic.run.v1`, ≤ 64 KiB each, ≤ 60 retained, oldest pruned on
   write). Each executed run — including `no_input` and error outcomes —
@@ -117,7 +118,7 @@ same root with the same ownership/mode rules.
 
 | Source | → Store attempt |
 | --- | --- |
-| jev-advisor journal record | branch `objective` = `<operation>:<tier or advice status>`; `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the record carries a decision, else `reject`; `wallMs` = `durationMs`; `provenance` = the journal record id |
+| jev-advisor journal record | advice entries = the record's `taskAdvice[]` batch when it carries entries, else the older single `advice`/`assessment` field; representative entry = the first real decision, else the first entry. Branch `objective` = `<operation>:<tier or advice status>` of that entry; `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the representative entry is a decision, else `reject`; `wallMs` = `durationMs`; `provenance` = the journal record id |
 | `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict; `wallMs` = recorded cost; `guardFailures` = non-passing guard ids; `provenance` = the cycle id |
 
 The plan's journal-projection fields (`source`, `goal`, `features`, `outcome`)
@@ -162,3 +163,79 @@ real journal is unavailable the verifier records the measured count (null/0)
 instead of substituting synthetic data. `.ts`/bun suites are local gates;
 `rrsi/tests/periodic.test.mjs` is the node-native file eligible for
 `verification_run`.
+
+## Quality trial contract (`gjc.quality_trial.v2`)
+
+The journal projection above records that an advice answer was returned, which
+is availability telemetry. Quality evidence is a separate contract:
+`self-improve/lib/quality-trial.mjs` is the single canonical implementation,
+`rrsi/lib/rrsi.ts` imports `projectQualityTrialCohort`, `QUALITY_TRIAL_SCHEMA`
+and `QUALITY_COHORT_SCHEMA` from it and only re-exports them, and
+`scripts/build.mjs` lists that file in `inlineModules` so both generated
+surfaces inline it and stay self-contained. The boundary and its rejected
+alternatives are [ADR 0003](../docs/adr/0003-quality-trial-evidence-boundary.md).
+
+**Trial record.** `gjc.quality_trial.v2` requires `trialId`, `taskId`,
+`taskVersion`, `split` (`training` / `development` / `holdout`), `arm` (`B0` /
+`B1` / `B2`), `repeat`, `goalRevision`, `producer` (id, kind), `executor` (id,
+`receiptId`, `receiptDigest`), `harness` (`sourceDigest`, `harnessDigest`,
+`manifestDigest`, `version`), `oracle` (kind, `verifierId`, `evidenceDigest`,
+`independentFromProducer`), `outcome` (`passed` / `failed`), `denominator`
+(`planned`, `passed`, `failed`, `error`, `skipped`), a measured `cost`
+(`wallMs`, `inputTokens`, `outputTokens`, `usd`, `zeroCostRationale` when all
+four are zero), `createdAt`, `sourceHead` and an `executionKey` that re-derives
+from `(taskId, taskVersion, arm, repeat, harnessDigest, oracle evidenceDigest,
+goalRevision)`. Independence is a relationship: the named verifier must differ
+from both producer and executor and must carry its own evidence digest, so a
+bare `independentFromProducer: true` is never enough.
+
+**Exclusion codes.** Every inspected record lands in exactly one bucket, so
+the funnel is visible as counts:
+
+| Code | Meaning |
+| --- | --- |
+| `legacy_schema` | Not a v2 payload: wrong schema, malformed/missing required field, or an `executionKey` that does not re-derive |
+| `conflicting_duplicate` | Same execution cell as an admitted trial with a different payload |
+| `non_independent_producer` | `producer.id === executor.id` |
+| `non_independent_oracle` | Bare independence flag, unnamed verifier, verifier equal to producer/executor, or missing kind/evidence digest |
+| `unknown_outcome` | Outcome is not `passed` or `failed` |
+| `negative_cost` | Any measured cost component is negative |
+| `missing_cost` | Cost unmeasured, a non-finite component, or an all-zero measurement without `zeroCostRationale` |
+| `denominator_mismatch` | `planned < 1`, `planned !== passed + failed + error + skipped`, or an outcome that disagrees with its counters |
+
+**Counts-only cohort.** `projectQualityCohort(records, { limit })` returns
+`{ schema: "rrsi.quality_cohort.v2", total, admissible[], excluded[{ reason,
+count }], duplicate }`. Admissible rows carry counts, ids and digests only
+(provenance, objective, taskVersion, split, arm, repeat, executionKey,
+decision, wallMs, usd, costMeasured, sourceDigest, harnessDigest) — no rate,
+delta or verdict — and there is no `efficacyClaimsAllowed` field, asserted by
+`tests/quality-cohort.test.ts`. Byte-identical repeats collapse into
+`duplicate` and count once; a genuine re-run is a separate cell only through
+`repeat`. The cohort is a library export exercised by the tests: the `rrsi`
+tool's four actions (`capture`, `import`, `dream`, `status`) do not return it.
+
+**`taskAdvice[]` projection.** One journal record is one attempt. The advice
+entries a record carries are its compact `taskAdvice[]` batch (one entry per
+delegated task) when that batch holds any entry; otherwise the older single
+`advice`/`assessment` object is used, and no entry is invented when neither
+exists. The representative entry is the first real decision, else the first
+entry; the branch objective is `<operation>:<tier|status>` of that entry,
+`decision` is `adopt` only when it is a decision, and the rest count as
+`reject`. `projectJournalRecords` also returns `scanned` (records inspected)
+and `truncated` (a prefix cut).
+
+**`incomplete_prefix` freshness rule.** `truncated: true` means the attempt
+bound was reached while newer records were still unread, so the projection and
+its digest cover only the head of the journal. The periodic run records
+`incomplete_prefix: true` on its receipt, state and `finish` result, does
+**not** renew `lastSuccessAt`, and — when the run is not already a dream
+failure — schedules the next attempt at one backoff step
+(`backoffMs(1, intervalMs)`) instead of the full interval. A prefix projection
+therefore never counts as freshness evidence.
+
+**What this does not prove.** Counts and digests are contract evidence, not
+efficacy evidence: no trial receipts are committed, no comparison has been run,
+and no accuracy, calibration or improvement claim follows from this surface.
+The frozen Harness² pilot in
+[`self-improve/HARNESS2.md`](../self-improve/HARNESS2.md) must run before any
+efficacy claim.

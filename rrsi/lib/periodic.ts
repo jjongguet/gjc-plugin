@@ -356,6 +356,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         lastStatus: null,
         lastReason: null,
         nextRetryAt: null,
+        incomplete_prefix: baseState?.incomplete_prefix ?? false,
         consecutiveFailures: baseState?.consecutiveFailures ?? 0,
         lastReceiptId: baseState?.lastReceiptId ?? null,
 		lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
@@ -385,6 +386,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     }
     const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
     const coverage = projectionCoverage(journal.records, projected.attempts);
+    // A prefix cut means newer records exist beyond the retained bound. The
+    // projection (and its digest) then covers only the head of the journal, so
+    // it must never renew freshness: lastSuccessAt stays at its prior value.
+    const incompletePrefix = projected.truncated === true;
     const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
 
     const loaded = readStore(env);
@@ -443,6 +448,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
+          incomplete_prefix: incompletePrefix,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
           clockSkew,
@@ -464,7 +470,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: "ok" });
         return await finish({ status: "error", mode, reason: "worker_spawn_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
       }
-      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew });
+      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew, incomplete_prefix: incompletePrefix });
       const deferredReceipt = writeReceipt({
         env,
         receipt: {
@@ -488,6 +494,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
+          incomplete_prefix: incompletePrefix,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: null },
           clockSkew,
@@ -495,7 +502,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         },
       });
       if (deferredReceipt.persisted) pruneReceipts({ env });
-      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted });
+      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted, incomplete_prefix: incompletePrefix });
     }
 
     let dream = null;
@@ -542,6 +549,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         attemptsOmitted: coverage.omitted,
         projection: coverage,
         limited_projection: coverage.limited,
+        incomplete_prefix: incompletePrefix,
         limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
         clockSkew,
@@ -552,19 +560,22 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     const stateWrite = writeState({
       lastStatus: dreamFailure ? "error" : status,
       lastReason: dreamFailure,
-      lastSuccessAt: dreamFailure ? (baseState?.lastSuccessAt ?? null) : now,
+      lastSuccessAt: dreamFailure || incompletePrefix ? (baseState?.lastSuccessAt ?? null) : now,
       lastReceiptId: receiptWrite.persisted ? receiptId : null,
 	      lastProjectionDigest: digest,
 	      lastProjection: coverage,
 	      storeWrite: replaced.storeWrite,
 	      derivedChunks: derivedSet.length,
+      incomplete_prefix: incompletePrefix,
 	      nextRetryAt: dreamFailure
         ? new Date(Date.parse(now) + backoffMs(failuresAfter, intervalMs)).toISOString()
-        : new Date(Date.parse(now) + intervalMs).toISOString(),
+        : incompletePrefix
+          ? new Date(Date.parse(now) + backoffMs(1, intervalMs)).toISOString()
+          : new Date(Date.parse(now) + intervalMs).toISOString(),
       consecutiveFailures: failuresAfter,
       clockSkew,
     });
-    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
+    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs, incomplete_prefix: incompletePrefix });
   } catch (error) {
     return await finish({ status: "error", mode, reason: bounded(error && error.message ? error.message : "periodic_failed", 120), receipt: false, journal: false, stateWrite: false });
   }
@@ -608,6 +619,7 @@ export function summarizePeriodicState({ state, env = process.env, now = new Dat
     lastStatus: state?.lastStatus ?? null,
     lastReason: state?.lastReason ?? null,
     nextRetryAt: state?.nextRetryAt ?? null,
+    incomplete_prefix: state?.incomplete_prefix === true,
     storeWrite: state?.storeWrite ?? null,
     lastProjectionDigest: state?.lastProjectionDigest ?? null,
     lastProjection: state?.lastProjection ?? null,

@@ -1,6 +1,7 @@
 // GENERATED FILE — do not edit by hand.
 // Core: lib/rrsi.ts + adapter: src/rrsi.adapter.ts
-// Inlined: shared/lib/results.ts and self-improve/lib/{types,ledger,replay,dream,policy}.mjs
+// Inlined: shared/lib/results.ts, self-improve/lib/{types,ledger,replay,dream,policy}.mjs and
+//          self-improve/lib/quality-trial.mjs (gjc.quality_trial.v2)
 // Rebuild with: bun scripts/build.mjs
 
 import { constants as resultsConstants, promises as resultsFs } from 'node:fs';
@@ -1634,6 +1635,278 @@ export function applyPolicyDeploy({ plan, ledgerPath }) {
   return { artifactPath: plan.artifactPath, currentPath: plan.currentPath, rowSeq: receipt.seq, commitMessage: plan.commitMessage };
 }
 
+// ---- inlined from self-improve/lib/quality-trial.mjs (canonical quality-evidence contract, keyless plain ESM) ----
+/**
+ * Canonical `gjc.quality_trial.v2` validator and counts-only quality cohort.
+ *
+ * A trial receipt is the only admissible evidence for task quality: the
+ * producer writes the arm, the executor runs it, and a verifier independent of
+ * both records the outcome. This module validates that structure and projects a
+ * cohort of counts. It never measures anything, never calls a model and never
+ * grants a boolean "efficacy allowed" permission — callers get the counts and
+ * decide nothing from a single flag.
+ *
+ * Exclusion taxonomy (a record is admitted at most once, else counted):
+ *   legacy_schema             not a well-formed v2 payload (wrong schema,
+ *                             missing/malformed required field, or an
+ *                             executionKey that does not re-derive)
+ *   conflicting_duplicate     same execution cell as an admitted trial with a
+ *                             different payload
+ *   non_independent_producer  producer.id === executor.id
+ *   non_independent_oracle    a bare independence boolean, or a verifier that
+ *                             is the producer or the executor
+ *   unknown_outcome           outcome is not a decidable passed|failed
+ *   negative_cost             any measured cost component is negative
+ *   missing_cost              cost is unmeasured, or an all-zero measurement
+ *                             without a zeroCostRationale
+ *   denominator_mismatch      the declared denominator does not add up or does
+ *                             not agree with the outcome
+ *
+ * Repeats are distinct trials: the identity of one execution is the
+ * executionKey, which includes `repeat`. Identical duplicates are collapsed to
+ * one admitted trial and counted once; same-cell different-payload records are
+ * conflicts, never silent overwrites.
+ */
+
+export const QUALITY_TRIAL_SCHEMA = "gjc.quality_trial.v2";
+export const QUALITY_COHORT_SCHEMA = "rrsi.quality_cohort.v2";
+
+export const QUALITY_SPLITS = Object.freeze(["training", "development", "holdout"]);
+export const QUALITY_ARMS = Object.freeze(["B0", "B1", "B2"]);
+export const QUALITY_OUTCOMES = Object.freeze(["passed", "failed"]);
+
+export const QUALITY_EXCLUSIONS = Object.freeze([
+  "legacy_schema",
+  "conflicting_duplicate",
+  "non_independent_producer",
+  "non_independent_oracle",
+  "unknown_outcome",
+  "negative_cost",
+  "missing_cost",
+  "denominator_mismatch",
+]);
+
+export const QUALITY_LIMITS = Object.freeze({
+  maxTrials: 4000,
+  maxIdChars: 64,
+  maxVersionChars: 32,
+  maxTextChars: 120,
+  maxRationaleChars: 200,
+});
+
+const DIGEST_HEX = /^[a-f0-9]{64}$/;
+const HEAD_HEX = /^[a-f0-9]{7,64}$/;
+
+/** Shared digest shape: the same predicate pins every pin in a trial receipt. */
+export const isDigestHex = (value) => typeof value === "string" && DIGEST_HEX.test(value);
+
+const isPlainRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+const qtText = (value, max = QUALITY_LIMITS.maxIdChars) =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
+const qtDigest = (value) => (isDigestHex(value) ? value : null);
+const qtCount = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+const qtRevision = (value) => (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : qtText(value, QUALITY_LIMITS.maxIdChars));
+
+/** taskVersion accepts `1`, `"1"` or `"v1"`; the key sees one canonical string. */
+const qtVersion = (value) =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? String(value) : qtText(value, QUALITY_LIMITS.maxVersionChars);
+
+/** One execution cell: repeats are distinct trials because `repeat` is in the key. */
+export function executionKeyFor({ taskId, taskVersion, arm, repeat, harnessDigest, oracleDigest, goalRevision }) {
+  return sha256(
+    JSON.stringify({
+      taskId,
+      taskVersion: String(taskVersion),
+      arm,
+      repeat,
+      harnessDigest,
+      oracleDigest,
+      goalRevision: String(goalRevision),
+    }),
+  );
+}
+
+const qtInvalid = (reason, detail = null) => ({ ok: false, reason, detail });
+
+/**
+ * Validate one trial record. Structure first (any malformed field is a
+ * `legacy_schema` payload), then independence, outcome, denominator and cost.
+ */
+export function validateQualityTrial(record) {
+  if (!isPlainRecord(record) || record.schema !== QUALITY_TRIAL_SCHEMA) return qtInvalid("legacy_schema", "schema");
+
+  const trialId = qtText(record.trialId, QUALITY_LIMITS.maxIdChars);
+  const taskId = qtText(record.taskId, QUALITY_LIMITS.maxIdChars);
+  const taskVersion = qtVersion(record.taskVersion);
+  const split = QUALITY_SPLITS.includes(record.split) ? record.split : null;
+  const arm = QUALITY_ARMS.includes(record.arm) ? record.arm : null;
+  const repeat = qtCount(record.repeat);
+  const goalRevision = qtRevision(record.goalRevision);
+  if (!trialId || !taskId || taskVersion === null || !split || !arm || repeat === null || goalRevision === null) {
+    return qtInvalid("legacy_schema", "identity");
+  }
+
+  const producer = record.producer;
+  const executor = record.executor;
+  const harness = record.harness;
+  const oracle = record.oracle;
+  if (!isPlainRecord(producer) || !isPlainRecord(executor) || !isPlainRecord(harness) || !isPlainRecord(oracle)) {
+    return qtInvalid("legacy_schema", "blocks");
+  }
+  const producerId = qtText(producer.id, QUALITY_LIMITS.maxIdChars);
+  const producerKind = qtText(producer.kind, QUALITY_LIMITS.maxTextChars);
+  const executorId = qtText(executor.id, QUALITY_LIMITS.maxIdChars);
+  const receiptId = qtText(executor.receiptId, QUALITY_LIMITS.maxIdChars);
+  const receiptDigest = qtDigest(executor.receiptDigest);
+  if (!producerId || !producerKind || !executorId || !receiptId || !receiptDigest) return qtInvalid("legacy_schema", "producer_executor");
+
+  const sourceDigest = qtDigest(harness.sourceDigest);
+  const harnessDigest = qtDigest(harness.harnessDigest);
+  const manifestDigest = qtDigest(harness.manifestDigest);
+  const harnessVersion = qtText(harness.version, QUALITY_LIMITS.maxVersionChars);
+  if (!sourceDigest || !harnessDigest || !manifestDigest || !harnessVersion) return qtInvalid("legacy_schema", "harness");
+
+  if (typeof oracle.independentFromProducer !== "boolean") return qtInvalid("legacy_schema", "oracle_independence");
+
+  const oracleKind = qtText(oracle.kind, QUALITY_LIMITS.maxTextChars);
+  const verifierId = qtText(oracle.verifierId, QUALITY_LIMITS.maxIdChars);
+  const evidenceDigest = qtDigest(oracle.evidenceDigest);
+  const verifierIndependent = Boolean(verifierId) && verifierId !== producerId && verifierId !== executorId;
+  if (oracle.independentFromProducer !== true || !verifierIndependent || !oracleKind || !evidenceDigest) {
+    return qtInvalid("non_independent_oracle", "oracle");
+  }
+
+  const createdAt = typeof record.createdAt === "string" && Number.isFinite(Date.parse(record.createdAt)) ? record.createdAt : null;
+  const sourceHead = typeof record.sourceHead === "string" && HEAD_HEX.test(record.sourceHead) ? record.sourceHead : null;
+  if (!createdAt || !sourceHead) return qtInvalid("legacy_schema", "provenance");
+
+  const executionKey = qtText(record.executionKey, 64);
+  const derivedKey = executionKeyFor({ taskId, taskVersion, arm, repeat, harnessDigest, oracleDigest: evidenceDigest, goalRevision });
+  if (!executionKey || executionKey !== derivedKey) return qtInvalid("legacy_schema", "execution_key");
+
+  if (producerId === executorId) return qtInvalid("non_independent_producer", "producer_is_executor");
+
+  const outcome = record.outcome;
+  if (!QUALITY_OUTCOMES.includes(outcome)) return qtInvalid("unknown_outcome", "outcome");
+
+  const rawDenominator = record.denominator;
+  if (!isPlainRecord(rawDenominator)) return qtInvalid("legacy_schema", "denominator");
+  const denominator = {
+    planned: qtCount(rawDenominator.planned),
+    passed: qtCount(rawDenominator.passed),
+    failed: qtCount(rawDenominator.failed),
+    error: qtCount(rawDenominator.error),
+    skipped: qtCount(rawDenominator.skipped),
+  };
+  if (Object.values(denominator).some((value) => value === null)) return qtInvalid("legacy_schema", "denominator");
+  const declared = denominator.planned;
+  const accounted = denominator.passed + denominator.failed + denominator.error + denominator.skipped;
+  const outcomeAgrees =
+    outcome === "passed"
+      ? denominator.passed >= 1 && denominator.failed === 0 && denominator.error === 0
+      : denominator.failed >= 1;
+  if (declared < 1 || declared !== accounted || !outcomeAgrees) return qtInvalid("denominator_mismatch", "denominator");
+
+  const rawCost = record.cost;
+  if (!isPlainRecord(rawCost) || rawCost.measured !== true) return qtInvalid("missing_cost", "measured");
+  const cost = {
+    wallMs: rawCost.wallMs,
+    inputTokens: rawCost.inputTokens,
+    outputTokens: rawCost.outputTokens,
+    usd: rawCost.usd,
+  };
+  if (!Object.values(cost).every((value) => typeof value === "number" && Number.isFinite(value))) {
+    return qtInvalid("missing_cost", "unmeasured_component");
+  }
+  if (Object.values(cost).some((value) => value < 0)) return qtInvalid("negative_cost", "negative_component");
+  const zeroCost = cost.wallMs === 0 && cost.inputTokens === 0 && cost.outputTokens === 0 && cost.usd === 0;
+  const zeroCostRationale = qtText(rawCost.zeroCostRationale, QUALITY_LIMITS.maxRationaleChars);
+  if (zeroCost && !zeroCostRationale) return qtInvalid("missing_cost", "zero_without_rationale");
+
+  return {
+    ok: true,
+    trial: {
+      trialId,
+      executionKey,
+      taskId,
+      taskVersion,
+      split,
+      arm,
+      repeat,
+      goalRevision,
+      producer: { id: producerId, kind: producerKind },
+      executor: { id: executorId, receiptId, receiptDigest },
+      harness: { sourceDigest, harnessDigest, manifestDigest, version: harnessVersion },
+      oracle: { kind: oracleKind, verifierId, evidenceDigest },
+      outcome,
+      denominator,
+      cost: { ...cost, measured: true, zeroCostRationale },
+      createdAt,
+      sourceHead,
+    },
+  };
+}
+
+/** Admissible trial -> bounded attempt-shaped row (no boolean permission field). */
+function qtAttemptFor(trial) {
+  return {
+    provenance: trial.trialId,
+    objective: trial.taskId,
+    taskVersion: trial.taskVersion,
+    split: trial.split,
+    arm: trial.arm,
+    repeat: trial.repeat,
+    executionKey: trial.executionKey,
+    decision: trial.outcome === "passed" ? "adopt" : "reject",
+    wallMs: trial.cost.wallMs,
+    usd: trial.cost.usd,
+    costMeasured: true,
+    sourceDigest: trial.harness.sourceDigest,
+    harnessDigest: trial.harness.harnessDigest,
+  };
+}
+
+/**
+ * Counts-only cohort over trial records. Every inspected record lands in
+ * exactly one bucket: admissible, one exclusion reason, or `duplicate`.
+ */
+export function projectQualityTrialCohort(records, { limit = QUALITY_LIMITS.maxTrials } = {}) {
+  const admissible = [];
+  const counts = new Map();
+  const exclude = (reason) => counts.set(reason, (counts.get(reason) ?? 0) + 1);
+  const admitted = new Map();
+  let total = 0;
+  let duplicate = 0;
+  for (const record of Array.isArray(records) ? records : []) {
+    if (total >= limit) break;
+    total += 1;
+    const checked = validateQualityTrial(record);
+    if (!checked.ok) {
+      exclude(checked.reason);
+      continue;
+    }
+    const { trial } = checked;
+    const canonical = JSON.stringify(trial);
+    const prior = admitted.get(trial.executionKey);
+    if (prior === undefined) {
+      admitted.set(trial.executionKey, canonical);
+      admissible.push(qtAttemptFor(trial));
+      continue;
+    }
+    if (prior === canonical) duplicate += 1;
+    else exclude("conflicting_duplicate");
+  }
+  return {
+    schema: QUALITY_COHORT_SCHEMA,
+    total,
+    admissible,
+    excluded: [...counts].map(([reason, tally]) => ({ reason, count: tally })),
+    duplicate,
+  };
+}
+
 /**
  * rrsi plugin core: a bounded, private exploration-episode store, read-only
  * projections of the jev-advisor journal and this repository's self-improve
@@ -1887,22 +2160,55 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
 }
 
 /**
+ * The advice entries a journal record actually carries. The jev-advisor
+ * producer writes a compact `taskAdvice[]` batch (one entry per delegated
+ * task); `advice` is the older single-answer field and is read only when the
+ * batch field is absent. No entry is invented when neither exists.
+ */
+function journalAdviceEntries(record) {
+  const batch = record?.taskAdvice;
+  if (Array.isArray(batch)) {
+    const entries = batch.filter((entry) => entry && typeof entry === "object");
+    if (entries.length > 0) return entries;
+  }
+  if (record?.advice && typeof record.advice === "object") return [record.advice];
+  if (record?.assessment && typeof record.assessment === "object") return [record.assessment];
+  return [];
+}
+
+/**
  * Journal record -> attempt projection (bounded, flattened for the replay core):
- *   branch objective = "<operation>:<tier|advice-status>"
+ *   advice entries = taskAdvice[] when present, else advice/assessment
+ *   branch objective = "<operation>:<tier|status>" of the representative entry
+ *     (the first real decision, else the first entry)
  *   hypothesisNovelty = first record of that branch in the read order
  *   priorFailures = count of earlier records of that branch whose advice was not a decision
- *   decision = "adopt" when the record carries a decision else "reject"
+ *   decision = "adopt" when the representative entry is a decision else "reject"
  *   wallMs = durationMs; provenance = the journal record id
+ *
+ * One record is one attempt. `scanned` counts inspected records and `truncated`
+ * reports a prefix cut: the retained bound was reached while newer records were
+ * still unread, so this projection is an incomplete prefix of the journal.
  */
 export function projectJournalRecords(records, { limit = 4000 } = {}) {
+  const input = Array.isArray(records) ? records : [];
   const seen = new Map();
   const attempts = [];
-  for (const record of records) {
-    if (attempts.length >= limit) break;
+  let scanned = 0;
+  let truncated = false;
+  for (const record of input) {
+    if (attempts.length >= limit) {
+      truncated = true;
+      break;
+    }
+    scanned += 1;
     if (!record || typeof record !== "object") continue;
+    const entries = journalAdviceEntries(record);
+    const entry = entries.find((candidate) => candidate.status === "decision") ?? entries[0] ?? {};
+    const decision = entry.status === "decision";
     const operation = boundedText(record.operation, 40) || "unknown";
-    const status = boundedText(record.advice?.status ?? record.assessment?.status ?? "unknown", 40) || "unknown";
-    const tier = boundedText(record.advice?.tier, 16) || status;
+    const status = boundedText(entry.status, 40) || "unknown";
+    const tier = boundedText(entry.tier, 16) || status;
     const objective = `${operation}:${tier}`;
     const branch = seen.get(objective) ?? { records: 0, failures: 0 };
     attempts.push(
@@ -1910,7 +2216,7 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
         {
           objective,
           hypothesisNovelty: branch.records === 0,
-          decision: record.advice?.status === "decision" ? "adopt" : "reject",
+          decision: decision ? "adopt" : "reject",
           wallMs: boundedInteger(record.durationMs, 86_400_000),
           guardFailures: [],
           budgetRung: 0,
@@ -1921,9 +2227,9 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
         attempts.length,
       ),
     );
-    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (record.advice?.status === "decision" ? 0 : 1) });
+    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
   }
-  return { attempts, branches: seen.size };
+  return { attempts, branches: seen.size, scanned, truncated };
 }
 
 /** Ledger cycle rows -> attempts (read-only summary of the repo search history). */
@@ -2178,77 +2484,55 @@ export function summarizeReceipt(receipt) {
 
 // --- Quality cohort ---------------------------------------------------------
 // The operational journal projection above records that an advice answer was
-// returned. That is availability telemetry, not task quality. Efficacy ranking
-// may only use this separate, versioned cohort: immutable trial receipts with
-// an independent outcome, a complete resource measurement and pinned source and
-// harness digests. Unknown outcomes and unmeasured costs stay out and are
-// counted as exclusions.
+// returned. That is availability telemetry, not task quality. Quality evidence
+// may only come from the separate, versioned trial cohort validated by the
+// canonical `gjc.quality_trial.v2` contract (self-improve/lib/quality-trial.mjs,
+// inlined at build time): an independent producer/executor/verifier split, a
+// complete denominator, a measured non-negative cost and pinned source and
+// harness digests. This projection exposes counts only — there is no
+// "efficacy claims allowed" boolean, and admissibility is never inferred from
+// row counts; a consumer that wants a claim has to read the cohort it has.
 
-export const RRSI_QUALITY_SCHEMA = "rrsi.quality_trial.v1";
+export const RRSI_QUALITY_SCHEMA = QUALITY_TRIAL_SCHEMA;
+export const RRSI_QUALITY_COHORT_SCHEMA = QUALITY_COHORT_SCHEMA;
 
 export type QualityExclusion =
-  | "unknown_outcome"
-  | "missing_cost"
+  | "legacy_schema"
+  | "conflicting_duplicate"
+  | "non_independent_producer"
   | "non_independent_oracle"
-  | "missing_identity"
-  | "invalid";
+  | "unknown_outcome"
+  | "negative_cost"
+  | "missing_cost"
+  | "denominator_mismatch";
 
 export type QualityAttempt = {
   provenance: string;
   objective: string;
+  taskVersion: string;
+  split: "training" | "development" | "holdout";
+  arm: "B0" | "B1" | "B2";
+  repeat: number;
+  executionKey: string;
   decision: "adopt" | "reject";
   wallMs: number;
+  usd: number;
   costMeasured: true;
   sourceDigest: string;
   harnessDigest: string;
 };
 
 export type QualityCohort = {
-  schema: typeof RRSI_QUALITY_SCHEMA;
+  schema: string;
+  total: number;
   admissible: QualityAttempt[];
   excluded: { reason: QualityExclusion; count: number }[];
-  total: number;
-  efficacyClaimsAllowed: boolean;
+  duplicate: number;
 };
 
-const QUALITY_DIGEST = /^[a-f0-9]{64}$/;
-const qualityText = (value: unknown, max: number): string | null =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= max ? value.trim() : null;
-
+/** Counts-only cohort over `gjc.quality_trial.v2` records (delegates to the canonical validator). */
 export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
-  const admissible: QualityAttempt[] = [];
-  const counts = new Map<QualityExclusion, number>();
-  const exclude = (reason: QualityExclusion) => counts.set(reason, (counts.get(reason) ?? 0) + 1);
-  let total = 0;
-  for (const record of records) {
-    if (total >= limit) break;
-    total += 1;
-    if (record === null || typeof record !== "object" || Array.isArray(record)) { exclude("invalid"); continue; }
-    const row = record as Record<string, unknown>;
-    if (row.schema !== RRSI_QUALITY_SCHEMA) { exclude("invalid"); continue; }
-    const trialId = qualityText(row.trialId, RRSI_LIMITS.maxIdChars);
-    const objective = qualityText(row.objective, RRSI_LIMITS.maxTextChars);
-    const sourceDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.sourceDigest, 64);
-    const harnessDigest = qualityText((row.harness as Record<string, unknown> | undefined)?.harnessDigest, 64);
-    if (!trialId || !objective || !sourceDigest || !harnessDigest || !QUALITY_DIGEST.test(sourceDigest) || !QUALITY_DIGEST.test(harnessDigest)) { exclude("missing_identity"); continue; }
-    const oracle = row.oracle as Record<string, unknown> | undefined;
-    if (oracle?.independent !== true) { exclude("non_independent_oracle"); continue; }
-    const outcome = oracle?.status;
-    if (outcome !== "passed" && outcome !== "failed") { exclude("unknown_outcome"); continue; }
-    const cost = row.cost as Record<string, unknown> | undefined;
-    const wallMs = typeof cost?.wallMs === "number" ? cost.wallMs : Number.NaN;
-    const measured = cost?.measured === true && Number.isFinite(wallMs) && wallMs >= 0;
-    const zeroNeedsReason = measured && wallMs === 0 && qualityText(cost?.zeroCostRationale, 200) === null;
-    if (!measured || zeroNeedsReason) { exclude("missing_cost"); continue; }
-    admissible.push({ provenance: trialId, objective, decision: outcome === "passed" ? "adopt" : "reject", wallMs, costMeasured: true, sourceDigest, harnessDigest });
-  }
-  return {
-    schema: RRSI_QUALITY_SCHEMA,
-    admissible,
-    excluded: [...counts].map(([reason, count]) => ({ reason, count })),
-    total,
-    efficacyClaimsAllowed: admissible.length >= 2,
-  };
+  return projectTrialCohort(records, { limit }) as QualityCohort;
 }
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);
@@ -2590,6 +2874,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         lastStatus: null,
         lastReason: null,
         nextRetryAt: null,
+        incomplete_prefix: baseState?.incomplete_prefix ?? false,
         consecutiveFailures: baseState?.consecutiveFailures ?? 0,
         lastReceiptId: baseState?.lastReceiptId ?? null,
 		lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
@@ -2619,6 +2904,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     }
     const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
     const coverage = projectionCoverage(journal.records, projected.attempts);
+    // A prefix cut means newer records exist beyond the retained bound. The
+    // projection (and its digest) then covers only the head of the journal, so
+    // it must never renew freshness: lastSuccessAt stays at its prior value.
+    const incompletePrefix = projected.truncated === true;
     const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
 
     const loaded = readStore(env);
@@ -2677,6 +2966,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
+          incomplete_prefix: incompletePrefix,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
           clockSkew,
@@ -2698,7 +2988,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: "ok" });
         return await finish({ status: "error", mode, reason: "worker_spawn_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
       }
-      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew });
+      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew, incomplete_prefix: incompletePrefix });
       const deferredReceipt = writeReceipt({
         env,
         receipt: {
@@ -2722,6 +3012,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
+          incomplete_prefix: incompletePrefix,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: null },
           clockSkew,
@@ -2729,7 +3020,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         },
       });
       if (deferredReceipt.persisted) pruneReceipts({ env });
-      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted });
+      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted, incomplete_prefix: incompletePrefix });
     }
 
     let dream = null;
@@ -2776,6 +3067,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         attemptsOmitted: coverage.omitted,
         projection: coverage,
         limited_projection: coverage.limited,
+        incomplete_prefix: incompletePrefix,
         limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
         clockSkew,
@@ -2786,19 +3078,22 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     const stateWrite = writeState({
       lastStatus: dreamFailure ? "error" : status,
       lastReason: dreamFailure,
-      lastSuccessAt: dreamFailure ? (baseState?.lastSuccessAt ?? null) : now,
+      lastSuccessAt: dreamFailure || incompletePrefix ? (baseState?.lastSuccessAt ?? null) : now,
       lastReceiptId: receiptWrite.persisted ? receiptId : null,
 	      lastProjectionDigest: digest,
 	      lastProjection: coverage,
 	      storeWrite: replaced.storeWrite,
 	      derivedChunks: derivedSet.length,
+      incomplete_prefix: incompletePrefix,
 	      nextRetryAt: dreamFailure
         ? new Date(Date.parse(now) + backoffMs(failuresAfter, intervalMs)).toISOString()
-        : new Date(Date.parse(now) + intervalMs).toISOString(),
+        : incompletePrefix
+          ? new Date(Date.parse(now) + backoffMs(1, intervalMs)).toISOString()
+          : new Date(Date.parse(now) + intervalMs).toISOString(),
       consecutiveFailures: failuresAfter,
       clockSkew,
     });
-    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs });
+    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs, incomplete_prefix: incompletePrefix });
   } catch (error) {
     return await finish({ status: "error", mode, reason: bounded(error && error.message ? error.message : "periodic_failed", 120), receipt: false, journal: false, stateWrite: false });
   }
@@ -2842,6 +3137,7 @@ export function summarizePeriodicState({ state, env = process.env, now = new Dat
     lastStatus: state?.lastStatus ?? null,
     lastReason: state?.lastReason ?? null,
     nextRetryAt: state?.nextRetryAt ?? null,
+    incomplete_prefix: state?.incomplete_prefix === true,
     storeWrite: state?.storeWrite ?? null,
     lastProjectionDigest: state?.lastProjectionDigest ?? null,
     lastProjection: state?.lastProjection ?? null,

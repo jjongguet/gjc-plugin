@@ -13,6 +13,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpath
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { projectJournalRecords } from "../lib/rrsi";
 
 const plugin = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const realJournalDir = path.join(os.homedir(), ".gjc-plugin", "jev-advisor", "journal", "v1");
@@ -122,6 +123,130 @@ test("periodic refresh over the real-journal slice: one derived set per source, 
 		expect(receiptB.projectionDigest).toBe(receiptA.projectionDigest);
 		expect(receiptB.receiptHash).toBe(receiptA.receiptHash);
 		console.log(`periodic real-journal slice: records=${slice.length} storeWrite=${first.storeWrite} rerun=${second.status} digest=${receiptA.projectionDigest.slice(0, 12)}`);
+	} finally {
+		process.env.HOME = previous;
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("the producer's taskAdvice[] batch projects a real label, not unknown/reject", () => {
+	const records = [
+		// Real jev-advisor producer shape: a compact batch with full-precision entries.
+		{ schemaVersion: 1, plugin: "jev-advisor", id: "rec-batch", observedAt: "2026-10-24T00:00:00.000Z", operation: "task_advice", durationMs: 700, taskAdvice: [{ index: 0, status: "decision", tier: "strong", confidence: 0.95, basis: "provider_choice" }] },
+		// Older single-answer field: read only because taskAdvice is absent.
+		{ schemaVersion: 1, plugin: "jev-advisor", id: "rec-advice", observedAt: "2026-10-24T00:00:01.000Z", operation: "advise", durationMs: 900, advice: { status: "decision", tier: "balanced" } },
+		// A batch with no decision: a real (negative) label, not "unknown".
+		{ schemaVersion: 1, plugin: "jev-advisor", id: "rec-none", observedAt: "2026-10-24T00:00:02.000Z", operation: "task_advice", durationMs: 12, taskAdvice: [{ index: 0, status: "no_decision", tier: "fast", reason: "disabled" }] },
+	];
+	const projected = projectJournalRecords(records);
+	expect(projected.truncated).toBe(false);
+	expect(projected.scanned).toBe(3);
+	expect(projected.attempts.map((attempt) => attempt.objective)).toEqual(["task_advice:strong", "advise:balanced", "task_advice:fast"]);
+	expect(projected.attempts.map((attempt) => attempt.decision)).toEqual(["adopt", "adopt", "reject"]);
+	expect(projected.attempts[0].provenance).toBe("rec-batch");
+	// One record is one attempt: multi-entry batches do not inflate the corpus.
+	expect(projected.attempts).toHaveLength(records.length);
+});
+
+test("a bounded projection reports a prefix cut instead of claiming the frame is complete", () => {
+	const records = [
+		{ id: "rec-1", operation: "task_advice", taskAdvice: [{ index: 0, status: "decision", tier: "strong" }] },
+		{ id: "rec-2", operation: "task_advice", taskAdvice: [{ index: 0, status: "decision", tier: "strong" }] },
+	];
+	const projected = projectJournalRecords(records, { limit: 1 });
+	expect(projected.attempts).toHaveLength(1);
+	expect(projected.scanned).toBe(1);
+	expect(projected.truncated).toBe(true);
+	expect(projectJournalRecords(records, { limit: 2 }).truncated).toBe(false);
+});
+
+const seedStamp = "2026-01-01T00:00:00.000Z";
+
+function seedPeriodicState(home) {
+	const root = path.join(home, ".gjc-plugin", "rrsi");
+	mkdirSync(root, { recursive: true, mode: 0o700 });
+	const state = {
+		schema: "gjc.rrsi.periodic.v1",
+		intervalMs: 24 * 60 * 60 * 1000,
+		lastAttemptAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+		lastSuccessAt: seedStamp,
+		lastStatus: "ran",
+		lastReason: null,
+		nextRetryAt: null,
+		consecutiveFailures: 0,
+		lastReceiptId: null,
+		lastProjectionDigest: null,
+		lastProjection: null,
+		storeWrite: null,
+		derivedChunks: null,
+		clockSkew: false,
+		updatedAt: seedStamp,
+	};
+	writeFileSync(path.join(root, "periodic.json"), `${JSON.stringify(state, null, 2)}\n`);
+	return path.join(root, "periodic.json");
+}
+
+function seedTaskAdviceJournal(home, count) {
+	const journalDir = path.join(home, ".gjc-plugin", "jev-advisor", "journal", "v1");
+	mkdirSync(journalDir, { recursive: true, mode: 0o700 });
+	const lines = Array.from({ length: count }, (_, index) =>
+		JSON.stringify({
+			schemaVersion: 1,
+			plugin: "jev-advisor",
+			id: `rec-${String(index).padStart(4, "0")}`,
+			observedAt: new Date(Date.UTC(2026, 9, 24, 0, 0, index)).toISOString(),
+			operation: "task_advice",
+			durationMs: 10 + index,
+			taskAdvice: [{ index: 0, status: index % 2 === 0 ? "decision" : "no_decision", tier: "strong", confidence: 0.95 }],
+		}),
+	);
+	writeFileSync(path.join(journalDir, "seg-synthetic.jsonl"), `${lines.join("\n")}\n`);
+}
+
+test("prefix truncation marks incomplete_prefix and never renews freshness", async () => {
+	const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rrsi-incomplete-prefix-")));
+	const previous = process.env.HOME;
+	process.env.HOME = home;
+	try {
+		expect(existsSync(path.join(home, ".gjc-plugin"))).toBe(false);
+		seedTaskAdviceJournal(home, 200);
+		const statePath = seedPeriodicState(home);
+		const hook = await import(pathToFileURL(path.join(plugin, "hooks/rrsi-periodic.ts")).href);
+		const run = await hook.runPeriodic({ env: process.env, mode: "inline" });
+		expect(run.status).toBe("ran");
+		expect(run.incomplete_prefix).toBe(true);
+		const receipts = readdirSync(path.join(home, ".gjc-plugin", "rrsi", "runs", "v1"));
+		expect(receipts.length).toBe(1);
+		const receipt = JSON.parse(readFileSync(path.join(home, ".gjc-plugin", "rrsi", "runs", "v1", receipts[0]), "utf8"));
+		expect(receipt.incomplete_prefix).toBe(true);
+		expect(receipt.projection).toMatchObject({ records: 200, projected: 160, omitted: 40, limited: true });
+		const state = JSON.parse(readFileSync(statePath, "utf8"));
+		expect(state.incomplete_prefix).toBe(true);
+		expect(state.lastSuccessAt).toBe(seedStamp);
+		expect(Date.parse(state.nextRetryAt)).toBeGreaterThan(Date.now());
+		const status = await hook.summarizePeriodicState({ state, env: process.env });
+		expect(status.incomplete_prefix).toBe(true);
+	} finally {
+		process.env.HOME = previous;
+		rmSync(home, { recursive: true, force: true });
+	}
+});
+
+test("a complete projection still advances lastSuccessAt", async () => {
+	const home = realpathSync(mkdtempSync(path.join(os.tmpdir(), "rrsi-complete-prefix-")));
+	const previous = process.env.HOME;
+	process.env.HOME = home;
+	try {
+		seedTaskAdviceJournal(home, 12);
+		const statePath = seedPeriodicState(home);
+		const hook = await import(pathToFileURL(path.join(plugin, "hooks/rrsi-periodic.ts")).href);
+		const run = await hook.runPeriodic({ env: process.env, mode: "inline" });
+		expect(run.status).toBe("ran");
+		expect(run.incomplete_prefix).toBe(false);
+		const state = JSON.parse(readFileSync(statePath, "utf8"));
+		expect(state.incomplete_prefix).toBe(false);
+		expect(state.lastSuccessAt).not.toBe(seedStamp);
+		expect(Number.isFinite(Date.parse(state.lastSuccessAt))).toBe(true);
 	} finally {
 		process.env.HOME = previous;
 		rmSync(home, { recursive: true, force: true });

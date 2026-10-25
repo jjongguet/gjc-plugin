@@ -23,6 +23,25 @@
       "target": "subagent",
       "phase": "after",
       "path": "hooks/jev-advisor-result.ts"
+    },
+    {
+      "name": "jev-goal-alignment",
+      "event": "tool_call",
+      "target": "*",
+      "phase": "before",
+      "path": "hooks/jev-advisor-alignment.ts"
+    },
+    {
+      "name": "jev-goal-alignment-observe",
+      "event": "tool_result",
+      "target": "*",
+      "phase": "after",
+      "path": "hooks/jev-advisor-alignment-observe.ts"
+    },
+    {
+      "name": "jev-goal-alignment-shutdown",
+      "event": "session_shutdown",
+      "path": "hooks/jev-advisor-alignment-shutdown.ts"
     }
   ],
   "tools": [

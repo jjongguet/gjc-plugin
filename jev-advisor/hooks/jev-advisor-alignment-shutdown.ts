@@ -1,0 +1,929 @@
+// GENERATED FILE — do not edit by hand.
+// Core: lib/alignment.ts + adapter: src/alignment-shutdown.adapter.ts
+// Rebuild with: bun scripts/build.mjs
+
+/**
+ * Goal alignment core: deterministic authority collection, ordered action
+ * rules, and the correction → admission → observation → completion chain.
+ *
+ * Pure by construction. This module reads no filesystem, network, environment
+ * or process state: the caller supplies the branch entries, the baseline
+ * observation and the journal load/save adapter. Records carry digests, ids and
+ * typed statuses only — never raw user text.
+ *
+ * Authority comes exclusively from host session *user* entries. Agent prose,
+ * todo lists and subagent output are data, never authority.
+ */
+import { createHash } from "node:crypto";
+
+export type ChangeSemantics = "supersede" | "cancel" | "narrow" | "add" | "unknown";
+export type ConstraintKind = "read_only" | "stop" | "forbidden_target";
+export type ActionClass = "read" | "bash" | "write";
+export type Coverage = "evaluated" | "coverage_gap";
+export type Verdict = "aligned" | "drift" | "uncertain" | "allow";
+export type Observation = "true" | "false" | "unknown";
+export type CriterionKind = "exit_zero" | "artifact_exists" | "criterion_file";
+export type ReleaseMode = "none" | "explicit" | "release_ambiguous";
+
+/** Ordered rule ids. `evaluateAction` returns exactly one of these. */
+export type RuleId =
+	| "drift_write_vs_readonly"
+	| "drift_write_forbidden_target"
+	| "drift_write_after_stop"
+	| "aligned_write_within_requested_scope"
+	| "uncertain_authority_ambiguous"
+	| "read_allow"
+	| "bash_observe"
+	| "unknown_authority";
+
+/** Default bounded scan: the last 12 user entries of the session branch. */
+export const WINDOW_SIZE = 12;
+const MAX_SCAN_ENTRIES = 200;
+const MAX_ENTRY_TEXT = 8192;
+const MAX_TARGETS = 16;
+const MAX_TARGET_LENGTH = 200;
+const MAX_ID_LENGTH = 512;
+const FUTURE_SKEW_MS = 60_000;
+
+/* ------------------------------------------------------------------------- */
+/* Digests and targets                                                        */
+/* ------------------------------------------------------------------------- */
+
+/** Stable 32-hex identity for any value this core retains in a record. */
+export function digestText(value: string): string {
+	return createHash("sha256").update(String(value), "utf8").digest("hex").slice(0, 32);
+}
+
+/**
+ * Normalise one path-like target. Quoted or backticked spans, `./` prefixes,
+ * doubled separators and trailing punctuation are removed; URLs, whitespace and
+ * over-long values are rejected instead of guessed at.
+ */
+export function normalizeTarget(value: string): string {
+	let token = String(value ?? "").trim();
+	token = token.replace(/^[`'"(<[]+/, "").replace(/[`'")>\],.:;!?]+$/, "");
+	token = token.replace(/\\/g, "/").replace(/\/{2,}/g, "/");
+	while (token.startsWith("./")) token = token.slice(2);
+	if (!token || token.length > MAX_TARGET_LENGTH) return "";
+	if (token.includes("://") || /\s/.test(token)) return "";
+	return token;
+}
+
+/** Digest of a normalised target; the empty target is never a valid digest. */
+export function digestTarget(value: string): string {
+	const token = normalizeTarget(value);
+	return token ? digestText(token) : "";
+}
+
+export type AuthorityTarget = { path: string; digest: string };
+
+const FILE_EXTENSION = /\.(?:[cm]?[jt]sx?|json|jsonc|md|mdx|txt|py|rs|go|rb|java|kt|swift|css|scss|html|yml|yaml|toml|ini|sh|bash|zsh|sql|db|sqlite|lock|env|cfg|conf)$/i;
+const CRITERION_MARKER = /\bcriterion=(exit_zero|artifact_exists|criterion_file)(?::([^\s`'"]{1,200}))?/i;
+
+/**
+ * Extract normalised path-like targets from one user entry. Only explicit,
+ * machine-shaped tokens qualify (backticked spans, slash paths, filenames with
+ * an extension); free prose never becomes a target.
+ */
+export function targetsInText(text: string): string[] {
+	const found = new Set<string>();
+	let source: string;
+	try { source = String(text ?? ""); } catch { return []; }
+	const add = (raw: string) => {
+		const token = normalizeTarget(raw);
+		if (!token) return;
+		if (!token.includes("/") && !FILE_EXTENSION.test(token)) return;
+		found.add(token);
+	};
+	for (const match of source.matchAll(/`([^`\n]{1,200})`/g)) add(match[1]);
+	for (const match of source.matchAll(/(?:^|[\s("'[=])((?:\.{1,2}\/)?[\w@.+-]+(?:\/[\w@.+-]+)+(?:\.[\w-]+)?)/g)) add(match[1]);
+	for (const match of source.matchAll(/(?:^|[\s("'[=])([\w@.+-]+\.[A-Za-z]{1,8})(?=$|[\s`'"),.;:!?])/g)) add(match[1]);
+	for (const match of source.matchAll(new RegExp(CRITERION_MARKER.source, "gi"))) add(match[2] ?? "");
+	return [...found].slice(0, MAX_TARGETS);
+}
+
+/* ------------------------------------------------------------------------- */
+/* Lexicon (deterministic, documented, never a model call)                    */
+/* ------------------------------------------------------------------------- */
+
+const READ_ONLY = /\bread[- ]?only\b|\breadonly\b|읽기\s*전용|수정\s*하지\s*마|변경\s*하지\s*마|작성\s*하지\s*마|쓰기\s*금지|코드\s*수정\s*금지/i;
+const STOP = /\bstop\b|\bhalt\b|\bpause\b|\bdo\s+not\s+continue\b|\bcancel\s+the\s+(?:work|task|request)\b|중지|멈춰|그만해|작업\s*취소/i;
+const SUPERSEDE = /\binstead\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|대신|새\s*목표|목표\s*변경|다른\s*작업/i;
+const NARROW = /\bnarrow\b|\bonly\b|\bjust\b|\bscope\s*down\b|오직|범위\s*축소/i;
+const ADD = /\balso\b|\badditionally\b|\bplus\b|추가로|그리고\s*또/i;
+const FORBIDDEN = /\bdo\s+not\s+(?:touch|modify|edit|change|write)\b|\bdon'?t\s+(?:touch|modify|edit|change|write)\b|\bnever\s+(?:touch|modify|edit|change)\b|\bforbidden\b|건드리지\s*마|수정\s*금지|변경\s*금지|작성\s*금지/i;
+const RELEASE = /\brelease(?:d|s)?\s+(?:the\s+)?(?:read[- ]?only|restriction|lock|constraint)\b|\bread[- ]?only\s+(?:is\s+)?(?:released|lifted|off)\b|\b(?:writes?|edits?)\s+(?:are|is)\s+(?:now\s+)?(?:allowed|permitted|enabled)\b|\byou\s+may\s+(?:now\s+)?(?:write|edit|modify|change)\b|\bfeel\s+free\s+to\s+(?:write|edit|modify|change)\b|\bcan\s+(?:now\s+)?(?:write|edit|modify|change)\b|읽기\s*전용\s*(?:해제|풀|끝)|(?:수정|쓰기|편집)\s*(?:해도|가능|허용)|이제\s*(?:수정|작성|편집)/i;
+const RELEASE_HEDGE = /\bif\b|\bmaybe\b|\bperhaps\b|\bunless\b|\bnot\s+sure\b|\?|혹시|가능하면|아마|조건/i;
+
+/** Change semantics of one entry; first match wins. */
+export function classifyChange(text: string): ChangeSemantics {
+	let source: string;
+	try { source = String(text ?? ""); } catch { return "unknown"; }
+	if (STOP.test(source)) return "cancel";
+	if (SUPERSEDE.test(source)) return "supersede";
+	if (NARROW.test(source)) return "narrow";
+	if (ADD.test(source)) return "add";
+	return "unknown";
+}
+
+/** `continue` is not a release; hedged release wording is explicitly ambiguous. */
+export function classifyRelease(text: string): ReleaseMode {
+	let source: string;
+	try { source = String(text ?? ""); } catch { return "none"; }
+	if (!RELEASE.test(source)) return "none";
+	return RELEASE_HEDGE.test(source) ? "release_ambiguous" : "explicit";
+}
+
+/* ------------------------------------------------------------------------- */
+/* Authority                                                                  */
+/* ------------------------------------------------------------------------- */
+
+export type AuthorityConstraint =
+	| { kind: "read_only"; sinceEntryId: string }
+	| { kind: "stop"; sinceEntryId: string }
+	| { kind: "forbidden_target"; sinceEntryId: string; targetDigest: string };
+
+/** Journalable criterion: kind plus target digest only. */
+export type CriterionState = { kind: CriterionKind; targetDigest: string };
+
+export type Authority = {
+	/** Number of user entries scanned (bounded by the window). */
+	userEntries: number;
+	windowSize: number;
+	/** Latest host user entry id; the retry identity, never the branch head. */
+	latestUserEntryId: string;
+	changeSemantics: ChangeSemantics;
+	constraints: readonly AuthorityConstraint[];
+	/** Normalised request targets (paths are adapter-local, digests are recorded). */
+	targets: readonly AuthorityTarget[];
+	scopeDigests: readonly string[];
+	release: ReleaseMode;
+	criterion: CriterionState | null;
+};
+
+function asRecord(value: unknown): Record<string, any> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, any>) : null;
+}
+
+function boundedId(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed && trimmed.length <= MAX_ID_LENGTH && !/[\u0000-\u001f\u007f]/.test(trimmed) ? trimmed : null;
+}
+
+function isUserEntry(entry: Record<string, any>): boolean {
+	if (entry.type === "assistant" || entry.role === "assistant") return false;
+	if (entry.type === "user" || entry.role === "user") return true;
+	const info = asRecord(entry.info);
+	return info?.role === "user";
+}
+
+/** Bounded text of one host user entry, or null when it carries no authority. */
+function entryText(entry: Record<string, any>): string | null {
+	if (!isUserEntry(entry)) return null;
+	const chunks: string[] = [];
+	const push = (value: unknown) => {
+		if (typeof value === "string" && value.trim()) chunks.push(value);
+	};
+	push(entry.text);
+	if (Array.isArray(entry.parts)) {
+		for (const part of entry.parts) {
+			const record = asRecord(part);
+			if (!record) continue;
+			if (record.type === "text" || record.type === "input_text" || record.type === undefined) push(record.text);
+		}
+	}
+	if (typeof entry.content === "string") push(entry.content);
+	else if (Array.isArray(entry.content)) {
+		for (const part of entry.content) {
+			const record = asRecord(part);
+			if (record && (record.type === "text" || record.type === "input_text")) push(record.text);
+		}
+	}
+	const joined = chunks.join("\n").trim();
+	return joined ? joined.slice(0, MAX_ENTRY_TEXT) : null;
+}
+
+function entryIdentity(entry: Record<string, any>, text: string, ordinal: number): string {
+	return boundedId(entry.id) ?? `anon-${ordinal}-${digestText(text).slice(0, 12)}`;
+}
+
+/**
+ * Collect the current authority from host branch entries.
+ *
+ * Returns null when the branch holds no user entry: missing authority is never
+ * a block and never an invented request. Only the newest `windowSize` user
+ * entries are scanned; assistant/tool entries are ignored entirely.
+ *
+ * Constraints are sticky in a deliberate, documented way:
+ *  - `read_only` clears only on an explicit release (a later "continue" never
+ *    clears it, and hedged release wording stays active as release_ambiguous);
+ *  - `stop` clears on an explicit release or on a later add/narrow/supersede
+ *    request (a new request re-opens work, a bare "continue" does not);
+ *  - a forbidden target clears only on an explicit release.
+ */
+export function collectAuthority(branchEntries: unknown, options: { windowSize?: number } = {}): Authority | null {
+	const list = Array.isArray(branchEntries) ? branchEntries : [];
+	const windowSize = Math.min(64, Math.max(1, Math.trunc(Number(options.windowSize) || WINDOW_SIZE)));
+	const entries: { id: string; text: string }[] = [];
+	let scanned = 0;
+	for (let index = list.length - 1; index >= 0 && scanned < MAX_SCAN_ENTRIES && entries.length < windowSize; index--) {
+		scanned++;
+		const entry = asRecord(list[index]);
+		if (!entry) continue;
+		const text = entryText(entry);
+		if (text === null) continue;
+		entries.push({ id: entryIdentity(entry, text, index), text });
+	}
+	if (entries.length === 0) return null;
+	entries.reverse();
+
+	let latestUserEntryId = entries[entries.length - 1].id;
+	let changeSemantics: ChangeSemantics = "unknown";
+	let release: ReleaseMode = "none";
+	let readOnly: AuthorityConstraint | null = null;
+	let stop: AuthorityConstraint | null = null;
+	const forbidden = new Map<string, AuthorityConstraint>();
+	let targets: AuthorityTarget[] = [];
+	let criterion: CriterionState | null = null;
+
+	for (const entry of entries) {
+		const semantics = classifyChange(entry.text);
+		const entryTargets = targetsInText(entry.text);
+		if (READ_ONLY.test(entry.text)) readOnly = { kind: "read_only", sinceEntryId: entry.id };
+		if (STOP.test(entry.text)) stop = { kind: "stop", sinceEntryId: entry.id };
+		if (entryTargets.length > 0) {
+			targets = entryTargets.map(path => ({ path, digest: digestTarget(path) })).filter(target => target.digest !== "");
+			// Only targets named at or after the do-not-touch phrase are forbidden:
+			// "implement `a.ts` and do not touch `b.ts`" forbids b.ts, never a.ts.
+			const forbiddenAt = FORBIDDEN.exec(entry.text)?.index;
+			if (forbiddenAt !== undefined) {
+				for (const path of targetsInText(entry.text.slice(forbiddenAt))) {
+					const digest = digestTarget(path);
+					if (digest) forbidden.set(digest, { kind: "forbidden_target", sinceEntryId: entry.id, targetDigest: digest });
+				}
+			}
+		} else if (semantics === "cancel" || semantics === "supersede") {
+			// A withdrawn or replaced request no longer authorises its old targets.
+			targets = [];
+		}
+		const marker = CRITERION_MARKER.exec(entry.text);
+		if (marker) {
+			const kind = marker[1].toLowerCase() as CriterionKind;
+			const explicit = marker[2] ? normalizeTarget(marker[2]) : "";
+			const chosen = explicit || targets[0]?.path || "";
+			const digest = chosen ? digestTarget(chosen) : "";
+			if (digest) {
+				criterion = { kind, targetDigest: digest };
+				if (!targets.some(target => target.digest === digest)) targets = [{ path: chosen, digest }, ...targets].slice(0, MAX_TARGETS);
+			}
+		}
+		const releaseMode = classifyRelease(entry.text);
+		if (releaseMode === "explicit") {
+			release = "explicit";
+			readOnly = null;
+			stop = null;
+			forbidden.clear();
+		} else if (releaseMode === "release_ambiguous") {
+			// Recorded, never applied: an unclear release keeps the constraint.
+			release = "release_ambiguous";
+		}
+		if (semantics === "add" || semantics === "narrow" || semantics === "supersede") stop = null;
+		changeSemantics = semantics;
+		latestUserEntryId = entry.id;
+	}
+
+	const constraints: AuthorityConstraint[] = [];
+	if (readOnly) constraints.push(readOnly);
+	if (stop) constraints.push(stop);
+	constraints.push(...forbidden.values());
+
+	return {
+		userEntries: entries.length,
+		windowSize,
+		latestUserEntryId,
+		changeSemantics,
+		constraints,
+		targets,
+		scopeDigests: targets.map(target => target.digest),
+		release,
+		criterion,
+	};
+}
+
+/* ------------------------------------------------------------------------- */
+/* Ordered action rules                                                       */
+/* ------------------------------------------------------------------------- */
+
+export type ActionEvaluation = {
+	actionClass: ActionClass;
+	ruleId: RuleId;
+	verdict: Verdict;
+	coverage: Coverage;
+	/** Only an evaluated, aligned write may enter the recovery chain. */
+	stage2Admissible: boolean;
+	block: boolean;
+	targetDigest: string | null;
+	/** (latestUserEntryId, changeSemantics, actionClass, targetDigest). */
+	retryKey: string;
+	entryIdPrefix: string | null;
+};
+
+function retryIdentity(authority: Authority | null, actionClass: ActionClass, targetDigest: string | null): string {
+	return digestText(
+		JSON.stringify([
+			authority?.latestUserEntryId ?? "",
+			authority?.changeSemantics ?? "unknown",
+			actionClass,
+			targetDigest ?? null,
+		]),
+	);
+}
+
+/**
+ * Ordered rules; the first match wins. Only a write-class action against an
+ * explicit drift rule blocks. Reads always allow, bash always allows with a
+ * coverage gap, and missing authority never blocks.
+ */
+export function evaluateAction(input: {
+	actionClass: ActionClass;
+	targetDigest: string | null;
+	authority: Authority | null;
+}): ActionEvaluation {
+	const { actionClass, targetDigest, authority } = input;
+	const base = {
+		actionClass,
+		targetDigest: targetDigest ?? null,
+		retryKey: retryIdentity(authority, actionClass, targetDigest ?? null),
+		entryIdPrefix: authority ? authority.latestUserEntryId.slice(0, 8) : null,
+	};
+	if (actionClass === "read") {
+		return { ...base, ruleId: "read_allow", verdict: "allow", coverage: "evaluated", stage2Admissible: false, block: false };
+	}
+	if (actionClass === "bash") {
+		return { ...base, ruleId: "bash_observe", verdict: "allow", coverage: "coverage_gap", stage2Admissible: false, block: false };
+	}
+	const drift = (ruleId: RuleId): ActionEvaluation => ({
+		...base,
+		ruleId,
+		verdict: "drift",
+		coverage: "evaluated",
+		stage2Admissible: false,
+		block: true,
+	});
+	if (!authority) {
+		return { ...base, ruleId: "unknown_authority", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
+	}
+	if (authority.constraints.some(constraint => constraint.kind === "read_only")) return drift("drift_write_vs_readonly");
+	if (targetDigest && authority.constraints.some(constraint => constraint.kind === "forbidden_target" && constraint.targetDigest === targetDigest)) {
+		return drift("drift_write_forbidden_target");
+	}
+	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
+	if (targetDigest && authority.scopeDigests.includes(targetDigest)) {
+		return {
+			...base,
+			ruleId: "aligned_write_within_requested_scope",
+			verdict: "aligned",
+			coverage: "evaluated",
+			stage2Admissible: true,
+			block: false,
+		};
+	}
+	return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
+}
+
+export const RECOVERY_GUIDANCE = {
+	readOnly: "Ask the user for an explicit release before writing; a plain \"continue\" does not release read-only.",
+	forbidden: "The target is on the user's do-not-touch list; request an explicit release for that path or pick another target.",
+	stop: "The user stopped this work; wait for a new explicit request before writing.",
+	retry: "Report the blocker and the attempted fix instead of retrying the same write.",
+} as const;
+
+/** Deterministic block reason: rule id, entry-id prefix, recovery guidance. */
+export function alignmentReason(evaluation: ActionEvaluation, retryCount = 1): string {
+	const entry = evaluation.entryIdPrefix ?? "unknown";
+	const stop = retryCount >= 2 ? ` stop_recommended: two repeated blocks for this request. ${RECOVERY_GUIDANCE.retry}` : "";
+	switch (evaluation.ruleId) {
+		case "drift_write_vs_readonly":
+			return `jev-goal-alignment: drift_write_vs_readonly (entry ${entry}). ${RECOVERY_GUIDANCE.readOnly}${stop}`;
+		case "drift_write_forbidden_target":
+			return `jev-goal-alignment: drift_write_forbidden_target (entry ${entry}). ${RECOVERY_GUIDANCE.forbidden}${stop}`;
+		case "drift_write_after_stop":
+			return `jev-goal-alignment: drift_write_after_stop (entry ${entry}). ${RECOVERY_GUIDANCE.stop}${stop}`;
+		default:
+			return `jev-goal-alignment: ${evaluation.ruleId} (entry ${entry}).${stop}`;
+	}
+}
+
+/* ------------------------------------------------------------------------- */
+/* Recovery transitions                                                       */
+/* ------------------------------------------------------------------------- */
+
+export type RecoveryStatus =
+	| "correction_recorded"
+	| "aligned_admitted"
+	| "result_observed"
+	| "recovered"
+	| "recovery_unverified";
+
+export type TransitionReason =
+	| "no_authority"
+	| "same_authority"
+	| "not_correction_stage"
+	| "not_admitted_stage"
+	| "not_observed_stage"
+	| "already_terminal"
+	| "not_stage2_admissible"
+	| "target_mismatch"
+	| "missing_tool_call"
+	| "tool_call_mismatch"
+	| "no_declared_criterion"
+	| "baseline_true"
+	| "criterion_not_true";
+
+export type AlignmentState = {
+	v: 1;
+	recoveryId: string;
+	latestUserEntryId: string;
+	changeSemantics: ChangeSemantics;
+	step: 1 | 2 | 3 | 4;
+	status: RecoveryStatus;
+	ruleId: RuleId | null;
+	actionClass: ActionClass | null;
+	/** Digests of the request targets captured at correction time. */
+	approvedTargets: readonly string[];
+	targetDigest: string | null;
+	toolCallIdDigest: string | null;
+	criterion: CriterionState | null;
+	criterionBaseline: Observation | null;
+	observation: Observation | null;
+	reason: TransitionReason | null;
+	updatedAt: number;
+};
+
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown";
+
+export type AlignmentCounts = {
+	corrections: number;
+	blocks: number;
+	recovered: number;
+	unverified: number;
+	unresolved: number;
+};
+
+export type AlignmentEvent = {
+	v: 1;
+	kind: AlignmentEventKind;
+	at: number;
+	recoveryId: string | null;
+	/** Full post-transition state for recovery events; null for block/shutdown. */
+	state: AlignmentState | null;
+	retryKey?: string;
+	ruleId?: RuleId;
+	retryCount?: number;
+	stopRecommended?: boolean;
+	counts?: AlignmentCounts;
+};
+
+export type Transition = {
+	applied: boolean;
+	state: AlignmentState | null;
+	status: RecoveryStatus | null;
+	reason: TransitionReason | null;
+	event: AlignmentEvent | null;
+};
+
+function rejected(state: AlignmentState | null, reason: TransitionReason): Transition {
+	return { applied: false, state, status: state?.status ?? null, reason, event: null };
+}
+
+function applied(state: AlignmentState, kind: AlignmentEventKind, now: number): Transition {
+	return {
+		applied: true,
+		state,
+		status: state.status,
+		reason: state.reason,
+		event: { v: 1, kind, at: now, recoveryId: state.recoveryId, state },
+	};
+}
+
+function recoveryIdentity(authority: Authority): string {
+	const constraints = authority.constraints
+		.map(constraint => [constraint.kind, constraint.kind === "forbidden_target" ? constraint.targetDigest : ""])
+		.sort((left, right) => left.join(":").localeCompare(right.join(":")));
+	return digestText(
+		JSON.stringify([
+			"goal-alignment-v1",
+			authority.latestUserEntryId,
+			authority.changeSemantics,
+			authority.scopeDigests,
+			authority.criterion?.kind ?? null,
+			authority.criterion?.targetDigest ?? null,
+			constraints,
+		]),
+	);
+}
+
+/** Step 1 — record one correction: authority identity, scope and criterion baseline. */
+export function recordCorrection(input: {
+	authority: Authority | null;
+	baseline: Observation | null;
+	now: number;
+	previous?: AlignmentState | null;
+}): Transition {
+	const { authority, now } = input;
+	if (!authority) return rejected(input.previous ?? null, "no_authority");
+	if (input.previous && input.previous.latestUserEntryId === authority.latestUserEntryId) {
+		return rejected(input.previous, "same_authority");
+	}
+	const state: AlignmentState = {
+		v: 1,
+		recoveryId: recoveryIdentity(authority),
+		latestUserEntryId: authority.latestUserEntryId,
+		changeSemantics: authority.changeSemantics,
+		step: 1,
+		status: "correction_recorded",
+		ruleId: null,
+		actionClass: null,
+		approvedTargets: authority.scopeDigests.slice(0, MAX_TARGETS),
+		targetDigest: null,
+		toolCallIdDigest: null,
+		criterion: authority.criterion,
+		criterionBaseline: authority.criterion ? (input.baseline ?? "unknown") : null,
+		observation: null,
+		reason: null,
+		updatedAt: now,
+	};
+	return applied(state, "correction", now);
+}
+
+/** Step 2 — admit an evaluated, aligned write whose target was in the correction scope. */
+export function admitAlignedAction(input: {
+	state: AlignmentState | null;
+	evaluation: ActionEvaluation;
+	targetDigest: string | null;
+	toolCallIdDigest: string | null;
+	now: number;
+}): Transition {
+	const { state, evaluation } = input;
+	if (!state || state.step !== 1) return rejected(state, state && state.step === 4 ? "already_terminal" : "not_correction_stage");
+	if (evaluation.coverage !== "evaluated" || evaluation.verdict !== "aligned" || !evaluation.stage2Admissible || !evaluation.ruleId) {
+		return rejected(state, "not_stage2_admissible");
+	}
+	if (!input.targetDigest || !state.approvedTargets.includes(input.targetDigest)) {
+		return rejected(state, "target_mismatch");
+	}
+	if (!input.toolCallIdDigest) return rejected(state, "missing_tool_call");
+	const next: AlignmentState = {
+		...state,
+		step: 2,
+		status: "aligned_admitted",
+		ruleId: evaluation.ruleId,
+		actionClass: evaluation.actionClass,
+		targetDigest: input.targetDigest,
+		toolCallIdDigest: input.toolCallIdDigest,
+		reason: null,
+		updatedAt: input.now,
+	};
+	return applied(next, "admit", input.now);
+}
+
+/** Step 3 — observe the admitted call's result; the id must match exactly. */
+export function observeResult(input: {
+	state: AlignmentState | null;
+	toolCallIdDigest: string | null;
+	observation: Observation;
+	now: number;
+}): Transition {
+	const { state, now } = input;
+	if (!state) return rejected(null, "not_admitted_stage");
+	if (state.step === 4) return rejected(state, "already_terminal");
+	if (state.step !== 2) return rejected(state, "not_admitted_stage");
+	if (!state.toolCallIdDigest || !input.toolCallIdDigest || input.toolCallIdDigest !== state.toolCallIdDigest) {
+		const unverified: AlignmentState = {
+			...state,
+			step: 4,
+			status: "recovery_unverified",
+			reason: "tool_call_mismatch",
+			observation: input.observation ?? "unknown",
+			updatedAt: now,
+		};
+		return applied(unverified, "unverified", now);
+	}
+	const next: AlignmentState = {
+		...state,
+		step: 3,
+		status: "result_observed",
+		observation: input.observation,
+		reason: null,
+		updatedAt: now,
+	};
+	return applied(next, "observe", now);
+}
+
+/**
+ * Step 4 — completion is only the declared criterion's false|unknown → true
+ * transition. A baseline that was already true, or no declared criterion at all,
+ * is recovery_unverified rather than a recovered claim.
+ */
+export function evaluateCompletion(input: { state: AlignmentState | null; now: number }): Transition {
+	const { state, now } = input;
+	if (!state) return rejected(null, "not_observed_stage");
+	if (state.step === 4) return rejected(state, "already_terminal");
+	if (state.step !== 3) return rejected(state, "not_observed_stage");
+	if (!state.criterion) {
+		const unverified: AlignmentState = { ...state, step: 4, status: "recovery_unverified", reason: "no_declared_criterion", updatedAt: now };
+		return applied(unverified, "unverified", now);
+	}
+	if (state.criterionBaseline === "true") {
+		const unverified: AlignmentState = { ...state, step: 4, status: "recovery_unverified", reason: "baseline_true", updatedAt: now };
+		return applied(unverified, "unverified", now);
+	}
+	if (state.observation !== "true") return rejected(state, "criterion_not_true");
+	const recovered: AlignmentState = { ...state, step: 4, status: "recovered", reason: null, updatedAt: now };
+	return applied(recovered, "complete", now);
+}
+
+/** One block record. The block itself is decided by `evaluateAction`. */
+export function recordBlock(input: { evaluation: ActionEvaluation; retryCount: number; now: number }): AlignmentEvent {
+	const retryCount = Math.max(1, Math.trunc(input.retryCount));
+	return {
+		v: 1,
+		kind: "block",
+		at: input.now,
+		recoveryId: null,
+		state: null,
+		retryKey: input.evaluation.retryKey,
+		ruleId: input.evaluation.ruleId,
+		retryCount,
+		stopRecommended: retryCount >= 2,
+	};
+}
+
+/** Idempotent session-close record for one unresolved recovery. */
+export function recordShutdown(input: { state: AlignmentState; counts: AlignmentCounts; now: number }): AlignmentEvent {
+	return { v: 1, kind: "shutdown", at: input.now, recoveryId: input.state.recoveryId, state: null, counts: input.counts };
+}
+
+/* ------------------------------------------------------------------------- */
+/* Journal: bounded, transition-only, digest-first                            */
+/* ------------------------------------------------------------------------- */
+
+export const ALIGNMENT_LIMITS = {
+	maxRecords: 200,
+	maxRecordBytes: 2048,
+	maxTotalBytes: 256 * 1024,
+	maxSegments: 2,
+	retentionMs: 7 * 24 * 60 * 60 * 1000,
+} as const;
+
+const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown"]);
+const RECOVERY_STATUSES = new Set<string>(["correction_recorded", "aligned_admitted", "result_observed", "recovered", "recovery_unverified"]);
+
+function fresh(at: number, now: number): boolean {
+	return Number.isFinite(at) && at >= now - ALIGNMENT_LIMITS.retentionMs && at <= now + FUTURE_SKEW_MS;
+}
+
+function isState(value: unknown): value is AlignmentState {
+	const record = asRecord(value);
+	if (!record) return false;
+	return (
+		record.v === 1 &&
+		typeof record.recoveryId === "string" &&
+		typeof record.latestUserEntryId === "string" &&
+		(record.step === 1 || record.step === 2 || record.step === 3 || record.step === 4) &&
+		typeof record.status === "string" &&
+		RECOVERY_STATUSES.has(record.status) &&
+		Array.isArray(record.approvedTargets) &&
+		Number.isFinite(record.updatedAt)
+	);
+}
+
+function isEvent(value: unknown): value is AlignmentEvent {
+	const record = asRecord(value);
+	if (!record) return false;
+	if (record.v !== 1 || typeof record.kind !== "string" || !EVENT_KINDS.has(record.kind)) return false;
+	if (typeof record.at !== "number" || !Number.isFinite(record.at)) return false;
+	if (record.state !== null && record.state !== undefined && !isState(record.state)) return false;
+	return true;
+}
+
+/** Serialize one record; over-cap records are dropped instead of truncated. */
+export function serializeEvent(event: AlignmentEvent): string | null {
+	let text: string;
+	try { text = JSON.stringify(event); } catch { return null; }
+	return Buffer.byteLength(text, "utf8") <= ALIGNMENT_LIMITS.maxRecordBytes ? text : null;
+}
+
+function parseJournalLines(text: string, now: number): { events: AlignmentEvent[]; dropped: number } {
+	const events: AlignmentEvent[] = [];
+	let dropped = 0;
+	for (const line of String(text ?? "").split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		if (Buffer.byteLength(trimmed, "utf8") > ALIGNMENT_LIMITS.maxRecordBytes) { dropped++; continue; }
+		let parsed: unknown;
+		try { parsed = JSON.parse(trimmed); } catch { dropped++; continue; }
+		if (!isEvent(parsed) || !fresh(parsed.at, now)) { dropped++; continue; }
+		events.push(parsed);
+	}
+	return { events, dropped };
+}
+
+function capEvents(events: readonly AlignmentEvent[]): AlignmentEvent[] {
+	const kept: AlignmentEvent[] = [];
+	let bytes = 0;
+	for (let index = events.length - 1; index >= 0 && kept.length < ALIGNMENT_LIMITS.maxRecords; index--) {
+		const size = Buffer.byteLength(JSON.stringify(events[index]), "utf8") + 1;
+		if (bytes + size > ALIGNMENT_LIMITS.maxTotalBytes) break;
+		kept.push(events[index]);
+		bytes += size;
+	}
+	return kept.reverse();
+}
+
+export type JournalSnapshot = {
+	events: readonly AlignmentEvent[];
+	latest: AlignmentState | null;
+	retryCounts: Readonly<Record<string, number>>;
+	shutdownFor: Readonly<Record<string, true>>;
+	counts: AlignmentCounts;
+	dropped: number;
+};
+
+/** Rebuild the current recovery view and retry counters from retained records. */
+export function reduceJournal(events: readonly AlignmentEvent[]): {
+	latest: AlignmentState | null;
+	retryCounts: Record<string, number>;
+	shutdownFor: Record<string, true>;
+	counts: AlignmentCounts;
+} {
+	const retryCounts: Record<string, number> = {};
+	const shutdownFor: Record<string, true> = {};
+	const counts: AlignmentCounts = { corrections: 0, blocks: 0, recovered: 0, unverified: 0, unresolved: 0 };
+	let latest: AlignmentState | null = null;
+	for (const event of events) {
+		if (event.kind === "block") {
+			counts.blocks++;
+			if (typeof event.retryKey === "string") {
+				const previous = retryCounts[event.retryKey] ?? 0;
+				const observed = typeof event.retryCount === "number" ? event.retryCount : previous + 1;
+				retryCounts[event.retryKey] = Math.max(previous, observed);
+			}
+		}
+		if (event.kind === "shutdown" && typeof event.recoveryId === "string") shutdownFor[event.recoveryId] = true;
+		if (event.kind === "correction") counts.corrections++;
+		if (!event.state) continue;
+		latest = event.state;
+	}
+	if (latest) {
+		if (latest.status === "recovered") counts.recovered++;
+		if (latest.status === "recovery_unverified") counts.unverified++;
+		if (latest.step < 4) counts.unresolved = 1;
+	}
+	return { latest, retryCounts, shutdownFor, counts };
+}
+
+/**
+ * Parse the retained segments (oldest first) into one bounded snapshot.
+ * Records older than the retention window, oversized lines and future-dated
+ * lines are dropped; the newest records win when the caps are reached.
+ */
+export function readJournalTexts(texts: readonly (string | null)[], now: number): JournalSnapshot {
+	const events: AlignmentEvent[] = [];
+	let dropped = 0;
+	for (const text of texts) {
+		const parsed = parseJournalLines(text ?? "", now);
+		events.push(...parsed.events);
+		dropped += parsed.dropped;
+	}
+	const retained = capEvents(events);
+	const reduced = reduceJournal(retained);
+	return { events: retained, dropped, ...reduced };
+}
+
+/** Newest retained records only, used when the active segment rotates. */
+export function compactJournalText(text: string, now: number): string {
+	const parsed = parseJournalLines(text, now);
+	return capEvents(parsed.events).map(event => `${JSON.stringify(event)}\n`).join("");
+}
+
+export type JournalAppendPlan = { text: string; rotate: boolean; appended: number; skipped: number };
+
+/**
+ * Decide one bounded append to the active segment. Rotation keeps two segments:
+ * the active tail and one retained predecessor, both under the record/byte caps.
+ */
+export function planJournalAppend(existingText: string | null, events: readonly AlignmentEvent[], now: number): JournalAppendPlan {
+	const lines: string[] = [];
+	let skipped = 0;
+	for (const event of events) {
+		const line = serializeEvent(event);
+		if (line === null) skipped++;
+		else lines.push(line);
+	}
+	if (lines.length === 0) return { text: "", rotate: false, appended: 0, skipped };
+	const body = `${lines.join("\n")}\n`;
+	const existing = String(existingText ?? "");
+	let records = 0;
+	let bytes = 0;
+	for (const line of existing.split("\n")) {
+		const trimmed = line.trim();
+		if (!trimmed) continue;
+		if (Buffer.byteLength(trimmed, "utf8") > ALIGNMENT_LIMITS.maxRecordBytes) continue;
+		let parsed: unknown;
+		try { parsed = JSON.parse(trimmed); } catch { continue; }
+		if (!isEvent(parsed) || !fresh(parsed.at, now)) continue;
+		records++;
+		bytes += Buffer.byteLength(trimmed, "utf8") + 1;
+	}
+	const rotate = records + lines.length > ALIGNMENT_LIMITS.maxRecords || bytes + Buffer.byteLength(body, "utf8") > ALIGNMENT_LIMITS.maxTotalBytes;
+	return { text: body, rotate, appended: lines.length, skipped };
+}
+// Goal-alignment session-shutdown surface. Flushes the unresolved recovery
+// counts once per recovery id; a repeated shutdown appends nothing.
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+
+export default function register(api: {
+	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
+}) {
+	api.on("session_shutdown", async (_event, ctx) => {
+		try {
+			const now = Date.now();
+			const { snapshot } = await alignmentLoadJournal(ctx, now);
+			const state = snapshot.latest;
+			if (!state || state.step >= 4) return undefined;
+			// Idempotent stop: the same unresolved recovery is flushed at most once.
+			if (snapshot.shutdownFor[state.recoveryId]) return undefined;
+			const shutdown = recordShutdown({ state, counts: snapshot.counts, now });
+			await alignmentAppendEvents(ctx, [shutdown], now);
+			return undefined;
+		} catch {
+			// hook_error: shutdown is best effort and never blocks anything.
+			return undefined;
+		}
+	});
+}
+
+function alignmentAsRecord(value: unknown): Record<string, any> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, any>) : null;
+}
+
+function alignmentSessionKey(ctx: unknown): string {
+	const record = alignmentAsRecord(ctx);
+	const manager = record ? alignmentAsRecord(record.sessionManager) : null;
+	if (manager && typeof manager.getSessionId === "function") {
+		try {
+			const value = manager.getSessionId.call(manager);
+			if (typeof value === "string" && value.trim() && value.length <= 512) return digestText(value.trim()).slice(0, 16);
+		} catch {
+			// An unreadable session id falls back to the shared segment.
+		}
+	}
+	return "default";
+}
+
+function alignmentJournalFiles(ctx: unknown): { directory: string; current: string; rotated: string } {
+	// Bun can cache os.homedir across HOME changes; honor the process-owned home.
+	// One bounded segment pair per session keeps concurrent sessions apart.
+	const directory = path.join(process.env.HOME || homedir(), ".gjc-plugin", "jev-advisor", "alignment", "v1", alignmentSessionKey(ctx));
+	return { directory, current: path.join(directory, "events.jsonl"), rotated: path.join(directory, "events.1.jsonl") };
+}
+
+async function alignmentReadText(file: string): Promise<{ text: string | null; available: boolean }> {
+	try {
+		const text = await readFile(file, "utf8");
+		return { text, available: Buffer.byteLength(text, "utf8") <= ALIGNMENT_LIMITS.maxTotalBytes };
+	} catch (error) {
+		return { text: null, available: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" };
+	}
+}
+
+async function alignmentLoadJournal(ctx: unknown, now: number): Promise<{ snapshot: JournalSnapshot; available: boolean }> {
+	const files = alignmentJournalFiles(ctx);
+	const rotated = await alignmentReadText(files.rotated);
+	const current = await alignmentReadText(files.current);
+	return { snapshot: readJournalTexts([rotated.text, current.text], now), available: rotated.available && current.available };
+}
+
+async function alignmentAppendEvents(ctx: unknown, events: readonly AlignmentEvent[], now: number): Promise<boolean> {
+	if (events.length === 0) return true;
+	const files = alignmentJournalFiles(ctx);
+	try {
+		await mkdir(files.directory, { recursive: true, mode: 0o700 });
+		const existing = await alignmentReadText(files.current);
+		const plan = planJournalAppend(existing.text ?? "", events, now);
+		if (!plan.text) return plan.skipped === 0;
+		if (plan.rotate) {
+			await writeFile(files.rotated, compactJournalText(existing.text ?? "", now), { mode: 0o600 });
+			await writeFile(files.current, plan.text, { mode: 0o600 });
+		} else {
+			await appendFile(files.current, plan.text, { mode: 0o600 });
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}

@@ -183,3 +183,54 @@ links, the intended two-file diff, published commit contents, and Linear issue
 relations. Runtime efficacy requires the future M1–M3 contracts and their actual
 observations; documentation review, local-stub tests, and advisory model
 judgments do not substitute for that evidence.
+
+## Contract layer status: offline predicates, no result
+
+`lib/behavior-eval.mjs` is an offline contract and predicate layer. It validates
+a frozen pilot manifest, plans arms, admits spending before a call, checks trial
+receipt validity and computes paired benefit — and it never calls a model,
+starts a process or reads a live outcome. Its verdicts say whether a receipt is
+admissible and whether a predeclared paired rule is met. They are not a measured
+comparison of harnesses.
+
+Admission rules hardened in this revision:
+
+- `admitCall` refuses a non-finite or negative cap, price, reservation or usage
+  and projects `spent + unresolved + max(reservation, price) + cleanup`, so a
+  refund-shaped negative component cannot lower the projected spend of a call.
+- `validateTrialReceipt` requires a named verifier that differs from both
+  producer and executor and carries its own evidence digest; a bare
+  `oracle.independent === true` is `oracle_not_independent`. It also requires
+  the loading receipt, source and harness digests, passing isolation deny
+  probes, an admitted budget, an untouched holdout, a complete denominator and
+  a measured non-negative cost.
+- `pairedBenefit` requires the full declared pair set: fewer pairs →
+  `incomplete_pairs`, more → `unexpected_pairs`, fewer than two →
+  `too_few_pairs`, duplicate ids → `duplicate_pairs`, `baselineCost === 0` →
+  `baseline_zero`, and a missing, non-finite or negative ratio →
+  `invalid_cost_ratio`. A missing ratio is never defaulted to 1.
+- The arm enum and the digest predicate now come from the canonical
+  `gjc.quality_trial.v2` module (`lib/quality-trial.mjs`), so the pilot and the
+  `rrsi` cohort cannot disagree about the arm vocabulary or the digest shape.
+  See [ADR 0003](../docs/adr/0003-quality-trial-evidence-boundary.md).
+- `lib/distill.mjs` requires re-derivable contrast support
+  (`rederiveSupport`) and treats an all-skipped run, including zero candidates,
+  as a normal empty result.
+
+**No measured comparison result exists.** No trial receipt, arm execution or
+paired benefit verdict from a real run is recorded in this repository. Nothing
+here establishes that any harness change improves task outcomes, reduces cost,
+or is calibrated. The suites (`tests/integration/behavior-eval.test.mjs`,
+`tests/unit/quality-trial.test.mjs`,
+`tests/unit/behavior-eval-integrity.test.mjs`,
+`tests/unit/distill-integrity.test.mjs`) prove the predicates and their failure
+paths, not behavior.
+
+**The experiment that must run before any efficacy claim** is M1 (JJO-270) under
+the [evaluation rules](../docs/adr/0001-public-adoption-and-evaluation.md):
+freeze the task manifest, arm definitions, scoring, thresholds and exclusions;
+prove that the baseline and candidate surfaces actually load (loading receipt);
+run the paired development and holdout trials for B0/B1/B2 inside one approved
+budget window; and keep every failure, timeout and exclusion in the denominator.
+Until that run exists, any sentence about this machinery being better, cheaper
+or more accurate is a proposal.
