@@ -28,7 +28,7 @@ const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
 const caseIndex = args.indexOf("--case");
 const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
-assert.ok(["single", "retry", "degrade"].includes(mode), `unknown case: ${mode}`);
+assert.ok(["single", "retry", "degrade", "concurrent"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -36,6 +36,13 @@ const agent = path.join(home, ".gjc", "agent");
 const work = path.join(root, "work");
 await fs.mkdir(agent, { recursive: true, mode: 0o700 });
 await fs.mkdir(work, { recursive: true, mode: 0o700 });
+const home2 = path.join(root, "home2");
+const agent2 = path.join(home2, ".gjc", "agent");
+const work2 = path.join(root, "work2");
+if (mode === "concurrent") {
+  await fs.mkdir(agent2, { recursive: true, mode: 0o700 });
+  await fs.mkdir(work2, { recursive: true, mode: 0o700 });
+}
 if (mode === "degrade") {
   // Occupy the alignment root with a regular file so the journal mkdir must fail.
   await fs.mkdir(path.join(home, ".gjc-plugin", "jev-advisor"), { recursive: true, mode: 0o700 });
@@ -104,9 +111,9 @@ const env = {
   CI: "1",
 };
 
-function run(command) {
+function run(command, runEnv = env, cwd = work) {
   return new Promise(resolve => {
-    const child = spawn(command[0], command.slice(1), { cwd: work, env });
+    const child = spawn(command[0], command.slice(1), { cwd, env: runEnv });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", data => (stdout += data));
@@ -116,8 +123,40 @@ function run(command) {
   });
 }
 
+async function journalOf(homeDir) {
+  const base = path.join(homeDir, ".gjc-plugin", "jev-advisor", "alignment", "v1");
+  let text = "";
+  if (existsSync(base)) {
+    for (const entry of await fs.readdir(base)) {
+      const file = path.join(base, entry, "events.jsonl");
+      if (existsSync(file)) text += await fs.readFile(file, "utf8");
+    }
+  }
+  return text;
+}
+
 try {
   const install = await run(["gjc", "plugin", "install", pluginRoot, "--user", "--json"]);
+  if (mode === "concurrent") {
+    const env2 = { ...env, HOME: home2, TMPDIR: root, GJC_CODING_AGENT_DIR: agent2, GJC_AGENT_DIR: agent2 };
+    const install2 = await run(["gjc", "plugin", "install", pluginRoot, "--user", "--json"], env2, work2);
+    assert.equal(install2.status, 0, `second install failed: ${install2.stdout}${install2.stderr}`);
+    const sessionArgs = ["gjc", "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-rules", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", "write,read", PROMPT];
+    const [a, b] = await Promise.all([run(sessionArgs), run(sessionArgs, env2, work2)]);
+    const journalA = await journalOf(home);
+    const journalB = await journalOf(home2);
+    const wroteA = existsSync(path.join(work, "blocked.txt"));
+    const wroteB = existsSync(path.join(work2, "blocked.txt"));
+    console.log(JSON.stringify({ kind: "alignment-host-block-observation", mode, exitA: a.status, exitB: b.status, wroteA, wroteB, blocksA: (journalA.match(/"kind":"block"/g) ?? []).length, blocksB: (journalB.match(/"kind":"block"/g) ?? []).length, remoteProviderRequests: 0 }, null, 2));
+    assert.equal(wroteA, false, "session A wrote under read-only authority");
+    assert.equal(wroteB, false, "session B wrote under read-only authority");
+    assert.ok((journalA.match(/"kind":"block"/g) ?? []).length >= 1, "session A journal has no block record");
+    assert.ok((journalB.match(/"kind":"block"/g) ?? []).length >= 1, "session B journal has no block record");
+    console.log("ALL PASS (concurrent-session isolation case)");
+    server.close();
+    await fs.rm(root, { recursive: true, force: true });
+    process.exit(0);
+  }
   assert.equal(install.status, 0, `plugin install failed: ${install.stdout}${install.stderr}`);
 
   const session = await run([

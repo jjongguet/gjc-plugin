@@ -102,4 +102,29 @@ results.push("unknown mode: falls back to shadow");
 
 console.log(JSON.stringify({ kind: "alignment-installed-smoke", pluginRoot, cases: results.length, unexpectedFetches: 0 }, null, 2));
 for (const line of results) console.log(`ok - ${line}`);
+// Deterministic latency: 20 evaluations of the shipped block/allow path.
+const latencyHome = mkdtempSync(path.join(tmpdir(), "alignment-latency-"));
+const priorHome = process.env.HOME;
+const priorMode = process.env.JEV_ALIGNMENT_MODE;
+process.env.HOME = latencyHome;
+process.env.JEV_ALIGNMENT_MODE = "deterministic";
+try {
+  const { handler } = await loadRegistrations();
+  const samples = [];
+  for (let index = 0; index < 20; index++) {
+    const started = performance.now();
+    await handler(writeCall, ctx);
+    samples.push(performance.now() - started);
+  }
+  samples.sort((left, right) => left - right);
+  const p95 = samples[Math.min(samples.length - 1, Math.ceil(samples.length * 0.95) - 1)];
+  console.log(JSON.stringify({ latencySamples: samples.length, p50Ms: Number(samples[Math.floor(samples.length / 2)].toFixed(2)), p95Ms: Number(p95.toFixed(2)), hardBudgetMs: 250, proposalP95Ms: 50 }));
+  assert.ok(p95 < 250, `p95 ${p95.toFixed(1)}ms exceeds the hard 250ms budget`);
+  results.push(`latency: p95 ${p95.toFixed(1)}ms < hard 250ms`);
+} finally {
+  process.env.HOME = priorHome;
+  if (priorMode === undefined) delete process.env.JEV_ALIGNMENT_MODE;
+  else process.env.JEV_ALIGNMENT_MODE = priorMode;
+  rmSync(latencyHome, { recursive: true, force: true });
+}
 console.log(`ALL PASS (${results.length} installed-hook cases)`);
