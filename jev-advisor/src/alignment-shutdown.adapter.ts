@@ -9,6 +9,7 @@ import {
 	digestText,
 	planJournalAppend,
 	readJournalTexts,
+	recordHookError,
 	recordShutdown,
 	type AlignmentEvent,
 	type JournalSnapshot,
@@ -28,8 +29,14 @@ export default function register(api: {
 			const shutdown = recordShutdown({ state, counts: snapshot.counts, now });
 			await alignmentAppendEvents(ctx, [shutdown], now);
 			return undefined;
-		} catch {
-			// hook_error: shutdown is best effort and never blocks anything.
+		} catch (error) {
+			// hook_error: shutdown is best effort and never blocks anything, but the
+			// failure class is recorded for auditability.
+			try {
+				await alignmentAppendEvents(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now());
+			} catch {
+				// Recording must never change the outcome.
+			}
 			return undefined;
 		}
 	});

@@ -1004,8 +1004,14 @@ export default function register(api: {
 			}
 			if (events.length > 0) await alignmentAppendEvents(ctx, events, now);
 			return undefined;
-		} catch {
-			// hook_error: observers are always fail-open.
+		} catch (error) {
+			// hook_error: observers are always fail-open, but the failure class stays
+			// auditable like the before-surface.
+			try {
+				await alignmentAppendEvents(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now());
+			} catch {
+				// Recording must never change the outcome.
+			}
 			return undefined;
 		}
 	});
