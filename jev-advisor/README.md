@@ -91,11 +91,11 @@ policy independently; a confidence threshold alone does not establish safety.
 
 ## Providers
 
-| Provider | Endpoint | Default model | Key |
+| Provider | Endpoint | Default model | Key variable |
 | --- | --- | --- | --- |
-| `jev` | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.13` | OpenRouter |
-| `openrouter` | OpenRouter `/api/v1/chat/completions` | `openai/gpt-5-mini` | OpenRouter |
-| `typesafe-jev` | `https://api.typesafe.ai/v1/systemone` | `jev-latest` | TypeSafe |
+| `jev` | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.13` | `OPENROUTER_API_KEY` |
+| `openrouter` | OpenRouter `/api/v1/chat/completions` | `openai/gpt-5-mini` | `OPENROUTER_API_KEY` |
+| `typesafe-jev` | `https://api.typesafe.ai/v1/systemone` | `jev-latest` | `TYPESAFE_API_KEY` |
 | `ollaya` | `http://127.0.0.1:11435/v1/systemone` | `laya` | none |
 
 Jev uses `state` plus typed `questions`, not chat completions. Provider/model
@@ -107,7 +107,11 @@ receives attribution headers (`HTTP-Referer` and `X-Title`).
 
 Configuration lives outside the replaceable installation tree in
 `~/.gjc/agent/jev-advisor/.env`. Process environment overrides same-named file
-values; the merged `JEV_ADVISOR_API_KEY` takes priority over `OPENROUTER_API_KEY`.
+values. `JEV_ADVISOR_API_KEY` is an explicit override for any provider; without
+it each provider reads only its own variable (`OPENROUTER_API_KEY` for `jev` and
+`openrouter`, `TYPESAFE_API_KEY` for `typesafe-jev`). A provider never falls back
+to another provider's credential, so a missing key surfaces as `unconfigured`
+rather than as a 401 from the wrong service.
 No key and no keyless provider means zero hook network calls or correlation-state writes.
 `JEV_ADVISOR_PROVIDER=off` disables provider advice and correlation writes; local
 outcome journaling still records disabled/unconfigured operations. An explicit offline report still works.
