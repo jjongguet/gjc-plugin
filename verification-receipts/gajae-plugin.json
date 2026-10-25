@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "verification-receipts",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "hooks": [
     {
       "name": "verification-gate-baseline",

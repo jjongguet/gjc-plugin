@@ -2,6 +2,23 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.12] - 2026-10-25
+
+Plugins: jev-advisor 0.0.9 · verification-receipts 0.0.6 · ui-regression 0.0.6 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
+
+### Added
+
+- **verification-receipts**: `verification_loop` takes an optional `repository` (same roots and rejection reasons as `verification_run`), so a session started in a non-Git workspace root can evaluate a named repository. Such a session records no delegation gates, so that call reports `blocked` with an `ungated_session_cwd` warning instead of `clean`.
+- **ui-regression**: `ui_regression_run` and `ui_regression_status` take the same optional `repository`; run records a receipt against a repository inside a non-Git session directory and status reads it with the same argument.
+
+### Fixed
+
+- **verification-receipts**: a failing `execSync` or promisified `exec` whose shell reports a command the runner `PATH` cannot resolve is recorded as `missing_binary` (warning `missing_binary:<name>`); a command present on `PATH` that exits non-zero stays `native_failure`.
+
+### Upgrade notes
+
+- Reinstall `verification-receipts` and `ui-regression`, then start a new `gjc` session: tool parameters are read at session start.
+
 ## [0.0.11] - 2026-10-24
 
 Plugins: jev-advisor 0.0.9 · verification-receipts 0.0.5 · ui-regression 0.0.5 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
@@ -149,6 +166,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.12]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.9...v0.0.10
 [0.0.9]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.8...v0.0.9
