@@ -1,5 +1,5 @@
 // GENERATED FILE — do not edit by hand.
-// Core: lib/alignment.ts + adapter: src/alignment-observe.adapter.ts
+// Core: lib/alignment.ts + lib/alignment-journal.ts + adapter: src/alignment-observe.adapter.ts
 // Rebuild with: bun scripts/build.mjs
 
 /**
@@ -402,8 +402,9 @@ export function evaluateAction(input: {
 	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
 	if (targetDigest && authority.scopeDigests.includes(targetDigest) && authority.authorityTruncated) {
 		// Older entries were not scanned, so an unseen constraint may exist:
-		// never claim alignment, never block.
-		return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "evaluated", stage2Admissible: false, block: false };
+		// never claim alignment, never block, and report the gap rather than
+		// labelling a partially read authority as evaluated.
+		return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
 	}
 	if (targetDigest && authority.scopeDigests.includes(targetDigest) && !authority.authorityTruncated) {
 		return {
@@ -944,13 +945,133 @@ export function validateSemanticEnvelope(input: {
 		return { status: "precision_anomaly", confidence, probabilities, outbound: true, probabilitySum };
 	return { status: "ok", confidence, probabilities, outbound: true, probabilitySum };
 }
+/**
+ * Goal-alignment journal store: the one read/append path shared by the
+ * before-tool, observe and shutdown surfaces.
+ *
+ * The verdict never comes from here, and storage never delays a tool call:
+ * every read and append is bounded by one budget
+ * (`JEV_ALIGNMENT_STORE_TIMEOUT_MS`, default 100 ms). A bounded-out read
+ * reports the empty, unavailable snapshot the adapters already treat as
+ * degraded storage, and a bounded-out append reports "not stored" — never
+ * "did not happen" and never a block.
+ */
+import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+
+const DEFAULT_STORE_TIMEOUT_MS = 100;
+
+/**
+ * The store's whole filesystem surface. Production passes `JOURNAL_STORE_IO`;
+ * a test passes its own so a hung or failing store is induced, not simulated
+ * with a global builtin patch (builtin ESM bindings are snapshots in Bun).
+ */
+export type JournalStoreIo = {
+	readFile: (file: string, encoding: "utf8") => Promise<string>;
+	appendFile: (file: string, data: string, options: { mode: number }) => Promise<unknown>;
+	writeFile: (file: string, data: string, options: { mode: number }) => Promise<unknown>;
+	mkdir: (directory: string, options: { recursive: true; mode: number }) => Promise<unknown>;
+};
+
+export const JOURNAL_STORE_IO: JournalStoreIo = { readFile, appendFile, writeFile, mkdir };
+
+/** One bounded budget for every journal read and append. */
+export function journalStoreBudgetMs(env: Record<string, string | undefined> = process.env): number {
+	const raw = Number(env.JEV_ALIGNMENT_STORE_TIMEOUT_MS ?? DEFAULT_STORE_TIMEOUT_MS);
+	return Number.isFinite(raw) ? Math.max(0, Math.trunc(raw)) : DEFAULT_STORE_TIMEOUT_MS;
+}
+
+export type JournalLoad = { snapshot: JournalSnapshot; available: boolean };
+
+function journalRecord(value: unknown): Record<string, any> | null {
+	return typeof value === "object" && value !== null && !Array.isArray(value) ? (value as Record<string, any>) : null;
+}
+
+/** Bounded session segment key, or the shared segment when unreadable. */
+export function journalSessionKey(ctx: unknown): string {
+	const record = journalRecord(ctx);
+	const manager = record ? journalRecord(record.sessionManager) : null;
+	if (manager && typeof manager.getSessionId === "function") {
+		try {
+			const value = manager.getSessionId.call(manager);
+			if (typeof value === "string" && value.trim() && value.length <= 512) return digestText(value.trim()).slice(0, 16);
+		} catch {
+			// An unreadable session id falls back to the shared segment.
+		}
+	}
+	return "default";
+}
+
+export function journalFiles(ctx: unknown): { directory: string; current: string; rotated: string } {
+	// Bun can cache os.homedir across HOME changes; honor the process-owned home.
+	// One bounded segment pair per session keeps concurrent sessions apart.
+	const directory = path.join(process.env.HOME || homedir(), ".gjc-plugin", "jev-advisor", "alignment", "v1", journalSessionKey(ctx));
+	return { directory, current: path.join(directory, "events.jsonl"), rotated: path.join(directory, "events.1.jsonl") };
+}
+
+export async function journalReadText(file: string, io: JournalStoreIo = JOURNAL_STORE_IO): Promise<{ text: string | null; available: boolean }> {
+	try {
+		const text = await io.readFile(file, "utf8");
+		return { text, available: Buffer.byteLength(text, "utf8") <= ALIGNMENT_LIMITS.maxTotalBytes };
+	} catch (error) {
+		return { text: null, available: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" };
+	}
+}
+
+/** Unbounded store read; every caller goes through `loadJournalStore`. */
+async function journalLoadUnbounded(ctx: unknown, now: number, io: JournalStoreIo): Promise<JournalLoad> {
+	const files = journalFiles(ctx);
+	const rotated = await journalReadText(files.rotated, io);
+	const current = await journalReadText(files.current, io);
+	return { snapshot: readJournalTexts([rotated.text, current.text], now), available: rotated.available && current.available };
+}
+
+/** Read the retained journal inside the store budget; a timeout is degraded storage. */
+export async function loadJournalStore(
+	ctx: unknown,
+	now: number,
+	budgetMs: number,
+	io: JournalStoreIo = JOURNAL_STORE_IO,
+): Promise<JournalLoad> {
+	return withDeadline(journalLoadUnbounded(ctx, now, io), budgetMs, { snapshot: readJournalTexts([null, null], now), available: false });
+}
+
+/** Unbounded store append; every caller goes through `appendJournalStore`. */
+async function journalAppendUnbounded(ctx: unknown, events: readonly AlignmentEvent[], now: number, io: JournalStoreIo): Promise<boolean> {
+	if (events.length === 0) return true;
+	const files = journalFiles(ctx);
+	try {
+		await io.mkdir(files.directory, { recursive: true, mode: 0o700 });
+		const existing = await journalReadText(files.current, io);
+		const plan = planJournalAppend(existing.text ?? "", events, now);
+		if (!plan.text) return plan.skipped === 0;
+		if (plan.rotate) {
+			await io.writeFile(files.rotated, compactJournalText(existing.text ?? "", now), { mode: 0o600 });
+			await io.writeFile(files.current, plan.text, { mode: 0o600 });
+		} else {
+			await io.appendFile(files.current, plan.text, { mode: 0o600 });
+		}
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** Append inside the store budget; `false` means "not stored", never "not attempted". */
+export async function appendJournalStore(
+	ctx: unknown,
+	events: readonly AlignmentEvent[],
+	now: number,
+	budgetMs: number,
+	io: JournalStoreIo = JOURNAL_STORE_IO,
+): Promise<boolean> {
+	return withDeadline(journalAppendUnbounded(ctx, events, now, io), budgetMs, false);
+}
 // Goal-alignment after-tool surface. Binds one admitted write to its result,
 // observes the declared criterion and completes the recovery only on a
 // false|unknown → true transition. Never rewrites a tool result; never blocks.
 import { existsSync, readFileSync } from "node:fs";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
 
 const ALIGNMENT_WRITE_TOOLS = new Set([
 	"write",
@@ -972,12 +1093,15 @@ export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
 }) {
 	api.on("tool_result", async (event, ctx) => {
+		// One store budget for this result's read and appends: a hung store
+		// degrades to "unavailable"/"not stored" instead of delaying the host.
+		const storeBudgetMs = journalStoreBudgetMs();
 		try {
 			const result = alignmentAsRecord(event);
 			if (!result || result.type !== "tool_result") return undefined;
 			if (!alignmentIsWriteTool(result.toolName)) return undefined;
 			const now = Date.now();
-			const { snapshot } = await alignmentLoadJournal(ctx, now);
+			const { snapshot } = await loadJournalStore(ctx, now, storeBudgetMs);
 			const state = snapshot.latest;
 			if (!state || state.step !== 2 || state.status !== "aligned_admitted" || state.actionClass !== "write") return undefined;
 			const toolCallIdDigest = alignmentToolCallDigest(result.toolCallId);
@@ -1002,13 +1126,13 @@ export default function register(api: {
 				// A different call is not this recovery; it is ignored, not claimed.
 				return undefined;
 			}
-			if (events.length > 0) await alignmentAppendEvents(ctx, events, now);
+			if (events.length > 0) await appendJournalStore(ctx, events, now, storeBudgetMs);
 			return undefined;
 		} catch (error) {
 			// hook_error: observers are always fail-open, but the failure class stays
 			// auditable like the before-surface.
 			try {
-				await alignmentAppendEvents(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now());
+				await appendJournalStore(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now(), storeBudgetMs);
 			} catch {
 				// Recording must never change the outcome.
 			}
@@ -1109,62 +1233,5 @@ function alignmentObservation(state: AlignmentState, result: Record<string, any>
 		return existsSync(target) ? "true" : "false";
 	} catch {
 		return "unknown";
-	}
-}
-
-function alignmentSessionKey(ctx: unknown): string {
-	const record = alignmentAsRecord(ctx);
-	const manager = record ? alignmentAsRecord(record.sessionManager) : null;
-	if (manager && typeof manager.getSessionId === "function") {
-		try {
-			const value = manager.getSessionId.call(manager);
-			if (typeof value === "string" && value.trim() && value.length <= 512) return digestText(value.trim()).slice(0, 16);
-		} catch {
-			// An unreadable session id falls back to the shared segment.
-		}
-	}
-	return "default";
-}
-
-function alignmentJournalFiles(ctx: unknown): { directory: string; current: string; rotated: string } {
-	// Bun can cache os.homedir across HOME changes; honor the process-owned home.
-	// One bounded segment pair per session keeps concurrent sessions apart.
-	const directory = path.join(process.env.HOME || homedir(), ".gjc-plugin", "jev-advisor", "alignment", "v1", alignmentSessionKey(ctx));
-	return { directory, current: path.join(directory, "events.jsonl"), rotated: path.join(directory, "events.1.jsonl") };
-}
-
-async function alignmentReadText(file: string): Promise<{ text: string | null; available: boolean }> {
-	try {
-		const text = await readFile(file, "utf8");
-		return { text, available: Buffer.byteLength(text, "utf8") <= ALIGNMENT_LIMITS.maxTotalBytes };
-	} catch (error) {
-		return { text: null, available: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" };
-	}
-}
-
-async function alignmentLoadJournal(ctx: unknown, now: number): Promise<{ snapshot: JournalSnapshot; available: boolean }> {
-	const files = alignmentJournalFiles(ctx);
-	const rotated = await alignmentReadText(files.rotated);
-	const current = await alignmentReadText(files.current);
-	return { snapshot: readJournalTexts([rotated.text, current.text], now), available: rotated.available && current.available };
-}
-
-async function alignmentAppendEvents(ctx: unknown, events: readonly AlignmentEvent[], now: number): Promise<boolean> {
-	if (events.length === 0) return true;
-	const files = alignmentJournalFiles(ctx);
-	try {
-		await mkdir(files.directory, { recursive: true, mode: 0o700 });
-		const existing = await alignmentReadText(files.current);
-		const plan = planJournalAppend(existing.text ?? "", events, now);
-		if (!plan.text) return plan.skipped === 0;
-		if (plan.rotate) {
-			await writeFile(files.rotated, compactJournalText(existing.text ?? "", now), { mode: 0o600 });
-			await writeFile(files.current, plan.text, { mode: 0o600 });
-		} else {
-			await appendFile(files.current, plan.text, { mode: 0o600 });
-		}
-		return true;
-	} catch {
-		return false;
 	}
 }

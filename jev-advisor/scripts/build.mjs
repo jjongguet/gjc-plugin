@@ -26,9 +26,11 @@ const surfaces = [
 	{ cores: ["lib/decision.ts"], adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
 	{ cores: ["lib/decision.ts"], adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
 	// Goal alignment: deterministic and keyless, so no provider prelude is inlined.
-	{ cores: ["lib/alignment.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false },
-	{ cores: ["lib/alignment.ts"], adapter: "src/alignment-observe.adapter.ts", out: "hooks/jev-advisor-alignment-observe.ts", shared: false },
-	{ cores: ["lib/alignment.ts"], adapter: "src/alignment-shutdown.adapter.ts", out: "hooks/jev-advisor-alignment-shutdown.ts", shared: false },
+	// The journal store is a second keyless core so the three surfaces share one
+	// bounded read/append path instead of three drifting copies.
+	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false },
+	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-observe.adapter.ts", out: "hooks/jev-advisor-alignment-observe.ts", shared: false },
+	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-shutdown.adapter.ts", out: "hooks/jev-advisor-alignment-shutdown.ts", shared: false },
 ];
 
 const banner = [

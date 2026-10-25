@@ -62,7 +62,10 @@ here is a measured outcome.
    `multiedit`, `multi_edit`, `multi_edit_file`, `str_replace`,
    `str_replace_editor`, `notebookedit`, `notebook_edit`). A multi-target write
    is evaluated per path, so one forbidden target still blocks; only a
-   single-target write can be stage-2 admitted.
+   single-target write can be stage-2 admitted. A write whose target is in
+   scope while the authority window is truncated (older user entries were not
+   scanned) takes the `uncertain_authority_ambiguous` row: `uncertain`,
+   `coverage_gap`, never aligned and never blocked.
 4. **Bash is observe-only with `coverage_gap`.** `bash_observe` allows every
    bash call and reports `coverage_gap` rather than a verdict. A mutation
    performed inside bash is therefore outside the evaluation: it is not
@@ -86,13 +89,18 @@ here is a measured outcome.
    - Criteria are declared by the user entry as `criterion=exit_zero`,
      `criterion=artifact_exists:<path>` or `criterion=criterion_file:<path>`
      (`CRITERION_MARKER`, `CriterionKind`).
-6. **Storage failure is never a block reason, and deterministic blocking
-   survives degradation.** The verdict comes from `evaluateAction` alone. The
-   journal is best effort: `alignmentAppendEvents` returns `false` on any
-   failure, `alignmentLoadJournal` reports `available: false` for an
-   unreadable or oversized segment, and a thrown handler is a `hook_error`
-   that fails open. While the store is unavailable the retry chain is kept in
-   the in-process map `alignmentDegradedRetries` (at most
+6. **Storage failure is never a block reason, deterministic blocking survives
+   degradation, and storage never delays a tool call.** The verdict comes from
+   `evaluateAction` alone. The journal is best effort: every read and append
+   goes through `lib/alignment-journal.ts`, which bounds each await by one
+   budget (`JEV_ALIGNMENT_STORE_TIMEOUT_MS`, default 100 ms).
+   `loadJournalStore` reports the empty `available: false` snapshot and
+   `appendJournalStore` returns `false` when the budget expires, exactly as an
+   unreadable, unwritable or oversized store reports them, and a thrown
+   handler is a `hook_error` that fails open. All three surfaces share that one
+   store; none keeps a private copy of the plumbing. While the store is
+   unavailable the retry chain is kept in the in-process map
+   `alignmentDegradedRetries` (at most
    `ALIGNMENT_DEGRADED_COUNTERS_MAX = 64` keys, cleared when full), so a
    repeated violation still reaches `stop_recommended`. A broken journal can
    neither create nor suppress a block.
@@ -205,6 +213,8 @@ here is a measured outcome.
 
 - `jev-advisor/lib/alignment.ts` — authority collection, ordered rules,
   recovery transitions, journal limits.
+- `jev-advisor/lib/alignment-journal.ts` — the one bounded journal read/append
+  path shared by the three surfaces.
 - `jev-advisor/src/alignment.adapter.ts` — before-tool surface, mode
   resolution, degraded retry counters.
 - `jev-advisor/src/alignment-observe.adapter.ts` — result binding, criterion

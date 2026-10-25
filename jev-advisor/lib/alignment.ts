@@ -398,8 +398,9 @@ export function evaluateAction(input: {
 	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
 	if (targetDigest && authority.scopeDigests.includes(targetDigest) && authority.authorityTruncated) {
 		// Older entries were not scanned, so an unseen constraint may exist:
-		// never claim alignment, never block.
-		return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "evaluated", stage2Admissible: false, block: false };
+		// never claim alignment, never block, and report the gap rather than
+		// labelling a partially read authority as evaluated.
+		return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
 	}
 	if (targetDigest && authority.scopeDigests.includes(targetDigest) && !authority.authorityTruncated) {
 		return {

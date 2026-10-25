@@ -428,7 +428,9 @@ evaluation at all, an action that is already running is not re-evaluated, an
 unknown tool name is not evaluated, only a single-target write can reach the
 recovery chain, and work inside a subagent is covered only insofar as its tool
 calls reach this surface with a readable session branch. An ambiguous write is
-allowed and reported as `coverage_gap` rather than guessed at.
+allowed and reported as `coverage_gap` rather than guessed at, and a truncated
+authority window (older user entries left unscanned) is `coverage_gap` too
+— never labelled `evaluated`, never aligned and never blocked.
 - **Journal.** `~/.gjc-plugin/jev-advisor/alignment/v1/<sessionDigest>/events.jsonl`
 with one rotated predecessor `events.1.jsonl`; `<sessionDigest>` is the first 16
 hex characters of the session-id digest, or `default` when the session id is
@@ -437,8 +439,12 @@ record, 256 KiB total, two segments, seven-day retention (plus 60 s future-skew
 tolerance). Records carry digests, ids and typed statuses only — never raw user
 text — and an over-cap record is dropped rather than truncated. The journal is
 best effort: a storage failure can neither create nor suppress a block, and
-retry counters fall back to bounded in-process state. The session-shutdown
-surface flushes one record per still-unresolved recovery, idempotently.
+retry counters fall back to bounded in-process state. Every read and append
+goes through one shared store (`lib/alignment-journal.ts`) bounded by
+`JEV_ALIGNMENT_STORE_TIMEOUT_MS` (default 100 ms), so a hung filesystem
+degrades to degraded storage instead of delaying a tool call. The
+session-shutdown surface flushes one record per still-unresolved recovery,
+idempotently.
 
 ### Rebuild, install and rollback order
 
