@@ -28,7 +28,7 @@ const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
 const caseIndex = args.indexOf("--case");
 const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
-assert.ok(["single", "retry", "degrade", "concurrent"].includes(mode), `unknown case: ${mode}`);
+assert.ok(["single", "retry", "degrade", "concurrent", "scope"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -153,6 +153,19 @@ try {
     assert.ok((journalA.match(/"kind":"block"/g) ?? []).length >= 1, "session A journal has no block record");
     assert.ok((journalB.match(/"kind":"block"/g) ?? []).length >= 1, "session B journal has no block record");
     console.log("ALL PASS (concurrent-session isolation case)");
+    server.close();
+    await fs.rm(root, { recursive: true, force: true });
+    process.exit(0);
+  }
+  if (mode === "scope") {
+    // Same bundle in BOTH scopes: user scope (isolated agent dir) and project scope (cwd/.gjc).
+    const projectInstall = await run(["gjc", "plugin", "install", pluginRoot, "--project", "--json"], env, work);
+    const sessionArgs = ["gjc", "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-rules", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", "write,read", PROMPT];
+    const session = await run(sessionArgs);
+    const journal = await journalOf(home);
+    const blocks = (journal.match(/"kind":"block"/g) ?? []).length;
+    console.log(JSON.stringify({ kind: "alignment-host-block-observation", mode, projectInstallExit: projectInstall.status, sessionExit: session.status, blocks, duplicateHookFiredTwice: blocks > 1, remoteProviderRequests: 0 }, null, 2));
+    if (projectInstall.status !== 0) console.log(`project install: ${projectInstall.stdout}${projectInstall.stderr}`);
     server.close();
     await fs.rm(root, { recursive: true, force: true });
     process.exit(0);
