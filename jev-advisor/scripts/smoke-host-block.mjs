@@ -28,7 +28,7 @@ const pluginIndex = args.indexOf("--plugin");
 const pluginRoot = path.resolve(pluginIndex >= 0 ? args[pluginIndex + 1] : path.join(import.meta.dir, ".."));
 const caseIndex = args.indexOf("--case");
 const mode = caseIndex >= 0 ? args[caseIndex + 1] : "single";
-assert.ok(["single", "retry", "degrade", "concurrent", "scope", "subagent"].includes(mode), `unknown case: ${mode}`);
+assert.ok(["single", "retry", "degrade", "concurrent", "scope", "subagent", "throw"].includes(mode), `unknown case: ${mode}`);
 
 const root = await fs.realpath(await mkdtemp(path.join(tmpdir(), "alignment-host-")));
 const home = path.join(root, "home");
@@ -229,8 +229,12 @@ try {
     ),
   );
   if (!recorded) console.log(`stdout:\n${session.stdout}\nstderr:\n${session.stderr}`);
-  assert.equal(wroteFile, false, "the host wrote the file despite read-only authority");
-  if (mode === "subagent") {
+  if (mode !== "throw") assert.equal(wroteFile, false, "the host wrote the file despite read-only authority");
+  if (mode === "throw") {
+    // A poisoned copy (hook throws) must still let the host run the tool: fail-open.
+    assert.equal(wroteFile, true, "a throwing hook must not block the tool (fail-open)");
+    assert.equal(session.status, 0, "the session must still complete");
+  } else if (mode === "subagent") {
     assert.equal((journal.match(/"kind":"block"/g) ?? []).length, 0, "a subagent tool call must not be blocked");
     assert.equal(session.status, 0, `subagent session failed: ${session.stderr}`);
   } else if (mode === "retry") {
