@@ -37,6 +37,7 @@ Partial regularization: anything beyond this set is explicitly out of scope.
 - Keyless: the loop never reads credentials; logs and ledger rows contain no secrets.
 - Commits: at most three main commits per accepted cycle — ledger-only `chore(self-improve): cycle <cycleId> <decision>`, the code commit, and ledger-only `chore(self-improve): record adoption <cycleId>`. Push, install and release stay separate steps.
 - `subskills/jev-advisor/SKILL.md` is scored only as a `text_fixture` (plain text input); it is not a runtime-loaded surface.
+- Live Harness² trials need kernel-enforced containment, not a shared UID: `lib/isolation-runtime.mjs` builds a seatbelt profile and proves it with deny probes (write outside the trial mount, network egress, secret passthrough) plus a write-inside control. A missing runtime, a permitted deny probe or a blocked control reports `unavailable`/`fail`, never a pass. Provider-endpoint allowlisting and an approved budget window stay separate decisions.
 
 ## Status
 
@@ -65,6 +66,7 @@ node self-improve/scripts/run.mjs history --json
 node self-improve/scripts/run.mjs distill --json
 node self-improve/scripts/run.mjs distill --max-lag 15 --json
 node self-improve/scripts/run.mjs loop --candidate-file /tmp/candidate.json --ledger self-improve/ledger.jsonl --proposer cmd --proposer-cmd 'node tools/proposer.mjs {request} {response}' --max-cycles 1 --dry-run --json
+node self-improve/scripts/isolation-probe.mjs
 node self-improve/scripts/verify-unit.mjs
 node self-improve/scripts/verify-integration.mjs
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json
