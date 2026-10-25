@@ -147,7 +147,7 @@ Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev
 ```sh
 bun run build            # keyless builds for every plugin
 bun run build:check      # generated surfaces are in sync with sources (non-mutating)
-bun run test             # check-script fixtures, shared tests, every plugin suite, self-improve
+bun run test             # every test:* step (check-script fixtures, shared tests, plugin suites, self-improve), run concurrently
 bun run demo             # keyless end-to-end demo in a temporary HOME
 bun run onboarding:smoke # README quick start in a throwaway GJC root (needs gjc)
 bun run docs:check       # every relative Markdown link resolves
