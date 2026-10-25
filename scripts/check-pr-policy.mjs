@@ -87,6 +87,25 @@ function automaticTrigger(text) {
 	return null;
 }
 
+// Generated surfaces under each plugin's tools/ and hooks/ are committed, and
+// `bun run build` rewrites them in place. A lane that builds before comparing,
+// or that never proves the build left the committed files untouched, reports
+// green while main carries stale artifacts: the later `--check` fixtures read
+// the repaired tree (JJO-784). Order and gate are enforced per lane.
+function checkGeneratedSurfaceGate(label, text) {
+	const lines = text.split("\n");
+	const check = lines.findIndex(line => /run: bun run build:check\s*$/.test(line));
+	const build = lines.findIndex(line => /run: bun run build\s*$/.test(line));
+	const gate = lines.findIndex(line => line.includes("git status --porcelain"));
+	const gateFails = gate !== -1 && lines.slice(gate).some(line => /^\s+exit 1\s*$/.test(line));
+	if (check === -1) report(`${label}: must run bun run build:check`);
+	if (build === -1) report(`${label}: must run bun run build`);
+	if (check !== -1 && build !== -1 && check > build) report(`${label}: must check generated surfaces before bun run build rewrites them`);
+	if (gate === -1) report(`${label}: must assert bun run build left the committed tree unchanged (git status --porcelain)`);
+	else if (build !== -1 && gate < build) report(`${label}: the unchanged-tree gate must run after bun run build`);
+	if (gate !== -1 && !gateFails) report(`${label}: the unchanged-tree gate must exit non-zero on drift`);
+}
+
 let names = [];
 try {
 	names = readdirSync(workflows).filter(name => /\.ya?ml$/.test(name));
@@ -148,6 +167,7 @@ if (!existsSync(path.join(workflows, laneName))) {
 	if (!/no-cache: true/.test(candidate)) report(`${laneName}: candidate bun setup must set no-cache: true`);
 	if (!/ref: refs\/pull\/\$\{\{ inputs\.pr_number \}\}\/head/.test(candidate)) report(`${laneName}: candidate must check out the pull request head ref`);
 	if (!/test "\$actual" = "\$REVIEWED_SHA"/.test(candidate)) report(`${laneName}: candidate must assert the checked-out SHA equals the reviewed SHA`);
+	checkGeneratedSurfaceGate(`${laneName}: candidate`, candidate);
 
 	const verify = laneJobs.get("verify") ?? "";
 	if (!/contents: read/.test(verify) || !/statuses: write/.test(verify)) report(`${laneName}: verify must hold contents: read and statuses: write only`);
@@ -168,6 +188,7 @@ if (!existsSync(path.join(workflows, ciName))) {
 	if (!on || !/^ {2}push:\s*$/m.test(on) || !/branches: \[main\]/.test(on)) report(`${ciName}: trigger must be push to main only`);
 	if (/self-hosted/.test(text)) report(`${ciName}: use the arc-ci label, not a self-hosted literal`);
 	if (!/no-cache: true/.test(text)) report(`${ciName}: bun setup must set no-cache: true so a pull request cannot seed a restore path`);
+	checkGeneratedSurfaceGate(ciName, text);
 }
 
 // --- Legacy external-PR closer (only while it exists) -----------------------
