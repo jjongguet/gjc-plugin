@@ -229,3 +229,13 @@ only admitted for write-class actions and a write tool result carries no exit
 code. Use `artifact_exists` or `criterion_file` (a <=4 KiB JSON with an explicit
 `satisfied` boolean) for write-surface recovery; `exit_zero` remains valid only
 if a future surface admits command results into the same state machine.
+
+## Failure-recording coverage
+
+Every surface wraps its body and records a `hook_error` event with the error
+class before failing open. Coverage differs by construction: the before-surface
+and the observe-surface are proven by fixtures that inject throwing inputs,
+while the shutdown surface ignores its event argument and only touches the
+session facade, so the same injection cannot make it throw. Its `hook_error`
+path is therefore covered indirectly through the shared append/record helper
+rather than by a dedicated fixture.
