@@ -249,6 +249,30 @@ test("policy:check rejects unsafe changes to the owner-dispatched pull-request l
 	}
 });
 
+test("policy:check keeps the generated-surface drift gate ordered and failing", () => {
+	// `bun run build` rewrites the committed surfaces, so the ordering of the
+	// check/build pair and the post-build unchanged-tree assertion are the only
+	// things that stop drift from turning green (JJO-784).
+	const mutations = [
+		["ci pre-build drift check renamed", { file: "ci.yml", edit: text => text.replace("        run: bun run build:check", "        run: bun run build:check-skipped") }, /ci\.yml: must run bun run build:check/],
+		["ci builds before checking drift", { file: "ci.yml", edit: text => text.replace("      - name: Generated-surface drift check (non-mutating)\n        run: bun run build:check", "      - name: Build\n        run: bun run build\n\n      - name: Generated-surface drift check (non-mutating)\n        run: bun run build:check") }, /ci\.yml: must check generated surfaces before bun run build rewrites them/],
+		["ci post-build gate dropped", { file: "ci.yml", edit: text => text.replaceAll("git status --porcelain", "git status --short") }, /ci\.yml: must assert bun run build left the committed tree unchanged/],
+		["ci post-build gate no longer fails", { file: "ci.yml", edit: text => text.replace("            git status --porcelain\n            exit 1", "            git status --porcelain\n            exit 0") }, /ci\.yml: the unchanged-tree gate must exit non-zero on drift/],
+		["candidate builds before checking drift", { file: "pr-validate.yml", edit: text => text.replace("      - name: Generated-surface drift check\n        run: bun run build:check", "      - name: Build\n        run: bun run build\n\n      - name: Generated-surface drift check\n        run: bun run build:check") }, /pr-validate\.yml: candidate: must check generated surfaces before bun run build rewrites them/],
+		["candidate post-build gate dropped", { file: "pr-validate.yml", edit: text => text.replaceAll("git status --porcelain", "git status --short") }, /pr-validate\.yml: candidate: must assert bun run build left the committed tree unchanged/],
+	];
+	for (const [name, mutate, pattern] of mutations) {
+		const root = policyFixture(mutate);
+		try {
+			const result = run("check-pr-policy.mjs", root);
+			assert.equal(result.status, 1, `${name}: ${result.out}`);
+			assert.match(result.out, pattern, name);
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	}
+});
+
 function fakeGjc(output, status = 0) {
 	const bin = mkdtempSync(join(tmpdir(), "gjc-plugin-fake-gjc-"));
 	writeFileSync(join(bin, "gjc"), `#!/bin/sh\necho '${output}'\nexit ${status}\n`, { mode: 0o755 });

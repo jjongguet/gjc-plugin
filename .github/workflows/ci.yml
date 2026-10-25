@@ -51,6 +51,23 @@ jobs:
       - name: Build
         run: bun run build
 
+      # `bun run build` rewrites the generated surfaces in the working tree, so
+      # every later step — including the `--check` fixtures in
+      # scripts/tests/checks.test.mjs — inspects a repaired tree. Assert the
+      # build was a no-op over the committed files: a drifted commit then fails
+      # here even if the pre-build `build:check` step is reordered or broken
+      # (JJO-784: PR #6 renamed a shared constant without regenerating and no
+      # step proved the committed artifacts still matched).
+      - name: Build leaves the committed generated surfaces unchanged
+        run: |
+          set -eu
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "build rewrote the committed tree; regenerate and commit the generated surfaces:"
+            git status --porcelain
+            exit 1
+          fi
+          echo "build left the committed tree unchanged"
+
       # The four smoke guards (verification-receipts x2, jev-advisor x2) install
       # and drive a local `gjc` binary that hosted runners do not have; the
       # real-gjc trial integration case and the ultragoal gate contract fixture

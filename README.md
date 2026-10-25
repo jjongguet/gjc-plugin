@@ -162,7 +162,7 @@ Offline suites use disposable repositories and homes with synthetic or disabled 
 
 | Claim in this README | Evidence you can run or read |
 | --- | --- |
-| Generated tools and hooks match their sources | `bun run build:check` |
+| Generated tools and hooks match their sources | `bun run build:check`, plus the post-build unchanged-tree gate in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | Every plugin suite passes offline, without credentials | `bun run test` |
 | The quick start works in a fresh `gjc` process | `bun run onboarding:smoke` |
 | The demo output above is real | `bun run demo` |

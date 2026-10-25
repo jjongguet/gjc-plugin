@@ -35,7 +35,7 @@ Without a local `gjc`, use `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four ho
 
 ## Build and test chain
 
-- `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing.
+- `bun run build` builds every plugin (keyless). Generated surfaces under each plugin's `tools/` and `hooks/` are committed and must stay in sync; `bun run build:check` (or `bun <plugin>/scripts/build.mjs --check`) fails on drift without writing. Because the build rewrites those surfaces in place, a change to a shared source that feeds a builder must land with the regenerated artifacts in the same commit: both CI lanes assert `bun run build` leaves the committed tree unchanged (`git status --porcelain`), and `policy:check` fails if that assertion, `build:check`, or their check-before-build order is dropped.
 - `bun run test` runs every `test:*` script in `package.json` — fixture tests for the repository check scripts (`scripts/tests/`), shared tests, per-plugin suites (`bun <plugin>/scripts/verify.ts`), the self-improve integration guards and the workspace checks — through `scripts/run-checks.mjs`. The steps share nothing but this checkout, so the runner keeps up to 4 of them in flight (`GJC_TEST_CONCURRENCY=<n>` overrides the fan-out, `1` restores a serial run), reprints each step's output as one block, and exits 1 when any step fails.
 - `scripts/tests/ultragoal-gate.test.mjs` checks the installed `gjc` against the ultragoal gate evidence contract in [docs/ultragoal-gate-evidence.md](docs/ultragoal-gate-evidence.md); it fails when a `gjc` release changes that contract and skips when no `gjc` is on `PATH`.
 - Suites are hermetic: disposable repositories/homes, synthetic or disabled transport, isolated fake CLIs. Live credentials, real personal data and production services are never required and never used in tests.
@@ -56,7 +56,7 @@ The onboarding smoke installs `backplan` from the checkout into a throwaway GJC 
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push to `main` (the only automatic trigger in this repository): `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the full test chain and `bun run demo`. It has no `pull_request` trigger, and neither does any other workflow. Two
+`.github/workflows/ci.yml` runs on every push to `main` (the only automatic trigger in this repository): `build:check`, `evidence:check`, `docs:check`, `policy:check`, `bun run build`, the post-build unchanged-tree assertion, the full test chain and `bun run demo`. It has no `pull_request` trigger, and neither does any other workflow. Two
 check classes cannot run on hosted runners and are excluded by boundary, not by failure: the four smoke
 guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case and the ultragoal
 gate contract fixture self-skip with a recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its

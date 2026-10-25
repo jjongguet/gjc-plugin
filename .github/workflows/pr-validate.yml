@@ -113,6 +113,19 @@ jobs:
       - name: Build
         run: bun run build
 
+      # Same gate as ci.yml: the candidate must ship artifacts that the build
+      # reproduces byte for byte, not artifacts the build repairs on the way to
+      # a green test run.
+      - name: Build leaves the committed generated surfaces unchanged
+        run: |
+          set -eu
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "build rewrote the committed tree; regenerate and commit the generated surfaces:"
+            git status --porcelain
+            exit 1
+          fi
+          echo "build left the committed tree unchanged"
+
       - name: Test (smoke guards skipped - require a local gjc binary)
         env:
           SELF_IMPROVE_SKIP_SMOKE: "1"
