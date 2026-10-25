@@ -57,6 +57,7 @@ async function runSuite(root: string) {
 	const toolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-advise.ts")).href);
 	const checkToolModule = await import(pathToFileURL(path.join(plugin, "tools/jev-check.ts")).href);
 	const alignmentCore = await import(pathToFileURL(path.join(plugin, "lib/alignment.ts")).href);
+	const alignmentJournalCore = await import(pathToFileURL(path.join(plugin, "lib/alignment-journal.ts")).href);
 	const alignmentHookModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment.ts")).href);
 	const alignmentObserveModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment-observe.ts")).href);
 	const alignmentShutdownModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-alignment-shutdown.ts")).href);
@@ -1135,7 +1136,7 @@ async function runSuite(root: string) {
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
 		copyFileSync(path.join(plugin, "../shared/lib/decision-contract.ts"), path.join(root, "shared/lib/decision-contract.ts"));
-		for (const file of ["scripts/build.mjs", "lib/decision.ts", "lib/alignment.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "lib/decision.ts", "lib/alignment.ts", "lib/alignment-journal.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
 		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts", "hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
@@ -1444,21 +1445,86 @@ async function runSuite(root: string) {
 		assert.notEqual(last.status, "recovered", "an oversized criterion file never completes");
 	});
 
-	await check("truncated authority never claims alignment and never blocks", async () => {
+	await check("truncated authority never claims alignment, never blocks and reports the gap", async () => {
 		env();
+		// The requested target sits inside the scanned window while older entries
+		// stay unscanned, so the truncation guard alone stands between this write
+		// and a stage-2 admission. Dropping that guard flips the verdict below.
 		const entries = [
-			alignmentUser("entry-old", "Implement `src/demo.ts`"),
-			...Array.from({ length: 14 }, (_, index) => alignmentUser("entry-filler-" + index, "continue")),
+			...Array.from({ length: 13 }, (_, index) => alignmentUser("entry-filler-" + index, "continue")),
+			alignmentUser("entry-scope", "Implement `src/demo.ts`"),
 		];
 		const truncated = alignmentCore.collectAuthority(entries, { windowSize: 12 });
 		assert.equal(truncated.authorityTruncated, true, "a 14-entry tail over a 12-entry window is truncated");
 		assert.equal(truncated.constraints.length, 0);
+		assert.ok(truncated.scopeDigests.includes(alignmentCore.digestTarget("src/demo.ts")), "the scanned window still names the target");
 		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: truncated });
+		assert.equal(evaluation.verdict, "uncertain", "truncated authority never yields aligned");
+		assert.equal(evaluation.block, false, "truncated authority never blocks");
+		assert.equal(evaluation.stage2Admissible, false, "truncated authority never admits a write");
+		assert.equal(evaluation.coverage, "coverage_gap", "a partially read authority is a coverage gap, matching ADR 0002");
 		const narrow = alignmentCore.collectAuthority([alignmentUser("entry-only", "Implement `src/demo.ts`")], { windowSize: 12 });
 		assert.equal(narrow.authorityTruncated, false, "a single entry is complete authority");
 		assert.ok(narrow.scopeDigests.includes(alignmentCore.digestTarget("src/demo.ts")), "the narrow authority still scopes the write");
-		assert.equal(evaluation.verdict, "uncertain", "truncated authority never yields aligned");
-		assert.equal(evaluation.block, false, "truncated authority never blocks");
+		const admitted = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority: narrow });
+		assert.deepEqual(
+			[admitted.ruleId, admitted.verdict, admitted.coverage, admitted.stage2Admissible],
+			["aligned_write_within_requested_scope", "aligned", "evaluated", true],
+			"the same target is admitted once the authority is complete",
+		);
+	});
+
+	await check("N1 a hung journal store is bounded and degrades every read and append", async () => {
+		env();
+		const ctx = alignmentContext([]);
+		const now = Date.now();
+		// Failure induction: an injected store that never settles. Without the
+		// deadline in the store this case would never resolve.
+		const hungIo = {
+			readFile: () => new Promise(() => {}),
+			appendFile: () => new Promise(() => {}),
+			writeFile: () => new Promise(() => {}),
+			mkdir: () => new Promise(() => {}),
+		} as any;
+		const startedAt = Date.now();
+		const loaded = await alignmentJournalCore.loadJournalStore(ctx, now, 30, hungIo);
+		assert.equal(loaded.available, false, "a bounded-out read is degraded storage");
+		assert.equal(loaded.snapshot.latest, null, "a bounded-out read never invents a recovery state");
+		const stored = await alignmentJournalCore.appendJournalStore(ctx, [alignmentCore.recordHookError({ errorClass: "hung", now })], now, 30, hungIo);
+		assert.equal(stored, false, "a bounded-out append is not stored");
+		const elapsed = Date.now() - startedAt;
+		assert.ok(elapsed < 1000, `both store calls must be bounded (took ${elapsed}ms)`);
+		// Positive control: the same seam with the production I/O still persists.
+		const appended = await alignmentJournalCore.appendJournalStore(ctx, [alignmentCore.recordHookError({ errorClass: "probe", now })], now, 500);
+		assert.equal(appended, true, "the default I/O is the real store");
+		const reread = await alignmentJournalCore.loadJournalStore(ctx, now, 500);
+		assert.equal(reread.available, true);
+		assert.equal(reread.snapshot.events.at(-1).kind, "hook_error", "the shared store round-trips a record");
+	});
+
+	await check("N1b every surface journal await is one bounded store call with the shared budget", () => {
+		for (const name of ["src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) {
+			const text = readFileSync(path.join(plugin, name), "utf8");
+			assert.ok(text.includes("journalStoreBudgetMs()"), `${name} resolves the store budget per call`);
+			const calls = text.split("\n").filter(line => /(?:load|append)JournalStore\(/.test(line));
+			assert.equal(calls.length, 3, `${name} has one bounded read and two bounded appends`);
+			for (const call of calls) assert.match(call.trim(), /storeBudgetMs\);$/, `${name} passes the bounded budget: ${call.trim()}`);
+		}
+	});
+
+	await check("N2 the three alignment surfaces share one journal store with no private plumbing", () => {
+		const retired = ["alignmentAppendEvents", "alignmentLoadJournal", "alignmentJournalFiles", "alignmentReadText", "alignmentSessionKey"];
+		for (const name of ["src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) {
+			const text = readFileSync(path.join(plugin, name), "utf8");
+			assert.ok(text.includes('from "../lib/alignment-journal"'), `${name} imports the shared journal store`);
+			for (const copy of retired) assert.ok(!text.includes(`function ${copy}(`), `${name} keeps no local ${copy} copy`);
+			assert.ok(!/await (?:readFile|appendFile|writeFile|mkdir)\(/.test(text), `${name} performs no unbounded journal await`);
+		}
+		const shared = ["journalSessionKey", "journalFiles", "journalReadText", "loadJournalStore", "appendJournalStore"];
+		for (const name of ["hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
+			const text = readFileSync(path.join(plugin, name), "utf8");
+			for (const fn of shared) assert.equal(text.split(`function ${fn}(`).length - 1, 1, `${name} carries exactly one ${fn} definition`);
+		}
 	});
 
 	await check("N3 a hung journal append degrades instead of delaying the verdict", async () => {

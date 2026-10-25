@@ -177,6 +177,15 @@ try {
   }
   assert.equal(install.status, 0, `plugin install failed: ${install.stdout}${install.stderr}`);
 
+  if (mode === "throw") {
+    // Poison the installed copy so the before-tool alignment hook throws. A
+    // throwing hook must fail open: the host still runs the tool and the
+    // session still completes.
+    const poisonedHook = path.join(agent, "gjc-plugins", "jev-advisor", "hooks", "jev-advisor-alignment.ts");
+    assert.equal(existsSync(poisonedHook), true, "the installed before-tool hook is present");
+    await fs.writeFile(poisonedHook, 'throw new Error("poisoned alignment hook");\n', { mode: 0o600 });
+  }
+
   const session = await run([
     "gjc",
     "--print",

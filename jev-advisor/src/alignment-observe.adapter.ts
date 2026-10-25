@@ -2,27 +2,20 @@
 // observes the declared criterion and completes the recovery only on a
 // false|unknown → true transition. Never rewrites a tool result; never blocks.
 import { existsSync, readFileSync } from "node:fs";
-import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
-import path from "node:path";
 import {
-	ALIGNMENT_LIMITS,
 	collectAuthority,
-	compactJournalText,
 	digestTarget,
 	digestText,
 	evaluateCompletion,
 	normalizeTarget,
 	observeResult,
-	planJournalAppend,
-	readJournalTexts,
 	recordHookError,
 	type AlignmentEvent,
 	type AlignmentState,
 	type Authority,
-	type JournalSnapshot,
 	type Observation,
 } from "../lib/alignment";
+import { appendJournalStore, journalStoreBudgetMs, loadJournalStore } from "../lib/alignment-journal";
 
 const ALIGNMENT_WRITE_TOOLS = new Set([
 	"write",
@@ -44,12 +37,15 @@ export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
 }) {
 	api.on("tool_result", async (event, ctx) => {
+		// One store budget for this result's read and appends: a hung store
+		// degrades to "unavailable"/"not stored" instead of delaying the host.
+		const storeBudgetMs = journalStoreBudgetMs();
 		try {
 			const result = alignmentAsRecord(event);
 			if (!result || result.type !== "tool_result") return undefined;
 			if (!alignmentIsWriteTool(result.toolName)) return undefined;
 			const now = Date.now();
-			const { snapshot } = await alignmentLoadJournal(ctx, now);
+			const { snapshot } = await loadJournalStore(ctx, now, storeBudgetMs);
 			const state = snapshot.latest;
 			if (!state || state.step !== 2 || state.status !== "aligned_admitted" || state.actionClass !== "write") return undefined;
 			const toolCallIdDigest = alignmentToolCallDigest(result.toolCallId);
@@ -74,13 +70,13 @@ export default function register(api: {
 				// A different call is not this recovery; it is ignored, not claimed.
 				return undefined;
 			}
-			if (events.length > 0) await alignmentAppendEvents(ctx, events, now);
+			if (events.length > 0) await appendJournalStore(ctx, events, now, storeBudgetMs);
 			return undefined;
 		} catch (error) {
 			// hook_error: observers are always fail-open, but the failure class stays
 			// auditable like the before-surface.
 			try {
-				await alignmentAppendEvents(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now());
+				await appendJournalStore(ctx, [recordHookError({ errorClass: error instanceof Error ? error.name || "error" : "non_error", now: Date.now() })], Date.now(), storeBudgetMs);
 			} catch {
 				// Recording must never change the outcome.
 			}
@@ -181,62 +177,5 @@ function alignmentObservation(state: AlignmentState, result: Record<string, any>
 		return existsSync(target) ? "true" : "false";
 	} catch {
 		return "unknown";
-	}
-}
-
-function alignmentSessionKey(ctx: unknown): string {
-	const record = alignmentAsRecord(ctx);
-	const manager = record ? alignmentAsRecord(record.sessionManager) : null;
-	if (manager && typeof manager.getSessionId === "function") {
-		try {
-			const value = manager.getSessionId.call(manager);
-			if (typeof value === "string" && value.trim() && value.length <= 512) return digestText(value.trim()).slice(0, 16);
-		} catch {
-			// An unreadable session id falls back to the shared segment.
-		}
-	}
-	return "default";
-}
-
-function alignmentJournalFiles(ctx: unknown): { directory: string; current: string; rotated: string } {
-	// Bun can cache os.homedir across HOME changes; honor the process-owned home.
-	// One bounded segment pair per session keeps concurrent sessions apart.
-	const directory = path.join(process.env.HOME || homedir(), ".gjc-plugin", "jev-advisor", "alignment", "v1", alignmentSessionKey(ctx));
-	return { directory, current: path.join(directory, "events.jsonl"), rotated: path.join(directory, "events.1.jsonl") };
-}
-
-async function alignmentReadText(file: string): Promise<{ text: string | null; available: boolean }> {
-	try {
-		const text = await readFile(file, "utf8");
-		return { text, available: Buffer.byteLength(text, "utf8") <= ALIGNMENT_LIMITS.maxTotalBytes };
-	} catch (error) {
-		return { text: null, available: (error as NodeJS.ErrnoException | null)?.code === "ENOENT" };
-	}
-}
-
-async function alignmentLoadJournal(ctx: unknown, now: number): Promise<{ snapshot: JournalSnapshot; available: boolean }> {
-	const files = alignmentJournalFiles(ctx);
-	const rotated = await alignmentReadText(files.rotated);
-	const current = await alignmentReadText(files.current);
-	return { snapshot: readJournalTexts([rotated.text, current.text], now), available: rotated.available && current.available };
-}
-
-async function alignmentAppendEvents(ctx: unknown, events: readonly AlignmentEvent[], now: number): Promise<boolean> {
-	if (events.length === 0) return true;
-	const files = alignmentJournalFiles(ctx);
-	try {
-		await mkdir(files.directory, { recursive: true, mode: 0o700 });
-		const existing = await alignmentReadText(files.current);
-		const plan = planJournalAppend(existing.text ?? "", events, now);
-		if (!plan.text) return plan.skipped === 0;
-		if (plan.rotate) {
-			await writeFile(files.rotated, compactJournalText(existing.text ?? "", now), { mode: 0o600 });
-			await writeFile(files.current, plan.text, { mode: 0o600 });
-		} else {
-			await appendFile(files.current, plan.text, { mode: 0o600 });
-		}
-		return true;
-	} catch {
-		return false;
 	}
 }
