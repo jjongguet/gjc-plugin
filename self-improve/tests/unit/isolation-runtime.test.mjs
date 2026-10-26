@@ -55,13 +55,13 @@ test("a probe set that cannot be enforced reports unavailable, never a pass", ()
 test("a runtime that permits the denied action or blocks the control fails closed", () => {
   // Every write succeeds: the sandbox is not containing anything.
   const open = fakeRun({ "/bin/sh": ACCEPTED });
-  const leaked = probeIsolation({ mountDir: "/tmp/trial", run: open.run, outsideDir: "/tmp" });
+  const leaked = probeIsolation({ mountDir: "/tmp/trial", runtime: SEATBELT_RUNTIME, run: open.run, outsideDir: "/tmp" });
   assert.equal(leaked.status, "fail");
   assert.equal(leaked.probes.find((probe) => probe.id === "write_outside_mount_denied").passed, false);
 
   // The control fails so the profile proves nothing about an allowed write.
   const closed = fakeRun({ "inside-probe.txt": REJECTED, "curl": REJECTED });
-  const unusable = probeIsolation({ mountDir: "/tmp/trial", run: closed.run, outsideDir: "/tmp" });
+  const unusable = probeIsolation({ mountDir: "/tmp/trial", runtime: SEATBELT_RUNTIME, run: closed.run, outsideDir: "/tmp" });
   assert.equal(unusable.status, "fail");
   assert.equal(unusable.probes.find((probe) => probe.id === "write_inside_mount_allowed").passed, false);
 });
