@@ -191,7 +191,8 @@ printf '%s\\n' "$tmux_rows" | while IFS='|' read -r n c p; do
   printf 'tmux\\t%s\\t%s\\t%s\\n' "$n" "$c" "$p"
 done
 for d in "$origin"/*/ "$origin"/lanes/*/; do
-  [ -d "$d/.git" ] || continue
+  # 워크트리의 .git 은 디렉터리가 아니라 파일이라 -d 로 검사하면 레인이 전부 빠진다.
+  [ -e "$d/.git" ] || continue
   case "$d" in "$origin"/lanes/*)
     lane_remote=$(git -C "$d" config --get remote.origin.url 2>/dev/null)
     lane_repo=$(printf '%s' "$lane_remote" | sed -E 's#.*/([^/]+?)(\\.git)?$#\\1#')
