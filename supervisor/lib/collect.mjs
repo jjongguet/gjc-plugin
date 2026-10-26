@@ -92,7 +92,9 @@ export async function collectSessions({
 async function collectLaneSessions({ runner, now, errors }) {
   const listing = await runner("tmux", ["ls", "-F", TMUX_FORMAT]);
   if (!listing.ok) {
-    errors.push({ target: "lane", error: listing.error ?? `tmux_exit_${listing.code}` });
+    const detail = (listing.stderr ?? "").split("\n").filter(Boolean)[0] ?? "";
+    const code = listing.code !== null ? `tmux_exit_${listing.code}` : (listing.error ?? "tmux_failed");
+    errors.push({ target: "lane", error: detail ? `${code}: ${detail.slice(0, 80)}` : code });
     return [];
   }
   const rows = listing.stdout
@@ -241,7 +243,7 @@ export function parseMiniRecords(stdout) {
 async function collectMiniSessions({ runner, now, host, errors }) {
   const remote = await runner("ssh", ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10", host, MINI_SCRIPT], { timeoutMs: 30000 });
   if (!remote.ok) {
-    errors.push({ target: "mini", error: remote.error ?? `ssh_exit_${remote.code}` });
+    errors.push({ target: "mini", error: remote.code !== null ? `ssh_exit_${remote.code}` : (remote.error ?? "ssh_failed") });
     return [];
   }
   const parsed = parseMiniRecords(remote.stdout);
