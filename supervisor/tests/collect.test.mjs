@@ -81,7 +81,7 @@ test("an unreachable mini host is a recorded error and the run continues", async
 });
 
 test("mini records parse into sessions with the tmux age when a session matches the checkout", async () => {
-  const origin = "/home/gjc/jjongguet";
+  const origin = "/srv/jjongguet";
   const remoteOutput = [
     `origin\t${origin}`,
     `repo\twhoos\tfeat/whoos-contract\t2\t4\t2026-10-27T00:00:00+09:00\tfeat: contract\tabc123\thttps://github.com/jjongguet/whoos.git`,
@@ -106,8 +106,9 @@ test("mini records parse into sessions with the tmux age when a session matches 
 });
 
 test("parseMiniRecords keeps usable rows and ignores noise", () => {
-  const parsed = parseMiniRecords(["", "noise", "repo\tonly-three\tfields", `origin\t${"/home/gjc/jjongguet"}`].join("\n"));
-  assert.equal(parsed.origin, "/home/gjc/jjongguet");
+  const origin = "/srv/jjongguet";
+  const parsed = parseMiniRecords(["", "noise", "repo\tonly-three\tfields", `origin\t${origin}`].join("\n"));
+  assert.equal(parsed.origin, origin);
   assert.deepEqual(parsed.repos, []);
   assert.deepEqual(parsed.tmux, []);
 });
