@@ -12,6 +12,7 @@ supervisor/bin/supervisor once                      # one snapshot + Discord sum
 supervisor/bin/supervisor once --dry-run            # collect, judge, print; no steer, no webhook
 supervisor/bin/supervisor loop --interval 600       # repeat in a user-started tmux session
 supervisor/bin/supervisor once --steer lane-JJO-913-supervisor   # real nudge, one target
+supervisor/bin/session-guard JJO-895 gjc-plugin     # refuse a second session on one ticket (exit 2)
 ```
 
 `supervisor loop` runs until stopped (`Ctrl-C`/`SIGTERM` finishes the current run
@@ -20,6 +21,33 @@ session the operator started.
 
 Flags: `--out DIR` (state directory, default `~/.gjc-plugin/supervisor`),
 `--no-discord`, `--no-mini`, `--json`, `--count N`.
+
+## Duplicate session guard (JJO-895)
+
+`lane-gjc run` refuses a duplicate session *name* only, so two sessions on the
+same ticket in the same repository could start and edit the same files (six
+sessions on one mini checkout were observed on 2026-10-27). `session-guard`
+answers that question before a start:
+
+```sh
+supervisor/bin/session-guard <ticket> <repo> [--no-mini] [--json]
+node supervisor/bin/session-guard JJO-895 /path/to/lane-worktree
+```
+
+- Liveness is the tmux listing only (`collect.mjs`); a handoff file or a branch
+alone never proves a session exists. A lane worktree whose pane directory was
+deleted, or a mini checkout whose tmux session is gone, is a leftover and does
+not block.
+- The ticket is matched against strings the session itself carries: session
+name, tmux session name, branch and worktree path (`JJO-895`, `jjo895` and
+`S42-JJO-895.md` all match). The repository comes from the session's origin
+remote, so the same ticket in another repository passes.
+- Exit codes: `0` clear, `2` live duplicate (the reason lists the session name,
+start time and age), `3` the tmux listing failed so absence is unproven, `1`
+usage. Sessions whose origin remote cannot be read are printed as `레포 미확인`
+rather than treated as a match.
+- Read-only: it starts, steers and kills nothing. Ending the duplicate session
+and restarting remains the operator's call.
 
 ## What is collected
 
