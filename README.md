@@ -23,6 +23,8 @@ gjc plugin install ./backplan --user
 gjc plugin list
 ```
 
+Keep this checkout. The install records its absolute path as the plugin's source, and `gjc plugin upgrade` resolves that path again later; a moved or deleted clone leaves the upgrade pointing at a source that no longer exists (see [Troubleshooting](#troubleshooting)).
+
 Start a **new** `gjc` session in the clone (tools load when a session starts) and ask:
 
 > Run backplan_check with plan_path backplan/examples/valid-plan.json, then with plan_path backplan/examples/invalid-plan.json.
@@ -136,6 +138,7 @@ Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev
 | --- | --- |
 | `gjc: command not found` | gajae-code is not installed or not on `PATH`. Install it from [gajae-code](https://github.com/Yeachan-Heo/gajae-code); `node scripts/onboarding-smoke.mjs` reports the missing prerequisite and exits `2`. |
 | `gjc plugin install` refuses because the plugin is already installed | Replace it: `gjc plugin uninstall <name> --user`, then install again. |
+| `gjc plugin upgrade` fails with `The stored source for GJC bundle "<name>" could not be resolved` | The plugin was installed from a path that no longer exists, for example a temporary worktree or a deleted clone. Reinstall from the checkout you keep: `gjc plugin uninstall <name> --user`, then `gjc plugin install <path> --user`. |
 | An installed tool is missing from the session | Tools and hooks load when a session starts. Start a new `gjc` process, then check `gjc plugin list` and `gjc plugin doctor`. |
 | `jev_advise` or `jev_check` returns `no_decision` with reason `disabled` | No decision-model key is configured. This is the documented keyless behaviour; add `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` to enable advice. |
 | A metrics or journal read fails with `store_corrupt` after upgrading several plugins | An older `jev-advisor` read records written by a newer `verification-receipts`. Reinstall `jev-advisor` first, `verification-receipts` second, then the rest ([install order](CONTRIBUTING.md#install-order-and-replacement)). |
