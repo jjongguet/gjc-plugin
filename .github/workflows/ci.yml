@@ -70,8 +70,9 @@ jobs:
 
       # The four smoke guards (verification-receipts x2, jev-advisor x2) install
       # and drive a local `gjc` binary that hosted runners do not have; the
-      # real-gjc trial integration case and the ultragoal gate contract fixture
-      # (scripts/tests/ultragoal-gate.test.mjs) likewise skip themselves when no
+      # real-gjc trial integration case and the ultragoal contract fixtures
+      # (scripts/tests/ultragoal-gate.test.mjs, ultragoal-succession.test.mjs)
+      # likewise skip themselves when no
       # `gjc` binary is on PATH. The workspace-standard validator guard is planned only
       # where its local tree sits beside the repository (self-improve/lib/guards.mjs).
       # All boundaries are recorded in CONTRIBUTING.md, never silently passed.
