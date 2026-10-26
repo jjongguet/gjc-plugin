@@ -210,6 +210,9 @@ for d in "$origin"/*/ "$origin"/lanes/*/; do
   else
     since_start=""
   fi
+  # 살아 있는 tmux 세션이 없는 최상위 체크아웃은 세션이 아니라 남은 브랜치다.
+  # (미니 최상위 레포에 남은 feature 브랜치를 세션으로 세면 정체로 잘못 보고된다.)
+  case "$d" in "$origin"/lanes/*) ;; *) [ -n "\${created:-}" ] || continue ;; esac
   dirty=$(git -C "$d" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
   last_at=$(git -C "$d" log -1 --format=%cI 2>/dev/null)
   last_subject=$(git -C "$d" log -1 --format=%s 2>/dev/null)
