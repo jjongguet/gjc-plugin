@@ -2,6 +2,22 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.14] - 2026-10-26
+
+Plugins: jev-advisor 0.0.10 · verification-receipts 0.0.6 · ui-regression 0.0.7 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
+
+### Added
+
+- `scripts/tests/ultragoal-succession.test.mjs` reproduces the ultragoal succession lifecycle of the installed `gjc` (JJO-513): `succession offer` → `adopt` → the successor completes every handed-off goal → the source run must finish cleanly. The stable scenario steps always assert; the close assertion skips with a recorded reason while the installed `gjc` still refuses `complete-goals` through the outgoing fence (verified on 0.18.12 and 0.19.0), and fails when that refusal message changes.
+
+### Fixed
+
+- **ui-regression**: `ui_regression_run` pins its Aside REPL invocation to the local session host (`--host local`). The scenario origin is strictly loopback, so the browser must run on the machine that serves the fixture; a cloud session host can never reach it and every run ended `failed: origin_drift` (JJO-745). A real-browser clean pass (visible/text assertions passing, owned tab closed) is now reachable; the runner still opens only its own tab in the shared local Aside Browser and never attaches to existing tabs.
+
+### Upgrade notes
+
+- Reinstall `ui-regression` and start a new `gjc` session: tool behavior is read at session start.
+
 ## [0.0.13] - 2026-10-26
 
 Plugins: jev-advisor 0.0.10 · verification-receipts 0.0.6 · ui-regression 0.0.6 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2

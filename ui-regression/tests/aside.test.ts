@@ -187,8 +187,8 @@ describe('Aside invocation lifecycle',() => {
   it('invokes exactly once and excludes private values from receipts',async () => withLock(async dir => {
     let calls = 0;
     const result = await runAsideScenario(scenario,'private-account',1000,undefined,{lockDir:dir,invoke:async args => {
-      calls++; expect(args.slice(0,3)).toEqual(['repl','--account','private-account']);
-      const actualNonce = JSON.parse(args[3].match(/const nonce = ("[^"]+");/)![1]);
+      calls++; expect(args.slice(0,5)).toEqual(['repl','--host','local','--account','private-account']);
+      const actualNonce = JSON.parse(args[5].match(/const nonce = ("[^"]+");/)![1]);
       return {exitCode:0,signal:null,stdout:frames().join('\n').replaceAll(nonce,actualNonce),stderr:'private raw error'};
     }});
     expect(calls).toBe(1); expect(result.status).toBe('passed');
@@ -208,7 +208,7 @@ describe('Aside invocation lifecycle',() => {
     const result=await runAsideScenario(scenario,'account',1000,undefined,{lockDir:dir,invoke:async args=>{
       await rename(join(dir,'run.lock'),join(dir,'owned-original.lock'));
       await writeFile(join(dir,'run.lock'),'foreign-lock-sentinel',{mode:0o600});
-      const actualNonce=JSON.parse(args[3].match(/const nonce = ("[^"]+");/)![1]);
+      const actualNonce=JSON.parse(args[5].match(/const nonce = ("[^"]+");/)![1]);
       return {exitCode:0,signal:null,stdout:frames().join('\n').replaceAll(nonce,actualNonce),stderr:''};
     }});
     expect(result.status).toBe('incomplete');expect(result.reason).toBe('unsafe_lock');expect(result.cleanup).toBe('confirmed');expect(result.assertions[0].status).toBe('passed');
@@ -217,7 +217,7 @@ describe('Aside invocation lifecycle',() => {
   it('does not remove a lock that acquires another hardlink during execution',async()=>withLock(async dir=>{
     const result=await runAsideScenario(scenario,'account',1000,undefined,{lockDir:dir,invoke:async args=>{
       await link(join(dir,'run.lock'),join(dir,'foreign-alias.lock'));
-      const actualNonce=JSON.parse(args[3].match(/const nonce = ("[^"]+");/)![1]);
+      const actualNonce=JSON.parse(args[5].match(/const nonce = ("[^"]+");/)![1]);
       return {exitCode:0,signal:null,stdout:frames().join('\n').replaceAll(nonce,actualNonce),stderr:''};
     }});
     expect(result.reason).toBe('unsafe_lock');expect(result.assertions.length).toBe(1);expect(await readFile(join(dir,'run.lock'),'utf8')).toBe('');expect(await readFile(join(dir,'foreign-alias.lock'),'utf8')).toBe('');

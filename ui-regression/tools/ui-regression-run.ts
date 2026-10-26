@@ -1668,7 +1668,10 @@ export async function runAsideScenario(scenario: UiScenario, account: string, ti
   const timer = setTimeout(() => { timedOut = true; controller.abort(); },timeoutMs);
   try {
     const nonce = uiAsideRandom(24).toString('hex');
-    const invocation = (deps?.invoke ?? uiAsideInvoke)(['repl','--account',account,buildAsideCode(clean,nonce)],controller.signal);
+    // The scenario origin is strictly loopback, so the browser must run on this
+    // machine: pin the local session host. A cloud session host can never reach
+    // the loopback fixture and every run would end in origin_drift (JJO-745).
+    const invocation = (deps?.invoke ?? uiAsideInvoke)(['repl','--host','local','--account',account,buildAsideCode(clean,nonce)],controller.signal);
     const output = deps?.invoke ? await Promise.race([invocation,new Promise<never>((_resolve,reject) => {
       const abort = () => { mockTimer = setTimeout(() => reject(new Error('cleanup_unconfirmed')),100); };
       if (controller.signal.aborted) abort(); else controller.signal.addEventListener('abort',abort,{once:true});
@@ -1705,7 +1708,7 @@ export default function uiRegressionRun(pi:{cwd:string;typebox:{Type:any}}) {
  const T=pi.typebox.Type;
  return {
   name:'ui_regression_run',label:'UI Regression Run',
-  description:'Execute one explicitly authorized non-sensitive loopback scenario through ONE Aside REPL invocation. Inspect handlers first: loopback is not a sandbox. Open/close only the owned new tab, fresh snapshots and unique visible current CSS locators, literal exact/substring assertions; no screenshots, user tabs, result imports or arbitrary JS. Account is explicit ephemeral routing, never in receipts. Automatically attempt Jev adequacy every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known; omission does not disable the call. Only validated selected summaries/notes and bounded host facts leave, not scenario text, account, inputs, selectors or snapshots. Warning-only; no repair loops or blocking. Missing context is not adequate verification. Historical browser evidence is not current/deployed UI evidence.',
+  description:'Execute one explicitly authorized non-sensitive loopback scenario through ONE Aside REPL invocation pinned to the local session host (--host local): the scenario origin is strictly loopback, so the browser must run on this machine and a cloud session host can never reach the fixture. Inspect handlers first: loopback is not a sandbox. Open/close only the owned new tab in the local Aside Browser and never attach to existing tabs; fresh snapshots and unique visible current CSS locators, literal exact/substring assertions; no screenshots, user tabs, result imports or arbitrary JS. Account is explicit ephemeral routing, never in receipts. Automatically attempt Jev adequacy every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known; omission does not disable the call. Only validated selected summaries/notes and bounded host facts leave, not scenario text, account, inputs, selectors or snapshots. Warning-only; no repair loops or blocking. Missing context is not adequate verification. Historical browser evidence is not current/deployed UI evidence.',
   parameters:T.Object({
    account:T.String({minLength:1,maxLength:64,description:'Explicit Aside account routing only; not persisted or included in evidence.'}),
    scenario:T.Object({id:T.String({maxLength:64}),expectedBehavior:T.String({maxLength:2000}),steps:T.Array(T.Union([

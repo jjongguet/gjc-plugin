@@ -198,7 +198,10 @@ export async function runAsideScenario(scenario: UiScenario, account: string, ti
   const timer = setTimeout(() => { timedOut = true; controller.abort(); },timeoutMs);
   try {
     const nonce = uiAsideRandom(24).toString('hex');
-    const invocation = (deps?.invoke ?? uiAsideInvoke)(['repl','--account',account,buildAsideCode(clean,nonce)],controller.signal);
+    // The scenario origin is strictly loopback, so the browser must run on this
+    // machine: pin the local session host. A cloud session host can never reach
+    // the loopback fixture and every run would end in origin_drift (JJO-745).
+    const invocation = (deps?.invoke ?? uiAsideInvoke)(['repl','--host','local','--account',account,buildAsideCode(clean,nonce)],controller.signal);
     const output = deps?.invoke ? await Promise.race([invocation,new Promise<never>((_resolve,reject) => {
       const abort = () => { mockTimer = setTimeout(() => reject(new Error('cleanup_unconfirmed')),100); };
       if (controller.signal.aborted) abort(); else controller.signal.addEventListener('abort',abort,{once:true});
