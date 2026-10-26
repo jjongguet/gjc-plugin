@@ -42,7 +42,7 @@ const USAGE = `usage:
 export function parseArgs(argv) {
   const [command, ...rest] = argv;
   if (!command || command === "--help" || command === "-h") return { command: "help" };
-  if (command !== "once" && command !== "loop") return { error: `unknown command: ${command}` };
+  if (command !== "once" && command !== "loop") throw new Error(`unknown command: ${command}`);
   const options = {
     command,
     out: path.join(os.homedir(), ".gjc-plugin", "supervisor"),

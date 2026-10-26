@@ -215,7 +215,7 @@ export function parseMiniRecords(stdout) {
     if (line.trim() === "") continue;
     const fields = line.split("\t");
     if (fields[0] === "origin" && fields[1]) rows.origin = fields[1];
-    else if (fields[0] === "repo" && fields[1]) {
+    else if (fields[0] === "repo" && fields[1] && fields.length >= 6 && fields[2]) {
       rows.repos.push({
         repo: fields[1],
         branch: fields[2] || null,

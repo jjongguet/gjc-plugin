@@ -2,6 +2,12 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [Unreleased]
+
+### Added
+
+- `supervisor/` — a repository-native workspace session supervisor (JJO-913): ten-minute collection over local lane sessions and the mini host, deterministic stall judgment (`progressing`/`thrashing`/`stalled`/`starting`/`unknown`), one `jev-omni` decision only for the dirty-tree ambiguity, a Discord summary, and a single-target `tmux send-keys` steer with marker verification. No kill path and no daemon install; the loop runs only in an operator-started tmux session.
+
 ## [0.0.14] - 2026-10-26
 
 Plugins: jev-advisor 0.0.10 · verification-receipts 0.0.6 · ui-regression 0.0.7 · wiki 0.0.5 · rea 0.0.5 · backplan 0.0.8 · rrsi 0.0.4 · aside-memory 0.0.2
