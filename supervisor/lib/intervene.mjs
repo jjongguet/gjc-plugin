@@ -33,7 +33,7 @@ export function formatSteerMessage({ session, judgment, marker }) {
  */
 export async function steerSession({ target, message, marker, dryRun = true, runner = defaultRunner, settleMs = 1500 }) {
   const command = ["tmux", "send-keys", "-t", target, "-l", message];
-  const base = { mode: dryRun ? "dry-run" : "real", target, delivered: false, verified: false, marker, command, error: null };
+  const base = { mode: dryRun ? "dry-run" : "real", target, delivered: false, verified: false, marker, command, message, error: null };
   if (!isSteerTarget(target)) return { ...base, error: "invalid_target" };
   if (dryRun) return base;
 
@@ -44,7 +44,8 @@ export async function steerSession({ target, message, marker, dryRun = true, run
   await new Promise(resolve => setTimeout(resolve, settleMs));
   const pane = await runner("tmux", ["capture-pane", "-p", "-t", target]);
   const verified = pane.ok && pane.stdout.includes(marker);
-  return { ...base, delivered: true, verified, error: verified ? null : "marker_not_observed" };
+  const paneTail = pane.ok ? pane.stdout.trimEnd().split("\n").slice(-12).join("\n") : null;
+  return { ...base, delivered: true, verified, paneTail, error: verified ? null : "marker_not_observed" };
 }
 
 export function validateWebhookUrl(value) {
