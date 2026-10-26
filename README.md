@@ -182,6 +182,10 @@ All plugin-owned result and state writes go to `~/.gjc-plugin/` (owned `0700` di
 
 [`self-improve/`](self-improve/) is a repository-native loop that proposes edits to this repository's own declared surfaces, checks them with deterministic guards in `git archive` scratch copies, and records every decision, including every rejection, in an append-only [ledger](self-improve/ledger.jsonl). Measured campaigns and their limits are in [self-improve/evidence/](self-improve/evidence/README.md). The [Harness² comparison](self-improve/HARNESS2.md) is a research proposal, not an installed capability.
 
+## Workspace session supervisor
+
+[`supervisor/`](supervisor/README.md) is a repository-native CLI (not a plugin) that collects the local lane sessions and the mini host's checkouts, judges progress with deterministic rules, sends one Discord summary, and can nudge exactly one stalled session. Ten minutes is the default interval; the loop only runs inside a tmux session the operator starts, and there is no kill path.
+
 ## Contributing and security
 
 Issues and pull requests are welcome. Pull-request code never runs automatically: the owner dispatches **Validate pull request (owner dispatch)** from `main` with the pull request number and the reviewed head SHA, and a trusted verifier posts a SHA-bound receipt when the checks pass. See [CONTRIBUTING.md](CONTRIBUTING.md#pull-requests) for the flow, [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [docs/agent-rules.md](docs/agent-rules.md) for the repository rules, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.

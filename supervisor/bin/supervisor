@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Entry point for a user-started tmux loop: `supervisor once`, `supervisor loop --interval 600`.
+set -euo pipefail
+exec node "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/supervisor.mjs" "$@"
