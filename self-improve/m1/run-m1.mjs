@@ -128,7 +128,10 @@ export function plantDefect(root, plant) {
 }
 
 /** Run one arm's plan in a cell root and measure it. */
-export function runPlan({ root, arm, env }) {
+export function runPlan({ root, arm, env, normalize = [] }) {
+	// Temporary roots are random per cell. They are replaced before hashing so
+	// `outputDigest` identifies the captured behaviour, not the temp path.
+	const stabilize = (text) => normalize.reduce((value, prefix) => (prefix ? value.split(prefix).join('<cell>') : value), text);
 	const steps = [];
 	const started = performance.now();
 	for (const step of arm.plan) {
@@ -150,7 +153,7 @@ export function runPlan({ root, arm, env }) {
 			timedOut: result.error?.code === 'ETIMEDOUT' || (result.status === null && result.signal === 'SIGTERM'),
 			spawnError: result.error && result.error.code !== 'ETIMEDOUT' ? result.error.code ?? 'spawn_error' : null,
 			bytes: Buffer.byteLength(output),
-			outputDigest: sha256(output).slice(0, 16),
+			outputDigest: sha256(stabilize(output)).slice(0, 16),
 			output,
 		});
 	}
@@ -257,7 +260,7 @@ export function runMatrix({ repoRoot, manifest, head = 'HEAD', keepWorkdirs = fa
 		try {
 			const root = snapshot({ repoRoot, head: sourceHead, dest: join(cellRoot, 'root') });
 			const defect = task.plant ? plantDefect(root, task.plant) : null;
-			const { steps, wallMs } = runPlan({ root, arm, env: cellEnv(cellRoot) });
+			const { steps, wallMs } = runPlan({ root, arm, env: cellEnv(cellRoot), normalize: [cellRoot, tmpdir()] });
 			return cellRecord({ task, arm, steps, wallMs, defect });
 		} finally {
 			if (!keepWorkdirs) rmSync(cellRoot, { recursive: true, force: true });

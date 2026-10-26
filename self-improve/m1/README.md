@@ -43,6 +43,11 @@ rubric `score`:
 A timeout, spawn failure or unplantable defect is `outcome: error`, score 0, kept
 in the denominator. Nothing is retried, dropped or substituted.
 
+`outputDigest` is the sha256 of a step's captured output with the cell's random
+temporary root replaced by `<cell>`, so the digest identifies the captured
+behaviour rather than the temp path and is stable across runs at the same source
+head.
+
 ## Run
 
 ```sh
