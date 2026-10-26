@@ -155,6 +155,7 @@ export function runPlan({ root, arm, env, normalize = [] }) {
 			bytes: Buffer.byteLength(output),
 			outputDigest: sha256(stabilize(output)).slice(0, 16),
 			output,
+			normalized: stabilize(output),
 		});
 	}
 	return { steps, wallMs: Math.round(performance.now() - started) };
@@ -166,7 +167,7 @@ export function runPlan({ root, arm, env, normalize = [] }) {
  */
 export function scoreCell({ task, steps }) {
 	const excerpt = steps
-		.map((step) => step.output)
+		.map((step) => step.normalized ?? step.output)
 		.join('\n')
 		.slice(-EXCERPT_CHARS);
 	const timedOut = steps.find((step) => step.timedOut);
