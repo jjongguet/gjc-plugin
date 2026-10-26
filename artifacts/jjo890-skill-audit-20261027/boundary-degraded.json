@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "report": "skill_audit",
+  "mode": "read_only",
+  "generated_at": "2026-10-26T17:17:42.029Z",
+  "status": "partial",
+  "roots": [
+    {
+      "scope": "user",
+      "path": "~/.gjc/agent/skills",
+      "exists": true
+    },
+    {
+      "scope": "project",
+      "path": "/Users/jjong-macmini/jjongguet/gjc-plugin/.gjc/skills",
+      "exists": false
+    }
+  ],
+  "usage": {
+    "status": "degraded",
+    "sessions_root": "~/.gjc/agent/sessions",
+    "transcripts": 2,
+    "files_scanned": 1,
+    "unreadable_files": 1,
+    "corrupt_lines": 1,
+    "tool_calls_observed": 1,
+    "prompt_invocations_observed": 0,
+    "signals": [
+      "skill_tool_call",
+      "prompt_slash_invocation"
+    ],
+    "window": {
+      "first_file_mtime": "2026-10-26T17:17:42.011Z",
+      "last_file_mtime": "2026-10-26T17:17:42.011Z"
+    },
+    "outside_roots": []
+  },
+  "counts": {
+    "installed": 1,
+    "used": 1,
+    "unused": 0,
+    "usage_unknown": 0,
+    "duplicate_candidates": 0,
+    "stale_replicas": 0,
+    "outside_roots": 0
+  },
+  "skills": [
+    {
+      "name": "used-skill",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/used-skill",
+      "used_count": 1,
+      "last_used": "2026-10-20T00:00:00.000Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    }
+  ],
+  "candidates": {
+    "unused": [],
+    "duplicates": []
+  },
+  "limitations": [
+    "usage comes only from retained session transcripts; deleted or unretained sessions are not reconstructed",
+    "each skill tool call counts once even if the load failed; call results are not correlated",
+    "a /skill:<name> prompt counts only in a transcript with no skill tool call for the same skill",
+    "catalog exposure, skill_discovery lookups and prompt mentions are not uses",
+    "file mtimes bound the scanned window; a transcript without timestamps contributes no last_used",
+    "read-only: this report reads skill directories and session transcripts and writes nothing by itself"
+  ]
+}

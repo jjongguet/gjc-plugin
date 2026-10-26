@@ -9,6 +9,7 @@
     "rea/gajae-plugin.json",
     "backplan/gajae-plugin.json",
     "rrsi/gajae-plugin.json",
-    "aside-memory/gajae-plugin.json"
+    "aside-memory/gajae-plugin.json",
+    "skill-audit/gajae-plugin.json"
   ]
 }

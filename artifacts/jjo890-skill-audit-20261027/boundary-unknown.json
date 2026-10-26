@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "report": "skill_audit",
+  "mode": "read_only",
+  "generated_at": "2026-10-26T17:17:41.993Z",
+  "status": "unknown",
+  "roots": [
+    {
+      "scope": "user",
+      "path": "~/.gjc/agent/skills",
+      "exists": true
+    },
+    {
+      "scope": "project",
+      "path": "/Users/jjong-macmini/jjongguet/gjc-plugin/.gjc/skills",
+      "exists": false
+    }
+  ],
+  "usage": {
+    "status": "unknown",
+    "sessions_root": "~/.gjc/agent/sessions",
+    "transcripts": 0,
+    "files_scanned": 0,
+    "unreadable_files": 0,
+    "corrupt_lines": 0,
+    "tool_calls_observed": 0,
+    "prompt_invocations_observed": 0,
+    "signals": [
+      "skill_tool_call",
+      "prompt_slash_invocation"
+    ],
+    "window": {
+      "first_file_mtime": null,
+      "last_file_mtime": null
+    },
+    "outside_roots": []
+  },
+  "counts": {
+    "installed": 1,
+    "used": 0,
+    "unused": 0,
+    "usage_unknown": 1,
+    "duplicate_candidates": 0,
+    "stale_replicas": 0,
+    "outside_roots": 0
+  },
+  "skills": [
+    {
+      "name": "orphan-skill",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/orphan-skill",
+      "used_count": null,
+      "last_used": null,
+      "tool_calls": null,
+      "prompt_invocations": null,
+      "prompt_only_sessions": null,
+      "sessions_used": null,
+      "verdict": "unknown"
+    }
+  ],
+  "candidates": {
+    "unused": [],
+    "duplicates": []
+  },
+  "limitations": [
+    "usage comes only from retained session transcripts; deleted or unretained sessions are not reconstructed",
+    "each skill tool call counts once even if the load failed; call results are not correlated",
+    "a /skill:<name> prompt counts only in a transcript with no skill tool call for the same skill",
+    "catalog exposure, skill_discovery lookups and prompt mentions are not uses",
+    "file mtimes bound the scanned window; a transcript without timestamps contributes no last_used",
+    "read-only: this report reads skill directories and session transcripts and writes nothing by itself"
+  ]
+}

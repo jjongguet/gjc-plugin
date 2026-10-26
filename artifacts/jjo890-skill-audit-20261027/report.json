@@ -1,0 +1,2055 @@
+{
+  "schema_version": 1,
+  "report": "skill_audit",
+  "mode": "read_only",
+  "generated_at": "2026-10-26T17:17:41.196Z",
+  "status": "complete",
+  "roots": [
+    {
+      "scope": "user",
+      "path": "~/.gjc/agent/skills",
+      "exists": true
+    },
+    {
+      "scope": "project",
+      "path": "~/jjongguet/gjc-plugin/.gjc/skills",
+      "exists": false
+    }
+  ],
+  "usage": {
+    "status": "ok",
+    "sessions_root": "~/.gjc/agent/sessions",
+    "transcripts": 1057,
+    "files_scanned": 1057,
+    "unreadable_files": 0,
+    "corrupt_lines": 0,
+    "tool_calls_observed": 339,
+    "prompt_invocations_observed": 12,
+    "signals": [
+      "skill_tool_call",
+      "prompt_slash_invocation"
+    ],
+    "window": {
+      "first_file_mtime": "2026-10-01T17:19:54.000Z",
+      "last_file_mtime": "2026-10-26T17:17:41.042Z"
+    },
+    "outside_roots": [
+      {
+        "name": "ultragoal",
+        "used_count": 123,
+        "last_used": "2026-10-25T08:14:43.232Z"
+      },
+      {
+        "name": "ralplan",
+        "used_count": 97,
+        "last_used": "2026-10-25T07:36:17.138Z"
+      },
+      {
+        "name": "autoresearch",
+        "used_count": 88,
+        "last_used": "2026-10-26T13:58:03.007Z"
+      },
+      {
+        "name": "deep-interview",
+        "used_count": 5,
+        "last_used": "2026-10-14T15:36:12.014Z"
+      },
+      {
+        "name": "prompt-craft",
+        "used_count": 1,
+        "last_used": "2026-10-11T02:16:21.602Z"
+      }
+    ]
+  },
+  "counts": {
+    "installed": 109,
+    "used": 7,
+    "unused": 102,
+    "usage_unknown": 0,
+    "duplicate_candidates": 4,
+    "stale_replicas": 2,
+    "outside_roots": 5
+  },
+  "skills": [
+    {
+      "name": "adv-review",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/adv-review",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "affiliate-link-tool",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/affiliate-link-tool",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "backplan",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/backplan",
+      "used_count": 1,
+      "last_used": "2026-10-17T12:44:01.381Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    },
+    {
+      "name": "brag",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/brag",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "clarify",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/clarify",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "codex-imagegen",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/codex-imagegen",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-lora-triggers",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-lora-triggers",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-advanced",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-advanced",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-basics",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-basics",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-datatypes",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-datatypes",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-frontend",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-frontend",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-inputs",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-inputs",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-lifecycle",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-lifecycle",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-migration",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-migration",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-outputs",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-outputs",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "comfyui-node-packaging",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/comfyui-node-packaging",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "create-formal-verification-skill",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/create-formal-verification-skill",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "doc-gardening",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/doc-gardening",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "gajae-stack-doctor",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/gajae-stack-doctor",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "gjc-config",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/gjc-config",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "grill-me",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/grill-me",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "grilling",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/grilling",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-animation",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-animation",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-audio",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-audio",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-cli",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-cli",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-core",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-core",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-creative",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-creative",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-keyframes",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-keyframes",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-registry",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-registry",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "hyperframes-studio",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/hyperframes-studio",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "macmini-to-macbook",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/macmini-to-macbook",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "maintain-formal-verification-skill",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/maintain-formal-verification-skill",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "media-use",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/media-use",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "notion-cli",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/notion-cli",
+      "used_count": 1,
+      "last_used": "2026-10-14T13:05:50.594Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    },
+    {
+      "name": "orca-cli",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/orca-cli",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "orchestration",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/orchestration",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-advisor",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-advisor",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-committee",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-committee",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-handoff",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-handoff",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-help",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-help",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-loop",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-loop",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "paseo-plugin",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/paseo-plugin",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "poteto-mode",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/poteto-mode",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "pptx",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/pptx",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "pstack-router",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/pstack-router",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "rea",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/rea",
+      "used_count": 1,
+      "last_used": "2026-10-25T06:58:51.853Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    },
+    {
+      "name": "scopelabs",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/scopelabs",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-agentic",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-agentic",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-ahrefs",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-ahrefs",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-audit",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-audit",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-backlinks",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-backlinks",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-bing",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-bing",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-cluster",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-cluster",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-competitor-pages",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-competitor-pages",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-content",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-content",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-content-brief",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-content-brief",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-dataforseo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-dataforseo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-drift",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-drift",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-ecommerce",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-ecommerce",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-firecrawl",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-firecrawl",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-flow",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-flow",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-geo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-geo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-google",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-google",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-hreflang",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-hreflang",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-image-gen",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-image-gen",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-images",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-images",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-local",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-local",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-maps",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-maps",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-matomo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-matomo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-page",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-page",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-plan",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-plan",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-profound",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-profound",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-programmatic",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-programmatic",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-schema",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-schema",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-seranking",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-seranking",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-sitemap",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-sitemap",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-sxo",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-sxo",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "seo-technical",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-technical",
+      "used_count": 1,
+      "last_used": "2026-10-25T07:30:04.571Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    },
+    {
+      "name": "seo-unlighthouse",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/seo-unlighthouse",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "session-to-macmini",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/session-to-macmini",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "shortform-factory",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/shortform-factory",
+      "used_count": 4,
+      "last_used": "2026-10-26T07:03:16.331Z",
+      "tool_calls": 4,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 3,
+      "verdict": "used"
+    },
+    {
+      "name": "skill-creator",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/skill-creator",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "statechart",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/statechart",
+      "used_count": 1,
+      "last_used": "2026-10-24T08:18:03.360Z",
+      "tool_calls": 1,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 1,
+      "verdict": "used"
+    },
+    {
+      "name": "toss-po-lens",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/toss-po-lens",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "ui-ux-pro-max",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/ui-ux-pro-max",
+      "used_count": 16,
+      "last_used": "2026-10-26T09:58:21.384Z",
+      "tool_calls": 16,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 12,
+      "verdict": "used"
+    },
+    {
+      "name": "vast-ssh",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vast-ssh",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-arca-curator",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-arca-curator",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-arca-curator.stale-20260804",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-arca-curator.stale-20260804",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-character-create-interview",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-character-create-interview",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-civitai-r2-sync",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-civitai-r2-sync",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-civitai-r2-sync.stale-20260804",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-civitai-r2-sync.stale-20260804",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-comfyui-workflow-builder",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-comfyui-workflow-builder",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-cover-gen",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-cover-gen",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-debug",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-debug",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-episode-cutscenes",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-episode-cutscenes",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-illustrious-stack-test",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-illustrious-stack-test",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-mellowz-upload",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-mellowz-upload",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-orchestrate",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-orchestrate",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-perf-feedback",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-perf-feedback",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-render-batch",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-render-batch",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-runpod-dispatch",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-runpod-dispatch",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-runpod-pulse",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-runpod-pulse",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-runpod-rescue",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-runpod-rescue",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-runpod-spawn-check",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-runpod-spawn-check",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "vc-runpod-spawn-fast",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/vc-runpod-spawn-fast",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    },
+    {
+      "name": "video-shotcraft",
+      "installed": true,
+      "source": "~/.gjc/agent/skills",
+      "scope": "user",
+      "path": "~/.gjc/agent/skills/video-shotcraft",
+      "used_count": 0,
+      "last_used": null,
+      "tool_calls": 0,
+      "prompt_invocations": 0,
+      "prompt_only_sessions": 0,
+      "sessions_used": 0,
+      "verdict": "unused"
+    }
+  ],
+  "candidates": {
+    "unused": [
+      {
+        "name": "adv-review",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "affiliate-link-tool",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "brag",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "clarify",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "codex-imagegen",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-lora-triggers",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-advanced",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-basics",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-datatypes",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-frontend",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-inputs",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-lifecycle",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-migration",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-outputs",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "comfyui-node-packaging",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "create-formal-verification-skill",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "doc-gardening",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "gajae-stack-doctor",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "gjc-config",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "grill-me",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "grilling",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-animation",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-audio",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-cli",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-core",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-creative",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-keyframes",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-registry",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "hyperframes-studio",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "macmini-to-macbook",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "maintain-formal-verification-skill",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "media-use",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "orca-cli",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "orchestration",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-advisor",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-committee",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-handoff",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-help",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-loop",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "paseo-plugin",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "poteto-mode",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "pptx",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "pstack-router",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "scopelabs",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-agentic",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-ahrefs",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-audit",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-backlinks",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-bing",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-cluster",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-competitor-pages",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-content",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-content-brief",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-dataforseo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-drift",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-ecommerce",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-firecrawl",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-flow",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-geo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-google",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-hreflang",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-image-gen",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-images",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-local",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-maps",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-matomo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-page",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-plan",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-profound",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-programmatic",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-schema",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-seranking",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-sitemap",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-sxo",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "seo-unlighthouse",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "session-to-macmini",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "skill-creator",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "toss-po-lens",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vast-ssh",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-arca-curator",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-arca-curator.stale-20260804",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-character-create-interview",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-civitai-r2-sync",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-civitai-r2-sync.stale-20260804",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-comfyui-workflow-builder",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-cover-gen",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-debug",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-episode-cutscenes",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-illustrious-stack-test",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-mellowz-upload",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-orchestrate",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-perf-feedback",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-render-batch",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-runpod-dispatch",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-runpod-pulse",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-runpod-rescue",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-runpod-spawn-check",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "vc-runpod-spawn-fast",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      },
+      {
+        "name": "video-shotcraft",
+        "basis": "0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z)"
+      }
+    ],
+    "duplicates": [
+      {
+        "kind": "duplicate_name",
+        "skills": [
+          "vc-arca-curator",
+          "vc-arca-curator.stale-20260804"
+        ],
+        "basis": "2 installed copies declare frontmatter name 'vc-arca-curator' (user:vc-arca-curator, user:vc-arca-curator.stale-20260804)"
+      },
+      {
+        "kind": "duplicate_name",
+        "skills": [
+          "vc-civitai-r2-sync",
+          "vc-civitai-r2-sync.stale-20260804"
+        ],
+        "basis": "2 installed copies declare frontmatter name 'vc-civitai-r2-sync' (user:vc-civitai-r2-sync, user:vc-civitai-r2-sync.stale-20260804)"
+      },
+      {
+        "kind": "stale_replica",
+        "skills": [
+          "vc-arca-curator",
+          "vc-arca-curator.stale-20260804"
+        ],
+        "basis": "dated copy 'vc-arca-curator.stale-20260804' of installed 'vc-arca-curator' is still exposed to the catalog"
+      },
+      {
+        "kind": "stale_replica",
+        "skills": [
+          "vc-civitai-r2-sync",
+          "vc-civitai-r2-sync.stale-20260804"
+        ],
+        "basis": "dated copy 'vc-civitai-r2-sync.stale-20260804' of installed 'vc-civitai-r2-sync' is still exposed to the catalog"
+      }
+    ]
+  },
+  "limitations": [
+    "usage comes only from retained session transcripts; deleted or unretained sessions are not reconstructed",
+    "each skill tool call counts once even if the load failed; call results are not correlated",
+    "a /skill:<name> prompt counts only in a transcript with no skill tool call for the same skill",
+    "catalog exposure, skill_discovery lookups and prompt mentions are not uses",
+    "file mtimes bound the scanned window; a transcript without timestamps contributes no last_used",
+    "read-only: this report reads skill directories and session transcripts and writes nothing by itself"
+  ]
+}

@@ -1,0 +1,116 @@
+skill-audit: 109 installed · 7 used · 102 unused · 0 unknown · 4 duplicate/stale candidate(s)
+usage: ok — 1057 transcript(s) under ~/.gjc/agent/sessions (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z), 339 skill call(s), 12 /skill: mention(s), 0 corrupt line(s), 0 unreadable file(s)
+observed outside the audited roots (5) — bundled or project-scope skills, not cleanup candidates:
+  · ultragoal (123 use(s), last 2026-10-25T08:14:43.232Z)
+  · ralplan (97 use(s), last 2026-10-25T07:36:17.138Z)
+  · autoresearch (88 use(s), last 2026-10-26T13:58:03.007Z)
+  · deep-interview (5 use(s), last 2026-10-14T15:36:12.014Z)
+  · prompt-craft (1 use(s), last 2026-10-11T02:16:21.602Z)
+unused (102) — 0 skill tool calls and 0 prompt-only /skill: invocations across 1057 retained transcripts (file mtimes 2026-10-01T17:19:54.000Z..2026-10-26T17:17:41.042Z):
+  ○ adv-review
+  ○ affiliate-link-tool
+  ○ brag
+  ○ clarify
+  ○ codex-imagegen
+  ○ comfyui-lora-triggers
+  ○ comfyui-node-advanced
+  ○ comfyui-node-basics
+  ○ comfyui-node-datatypes
+  ○ comfyui-node-frontend
+  ○ comfyui-node-inputs
+  ○ comfyui-node-lifecycle
+  ○ comfyui-node-migration
+  ○ comfyui-node-outputs
+  ○ comfyui-node-packaging
+  ○ create-formal-verification-skill
+  ○ doc-gardening
+  ○ gajae-stack-doctor
+  ○ gjc-config
+  ○ grill-me
+  ○ grilling
+  ○ hyperframes
+  ○ hyperframes-animation
+  ○ hyperframes-audio
+  ○ hyperframes-cli
+  ○ hyperframes-core
+  ○ hyperframes-creative
+  ○ hyperframes-keyframes
+  ○ hyperframes-registry
+  ○ hyperframes-studio
+  ○ macmini-to-macbook
+  ○ maintain-formal-verification-skill
+  ○ media-use
+  ○ orca-cli
+  ○ orchestration
+  ○ paseo
+  ○ paseo-advisor
+  ○ paseo-committee
+  ○ paseo-handoff
+  ○ paseo-help
+  ○ paseo-loop
+  ○ paseo-plugin
+  ○ poteto-mode
+  ○ pptx
+  ○ pstack-router
+  ○ scopelabs
+  ○ seo
+  ○ seo-agentic
+  ○ seo-ahrefs
+  ○ seo-audit
+  ○ seo-backlinks
+  ○ seo-bing
+  ○ seo-cluster
+  ○ seo-competitor-pages
+  ○ seo-content
+  ○ seo-content-brief
+  ○ seo-dataforseo
+  ○ seo-drift
+  ○ seo-ecommerce
+  ○ seo-firecrawl
+  ○ seo-flow
+  ○ seo-geo
+  ○ seo-google
+  ○ seo-hreflang
+  ○ seo-image-gen
+  ○ seo-images
+  ○ seo-local
+  ○ seo-maps
+  ○ seo-matomo
+  ○ seo-page
+  ○ seo-plan
+  ○ seo-profound
+  ○ seo-programmatic
+  ○ seo-schema
+  ○ seo-seranking
+  ○ seo-sitemap
+  ○ seo-sxo
+  ○ seo-unlighthouse
+  ○ session-to-macmini
+  ○ skill-creator
+  ○ toss-po-lens
+  ○ vast-ssh
+  ○ vc-arca-curator
+  ○ vc-arca-curator.stale-20260804
+  ○ vc-character-create-interview
+  ○ vc-civitai-r2-sync
+  ○ vc-civitai-r2-sync.stale-20260804
+  ○ vc-comfyui-workflow-builder
+  ○ vc-cover-gen
+  ○ vc-debug
+  ○ vc-episode-cutscenes
+  ○ vc-illustrious-stack-test
+  ○ vc-mellowz-upload
+  ○ vc-orchestrate
+  ○ vc-perf-feedback
+  ○ vc-render-batch
+  ○ vc-runpod-dispatch
+  ○ vc-runpod-pulse
+  ○ vc-runpod-rescue
+  ○ vc-runpod-spawn-check
+  ○ vc-runpod-spawn-fast
+  ○ video-shotcraft
+duplicate/stale (4):
+  duplicate_name: vc-arca-curator, vc-arca-curator.stale-20260804 — 2 installed copies declare frontmatter name 'vc-arca-curator' (user:vc-arca-curator, user:vc-arca-curator.stale-20260804)
+  duplicate_name: vc-civitai-r2-sync, vc-civitai-r2-sync.stale-20260804 — 2 installed copies declare frontmatter name 'vc-civitai-r2-sync' (user:vc-civitai-r2-sync, user:vc-civitai-r2-sync.stale-20260804)
+  stale_replica: vc-arca-curator, vc-arca-curator.stale-20260804 — dated copy 'vc-arca-curator.stale-20260804' of installed 'vc-arca-curator' is still exposed to the catalog
+  stale_replica: vc-civitai-r2-sync, vc-civitai-r2-sync.stale-20260804 — dated copy 'vc-civitai-r2-sync.stale-20260804' of installed 'vc-civitai-r2-sync' is still exposed to the catalog
