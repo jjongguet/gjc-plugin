@@ -1,0 +1,35 @@
+{
+  "action": "status",
+  "scope": "Functional acceptance only: rrsi captures exploration episodes, projects journals into attempt records and replays them through the bundled Dream-RSI core. The performance proof (P1-P3) applies to the self-improve loop and its frozen corpus, not to this plugin; no accuracy, savings or routing claim is made.",
+  "storageStatus": "ok",
+  "storageReason": null,
+  "counts": {
+    "episodes": 2,
+    "attempts": 32,
+    "adoptions": 7
+  },
+  "journalDir": "/Users/jjong-macmini/.gjc-plugin/jev-advisor/journal/v1",
+  "periodic": {
+    "lastAttemptAt": null,
+    "lastSuccessAt": null,
+    "lastStatus": null,
+    "lastReason": null,
+    "nextRetryAt": null,
+    "incomplete_prefix": false,
+    "storeWrite": null,
+    "lastProjectionDigest": null,
+    "lastProjection": null,
+    "due": true,
+    "dueStatus": null,
+    "receiptCount": 0,
+    "intervalMs": 86400000,
+    "disabled": false
+  },
+  "journalStorage": {
+    "persisted": true,
+    "reason": "stored",
+    "id": "4f9f6452-ee28-4fd2-9223-4eeec3b29681",
+    "rotated": 0,
+    "retainedSegments": 1
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "action": "import",
+  "scope": "Functional acceptance only: rrsi captures exploration episodes, projects journals into attempt records and replays them through the bundled Dream-RSI core. The performance proof (P1-P3) applies to the self-improve loop and its frozen corpus, not to this plugin; no accuracy, savings or routing claim is made.",
+  "imported": 28,
+  "journal": {
+    "status": "missing",
+    "segments": 0,
+    "records": 0,
+    "branches": 0
+  },
+  "counts": {
+    "episodes": 1,
+    "attempts": 28,
+    "adoptions": 4
+  },
+  "wrote": {
+    "persisted": true,
+    "reason": "stored",
+    "bytes": 9959
+  },
+  "storeWrite": "added",
+  "projectionDigest": "ec27ac3f415f4b0691603e9b0c2806688530f16ea61d303336758f40cd2639d7",
+  "projection": {
+    "records": 0,
+    "projected": 0,
+    "omitted": 0,
+    "ratio": null,
+    "limited": false
+  },
+  "journalStorage": {
+    "persisted": true,
+    "reason": "stored",
+    "id": "87f08b27-5b58-4062-81d6-75cdf31d0fe5",
+    "rotated": 0,
+    "retainedSegments": 1
+  }
+}

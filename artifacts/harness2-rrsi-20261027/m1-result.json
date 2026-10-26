@@ -1,0 +1,225 @@
+{
+  "schema": "harness2.m1.result.v1",
+  "runId": "m1-0aeecc3-20261026T172939Z",
+  "manifestId": "m1-guard-ablation-1",
+  "manifestDigest": "27f37479846a8f7be93f5c6df516c59134e27ea4d12249a167dda9a02613364d",
+  "sourceHead": "0aeecc32d3203a1df7dbb451bee1285264db1857",
+  "sourceRevision": "feat/harness2-rrsi-loop-mini-m6",
+  "scope": "Cost-0 deterministic guard ablation. Each arm is a guard set run against the same planted defect in an isolated snapshot. Every step is a local keyless repository command: no model call, no network, no credentials, no paid execution. The result measures these guard sets only; it is not a gjc.quality_trial.v2 receipt and makes no agent-efficacy claim.",
+  "immutability": "Frozen before the first run: tasks, arms, rubric and exclusions are changed only by a new manifest id. A run pins sourceHead and manifestDigest.",
+  "metricDefinitions": {
+    "wallMs": "Wall-clock milliseconds for the arm's whole plan in one cell.",
+    "toolCalls": "Guard commands executed in the cell (one command = one tool call for a tool-less planner).",
+    "retries": "Re-executions after a non-zero exit. Frozen at 0 for every arm so the harness stays deterministic.",
+    "artifactBytes": "Captured stdout+stderr bytes across the plan.",
+    "score": "Rubric score 0-5 from the oracle below."
+  },
+  "rubric": {
+    "0": "defect missed, control false positive, or timeout/runner error",
+    "3": "defect caught but not located: a guard exited non-zero without the locate marker",
+    "5": "defect located: a guard exited non-zero and its output contains the task's locate marker; a clean control stayed green"
+  },
+  "exclusions": "A cell that times out, crashes or cannot be given its planted defect is reported as outcome=error with score 0 and stays in the denominator. It is never dropped or retried.",
+  "host": {
+    "platform": "darwin",
+    "arch": "arm64",
+    "cpuCount": 12,
+    "node": "26.12.0",
+    "bun": "1.4.3"
+  },
+  "matrix": {
+    "tasks": 2,
+    "arms": 2,
+    "cells": 4
+  },
+  "totals": {
+    "planned": 4,
+    "passed": 3,
+    "failed": 1,
+    "error": 0,
+    "skipped": 0
+  },
+  "cells": [
+    {
+      "taskId": "generated-surface-drift",
+      "taskClass": "small-repo-task",
+      "armId": "B0",
+      "armLabel": "drift-only",
+      "planned": 1,
+      "executed": 1,
+      "toolCalls": 1,
+      "retries": 0,
+      "wallMs": 11,
+      "artifactBytes": 41,
+      "exitCodes": [
+        1
+      ],
+      "stepWallMs": {
+        "drift": 11
+      },
+      "outputDigest": "f17e361d219c2a49",
+      "defect": {
+        "file": "rrsi/tools/rrsi.ts",
+        "op": "append",
+        "bytes": 34
+      },
+      "excerpt": "generated_out_of_sync:rrsi/tools/rrsi.ts\n",
+      "failedSteps": [
+        "drift"
+      ],
+      "outcome": "passed",
+      "score": 5,
+      "reason": "defect_located"
+    },
+    {
+      "taskId": "generated-surface-drift",
+      "taskClass": "small-repo-task",
+      "armId": "B1",
+      "armLabel": "drift+acceptance",
+      "planned": 2,
+      "executed": 2,
+      "toolCalls": 2,
+      "retries": 0,
+      "wallMs": 2862,
+      "artifactBytes": 3658,
+      "exitCodes": [
+        1,
+        1
+      ],
+      "stepWallMs": {
+        "drift": 11,
+        "verify": 2851
+      },
+      "outputDigest": "690aecb36170e735",
+      "defect": {
+        "file": "rrsi/tools/rrsi.ts",
+        "op": "append",
+        "bytes": 34
+      },
+      "excerpt": "generated_out_of_sync:rrsi/tools/rrsi.ts\n\nok 1 manifest declares one tool, one session_start hook (no target/phase), and the four actions\nok 2 status on an empty store reports missing storage without creating one\nok 3 capture stores one bounded episode with 0700/0600 privacy and journals the outcome\nok 4 capture clamps attempts, coerces unknown decisions and truncates labels\nok 5 import projects the jev-advisor journal into >=10 attempts with the documented fields\nok 6 import reports bounded projection coverage when the limit omits records\nok 7 journal-dream emits a deterministic receipt over the synthetic journal\nok 8 journal-dream fails closed with no_journal and never writes the store\nok 9 import projects a self-improve ledger read-only when a path is given\nok 10 dream reports the frozen below-gate verdict for a small store\nok 11 a store at pass-gate size evaluates the thresholds instead\nok 12 the round trip runs capture -> import -> dream over >=10 imported attempts\nok 13 store faults are reported and never repaired\nok 14 unknown actions and malformed inputs are handled without throwing\nok 15 periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing\nok 16 periodic: 160 projection and limited_projection label\nok 17 periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class\nok 18 periodic: disabled consumes nothing, interval override fires per override, backoff is honored\nok 19 periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)\nok 20 periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes\nok 21 periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)\nok 22 periodic: receipt retention prunes to the newest 60\nok 23 periodic summary is exposed by the tool status and status stays read-only\nok 24 periodic: unsafe symlinked roots are never written through\nok 25 periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record\nok 26 periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)\nok 27 periodic: a dream failure is a bounded error (no masked success)\nok 28 periodic: the worker CLI entry runs, records, and stays inert without the flag\nok 29 the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start\nok 31 the shared results registry accepts rrsi outcomes and rejects malformed ones\n   note: real jev-advisor journal unavailable at <cell>/home/.gjc-plugin/jev-advisor/journal/v1; measured count stays null\nok 32 the real jev-advisor journal is counted read-only (measured; never copied into the plugin store)\n{\"kind\":\"rrsi-plugin-acceptance\",\"plugin\":\"rrsi\",\"version\":\"0.0.4\",\"cases\":32,\"failures\":1,\"realJournalRecords\":null,\"scope\":\"functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop\"}\nFAIL generated surfaces are in sync with sources (non-mutating --check drift gate): AssertionError [ERR_ASSERTION]: generated_out_of_sync:rrsi/tools/rrsi.ts\n\n\n1 !== 0\n\n    at <anonymous> (/private<cell>/root/rrsi/scripts/verify.ts:698:10)\n    at <anonymous> (/private<cell>/root/rrsi/scripts/verify.ts:58:10)\n    at runSuite (/private<cell>/root/rrsi/scripts/verify.ts:692:8)\n",
+      "failedSteps": [
+        "drift",
+        "verify"
+      ],
+      "outcome": "passed",
+      "score": 5,
+      "reason": "defect_located"
+    },
+    {
+      "taskId": "manifest-tool-path",
+      "taskClass": "small-repo-task",
+      "armId": "B0",
+      "armLabel": "drift-only",
+      "planned": 1,
+      "executed": 1,
+      "toolCalls": 1,
+      "retries": 0,
+      "wallMs": 8,
+      "artifactBytes": 70,
+      "exitCodes": [
+        0
+      ],
+      "stepWallMs": {
+        "drift": 8
+      },
+      "outputDigest": "09e1ef27f4976035",
+      "defect": {
+        "file": "rrsi/gajae-plugin.json",
+        "op": "replace",
+        "bytes": 8
+      },
+      "excerpt": "generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts\n",
+      "failedSteps": [],
+      "outcome": "failed",
+      "score": 0,
+      "reason": "defect_missed"
+    },
+    {
+      "taskId": "manifest-tool-path",
+      "taskClass": "small-repo-task",
+      "armId": "B1",
+      "armLabel": "drift+acceptance",
+      "planned": 2,
+      "executed": 2,
+      "toolCalls": 2,
+      "retries": 0,
+      "wallMs": 2794,
+      "artifactBytes": 3753,
+      "exitCodes": [
+        0,
+        1
+      ],
+      "stepWallMs": {
+        "drift": 8,
+        "verify": 2785
+      },
+      "outputDigest": "1a3fa57c129be658",
+      "defect": {
+        "file": "rrsi/gajae-plugin.json",
+        "op": "replace",
+        "bytes": 8
+      },
+      "excerpt": "generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts\n\nok 2 status on an empty store reports missing storage without creating one\nok 3 capture stores one bounded episode with 0700/0600 privacy and journals the outcome\nok 4 capture clamps attempts, coerces unknown decisions and truncates labels\nok 5 import projects the jev-advisor journal into >=10 attempts with the documented fields\nok 6 import reports bounded projection coverage when the limit omits records\nok 7 journal-dream emits a deterministic receipt over the synthetic journal\nok 8 journal-dream fails closed with no_journal and never writes the store\nok 9 import projects a self-improve ledger read-only when a path is given\nok 10 dream reports the frozen below-gate verdict for a small store\nok 11 a store at pass-gate size evaluates the thresholds instead\nok 12 the round trip runs capture -> import -> dream over >=10 imported attempts\nok 13 store faults are reported and never repaired\nok 14 unknown actions and malformed inputs are handled without throwing\nok 15 periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing\nok 16 periodic: 160 projection and limited_projection label\nok 17 periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class\nok 18 periodic: disabled consumes nothing, interval override fires per override, backoff is honored\nok 19 periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)\nok 20 periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes\nok 21 periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)\nok 22 periodic: receipt retention prunes to the newest 60\nok 23 periodic summary is exposed by the tool status and status stays read-only\nok 24 periodic: unsafe symlinked roots are never written through\nok 25 periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record\nok 26 periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)\nok 27 periodic: a dream failure is a bounded error (no masked success)\nok 28 periodic: the worker CLI entry runs, records, and stays inert without the flag\nok 29 the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start\nok 30 generated surfaces are in sync with sources (non-mutating --check drift gate)\nok 31 the shared results registry accepts rrsi outcomes and rejects malformed ones\n   note: real jev-advisor journal unavailable at <cell>/home/.gjc-plugin/jev-advisor/journal/v1; measured count stays null\nok 32 the real jev-advisor journal is counted read-only (measured; never copied into the plugin store)\n{\"kind\":\"rrsi-plugin-acceptance\",\"plugin\":\"rrsi\",\"version\":\"0.0.4\",\"cases\":32,\"failures\":1,\"realJournalRecords\":null,\"scope\":\"functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop\"}\nFAIL manifest declares one tool, one session_start hook (no target/phase), and the four actions: AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'tools/rrsi-missing.ts'\n- 'tools/rrsi.ts'\n             ^\n\n    at <anonymous> (/private<cell>/root/rrsi/scripts/verify.ts:94:10)\n    at <anonymous> (/private<cell>/root/rrsi/scripts/verify.ts:58:10)\n    at runSuite (/private<cell>/root/rrsi/scripts/verify.ts:90:8)\n",
+      "failedSteps": [
+        "verify"
+      ],
+      "outcome": "passed",
+      "score": 5,
+      "reason": "defect_located"
+    }
+  ],
+  "controls": [
+    {
+      "taskId": "clean-control",
+      "taskClass": "small-repo-task",
+      "armId": "B0",
+      "armLabel": "drift-only",
+      "planned": 1,
+      "executed": 1,
+      "toolCalls": 1,
+      "retries": 0,
+      "wallMs": 8,
+      "artifactBytes": 70,
+      "exitCodes": [
+        0
+      ],
+      "stepWallMs": {
+        "drift": 8
+      },
+      "outputDigest": "09e1ef27f4976035",
+      "defect": null,
+      "excerpt": "generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts\n",
+      "failedSteps": [],
+      "outcome": "passed",
+      "score": 5,
+      "reason": "control_clean"
+    },
+    {
+      "taskId": "clean-control",
+      "taskClass": "small-repo-task",
+      "armId": "B1",
+      "armLabel": "drift+acceptance",
+      "planned": 2,
+      "executed": 2,
+      "toolCalls": 2,
+      "retries": 0,
+      "wallMs": 2781,
+      "artifactBytes": 3233,
+      "exitCodes": [
+        0,
+        0
+      ],
+      "stepWallMs": {
+        "drift": 8,
+        "verify": 2772
+      },
+      "outputDigest": "d73961525a604d90",
+      "defect": null,
+      "excerpt": "generated surfaces are in sync: tools/rrsi.ts, hooks/rrsi-periodic.ts\n\nok 1 manifest declares one tool, one session_start hook (no target/phase), and the four actions\nok 2 status on an empty store reports missing storage without creating one\nok 3 capture stores one bounded episode with 0700/0600 privacy and journals the outcome\nok 4 capture clamps attempts, coerces unknown decisions and truncates labels\nok 5 import projects the jev-advisor journal into >=10 attempts with the documented fields\nok 6 import reports bounded projection coverage when the limit omits records\nok 7 journal-dream emits a deterministic receipt over the synthetic journal\nok 8 journal-dream fails closed with no_journal and never writes the store\nok 9 import projects a self-improve ledger read-only when a path is given\nok 10 dream reports the frozen below-gate verdict for a small store\nok 11 a store at pass-gate size evaluates the thresholds instead\nok 12 the round trip runs capture -> import -> dream over >=10 imported attempts\nok 13 store faults are reported and never repaired\nok 14 unknown actions and malformed inputs are handled without throwing\nok 15 periodic: fresh fire runs inline and records receipt+state+one dream record; in-interval skip writes nothing\nok 16 periodic: 160 projection and limited_projection label\nok 17 periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class\nok 18 periodic: disabled consumes nothing, interval override fires per override, backoff is honored\nok 19 periodic: lock contention skips without writes; stale locks are taken over once (periodic and store locks)\nok 20 periodic: corrupt and oversized stores error without receipt or repair; resource_limit writes an error receipt and never prunes\nok 21 periodic: empty journal yields no_input (state + one record, no receipt, retry at interval)\nok 22 periodic: receipt retention prunes to the newest 60\nok 23 periodic summary is exposed by the tool status and status stays read-only\nok 24 periodic: unsafe symlinked roots are never written through\nok 25 periodic: deferred handoff writes a handoff receipt; the worker completes with its own receipt and one record\nok 26 periodic: spawn failure is bounded (worker_spawn_failed, no crash, no receipt)\nok 27 periodic: a dream failure is a bounded error (no masked success)\nok 28 periodic: the worker CLI entry runs, records, and stays inert without the flag\nok 29 the generated surfaces are keyless, offline, self-contained, and the hook registers exactly one session_start\nok 30 generated surfaces are in sync with sources (non-mutating --check drift gate)\nok 31 the shared results registry accepts rrsi outcomes and rejects malformed ones\n   note: real jev-advisor journal unavailable at <cell>/home/.gjc-plugin/jev-advisor/journal/v1; measured count stays null\nok 32 the real jev-advisor journal is counted read-only (measured; never copied into the plugin store)\n{\"kind\":\"rrsi-plugin-acceptance\",\"plugin\":\"rrsi\",\"version\":\"0.0.4\",\"cases\":32,\"failures\":0,\"realJournalRecords\":null,\"scope\":\"functional acceptance only; the performance proof (P1-P3) applies to the self-improve loop\"}\n",
+      "failedSteps": [],
+      "outcome": "passed",
+      "score": 5,
+      "reason": "control_clean"
+    }
+  ]
+}
