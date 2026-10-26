@@ -1,0 +1,59 @@
+{
+  "schema": "harness2.m1.manifest.v1",
+  "id": "m1-guard-ablation-1",
+  "frozenAt": "2026-10-27",
+  "scope": "Cost-0 deterministic guard ablation. Each arm is a guard set run against the same planted defect in an isolated snapshot. Every step is a local keyless repository command: no model call, no network, no credentials, no paid execution. The result measures these guard sets only; it is not a gjc.quality_trial.v2 receipt and makes no agent-efficacy claim.",
+  "immutability": "Frozen before the first run: tasks, arms, rubric and exclusions are changed only by a new manifest id. A run pins sourceHead and manifestDigest.",
+  "metricDefinitions": {
+    "wallMs": "Wall-clock milliseconds for the arm's whole plan in one cell.",
+    "toolCalls": "Guard commands executed in the cell (one command = one tool call for a tool-less planner).",
+    "retries": "Re-executions after a non-zero exit. Frozen at 0 for every arm so the harness stays deterministic.",
+    "artifactBytes": "Captured stdout+stderr bytes across the plan.",
+    "score": "Rubric score 0-5 from the oracle below."
+  },
+  "rubric": {
+    "5": "defect located: a guard exited non-zero and its output contains the task's locate marker; a clean control stayed green",
+    "3": "defect caught but not located: a guard exited non-zero without the locate marker",
+    "0": "defect missed, control false positive, or timeout/runner error"
+  },
+  "exclusions": "A cell that times out, crashes or cannot be given its planted defect is reported as outcome=error with score 0 and stays in the denominator. It is never dropped or retried.",
+  "arms": [
+    {
+      "id": "B0",
+      "label": "drift-only",
+      "plan": [
+        { "id": "drift", "argv": ["bun", "rrsi/scripts/build.mjs", "--check"], "timeoutMs": 60000 }
+      ]
+    },
+    {
+      "id": "B1",
+      "label": "drift+acceptance",
+      "plan": [
+        { "id": "drift", "argv": ["bun", "rrsi/scripts/build.mjs", "--check"], "timeoutMs": 60000 },
+        { "id": "verify", "argv": ["bun", "rrsi/scripts/verify.ts"], "timeoutMs": 180000 }
+      ]
+    }
+  ],
+  "tasks": [
+    {
+      "id": "generated-surface-drift",
+      "class": "small-repo-task",
+      "plant": { "op": "append", "file": "rrsi/tools/rrsi.ts", "text": "\n// planted drift for harness2 m1\n" },
+      "oracle": { "caught": "exit_nonzero", "locate": "generated_out_of_sync" }
+    },
+    {
+      "id": "manifest-tool-path",
+      "class": "small-repo-task",
+      "plant": {
+        "op": "replace",
+        "file": "rrsi/gajae-plugin.json",
+        "find": "\"path\": \"tools/rrsi.ts\"",
+        "text": "\"path\": \"tools/rrsi-missing.ts\""
+      },
+      "oracle": { "caught": "exit_nonzero", "locate": "tools/rrsi.ts" }
+    }
+  ],
+  "controls": [
+    { "id": "clean-control", "class": "small-repo-task", "plant": null, "oracle": { "caught": "none" } }
+  ]
+}
