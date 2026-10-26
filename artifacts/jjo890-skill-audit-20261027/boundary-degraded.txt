@@ -1,3 +1,3 @@
 skill-audit: 1 installed · 1 used · 0 unused · 0 unknown · 0 duplicate/stale candidate(s)
-usage: degraded — 2 transcript(s) under ~/.gjc/agent/sessions (file mtimes 2026-10-26T17:17:42.011Z..2026-10-26T17:17:42.011Z), 1 skill call(s), 0 /skill: mention(s), 1 corrupt line(s), 1 unreadable file(s)
+usage: degraded — 2 transcript(s) under ~/.gjc/agent/sessions (file mtimes 2026-10-26T17:18:08.171Z..2026-10-26T17:18:08.171Z), 1 skill call(s), 0 /skill: mention(s), 1 corrupt line(s), 1 unreadable file(s)
 report status: partial (see limitations)

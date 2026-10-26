@@ -2,7 +2,7 @@
   "schema_version": 1,
   "report": "skill_audit",
   "mode": "read_only",
-  "generated_at": "2026-10-26T17:17:42.029Z",
+  "generated_at": "2026-10-26T17:18:08.188Z",
   "status": "partial",
   "roots": [
     {
@@ -12,7 +12,7 @@
     },
     {
       "scope": "project",
-      "path": "/Users/jjong-macmini/jjongguet/gjc-plugin/.gjc/skills",
+      "path": "/private/tmp/jjo890-boundary-degraded-g8sPCl/work/.gjc/skills",
       "exists": false
     }
   ],
@@ -30,8 +30,8 @@
       "prompt_slash_invocation"
     ],
     "window": {
-      "first_file_mtime": "2026-10-26T17:17:42.011Z",
-      "last_file_mtime": "2026-10-26T17:17:42.011Z"
+      "first_file_mtime": "2026-10-26T17:18:08.171Z",
+      "last_file_mtime": "2026-10-26T17:18:08.171Z"
     },
     "outside_roots": []
   },

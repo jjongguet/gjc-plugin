@@ -2,7 +2,7 @@
   "schema_version": 1,
   "report": "skill_audit",
   "mode": "read_only",
-  "generated_at": "2026-10-26T17:17:41.993Z",
+  "generated_at": "2026-10-26T17:18:08.154Z",
   "status": "unknown",
   "roots": [
     {
@@ -12,7 +12,7 @@
     },
     {
       "scope": "project",
-      "path": "/Users/jjong-macmini/jjongguet/gjc-plugin/.gjc/skills",
+      "path": "/private/tmp/jjo890-boundary-unknown-cuhV9t/work/.gjc/skills",
       "exists": false
     }
   ],
