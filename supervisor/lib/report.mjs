@@ -9,7 +9,7 @@ export const SNAPSHOT_SCHEMA_VERSION = 1;
 export function sessionLine(session, judgment) {
   const age = session.ageMinutes === null ? "?" : `${session.ageMinutes}m`;
   const commits = session.commitsSinceStart === null ? "?" : session.commitsSinceStart;
-  const ci = session.ci?.state && session.ci.state !== "unknown" ? ` ci=${session.ci.state}` : "";
+  const ci = ["success", "failure", "pending"].includes(session.ci?.state) ? ` ci=${session.ci.state}` : "";
   return `${session.target}:${session.name} ${age} 커밋${commits} dirty${session.dirty ?? "?"} → ${judgment.state}${ci}`;
 }
 

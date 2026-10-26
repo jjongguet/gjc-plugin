@@ -45,13 +45,14 @@ export function aggregateCheckRuns(payload) {
  * @param {number} [options.ttlMs]
  * @param {string} [options.token] GitHub token; omitted for public reads
  */
-export async function createCiResolver({ fetchImpl = globalThis.fetch, cacheFile, now, ttlMs = DEFAULT_TTL_MS, token = process.env.GITHUB_TOKEN }) {
+export async function createCiResolver({ fetchImpl = globalThis.fetch, cacheFile, now, ttlMs = DEFAULT_TTL_MS, token = process.env.GITHUB_TOKEN, maxLookups = 6 }) {
   let cache = {};
   try {
     cache = JSON.parse(await readFile(cacheFile, "utf8"));
   } catch {
     cache = {};
   }
+  let remaining = maxLookups;
   return {
     async resolve(session) {
       const slug = parseRepoSlug(session.remote);
@@ -60,18 +61,23 @@ export async function createCiResolver({ fetchImpl = globalThis.fetch, cacheFile
       const key = `${slug}@${session.sha}`;
       const cached = cache[key];
       if (cached && now - cached.at < ttlMs) return { ...cached.ci, cached: true };
+      if (remaining <= 0) return { state: "deferred", detail: "lookup_cap" };
+      remaining -= 1;
       const headers = { accept: "application/vnd.github+json", "user-agent": "gjc-supervisor" };
       if (token) headers.authorization = `Bearer ${token}`;
+      const remember = ci => {
+        cache[key] = { at: now, ci };
+        return ci;
+      };
       try {
         const response = await fetchImpl(`https://api.github.com/repos/${slug}/commits/${session.sha}/check-runs`, {
           headers,
           signal: AbortSignal.timeout(8000),
         });
-        if (response.status === 403 || response.status === 429) return { state: "unavailable", detail: "rate_limited" };
-        if (!response.ok) return { state: "unavailable", detail: `http_${response.status}` };
-        const ci = { ...aggregateCheckRuns(await response.json()), source: "github_check_runs" };
-        cache[key] = { at: now, ci };
-        return ci;
+        if (response.status === 403 || response.status === 429) return remember({ state: "unavailable", detail: "rate_limited" });
+        if (response.status === 404) return remember({ state: "unavailable", detail: "private_or_missing" });
+        if (!response.ok) return remember({ state: "unavailable", detail: `http_${response.status}` });
+        return remember({ ...aggregateCheckRuns(await response.json()), source: "github_check_runs" });
       } catch (error) {
         return { state: "unavailable", detail: `transport:${error.name}` };
       }

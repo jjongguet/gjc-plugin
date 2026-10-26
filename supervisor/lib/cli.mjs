@@ -140,14 +140,12 @@ export async function runOnce(options, deps = {}) {
   const write = deps.stdout ?? (line => process.stdout.write(`${line}\n`));
   const runId = deps.runId ?? nextRunId(now);
   const previous = deps.previous ?? (await loadPreviousSnapshot(options.out));
-  const ciResolver = deps.ciResolver ?? (await createCiResolver({ cacheFile: path.join(options.out, "ci-cache.json"), now, fetchImpl: deps.fetchImpl }));
   const collect = deps.collectSessions ?? collectSessions;
   const { sessions, errors } = await collect({
     runner,
     now,
     includeMini: options.includeMini,
     miniHost: deps.miniHost ?? process.env.MINI_HOST ?? "macmini",
-    ciResolver,
   });
   applyHistory(sessions, previous, now);
 
@@ -160,6 +158,7 @@ export async function runOnce(options, deps = {}) {
       model: deps.decisionModel,
       now,
     });
+    session.judgmentState = resolved.state;
     judgments.push({
       id: resolved.id,
       state: resolved.state,
@@ -169,6 +168,14 @@ export async function runOnce(options, deps = {}) {
       ...(resolved.confidence !== undefined ? { confidence: resolved.confidence } : {}),
       ...(resolved.error ? { error: resolved.error } : {}),
     });
+  }
+
+  // CI reads go to the public GitHub API without credentials in this workspace,
+  // so they run after judging and are spent on the sessions that matter first.
+  const ciResolver = deps.ciResolver ?? (await createCiResolver({ cacheFile: path.join(options.out, "ci-cache.json"), now, fetchImpl: deps.fetchImpl }));
+  const ciPriority = { stalled: 0, thrashing: 1, progressing: 2, starting: 3, unknown: 4 };
+  for (const session of [...sessions].sort((a, b) => (ciPriority[a.judgmentState] ?? 9) - (ciPriority[b.judgmentState] ?? 9))) {
+    session.ci = await ciResolver.resolve(session);
   }
 
   const interventions = [];

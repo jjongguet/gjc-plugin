@@ -32,7 +32,7 @@ test("an ambiguous judgment adopts a confident decision-model choice", async () 
 test("abstain, provider failure, unknown label and low confidence all fall back to the deterministic state", async () => {
   const cases = [
     { route: () => fail(null, 3), error: "decision_exit_3" },
-    { route: () => fail("command_not_found"), error: "decision_exit_error:command_not_found" },
+    { route: () => fail("command_not_found"), error: "decision_exit_error" },
     { route: () => ok(JSON.stringify({ choice: "everything-is-fine", confidence: 0.9 })), error: "decision_unknown_label:everything-is-fine" },
     { route: () => ok(JSON.stringify({ choice: "thrashing", confidence: 0.4 })), error: "decision_low_confidence" },
     { route: () => ok("not json"), error: "decision_invalid_json" },

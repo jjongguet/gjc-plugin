@@ -54,7 +54,8 @@ export async function resolveJudgment(session, judgment, {
       { timeoutMs: timeoutMs + 5000 },
     );
     if (!result.ok) {
-      return fallback(judgment, `decision_exit_${result.code ?? "error"}:${result.error ?? ""}`.replace(/:$/, ""));
+      const detail = (result.stderr ?? "").split("\n").filter(Boolean)[0] ?? "";
+      return fallback(judgment, `decision_exit_${result.code ?? "error"}${detail ? `:${detail.slice(0, 60)}` : ""}`);
     }
     let receipt;
     try {

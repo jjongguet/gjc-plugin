@@ -74,7 +74,6 @@ async function gitFact(runner, worktree, args, errors, label) {
  * @param {number} [context.now]
  * @param {boolean} [context.includeMini]
  * @param {string} [context.miniHost]
- * @param {Function} [context.ciResolver] async (session) => ci object
  * @returns {Promise<{sessions: object[], errors: object[]}>}
  */
 export async function collectSessions({
@@ -82,23 +81,11 @@ export async function collectSessions({
   now = Date.now(),
   includeMini = true,
   miniHost = process.env.MINI_HOST ?? "macmini",
-  ciResolver = null,
 } = {}) {
   const errors = [];
   const sessions = [];
   sessions.push(...(await collectLaneSessions({ runner, now, errors })));
   if (includeMini) sessions.push(...(await collectMiniSessions({ runner, now, host: miniHost, errors })));
-  if (ciResolver) {
-    const resolveOne = typeof ciResolver === "function" ? ciResolver : session => ciResolver.resolve(session);
-    for (const session of sessions) {
-      try {
-        session.ci = await resolveOne(session);
-      } catch (error) {
-        session.ci = { state: "unavailable", detail: `resolver_failed: ${error.message}` };
-        session.errors.push(`ci:${error.message}`);
-      }
-    }
-  }
   return { sessions, errors };
 }
 
@@ -193,20 +180,31 @@ set -u
 origin="$HOME/jjongguet"
 printf 'origin\\t%s\\n' "$origin"
 now=$(date +%s)
+tmux_rows=$(tmux ls -F '#{session_name}|#{session_created}|#{pane_current_path}' 2>/dev/null)
+printf '%s\\n' "$tmux_rows" | while IFS='|' read -r n c p; do
+  [ -n "\${n:-}" ] || continue
+  printf 'tmux\\t%s\\t%s\\t%s\\n' "$n" "$c" "$p"
+done
 for d in "$origin"/*/; do
   [ -d "$d/.git" ] || continue
   repo=$(basename "$d")
   branch=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null) || continue
   case "$branch" in main|master|dev) continue;; esac
+  session_path="\${d%/}"
+  created=$(printf '%s\\n' "$tmux_rows" | awk -F'|' -v p="$session_path" '$3==p {print $2; exit}')
   window=$(git -C "$d" log --since "@$((now - 600))" --format=%H 2>/dev/null | wc -l | tr -d ' ')
+  if [ -n "\${created:-}" ]; then
+    since_start=$(git -C "$d" log --since "@$created" --format=%H 2>/dev/null | wc -l | tr -d ' ')
+  else
+    since_start=""
+  fi
   dirty=$(git -C "$d" status --porcelain 2>/dev/null | wc -l | tr -d ' ')
   last_at=$(git -C "$d" log -1 --format=%cI 2>/dev/null)
   last_subject=$(git -C "$d" log -1 --format=%s 2>/dev/null)
   head=$(git -C "$d" rev-parse HEAD 2>/dev/null)
   remote=$(git -C "$d" config --get remote.origin.url 2>/dev/null)
-  printf 'repo\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$repo" "$branch" "$window" "$dirty" "$last_at" "$last_subject" "$head" "$remote"
+  printf 'repo\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$repo" "$branch" "$window" "$dirty" "$last_at" "$last_subject" "$head" "$remote" "$since_start" "\${created:-}"
 done
-tmux ls -F 'tmux\\t#{session_name}\\t#{session_created}\\t#{pane_current_path}' 2>/dev/null
 `;
 
 export function parseMiniRecords(stdout) {
@@ -225,6 +223,8 @@ export function parseMiniRecords(stdout) {
         lastCommitSubject: fields[6] || "",
         sha: fields[7] || null,
         remote: fields[8] || null,
+        commitsSinceStart: (fields[9] ?? "") === "" ? null : Number(fields[9]),
+        createdSeconds: Number(fields[10] ?? "") || null,
       });
     } else if (fields[0] === "tmux" && fields[1]) {
       const created = Number(fields[2]);
@@ -252,22 +252,23 @@ async function collectMiniSessions({ runner, now, host, errors }) {
   return parsed.repos.map(entry => {
     const worktree = path.posix.join(parsed.origin, entry.repo);
     const tmux = parsed.tmux.find(row => row.panePath === worktree || row.panePath === `${worktree}/`);
+    const createdMs = entry.createdSeconds ? entry.createdSeconds * 1000 : (tmux?.createdMs ?? null);
     const sessionErrors = [];
     return {
       id: `mini:${entry.repo}`,
       target: "mini",
       name: entry.repo,
       tmuxSession: tmux?.name ?? null,
-      tmuxAlive: tmux ? true : null,
+      tmuxAlive: createdMs ? true : null,
       paneCommand: null,
       worktree,
       worktreePresent: true,
       branch: entry.branch,
       sha: entry.sha,
       remote: entry.remote,
-      ageMinutes: tmux?.createdMs ? Math.max(0, Math.floor((now - tmux.createdMs) / MINUTE)) : null,
-      startedAt: tmux?.createdMs ? new Date(tmux.createdMs).toISOString() : null,
-      commitsSinceStart: null,
+      ageMinutes: createdMs ? Math.max(0, Math.floor((now - createdMs) / MINUTE)) : null,
+      startedAt: createdMs ? new Date(createdMs).toISOString() : null,
+      commitsSinceStart: entry.commitsSinceStart,
       commitsLastWindow: entry.commitsLastWindow,
       dirty: entry.dirty,
       lastCommit: entry.lastCommitAt ? { at: entry.lastCommitAt, subject: entry.lastCommitSubject } : null,

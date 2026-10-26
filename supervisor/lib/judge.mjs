@@ -66,7 +66,7 @@ export function judgeSession(session, { now, previous = null, thresholds = {} } 
   }
   // A commit landed inside the stall window but not the 10 minute window: the
   // session is still landing work, just less recently.
-  if (lastCommitAge !== null && lastCommitAge < stall && (commitsSinceStart ?? 0) > 0) {
+  if (lastCommitAge !== null && lastCommitAge < stall) {
     reasons.push(`last_commit_${lastCommitAge}m`);
     return verdict("progressing");
   }
