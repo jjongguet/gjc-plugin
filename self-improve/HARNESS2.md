@@ -226,6 +226,13 @@ or is calibrated. The suites (`tests/integration/behavior-eval.test.mjs`,
 `tests/unit/distill-integrity.test.mjs`) prove the predicates and their failure
 paths, not behavior.
 
+**What does exist (2026-10-27).** A cost-0 guard ablation — two planted-defect
+tasks × two guard sets, each in an isolated `git archive` snapshot — is recorded
+in `artifacts/harness2-rrsi-20261027/` and summarised in
+[`PATTERNS.md`](PATTERNS.md). It measures which guard set catches which defect and
+at what wall cost. It has no model in the loop, no repeated arms and no holdout,
+so it is not a trial receipt and does not change the paragraph above.
+
 **The experiment that must run before any efficacy claim** is M1 (JJO-270) under
 the [evaluation rules](../docs/adr/0001-public-adoption-and-evaluation.md):
 freeze the task manifest, arm definitions, scoring, thresholds and exclusions;

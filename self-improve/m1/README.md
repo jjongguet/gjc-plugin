@@ -57,8 +57,11 @@ as stdout) and `rrsi-attempts.json`. Feed the attempts to the store with
 bun rrsi/scripts/rrsi-cli.mjs capture --goal "harness2-m1:<runId>" \
   --attempts-file artifacts/harness2-rrsi-20261027/rrsi-attempts.json
 bun rrsi/scripts/rrsi-cli.mjs import --ledger self-improve/ledger.jsonl
-bun rrsi/scripts/rrsi-cli.mjs dream
+bun rrsi/scripts/rrsi-cli.mjs dream --full
 ```
+
+`--full` prints the per-policy numbers behind the ranking ids (same store, same
+seed; refuses to print when the receipt hash differs from the journaled call).
 
 ## What this does not prove
 

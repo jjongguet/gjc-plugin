@@ -164,6 +164,24 @@ instead of substituting synthetic data. `.ts`/bun suites are local gates;
 `rrsi/tests/periodic.test.mjs` is the node-native file eligible for
 `verification_run`.
 
+### Local CLI
+
+`scripts/rrsi-cli.mjs` calls the same built surface from a shell, so a store can
+be inspected and fed outside a session. It parses arguments only; bounds, locking
+and storage stay in `tools/rrsi.ts` + `lib/rrsi.ts`.
+
+```sh
+bun rrsi/scripts/rrsi-cli.mjs status
+bun rrsi/scripts/rrsi-cli.mjs import --ledger self-improve/ledger.jsonl --limit 200
+bun rrsi/scripts/rrsi-cli.mjs capture --goal "harness2-m1:<runId>" --attempts-file <path>
+bun rrsi/scripts/rrsi-cli.mjs dream --full
+```
+
+Exit codes: `0` handled · `1` tool error or invalid store · `2` usage/runtime
+error. `dream --full` also prints the per-policy numbers behind the tool's
+ranking ids; it replays the same store and seed and refuses to print when the
+receipt hash differs from the journaled call.
+
 ## Quality trial contract (`gjc.quality_trial.v2`)
 
 The journal projection above records that an advice answer was returned, which

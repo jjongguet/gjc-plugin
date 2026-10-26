@@ -17,7 +17,7 @@ const USAGE = [
 	'usage: bun rrsi/scripts/rrsi-cli.mjs <action> [options]',
 	'',
 	'  status',
-	'  dream    [--seed <n>]',
+	'  dream    [--seed <n>] [--full]',
 	'  import   [--ledger <path>] [--limit <n>]',
 	'  capture  --goal <text> [--attempts <json> | --attempts-file <path>]',
 	'',
@@ -31,8 +31,12 @@ function parseArgs(argv) {
 	const options = {};
 	for (let index = 0; index < rest.length; index++) {
 		const flag = rest[index];
-		const value = rest[index + 1];
 		if (!flag.startsWith('--')) throw Object.assign(new Error(`unexpected argument: ${flag}`), { usage: true });
+		if (flag === '--full') {
+			options.full = true;
+			continue;
+		}
+		const value = rest[index + 1];
 		if (value === undefined || value.startsWith('--')) throw Object.assign(new Error(`missing value for ${flag}`), { usage: true });
 		index++;
 		if (flag === '--goal') options.goal = value;
@@ -53,6 +57,22 @@ async function loadTool() {
 	return module.default(fakePi);
 }
 
+/**
+ * `dream --full` also returns the per-policy numbers behind the tool's ranking ids.
+ * It replays the same store and seed, and refuses to print a table whose receipt
+ * hash differs from the journaled tool call.
+ */
+async function fullDream(seed) {
+	const lib = await import(pathToFileURL(join(pluginRoot, 'lib', 'rrsi.ts')).href);
+	const loaded = lib.readStore();
+	const { receipt } = lib.dreamOverStore({ store: loaded.store, seed: Number.parseInt(seed ?? '1', 10) || 1 });
+	const ranked = receipt.rankings.map((id) => {
+		const candidate = receipt.candidates.find((entry) => entry.id === id) ?? {};
+		return { id, config: candidate.config ?? null, validation: candidate.validation ?? null, train: candidate.train ?? null };
+	});
+	return { full: { receiptHash: receipt.receiptHash, ranked, baselines: receipt.baselines, thresholds: receipt.thresholds } };
+}
+
 async function main(argv) {
 	if (process.versions.bun === undefined) throw Object.assign(new Error('run this CLI with bun (the built surface is TypeScript)'), { usage: true });
 	if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
@@ -60,9 +80,18 @@ async function main(argv) {
 		return 0;
 	}
 	const { action, options } = parseArgs(argv);
+	const { full, ...params } = options;
 	const tool = await loadTool();
-	const response = await tool.execute('rrsi-cli', { action, ...options });
-	process.stdout.write(`${response.content?.[0]?.text ?? ''}\n`);
+	const response = await tool.execute('rrsi-cli', { action, ...params });
+	const payload = JSON.parse(response.content?.[0]?.text ?? '{}');
+	if (full && action === 'dream' && !response.isError) {
+		const extra = await fullDream(params.seed);
+		if (payload.summary?.receiptHash && extra.full.receiptHash !== payload.summary.receiptHash) {
+			throw new Error(`receipt_hash_mismatch: tool=${payload.summary.receiptHash} replay=${extra.full.receiptHash}`);
+		}
+		Object.assign(payload, extra);
+	}
+	process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
 	return response.isError ? 1 : 0;
 }
 
