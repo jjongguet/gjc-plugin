@@ -3,7 +3,10 @@
 // Lane sessions are local tmux sessions started by lane-gjc (`lane-<name>`); the
 // pane's working directory is the lane worktree, which is the authoritative
 // worktree pointer. Mini sessions are non-integration-branch checkouts under
-// ~/jjongguet on the mini host, read over one bounded ssh call.
+// ~/jjongguet and its lane worktrees on the mini host, read over one bounded ssh
+// call. Lane worktrees matter: a mini session created by `mini-gjc run --lane`
+// works inside ~/jjongguet/lanes/<repo>-<name>-<date>, so scanning only the top
+// level reports the lane as missing and masks a stalled session (JJO-913).
 //
 // Every failure is returned as data: a missing worktree, unreachable host or
 // failing git command must not abort the run.
@@ -187,9 +190,15 @@ printf '%s\\n' "$tmux_rows" | while IFS='|' read -r n c p; do
   [ -n "\${n:-}" ] || continue
   printf 'tmux\\t%s\\t%s\\t%s\\n' "$n" "$c" "$p"
 done
-for d in "$origin"/*/; do
+for d in "$origin"/*/ "$origin"/lanes/*/; do
   [ -d "$d/.git" ] || continue
-  repo=$(basename "$d")
+  case "$d" in "$origin"/lanes/*)
+    lane_remote=$(git -C "$d" config --get remote.origin.url 2>/dev/null)
+    lane_repo=$(printf '%s' "$lane_remote" | sed -E 's#.*/([^/]+?)(\\.git)?$#\\1#')
+    repo="\${lane_repo:-$(basename "$d")}"
+    ;;
+  *) repo=$(basename "$d") ;;
+  esac
   branch=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null) || continue
   case "$branch" in main|master|dev) continue;; esac
   session_path="\${d%/}"
