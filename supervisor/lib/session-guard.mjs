@@ -93,10 +93,13 @@ export function formatReport(result) {
     lines.push(`session-guard: 통과 — ${target} 에 살아있는 세션이 없다 (세션 ${result.checked}개 검사${mini})`);
   }
   for (const entry of result.dead) {
+    // Only a lane entry carries a trustworthy worktree path; the mini collector
+    // reports the checkout name, not its lane directory.
+    const where = entry.target === "lane" && entry.worktree ? ` · ${entry.worktree}` : "";
     lines.push(
       `  정리 후보(차단 아님): ${entry.tmuxSession ?? entry.name ?? entry.id} — ${
         entry.reason === "worktree_missing" ? "워크트리 없음" : "tmux 세션 없음"
-      } · ${entry.worktree ?? "경로 미상"}`,
+      }${where}`,
     );
   }
   for (const entry of result.unresolved) {
