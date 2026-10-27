@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { RRSI_QUALITY_SCHEMA, projectQualityCohort } from "../lib/rrsi";
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { RRSI_QUALITY_SCHEMA, projectQualityCohort, readTrialRecords } from "../lib/rrsi";
 import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
 
 const digest = (fill: string) => fill.repeat(64).slice(0, 64);
@@ -192,4 +195,28 @@ test("the limit bounds inspected records and keeps every inspected row accounted
 	const cohort = projectQualityCohort(records, { limit: 2 });
 	expect(cohort.total).toBe(2);
 	expect(cohort.admissible).toHaveLength(2);
+});
+
+test("the bounded trial reader accepts JSON arrays and JSONL, and refuses unsafe paths", () => {
+	const root = mkdtempSync(path.join(os.tmpdir(), "rrsi-trial-reader-"));
+	try {
+		const records = [trial(), trial()];
+		const arrayPath = path.join(root, "trials.json");
+		writeFileSync(arrayPath, JSON.stringify(records));
+		const fromArray = readTrialRecords({ recordsPath: arrayPath });
+		expect(fromArray.status).toBe("ok");
+		expect(fromArray.records).toHaveLength(2);
+
+		const jsonlPath = path.join(root, "trials.jsonl");
+		writeFileSync(jsonlPath, `${records.map((entry) => JSON.stringify(entry)).join("\n")}\nnot json\n`);
+		const fromJsonl = readTrialRecords({ recordsPath: jsonlPath });
+		expect(fromJsonl.records).toHaveLength(2);
+
+		expect(readTrialRecords({ recordsPath: path.join(root, "missing.json") })).toMatchObject({ status: "missing", records: [] });
+		const linkPath = path.join(root, "link.json");
+		symlinkSync(arrayPath, linkPath);
+		expect(readTrialRecords({ recordsPath: linkPath })).toMatchObject({ status: "invalid", reason: "unsafe_path" });
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
 });

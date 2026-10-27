@@ -37,7 +37,7 @@ const readSafe = (file) => { try { return fs.readFileSync(file, "utf8"); } catch
 
 const empty = await hook.runPeriodic({ env: process.env, mode: "inline" });
 fs.mkdirSync(journalDir, { recursive: true, mode: 0o700 });
-fs.writeFileSync(path.join(journalDir, "s.jsonl"), `${Array.from({ length: 12 }, (_, i) => JSON.stringify({ id: `r${i}`, operation: "run", durationMs: 5, advice: { status: "decision", tier: "fast" } })).join("\n")}\n`);
+fs.writeFileSync(path.join(journalDir, "seg-1.jsonl"), `${Array.from({ length: 12 }, (_, i) => JSON.stringify({ id: `r${i}`, operation: "run", durationMs: 5, advice: { status: "decision", tier: "fast" } })).join("\n")}\n`);
 backdate(25 * 60 * 60 * 1000);
 const first = await hook.runPeriodic({ env: process.env, mode: "inline" });
 const second = await hook.runPeriodic({ env: process.env, mode: "inline" });

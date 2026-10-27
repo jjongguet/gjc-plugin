@@ -14,6 +14,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
+import { journalWindowCoverage, readJournalRecords } from "../lib/rrsi";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
@@ -87,7 +89,7 @@ async function runSuite(root) {
 			advice: index % 3 === 0 ? { status: "decision", tier: ["fast", "balanced", "strong"][index % 3] } : { status: "no_decision", reason: "provider_error" },
 		}));
 
-	await check("manifest declares one tool, one session_start hook (no target/phase), and the four actions", async () => {
+	await check("manifest declares one tool, one session_start hook (no target/phase), and the five actions", async () => {
 		assert.equal(manifest.name, "rrsi");
 		assert.equal(manifest.version, "0.0.4");
 		assert.equal(manifest.tools.length, 1);
@@ -215,6 +217,58 @@ async function runSuite(root) {
 		assert.equal(ledgerEpisode.attempts.length, 2, "malformed ledger rows are skipped, never repaired");
 		assert.equal(ledgerEpisode.attempts.some((attempt) => attempt.decision === "adopt"), true);
 		assert.equal(readFileSync(ledgerPath, "utf8"), before, "the ledger source is never modified");
+	});
+
+	await check("cohort returns a counts-only v2 cohort and never repairs the source file", async () => {
+		const evidenceDigest = "e".repeat(64);
+		const harnessDigest = "b".repeat(64);
+		const receipt = {
+			schema: "gjc.quality_trial.v2",
+			trialId: "trial-1",
+			taskId: "t1",
+			taskVersion: 1,
+			split: "development",
+			arm: "B1",
+			repeat: 1,
+			goalRevision: 0,
+			producer: { id: "producer-a", kind: "producer" },
+			executor: { id: "executor-a", receiptId: "run-1", receiptDigest: "a".repeat(64) },
+			harness: { sourceDigest: "c".repeat(64), harnessDigest, manifestDigest: "d".repeat(64), version: "1" },
+			oracle: { kind: "json-expectation", verifierId: "verifier-a", evidenceDigest, independentFromProducer: true },
+			outcome: "passed",
+			denominator: { planned: 1, passed: 1, failed: 0, error: 0, skipped: 0 },
+			cost: { measured: true, wallMs: 10, inputTokens: 12, outputTokens: 3, usd: 0.0001 },
+			createdAt: "2026-10-27T00:00:00.000Z",
+			sourceHead: "e6e38a1",
+			executionKey: executionKeyFor({ taskId: "t1", taskVersion: "1", arm: "B1", repeat: 1, harnessDigest, oracleDigest: evidenceDigest, goalRevision: "0" }),
+		};
+		const recordsPath = path.join(root, "trials.jsonl");
+		const text = `${JSON.stringify(receipt)}\n{"schema":"gjc.quality_trial.v1"}\nnot json\n`;
+		writeFileSync(recordsPath, text);
+		const cohort = await call({ action: "cohort", recordsPath });
+		assert.equal(cohort.cohort.schema, "rrsi.quality_cohort.v2");
+		assert.equal(cohort.cohort.total, 2, "malformed lines are skipped, not repaired");
+		assert.equal(cohort.cohort.admissible.length, 1);
+		assert.deepEqual(cohort.cohort.excluded, [{ reason: "legacy_schema", count: 1 }]);
+		assert.equal("efficacyClaimsAllowed" in cohort.cohort, false, "no boolean efficacy permission");
+		assert.equal(readFileSync(recordsPath, "utf8"), text, "the source file is never modified");
+		assert.equal(cohort.journalStorage.persisted, true);
+
+		const missing = await call({ action: "cohort", recordsPath: path.join(root, "missing-trials.jsonl") });
+		assert.equal(missing.cohort.total, 0);
+		assert.equal(missing.source.status, "missing");
+
+		const linkPath = path.join(root, "linked-trials.jsonl");
+		symlinkSync(recordsPath, linkPath);
+		const unsafe = await call({ action: "cohort", recordsPath: linkPath });
+		assert.equal(unsafe.cohort.total, 0);
+		assert.equal(unsafe.source.reason, "unsafe_path");
+
+		const oversizedPath = path.join(root, "oversized-trials.json");
+		writeFileSync(oversizedPath, `[${"x".repeat(4 * 1024 * 1024 + 1)}]`);
+		const oversized = await call({ action: "cohort", recordsPath: oversizedPath });
+		assert.equal(oversized.cohort.total, 0);
+		assert.equal(oversized.source.reason, "oversized");
 	});
 
 	await check("dream reports the frozen below-gate verdict for a small store", async () => {
@@ -365,14 +419,111 @@ async function runSuite(root) {
 		const paths = periodicPaths(homeLimit);
 		const result = await withHome(homeLimit, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
 		assert.equal(result.status, "ran");
+		assert.equal(result.newest_covered, true);
+		assert.equal(result.head_omitted, 40);
 		const receiptFile = readdirSync(paths.receipts)[0];
 		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, receiptFile), "utf8"));
 		assert.deepEqual(receipt.projection, { records: 200, projected: 160, omitted: 40, ratio: 0.8, limited: true });
+		assert.equal(receipt.newest_covered, true);
+		assert.equal(receipt.head_omitted, 40);
 		assert.equal(receipt.limited_projection, true);
 		assert.equal(receipt.attemptsOmitted, 40);
 		assert.equal(receipt.limits.limit, 160);
 		const state = JSON.parse(readFileSync(paths.state, "utf8"));
 		assert.deepEqual(state.lastProjection, receipt.projection);
+		assert.equal(state.newest_covered, true);
+		assert.equal(Number.isFinite(Date.parse(state.lastSuccessAt)), true, "a covered newest window renews freshness");
+		assert.equal(Date.parse(state.nextRetryAt) - Date.parse(state.lastAttemptAt), 24 * 60 * 60 * 1000, "success arms the full interval, not a backoff step");
+	});
+
+	await check("periodic: a torn tail is reported and renews freshness", async () => {
+		const homeTorn = path.join(root, "periodic-home-torn");
+		mkdirSync(homeTorn, { mode: 0o700 });
+		const dir = path.join(homeTorn, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const complete = syntheticRecords(12).map((entry) => JSON.stringify(entry)).join("\n");
+		writeFileSync(path.join(dir, "seg-1.jsonl"), `${complete}\n{"id":"torn-fragment","operation":"run","advice":[`);
+		const report = readJournalRecords({ journalDir: dir });
+		assert.equal(report.newestSegment.tornTail, true);
+		assert.equal(report.segmentReport[0].state, "torn");
+		assert.equal(report.records.length, 12);
+		assert.equal(journalWindowCoverage(report.segmentReport, 160).covered, true);
+		const result = await withHome(homeTorn, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(result.status, "ran");
+		assert.equal(result.newest_covered, true);
+		const state = JSON.parse(readFileSync(periodicPaths(homeTorn).state, "utf8"));
+		assert.equal(Number.isFinite(Date.parse(state.lastSuccessAt)), true);
+	});
+
+	await check("periodic: numeric segment order (-9/-10), record cap, symlinked newest and an existing-store hold", async () => {
+		const record = (prefix, index) => ({ id: `${prefix}${index}`, operation: "run", durationMs: 5, advice: { status: "decision", tier: "fast" } });
+		const seedRecords = (homeDir, name, records) => {
+			const dir = path.join(homeDir, ".gjc-plugin", "jev-advisor", "journal", "v1");
+			mkdirSync(dir, { recursive: true, mode: 0o700 });
+			writeFileSync(path.join(dir, name), `${records.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+			return dir;
+		};
+
+		// -9 sorts after -10 lexicographically; numeric order must keep -9 first.
+		const homeOrder = path.join(root, "periodic-home-order");
+		mkdirSync(homeOrder, { mode: 0o700 });
+		const orderDir = seedRecords(homeOrder, "seg-10.jsonl", Array.from({ length: 6 }, (_, i) => record("b", i)));
+		seedRecords(homeOrder, "seg-9.jsonl", Array.from({ length: 6 }, (_, i) => record("a", i)));
+		const ordered = readJournalRecords({ journalDir: orderDir });
+		assert.deepEqual(ordered.segmentReport.map((entry) => entry.name), ["seg-9.jsonl", "seg-10.jsonl"]);
+		assert.equal(ordered.records[0].id, "a0");
+		assert.equal(ordered.records.at(-1).id, "b5");
+		assert.equal(journalWindowCoverage(ordered.segmentReport, 6).covered, true);
+
+		// A segment over the record cap cannot prove coverage.
+		const homeCap = path.join(root, "periodic-home-cap");
+		mkdirSync(homeCap, { mode: 0o700 });
+		const capDir = seedRecords(homeCap, "seg-1.jsonl", Array.from({ length: 4097 }, (_, i) => record("c", i)));
+		const capped = readJournalRecords({ journalDir: capDir });
+		assert.equal(capped.segmentReport[0].state, "truncated");
+		assert.deepEqual(capped.truncatedSegments, ["seg-1.jsonl"]);
+		assert.equal(journalWindowCoverage(capped.segmentReport, 160).covered, false);
+
+		// A symlinked newest segment is skipped and blocks coverage.
+		const homeLink = path.join(root, "periodic-home-link");
+		mkdirSync(homeLink, { mode: 0o700 });
+		const linkDir = seedRecords(homeLink, "seg-1.jsonl", Array.from({ length: 6 }, (_, i) => record("d", i)));
+		symlinkSync(path.join(linkDir, "seg-1.jsonl"), path.join(linkDir, "seg-2.jsonl"));
+		const linked = readJournalRecords({ journalDir: linkDir });
+		assert.equal(linked.segmentReport.at(-1).state, "skipped");
+		assert.equal(linked.newestSegment.state, "skipped");
+		assert.equal(journalWindowCoverage(linked.segmentReport, 160).covered, false);
+
+		// An uncovered run holds a pre-existing store byte-identically.
+		const homeHold = path.join(root, "periodic-home-hold");
+		mkdirSync(homeHold, { mode: 0o700 });
+		seedJournal(homeHold, 12);
+		const holdPaths = periodicPaths(homeHold);
+		const firstRun = await withHome(homeHold, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(firstRun.status, "ran");
+		const heldBytes = readFileSync(holdPaths.store, "utf8");
+		seedRecords(homeHold, "journal-a.jsonl", [record("e", 0)]);
+		backdateState(homeHold, 25 * 60 * 60 * 1000);
+		const beforeHold = JSON.parse(readFileSync(holdPaths.state, "utf8"));
+		const heldRun = await withHome(homeHold, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(heldRun.status, "uncovered");
+		assert.equal(heldRun.storeWrite, "held");
+		assert.equal(readFileSync(holdPaths.store, "utf8"), heldBytes, "an uncovered run must not rewrite the store");
+		const afterHold = JSON.parse(readFileSync(holdPaths.state, "utf8"));
+		assert.equal(afterHold.lastSuccessAt, beforeHold.lastSuccessAt, "uncovered must not renew freshness");
+		assert.deepEqual(afterHold.blocking_segments, ["journal-a.jsonl"]);
+		const holdReceipts = readdirSync(holdPaths.receipts).map((name) => JSON.parse(readFileSync(path.join(holdPaths.receipts, name), "utf8"))).filter((receipt) => receipt.status === "uncovered");
+		assert.equal(holdReceipts.length, 1);
+		assert.deepEqual(holdReceipts[0].blocking_segments, ["journal-a.jsonl"], "the receipt names the offending segments");
+
+		const inventoryHome = path.join(root, "periodic-home-inventory");
+		mkdirSync(inventoryHome, { mode: 0o700 });
+		const inventoryDir = seedRecords(inventoryHome, "seg-1.jsonl", Array.from({ length: 6 }, (_, i) => record("f", i)));
+		writeFileSync(path.join(inventoryDir, "inventory.json"), JSON.stringify({ schemaVersion: 1, next: 2, segments: [{ name: "seg-0.jsonl" }] }));
+		const staleInventory = readJournalRecords({ journalDir: inventoryDir });
+		assert.equal(staleInventory.inventory.stale, true);
+		assert.deepEqual(staleInventory.inventory.missingDeclared, ["seg-0.jsonl"]);
+		assert.equal(journalWindowCoverage(staleInventory.segmentReport, 160).covered, true);
 	});
 
 	await check("periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class", async () => {
@@ -703,7 +854,7 @@ async function runSuite(root) {
 
 	await check("the shared results registry accepts rrsi outcomes and rejects malformed ones", async () => {
 		const shared = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
-		for (const action of ["capture", "import", "dream", "status"]) {
+		for (const action of ["capture", "import", "dream", "cohort", "status"]) {
 			const result = await shared.appendPluginOutcome("rrsi", { operation: action, rrsi: { action, storage: "ok" } });
 			assert.equal(result.persisted, true, action);
 		}

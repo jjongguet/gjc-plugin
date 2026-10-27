@@ -16,7 +16,7 @@ store contains and are reported with the same pinned caveat as the loop.
 
 ## Tool surface
 
-One explicitly invoked tool — `rrsi` — with four actions, plus one
+One explicitly invoked tool — `rrsi` — with five actions, plus one
 `session_start` hook (`hooks/rrsi-periodic.ts`) that performs the due-gated
 periodic refresh described below.
 
@@ -25,6 +25,7 @@ periodic refresh described below.
 | `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |
 | `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`), `projectionDigest` and `projection` (`records` / `projected` / `omitted` / `ratio` / `limited`), and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
 | `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |
+| `cohort` | `recordsPath`, `limit?` | Reads one bounded `gjc.quality_trial.v2` receipt file (JSON array or JSONL, symlinked/oversized/unreadable paths refused) and returns the counts-only `rrsi.quality_cohort.v2` cohort: `total`, `admissible[]`, `excluded[{reason,count}]`, `duplicate`. No rate, delta or verdict; `efficacyClaimsAllowed` does not exist. Missing or empty input returns `total: 0` with `source.status: "missing"`. |
 | _other_ | — | Rejected as a tool error (`isError: true`) with `error: "unknown action: <value>"`; the store is read, never written. |
 | `status` | — | Store counts (episodes/attempts/adoptions, where `adoptions` counts attempts whose `decision` is `adopt`, including projected advice records), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
 
@@ -57,16 +58,18 @@ is out of scope and unprovided.
   (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`, spawned by the hook,
   re-running under the same locks) instead of inside the session.
 - **Coverage labels.** The periodic receipt carries `projection`
-  `{records, projected, omitted, ratio, limited}`, `limited_projection` and
-  `incomplete_prefix`; omitted records are labeled in the periodic receipt,
-  never silently dropped by that path; `import` returns journal coverage as `projection`.
-  The same projection is stored as `lastProjection` for
-  `rrsi status`.
+  `{records, projected, omitted, ratio, limited}` plus `newest_covered`,
+  `head_omitted`, `novelty` (`{retained, novel, shared, density}`) and
+  `blocking_segments`; omitted
+  older records are labeled, never silently dropped. `import` returns the same
+  labels under `journal`/`window`. The same projection is stored as
+  `lastProjection` for `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
   `consecutiveFailures`, `lastReceiptId`, `lastProjectionDigest`, `storeWrite`,
-  `derivedChunks`, `incomplete_prefix` and `intervalMs`. Run receipts live in
+  `derivedChunks`, `newest_covered`, `head_omitted`, `novelty`,
+  `blocking_segments` and `intervalMs`. Run receipts live in
   `~/.gjc-plugin/rrsi/runs/v1/<receiptId>.json` (schema
   `gjc.rrsi.periodic.run.v1`, ≤ 64 KiB each, ≤ 60 retained, oldest pruned on
   write). Each executed run — including `no_input` and error outcomes —
@@ -74,7 +77,9 @@ is out of scope and unprovided.
   `~/.gjc-plugin/rrsi/journal/v1/`; `skipped_due` / `skipped_locked` /
   `skipped_disabled` write nothing.
 - **Outcome taxonomy.** `ran` (store written: `added`/`replaced`) ·
-  `unchanged` (due run, byte-identical content, no write) · `deferred` (large
+  `unchanged` (due run, byte-identical content, no write) · `uncovered`
+  (newest window could not be proven current: store held byte-identically,
+  freshness not renewed, next attempt at the full interval) · `deferred` (large
   corpus handed to the detached worker) · `no_input` (journal missing/empty;
   state `lastStatus: "empty"`, next attempt at the interval) · `skipped_due`
   (interval or backoff) · `skipped_locked` · `skipped_disabled` · `error`
@@ -229,8 +234,7 @@ decision, wallMs, usd, costMeasured, sourceDigest, harnessDigest) — no rate,
 delta or verdict — and there is no `efficacyClaimsAllowed` field, asserted by
 `tests/quality-cohort.test.ts`. Byte-identical repeats collapse into
 `duplicate` and count once; a genuine re-run is a separate cell only through
-`repeat`. The cohort is a library export exercised by the tests: the `rrsi`
-tool's four actions (`capture`, `import`, `dream`, `status`) do not return it.
+`repeat`. The cohort is a library export exercised by the tests and returned by the bounded `cohort` tool action (counts only: no rate, delta or verdict).
 
 **`taskAdvice[]` projection.** One journal record is one attempt. The advice
 entries a record carries are its compact `taskAdvice[]` batch (one entry per
@@ -239,17 +243,27 @@ delegated task) when that batch holds any entry; otherwise the older single
 exists. The representative entry is the first real decision, else the first
 entry; the branch objective is `<operation>:<tier|status>` of that entry,
 `decision` is `adopt` only when it is a decision, and the rest count as
-`reject`. `projectJournalRecords` also returns `scanned` (records inspected)
-and `truncated` (a prefix cut).
+`reject`. `projectJournalRecords` also returns `scanned` (records inspected),
+`headOmitted` (older attempts the newest window dropped) and `novelty`
+(`{retained, novel, shared, density}`; novelty keeps the journal read order, so
+a mature journal's retained window is novelty-empty by construction).
 
-**`incomplete_prefix` freshness rule.** `truncated: true` means the attempt
-bound was reached while newer records were still unread, so the projection and
-its digest cover only the head of the journal. The periodic run records
-`incomplete_prefix: true` on its receipt, state and `finish` result, does
-**not** renew `lastSuccessAt`, and — when the run is not already a dream
-failure — schedules the next attempt at one backoff step
-(`backoffMs(1, intervalMs)`) instead of the full interval. A prefix projection
-therefore never counts as freshness evidence.
+**Segment order and window coverage.** Numeric segment suffixes (`-<n>.jsonl`)
+order the journal ascending; `inventory.json` is a membership/staleness
+cross-check, not a replacement for numeric order. A segment without a numeric
+suffix is reported as `ordering: "unproven"` and is never coverage evidence.
+The periodic run walks the segment report newest-first until the retained
+window is filled: a skipped, truncated or unproven segment inside that walk
+means the window is **uncovered**. A torn tail line (a final chunk without a
+trailing newline) is excluded from the projection and reported; it does not
+block coverage.
+
+**Newest-coverage freshness rule.** `lastSuccessAt` renews only when the newest
+window was covered. On `uncovered` the run performs **no store write** (the
+previous derived set is held byte-identically, `storeWrite: "held"`), keeps the
+prior `lastSuccessAt`, and schedules the next attempt at the full interval — no
+backoff spin. Older records outside the window are normal and never block
+freshness.
 
 **What this does not prove.** Counts and digests are contract evidence, not
 efficacy evidence: no trial receipts are committed, no comparison has been run,

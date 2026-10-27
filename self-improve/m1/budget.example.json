@@ -1,0 +1,12 @@
+{
+  "capUsd": 1.0,
+  "modelPin": "openai/gpt-4o-mini",
+  "maxCalls": 54,
+  "pricePer1kInputUsd": 0.00015,
+  "pricePer1kOutputUsd": 0.0006,
+  "maxInputTokensPerCall": 2000,
+  "maxOutputTokensPerCall": 400,
+  "maxWallMs": 60000,
+  "cleanupUsd": 0.0,
+  "note": "Operator declarations only; prices are never fetched. The preflight refuses live execution, so no call is made and no spend is authorized by this file."
+}

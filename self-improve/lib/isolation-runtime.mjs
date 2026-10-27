@@ -132,6 +132,9 @@ export function probeIsolation({
     allowlist: allowNetwork ? { mode: "ip-allowlist", hosts: [...allowNetworkHosts] } : { mode: "deny-all", hosts: [] },
     probes,
     profileDigest: createHash("sha256").update(profile).digest("hex"),
+    // Path-stable digest for reproducible preflight artifacts: the trial mount
+    // (and the temporary outside root) are replaced by fixed tokens.
+    profileDigestNormalized: createHash("sha256").update(profile.replaceAll(resolvedMount, "<mount>").replaceAll(home, "<outside>")).digest("hex"),
   };
 }
 

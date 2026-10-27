@@ -21,7 +21,7 @@ import { sha256Hex } from "../../self-improve/lib/types.mjs";
 import { corpusFromAttempts } from "../../self-improve/lib/replay.mjs";
 import { runDream } from "../../self-improve/lib/dream.mjs";
 import {
-  projectQualityTrialCohort as projectTrialCohort,
+  projectQualityTrialCohort,
   QUALITY_COHORT_SCHEMA,
   QUALITY_TRIAL_SCHEMA,
 } from "../../self-improve/lib/quality-trial.mjs";
@@ -222,43 +222,145 @@ export function writeStore({ store, env = process.env }) {
   }
 }
 
+const SEGMENT_INDEX_RE = /-(\d+)\.jsonl$/;
+
+/** Numeric suffix of a journal segment name, or null when the name is unproven. */
+export function journalSegmentIndex(name) {
+  const match = SEGMENT_INDEX_RE.exec(String(name ?? ""));
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 /**
- * Read-only projection of the jev-advisor journal segments. Records are read in
- * segment order and never modified; the caller decides what to persist.
+ * Segment order: the numeric suffix ascending is authoritative. Names without
+ * a numeric suffix sort last lexicographically for reporting only and are
+ * never coverage evidence.
+ */
+export function orderJournalSegments(names) {
+  const numeric = [];
+  const unproven = [];
+  for (const name of Array.isArray(names) ? names : []) {
+    const index = journalSegmentIndex(name);
+    if (index === null) unproven.push(String(name));
+    else numeric.push({ name: String(name), index });
+  }
+  numeric.sort((left, right) => left.index - right.index || left.name.localeCompare(right.name));
+  unproven.sort();
+  return [
+    ...numeric.map((entry) => ({ name: entry.name, index: entry.index, ordering: "numeric" })),
+    ...unproven.map((name) => ({ name, index: null, ordering: "unproven" })),
+  ];
+}
+
+function readJournalInventory(dir) {
+  try {
+    const file = path.join(dir, "inventory.json");
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) return { status: "invalid", declared: null, next: null };
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    const declared = Array.isArray(parsed?.segments) ? new Set(parsed.segments.map((entry) => String(entry?.name ?? "")).filter(Boolean)) : null;
+    return { status: "ok", declared, next: Number.isSafeInteger(parsed?.next) ? parsed.next : null };
+  } catch (error) {
+    return { status: error && error.code === "ENOENT" ? "missing" : "invalid", declared: null, next: null };
+  }
+}
+
+/**
+ * Read-only projection of the jev-advisor journal segments. Records are read
+ * in ascending numeric segment order and never modified. The return value
+ * carries a per-segment report so a caller can prove whether the newest
+ * records were covered: a skipped, truncated or unproven segment inside the
+ * retained window cannot count as covered. A torn tail line is excluded and
+ * reported; it is not a coverage failure.
  */
 export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJournalSegments } = {}) {
   const dir = journalDir ?? rrsiJournalDir();
+  const empty = (status, reason) => ({
+    status,
+    reason,
+    records: [],
+    segments: 0,
+    segmentReport: [],
+    skippedSegments: [],
+    truncatedSegments: [],
+    newestSegment: null,
+    inventory: { status: "missing", stale: false, next: null, missingDeclared: [] },
+    ordering: "none",
+  });
   let names;
   try {
-    names = fs.readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort();
+    names = fs.readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
   } catch {
-    return { status: "missing", records: [], segments: 0, reason: "no_journal" };
+    return empty("missing", "no_journal");
   }
-  const segments = names.slice(-maxSegments);
+  const ordered = orderJournalSegments(names);
+  const selected = ordered.slice(-maxSegments);
+  const inventory = readJournalInventory(dir);
+  const stale = inventory.status === "ok" && inventory.declared !== null && selected.some((entry) => !inventory.declared.has(entry.name));
+  const missingDeclared = inventory.status === "ok" && inventory.declared !== null ? [...inventory.declared].filter((name) => !names.includes(name)).slice(0, 8) : [];
   const records = [];
-  for (const name of segments) {
-    let text;
+  const segmentReport = [];
+  for (const entry of selected) {
+    let text = null;
+    let state = "read";
+    let reason = null;
     try {
-      const file = path.join(dir, name);
+      const file = path.join(dir, entry.name);
       const stat = fs.lstatSync(file);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > RRSI_LIMITS.maxReadBytes) continue;
-      text = fs.readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    let count = 0;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      count += 1;
-      if (count > RRSI_LIMITS.maxJournalRecordsPerSegment) break;
-      try {
-        records.push(JSON.parse(line));
-      } catch {
-        /* a malformed line is skipped, never repaired */
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        state = "skipped";
+        reason = "unsafe_segment";
+      } else if (stat.size > RRSI_LIMITS.maxReadBytes) {
+        state = "skipped";
+        reason = "oversized_segment";
+      } else {
+        text = fs.readFileSync(file, "utf8");
       }
+    } catch {
+      state = "skipped";
+      reason = "unreadable_segment";
     }
+    const lines = [];
+    let torn = false;
+    let malformed = 0;
+    let count = 0;
+    if (text !== null) {
+      const chunks = text.split("\n");
+      const tail = chunks.length > 0 ? chunks[chunks.length - 1] : "";
+      torn = tail !== "";
+      if (torn) chunks.pop();
+      for (const line of chunks) {
+        if (!line.trim()) continue;
+        count += 1;
+        if (count > RRSI_LIMITS.maxJournalRecordsPerSegment) {
+          if (state === "read") {
+            state = "truncated";
+            reason = "record_cap";
+          }
+          break;
+        }
+        try {
+          lines.push(JSON.parse(line));
+        } catch {
+          malformed += 1;
+        }
+      }
+      records.push(...lines);
+    }
+    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state: torn && state === "read" ? "torn" : state, tornTail: torn, malformed, reason });
   }
-  return { status: records.length > 0 ? "ok" : "missing", records, segments: segments.length, reason: records.length > 0 ? null : "no_records" };
+  const newest = segmentReport.length > 0 ? segmentReport[segmentReport.length - 1] : null;
+  return {
+    status: records.length > 0 ? "ok" : "missing",
+    reason: records.length > 0 ? null : "no_records",
+    records,
+    segments: selected.length,
+    segmentReport,
+    skippedSegments: segmentReport.filter((entry) => entry.state === "skipped").map((entry) => entry.name),
+    truncatedSegments: segmentReport.filter((entry) => entry.state === "truncated").map((entry) => entry.name),
+    newestSegment: newest ? { name: newest.name, state: newest.state, tornTail: newest.tornTail, ordering: newest.ordering } : null,
+    inventory: { status: inventory.status, stale, next: inventory.next, missingDeclared },
+    ordering: selected.some((entry) => entry.ordering === "unproven") ? "unproven" : "numeric",
+  };
 }
 
 /**
@@ -288,21 +390,17 @@ function journalAdviceEntries(record) {
  *   decision = "adopt" when the representative entry is a decision else "reject"
  *   wallMs = durationMs; provenance = the journal record id
  *
- * One record is one attempt. `scanned` counts inspected records and `truncated`
- * reports a prefix cut: the retained bound was reached while newer records were
- * still unread, so this projection is an incomplete prefix of the journal.
+ * One record is one attempt. Novelty is computed over the full read order,
+ * then the newest `limit` attempts are retained. `scanned` counts inspected
+ * records and `headOmitted` counts the older attempts the window dropped.
  */
 export function projectJournalRecords(records, { limit = 4000 } = {}) {
   const input = Array.isArray(records) ? records : [];
   const seen = new Map();
-  const attempts = [];
+  const all = [];
   let scanned = 0;
-  let truncated = false;
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
   for (const record of input) {
-    if (attempts.length >= limit) {
-      truncated = true;
-      break;
-    }
     scanned += 1;
     if (!record || typeof record !== "object") continue;
     const entries = journalAdviceEntries(record);
@@ -313,25 +411,29 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
     const tier = boundedText(entry.tier, 16) || status;
     const objective = `${operation}:${tier}`;
     const branch = seen.get(objective) ?? { records: 0, failures: 0 };
-    attempts.push(
-      normalizeAttempt(
-        {
-          objective,
-          hypothesisNovelty: branch.records === 0,
-          decision: decision ? "adopt" : "reject",
-          wallMs: boundedInteger(record.durationMs, 86_400_000),
-          guardFailures: [],
-          budgetRung: 0,
-          files: 0,
-          hunks: 0,
-          provenance: boundedText(record.id, RRSI_LIMITS.maxIdChars),
-        },
-        attempts.length,
-      ),
-    );
+    all.push({
+      objective,
+      hypothesisNovelty: branch.records === 0,
+      decision: decision ? "adopt" : "reject",
+      wallMs: boundedInteger(record.durationMs, 86_400_000),
+      guardFailures: [],
+      budgetRung: 0,
+      files: 0,
+      hunks: 0,
+      provenance: boundedText(record.id, RRSI_LIMITS.maxIdChars),
+    });
     seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
   }
-  return { attempts, branches: seen.size, scanned, truncated };
+  const headOmitted = Math.max(0, all.length - Math.min(all.length, bound));
+  const attempts = all.slice(all.length - Math.min(all.length, bound)).map((attempt, index) => normalizeAttempt(attempt, index));
+  const novel = attempts.filter((attempt) => attempt.hypothesisNovelty).length;
+  return {
+    attempts,
+    branches: seen.size,
+    scanned,
+    headOmitted,
+    novelty: { retained: attempts.length, novel, shared: attempts.length - novel, density: attempts.length > 0 ? novel / attempts.length : null },
+  };
 }
 
 /** Ledger cycle rows -> attempts (read-only summary of the repo search history). */
@@ -358,6 +460,47 @@ export function projectLedgerRows(rows, { limit = 4000 } = {}) {
     );
   }
   return { attempts };
+}
+
+/**
+ * Bounded reader for `gjc.quality_trial.v2` receipts: one JSON array file or a
+ * JSONL file. A symlinked, oversized or unreadable path is reported, never
+ * repaired; malformed lines are skipped and counted by the cohort validator.
+ */
+export function readTrialRecords({ recordsPath, limit = 4000 } = {}) {
+  if (typeof recordsPath !== "string" || recordsPath.length === 0) return { status: "missing", reason: "no_path", records: [] };
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 4000) : 4000;
+  try {
+    const stat = fs.lstatSync(recordsPath);
+    if (stat.isSymbolicLink() || !stat.isFile()) return { status: "invalid", reason: "unsafe_path", records: [] };
+    if (stat.size > RRSI_LIMITS.maxReadBytes) return { status: "invalid", reason: "oversized", records: [] };
+    const text = fs.readFileSync(recordsPath, "utf8");
+    const trimmed = text.trim();
+    let records = [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) return { status: "invalid", reason: "not_an_array", records: [] };
+        records = parsed;
+      } catch {
+        return { status: "invalid", reason: "malformed_json", records: [] };
+      }
+    } else {
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        if (records.length >= bound) break;
+        try {
+          records.push(JSON.parse(line));
+        } catch {
+          /* malformed lines are skipped, never repaired */
+        }
+      }
+    }
+    records = records.slice(0, bound);
+    return { status: records.length > 0 ? "ok" : "missing", reason: records.length > 0 ? null : "no_records", records };
+  } catch {
+    return { status: "missing", reason: "unreadable", records: [] };
+  }
 }
 
 export function readLedgerRows({ ledgerPath } = {}) {
@@ -400,6 +543,29 @@ export function projectionCoverage(records, attempts) {
   const projected = Array.isArray(attempts) ? attempts.length : 0;
   const omitted = Math.max(0, total - projected);
   return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
+}
+
+/**
+ * Window coverage: walk the segment report newest-first until the retained
+ * window is filled. A skipped, truncated or unproven segment inside that walk
+ * cannot prove coverage; a torn tail is reported and does not block.
+ */
+export function journalWindowCoverage(segmentReport, limit) {
+  const report = Array.isArray(segmentReport) ? segmentReport : [];
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
+  let collected = 0;
+  const touched = [];
+  for (let index = report.length - 1; index >= 0; index -= 1) {
+    touched.push(report[index]);
+    collected += Number.isSafeInteger(report[index].records) ? report[index].records : 0;
+    if (collected >= bound) break;
+  }
+  const blocking = touched.filter((entry) => entry.state === "skipped" || entry.state === "truncated" || entry.ordering === "unproven");
+  return {
+    covered: touched.length > 0 && blocking.length === 0,
+    touched: touched.map((entry) => entry.name),
+    blocking: blocking.map((entry) => entry.name),
+  };
 }
 
 /**
@@ -634,7 +800,7 @@ export type QualityCohort = {
 
 /** Counts-only cohort over `gjc.quality_trial.v2` records (delegates to the canonical validator). */
 export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
-  return projectTrialCohort(records, { limit }) as QualityCohort;
+  return projectQualityTrialCohort(records, { limit }) as QualityCohort;
 }
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);

@@ -89,5 +89,5 @@ test("the generated hook surface carries the v2 quality contract and the prefix-
 		assert.ok(surface.includes("conflicting_duplicate"), "duplicate exclusion taxonomy is inlined");
 		assert.equal(surface.includes("efficacyClaimsAllowed"), false, "no boolean efficacy permission survives");
 	}
-	assert.ok(hook.includes("incomplete_prefix"), "the periodic surface reports a prefix cut");
+	assert.ok(hook.includes("newest_covered"), "the periodic surface reports window coverage");
 });

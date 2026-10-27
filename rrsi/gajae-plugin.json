@@ -6,7 +6,7 @@
     {
       "name": "rrsi",
       "path": "tools/rrsi.ts",
-      "description": "Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy; status reports store counts and storage state. Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/ (0700/0600, never committed)."
+      "description": "Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | cohort | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy; status reports store counts and storage state. cohort reads one bounded gjc.quality_trial.v2 receipt file and returns a counts-only rrsi.quality_cohort.v2 (no rate, delta or verdict). Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/ (0700/0600, never committed)."
     }
   ],
   "hooks": [
