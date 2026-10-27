@@ -172,6 +172,11 @@ measured result.
 - `rrsi` exposes the cohort as a library export (`projectQualityCohort`) used
   by its tests. The `rrsi` tool's four actions (`capture`, `import`, `dream`,
   `status`) do not return it.
+- `loaded` is a pilot-receipt (`harness2`) property: `validateTrialReceipt`
+  requires it and re-derives the embedded loading payload, while
+  `validateQualityTrial` keeps digest-pin admission. The divergence is
+  deliberate and recorded here; propagating `loaded` into the cohort validator
+  is separate work, not a silent reconciliation.
 - Duplicate collapse means two byte-identical receipts count once; a genuine
   repeat must differ in `repeat`.
 - No measured comparison exists yet. No trial receipts are committed, and every

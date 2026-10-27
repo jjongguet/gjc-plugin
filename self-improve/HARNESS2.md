@@ -15,6 +15,17 @@ No live trial has run; every efficacy statement in this document remains a
 proposal, and a live run needs an enforceable isolation runtime plus a separate
 owner-approved budget.
 
+`lib/loading-receipt.mjs` is the loading-evidence producer. It composes the
+loader state (`gjc plugin list --json`, whitelisted and redacted) with
+`computeHarnessDigest` over explicit targets, excludes credential-like files
+from the digest rows (presence is recorded without a digest), and embeds a
+canonical payload whose sha256 is the receipt digest. `validateTrialReceipt`
+requires `loadingReceipt.loaded === true` and re-derives the payload digest
+(`loading_not_proven`, `loading_payload_missing`,
+`loading_payload_mismatch`). It proves loader-resolved surfaces and payload
+integrity — not that a model used them, and not provenance: a self-consistent
+forgery still passes. Task outcomes remain the independent oracle's job.
+
 ## Decision and evidence boundary
 
 Selectively adapt Harness²'s execution-evidence approach inside the existing

@@ -8,6 +8,7 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
 import { isDigestHex, QUALITY_ARMS } from "./quality-trial.mjs";
+import { verifyLoadingReceipt } from "./loading-receipt.mjs";
 
 export const PILOT_SCHEMA = "harness2.pilot.v1";
 export const ARMS = QUALITY_ARMS;
@@ -124,7 +125,11 @@ export function isolationPreflight({ runtime = null, denyProbes = [] } = {}) {
 export function validateTrialReceipt(receipt) {
   const failures = [];
   if (!receipt || typeof receipt !== "object") return { valid: false, failures: ["missing_receipt"] };
-  if (!isDigestHex(receipt.loadingReceipt?.sha256)) failures.push("missing_loading_receipt");
+  if (receipt.loadingReceipt?.loaded !== true) failures.push("loading_not_proven");
+  else {
+    const loading = verifyLoadingReceipt(receipt.loadingReceipt);
+    if (!loading.ok) failures.push(loading.reason ?? "loading_not_proven");
+  }
   if (!isDigestHex(receipt.harness?.sourceDigest)) failures.push("missing_source_digest");
   if (!isDigestHex(receipt.harness?.harnessDigest)) failures.push("missing_harness_digest");
   if (receipt.isolation?.denyProbesPassed !== true) failures.push("isolation_not_proven");

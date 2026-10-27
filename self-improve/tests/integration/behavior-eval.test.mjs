@@ -13,6 +13,7 @@ import {
   validateManifest,
   validateTrialReceipt,
 } from "../../lib/behavior-eval.mjs";
+import { buildLoadingReceipt } from "../../lib/loading-receipt.mjs";
 
 const SELF_IMPROVE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(join(SELF_IMPROVE, "tests/fixtures/pilot/manifest.json"), "utf8"));
@@ -64,8 +65,27 @@ test("spending admission fails closed on unknown price, usage or cap", () => {
 });
 
 test("a trial is invalid without loading, isolation, budget or measured cost evidence", () => {
+  const loadingReceipt = buildLoadingReceipt({
+    pluginState: {
+      status: "ok",
+      reason: null,
+      plugins: [
+        {
+          name: "rrsi",
+          version: "0.0.4",
+          enabled: true,
+          quarantined: false,
+          manifestHash: "1".repeat(64),
+          targetFingerprint: "2".repeat(64),
+          surfaces: [{ kind: "tool", name: "rrsi", enabled: true, quarantined: false }],
+        },
+      ],
+    },
+    harnessDigest: { rootHash: "3".repeat(64), rows: [{ path: "gjc-plugins/rrsi", sha256: "4".repeat(64), size: 10 }] },
+    expected: { plugins: ["rrsi"] },
+  });
   const good = {
-    loadingReceipt: { sha256: "a".repeat(64) },
+    loadingReceipt,
     harness: { sourceDigest: "b".repeat(64), harnessDigest: "c".repeat(64) },
     isolation: { denyProbesPassed: true },
     producer: { id: "producer-a" },
@@ -97,6 +117,15 @@ test("a trial is invalid without loading, isolation, budget or measured cost evi
   assert.deepEqual(validateTrialReceipt(shortDenominator).failures, ["denominator_mismatch"]);
   const negativeCost = { ...good, cost: { measured: true, usd: -0.01, wallMs: 1200 } };
   assert.deepEqual(validateTrialReceipt(negativeCost).failures, ["invalid_cost"]);
+
+  // The loading gate is re-derived, not trusted: an unloaded receipt, a missing
+  // payload and a tampered payload are all rejected.
+  const unloaded = { ...good, loadingReceipt: { ...loadingReceipt, loaded: false } };
+  assert.deepEqual(validateTrialReceipt(unloaded).failures, ["loading_not_proven"]);
+  const noPayload = { ...good, loadingReceipt: { sha256: "a".repeat(64), loaded: true } };
+  assert.deepEqual(validateTrialReceipt(noPayload).failures, ["loading_payload_missing"]);
+  const tampered = { ...good, loadingReceipt: { ...loadingReceipt, payload: { ...loadingReceipt.payload, sourceHead: "deadbeef" } } };
+  assert.deepEqual(validateTrialReceipt(tampered).failures, ["loading_payload_mismatch"]);
 });
 
 test("component wins never rescue a regressing or costlier composite", () => {

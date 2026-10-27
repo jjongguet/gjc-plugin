@@ -12,9 +12,10 @@ plus declared probes, and records every decision in an append-only ledger
 
 | Path | Role |
 | --- | --- |
-| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `runner`, `propose`, `loop`, `replay`, `dream`, `policy`) |
+| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `isolation-runtime`, `loading-receipt`, `runner`, `propose`, `loop`, `replay`, `dream`, `policy`, `quality-trial`, `behavior-eval`) |
 | `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON, incl. per-case `failures` labels) |
 | `scripts/run.mjs` | CLI (`report`, `cycle`, `loop`, `recover`, `prune`, `runner`, `history`) |
+| `scripts/loading-receipt.mjs` | read-only loading receipt: loader state + harness digest + canonical payload (`loaded` only when every declared expectation resolves) |
 | `scripts/verify-unit.mjs` | runs the unit suite; prints `ALL PASS (N cases)`; zero cases fails |
 | `scripts/verify-integration.mjs` | runs the integration suite the same way; part of the `test:self-improve` chain and therefore every cycle's `test` guard |
 | `tests/unit/` | `node:test` unit suite (node builtins only) |
