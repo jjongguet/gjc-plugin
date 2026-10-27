@@ -26,6 +26,13 @@ requires `loadingReceipt.loaded === true` and re-derives the payload digest
 integrity — not that a model used them, and not provenance: a self-consistent
 forgery still passes. Task outcomes remain the independent oracle's job.
 
+`m1/preflight.mjs` + `m1/run-preflight.mjs` plan the pilot without spending:
+development cells only (the holdout stays untouched), an accumulated budget that
+blocks on the first refusal, oracle/prompt blockers
+(`oracle_unresolved`, `oracle_kind_unimplemented`, `prompt_missing`), a sandbox
+probe, the loading receipt, and the five live refusals. The dry-run artifact is
+the blocker report; no trial receipt is produced and no model is called.
+
 ## Decision and evidence boundary
 
 Selectively adapt Harness²'s execution-evidence approach inside the existing
