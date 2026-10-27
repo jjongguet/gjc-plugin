@@ -1,4 +1,4 @@
-// rrsi tool adapter: one explicitly invoked tool with actions capture | import | dream | status.
+// rrsi tool adapter: one explicitly invoked tool with actions capture | import | dream | cohort | status.
 // The only automatic invocation is the session_start hook (src/periodic.adapter.ts, generated as
 // hooks/rrsi-periodic.ts): a due-gated, bounded refresh — no timer process. Keyless and offline:
 // the tool never reads credentials and makes no network call.
@@ -57,14 +57,14 @@ export default function rrsi(pi: {
 		name: 'rrsi',
 		label: 'RRSI Exploration Store',
 		description:
-			'Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy; status reports store counts and storage state. Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/.',
+			'Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | cohort | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy; cohort reads one bounded gjc.quality_trial.v2 receipt file and returns a counts-only rrsi.quality_cohort.v2 (no rate, delta or verdict); status reports store counts and storage state. Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/.',
 		parameters: pi.typebox.Type.Object({
-			action: pi.typebox.Type.String({ description: 'capture | import | dream | status' }),
+			action: pi.typebox.Type.String({ description: 'capture | import | dream | cohort | status' }),
 			goal: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: one bounded goal label for the episode' })),
 			attempts: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: JSON array of attempts [{objective, hypothesisNovelty, decision, wallMs, guardFailures, budgetRung, files, hunks}]' })),
 			ledgerPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: optional path to a self-improve ledger.jsonl to project (read-only)' })),
 			recordsPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'cohort: path to a bounded gjc.quality_trial.v2 receipt file (JSON array or JSONL, read-only)' })),
-			limit: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: maximum attempts to project (default 200)' })),
+			limit: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: maximum attempts to project (default 160); cohort: maximum receipts (default 4000)' })),
 			seed: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'dream: deterministic seed (default 1)' })),
 		}),
 		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; recordsPath?: string; limit?: string; seed?: string }) {

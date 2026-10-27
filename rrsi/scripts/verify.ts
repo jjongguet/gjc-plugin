@@ -15,6 +15,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
+import { journalWindowCoverage, readJournalRecords } from "../lib/rrsi";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
@@ -420,6 +421,65 @@ async function runSuite(root) {
 		assert.equal(receipt.limits.limit, 160);
 		const state = JSON.parse(readFileSync(paths.state, "utf8"));
 		assert.deepEqual(state.lastProjection, receipt.projection);
+	});
+
+	await check("periodic: numeric segment order (-9/-10), record cap, symlinked newest and an existing-store hold", async () => {
+		const record = (prefix, index) => ({ id: `${prefix}${index}`, operation: "run", durationMs: 5, advice: { status: "decision", tier: "fast" } });
+		const seedRecords = (homeDir, name, records) => {
+			const dir = path.join(homeDir, ".gjc-plugin", "jev-advisor", "journal", "v1");
+			mkdirSync(dir, { recursive: true, mode: 0o700 });
+			writeFileSync(path.join(dir, name), `${records.map((entry) => JSON.stringify(entry)).join("\n")}\n`);
+			return dir;
+		};
+
+		// -9 sorts after -10 lexicographically; numeric order must keep -9 first.
+		const homeOrder = path.join(root, "periodic-home-order");
+		mkdirSync(homeOrder, { mode: 0o700 });
+		const orderDir = seedRecords(homeOrder, "seg-10.jsonl", Array.from({ length: 6 }, (_, i) => record("b", i)));
+		seedRecords(homeOrder, "seg-9.jsonl", Array.from({ length: 6 }, (_, i) => record("a", i)));
+		const ordered = readJournalRecords({ journalDir: orderDir });
+		assert.deepEqual(ordered.segmentReport.map((entry) => entry.name), ["seg-9.jsonl", "seg-10.jsonl"]);
+		assert.equal(ordered.records[0].id, "a0");
+		assert.equal(ordered.records.at(-1).id, "b5");
+		assert.equal(journalWindowCoverage(ordered.segmentReport, 6).covered, true);
+
+		// A segment over the record cap cannot prove coverage.
+		const homeCap = path.join(root, "periodic-home-cap");
+		mkdirSync(homeCap, { mode: 0o700 });
+		const capDir = seedRecords(homeCap, "seg-1.jsonl", Array.from({ length: 4097 }, (_, i) => record("c", i)));
+		const capped = readJournalRecords({ journalDir: capDir });
+		assert.equal(capped.segmentReport[0].state, "truncated");
+		assert.deepEqual(capped.truncatedSegments, ["seg-1.jsonl"]);
+		assert.equal(journalWindowCoverage(capped.segmentReport, 160).covered, false);
+
+		// A symlinked newest segment is skipped and blocks coverage.
+		const homeLink = path.join(root, "periodic-home-link");
+		mkdirSync(homeLink, { mode: 0o700 });
+		const linkDir = seedRecords(homeLink, "seg-1.jsonl", Array.from({ length: 6 }, (_, i) => record("d", i)));
+		symlinkSync(path.join(linkDir, "seg-1.jsonl"), path.join(linkDir, "seg-2.jsonl"));
+		const linked = readJournalRecords({ journalDir: linkDir });
+		assert.equal(linked.segmentReport.at(-1).state, "skipped");
+		assert.equal(linked.newestSegment.state, "skipped");
+		assert.equal(journalWindowCoverage(linked.segmentReport, 160).covered, false);
+
+		// An uncovered run holds a pre-existing store byte-identically.
+		const homeHold = path.join(root, "periodic-home-hold");
+		mkdirSync(homeHold, { mode: 0o700 });
+		seedJournal(homeHold, 12);
+		const holdPaths = periodicPaths(homeHold);
+		const firstRun = await withHome(homeHold, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(firstRun.status, "ran");
+		const heldBytes = readFileSync(holdPaths.store, "utf8");
+		seedRecords(homeHold, "journal-a.jsonl", [record("e", 0)]);
+		backdateState(homeHold, 25 * 60 * 60 * 1000);
+		const beforeHold = JSON.parse(readFileSync(holdPaths.state, "utf8"));
+		const heldRun = await withHome(homeHold, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(heldRun.status, "uncovered");
+		assert.equal(heldRun.storeWrite, "held");
+		assert.equal(readFileSync(holdPaths.store, "utf8"), heldBytes, "an uncovered run must not rewrite the store");
+		const afterHold = JSON.parse(readFileSync(holdPaths.state, "utf8"));
+		assert.equal(afterHold.lastSuccessAt, beforeHold.lastSuccessAt, "uncovered must not renew freshness");
+		assert.deepEqual(afterHold.blocking_segments, ["journal-a.jsonl"]);
 	});
 
 	await check("periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class", async () => {

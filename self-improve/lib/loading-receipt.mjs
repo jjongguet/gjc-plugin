@@ -199,14 +199,15 @@ export function buildLoadingReceipt({
     { home, repoRoot, agentDir },
   );
   const text = canonicalJson(payload);
-  const bounded = text.length <= LOADING_RECEIPT_LIMITS.maxPayloadBytes;
+  const bytes = Buffer.byteLength(text);
+  const bounded = bytes <= LOADING_RECEIPT_LIMITS.maxPayloadBytes;
   return {
     schema: LOADING_RECEIPT_SCHEMA,
     loaded: failures.length === 0 && bounded,
     failures: bounded ? [...new Set(failures)].sort() : [...new Set([...failures, "payload_oversized"])].sort(),
     sha256: sha256Hex(text),
     payload,
-    canonicalBytes: Buffer.byteLength(text),
+    canonicalBytes: bytes,
   };
 }
 
@@ -215,7 +216,7 @@ export function verifyLoadingReceipt(receipt) {
   if (!receipt || typeof receipt !== "object") return { ok: false, reason: "loading_payload_missing" };
   if (!receipt.payload || typeof receipt.payload !== "object") return { ok: false, reason: "loading_payload_missing" };
   const text = canonicalJson(receipt.payload);
-  if (text.length > LOADING_RECEIPT_LIMITS.maxPayloadBytes) return { ok: false, reason: "loading_payload_mismatch" };
+  if (Buffer.byteLength(text) > LOADING_RECEIPT_LIMITS.maxPayloadBytes) return { ok: false, reason: "loading_payload_mismatch" };
   if (sha256Hex(text) !== receipt.sha256) return { ok: false, reason: "loading_payload_mismatch" };
   if (receipt.loaded !== true) return { ok: false, reason: "loading_not_proven" };
   return { ok: true, reason: null };

@@ -9,9 +9,10 @@ is allowed to produce numbers.
 `run-preflight.mjs` is the other M1 surface and produces **no numbers**: it plans
 the pilot cells and budget, resolves oracles and prompts, probes the sandbox and
 attaches the loading receipt, then reports every blocker. It is dry-run by
-default and refuses `--live` with a stable code (`live_not_approved`,
-`live_approval_invalid`, `live_cap_exceeds_declared`, `live_approval_without_live`,
-`live_executor_absent`). There is no live executor in this slice, so an
+default and answers `--live` with one of five stable codes: `live_not_approved`
+(skip, exit 0) plus four refusals (`live_approval_invalid`,
+`live_cap_exceeds_declared`, `live_approval_without_live`,
+`live_executor_absent`, exit 2). There is no live executor in this slice, so an
 approval can never be recorded without a cap and an executor.
 
 ## What a cell is

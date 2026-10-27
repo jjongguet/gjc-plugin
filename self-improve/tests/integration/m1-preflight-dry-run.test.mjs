@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { dirname, join, resolve } from "node:path";
@@ -25,11 +25,18 @@ test("the dry run names every blocker, plans development cells, and makes no mod
     assert.equal(plan.cellCount, 27);
     assert.equal(plan.manifest.holdout.length, 3);
     assert.equal(plan.manifest.holdoutUsedEarly, false);
-    assert.deepEqual(plan.blockerCounts, { oracle_kind_unimplemented: 6, prompt_missing: 6 });
+    assert.equal(plan.blockerCounts.oracle_kind_unimplemented, 6);
+    assert.equal(plan.blockerCounts.prompt_missing, 6);
+    assert.equal(plan.blockerCounts.oracle_unresolved, undefined);
     assert.equal(plan.live.code, "live_not_approved");
-    assert.equal(plan.isolation.status, "pass");
-    assert.equal(plan.loading.loaded, true);
-    assert.equal(typeof plan.isolation.profileDigestNormalized, "string");
+    // Isolation and loading depend on the host (seatbelt, an installed gjc and
+    // the expected plugin). The plan stays deterministic; the proof must be
+    // internally consistent either way, never a fabricated pass on CI.
+    assert.ok(["pass", "fail", "unavailable"].includes(plan.isolation.status), plan.isolation.status);
+    if (plan.isolation.status === "pass") assert.match(plan.isolation.profileDigestNormalized, /^[a-f0-9]{64}$/);
+    assert.equal(typeof plan.loading.loaded, "boolean");
+    if (plan.loading.loaded === true) assert.deepEqual(plan.loading.failures, []);
+    else assert.ok(plan.loading.failures.length > 0, "an unloaded receipt names its failures");
 
     const second = mkdtempSync(path.join(os.tmpdir(), "harness2-preflight-dry2-"));
     try {

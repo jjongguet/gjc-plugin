@@ -67,7 +67,8 @@ is out of scope and unprovided.
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
   `consecutiveFailures`, `lastReceiptId`, `lastProjectionDigest`, `storeWrite`,
-  `derivedChunks`, `newest_covered`, `head_omitted`, `novelty` and `intervalMs`. Run receipts live in
+  `derivedChunks`, `newest_covered`, `head_omitted`, `novelty`,
+  `blocking_segments` and `intervalMs`. Run receipts live in
   `~/.gjc-plugin/rrsi/runs/v1/<receiptId>.json` (schema
   `gjc.rrsi.periodic.run.v1`, ≤ 64 KiB each, ≤ 60 retained, oldest pruned on
   write). Each executed run — including `no_input` and error outcomes —

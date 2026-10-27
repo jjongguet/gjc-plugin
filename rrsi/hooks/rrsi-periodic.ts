@@ -2182,7 +2182,7 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
     skippedSegments: [],
     truncatedSegments: [],
     newestSegment: null,
-    inventory: { status: "missing", stale: false },
+    inventory: { status: "missing", stale: false, next: null, missingDeclared: [] },
     ordering: "none",
   });
   let names;
@@ -2195,6 +2195,7 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
   const selected = ordered.slice(-maxSegments);
   const inventory = readJournalInventory(dir);
   const stale = inventory.status === "ok" && inventory.declared !== null && selected.some((entry) => !inventory.declared.has(entry.name));
+  const missingDeclared = inventory.status === "ok" && inventory.declared !== null ? [...inventory.declared].filter((name) => !names.includes(name)).slice(0, 8) : [];
   const records = [];
   const segmentReport = [];
   for (const entry of selected) {
@@ -2256,7 +2257,7 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
     skippedSegments: segmentReport.filter((entry) => entry.state === "skipped").map((entry) => entry.name),
     truncatedSegments: segmentReport.filter((entry) => entry.state === "truncated").map((entry) => entry.name),
     newestSegment: newest ? { name: newest.name, state: newest.state, tornTail: newest.tornTail, ordering: newest.ordering } : null,
-    inventory: { status: inventory.status, stale },
+    inventory: { status: inventory.status, stale, next: inventory.next, missingDeclared },
     ordering: selected.some((entry) => entry.ordering === "unproven") ? "unproven" : "numeric",
   };
 }
@@ -3245,6 +3246,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         imported: projected.attempts.length,
         policies: dream?.policies ?? 0,
         corpusAttempts,
+        blocking_segments: window.blocking,
         receiptHash: dream?.receiptHash ?? null,
         verdict: dream?.verdict ?? null,
         attemptsOmitted: coverage.omitted,
@@ -3269,6 +3271,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
 	      lastProjection: newestCovered ? coverage : (baseState?.lastProjection ?? null),
 	      storeWrite: replaced.storeWrite,
 	      derivedChunks: newestCovered ? derivedSet.length : (baseState?.derivedChunks ?? null),
+	      blocking_segments: window.blocking,
       newest_covered: newestCovered,
           head_omitted: headOmitted,
           novelty,

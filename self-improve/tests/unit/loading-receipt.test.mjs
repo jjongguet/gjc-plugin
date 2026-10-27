@@ -136,6 +136,24 @@ test("secret-like digest targets are excluded, and the receipt redacts absolute 
   }
 });
 
+test("an oversized payload fails closed and cannot be verified", () => {
+  const surfaces = Array.from({ length: 64 }, (_, index) => ({ kind: "tool", name: `surface-${index}-${"x".repeat(40)}`, enabled: true, quarantined: false }));
+  const plugins = Array.from({ length: 32 }, (_, index) => ({
+    name: `plugin-${index}`,
+    version: "0.0.1",
+    enabled: true,
+    quarantined: false,
+    manifestHash: hex("1"),
+    targetFingerprint: hex("2"),
+    surfaces,
+  }));
+  const receipt = buildLoadingReceipt({ pluginState: { status: "ok", reason: null, plugins }, harnessDigest: harnessDigest(), expected: { plugins: ["plugin-0"] } });
+  assert.equal(receipt.loaded, false);
+  assert.ok(receipt.failures.includes("payload_oversized"));
+  assert.ok(receipt.canonicalBytes > 8 * 1024);
+  assert.deepEqual(verifyLoadingReceipt(receipt), { ok: false, reason: "loading_payload_mismatch" });
+});
+
 test("the digest is re-derived: a tampered or unloaded receipt is rejected", () => {
   const receipt = receiptFor();
   const tampered = { ...receipt, payload: { ...receipt.payload, sourceHead: "deadbeef" } };

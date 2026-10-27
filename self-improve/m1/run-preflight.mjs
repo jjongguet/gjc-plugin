@@ -29,7 +29,7 @@ const valueOf = (name) => {
 
 const manifestPath = valueOf("--manifest");
 if (!manifestPath) {
-  process.stderr.write("usage: run-preflight.mjs --manifest <path> [--budget <path>] [--out <dir>] [--repeats N] [--live --approve-live <capUsd>] [--json]\n");
+  process.stderr.write("usage: run-preflight.mjs --manifest <path> [--budget <path>] [--out <dir>] [--repeats N] [--expect <json>] [--live --approve-live <capUsd>] [--json]\n");
   process.exit(2);
 }
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
@@ -43,6 +43,16 @@ const approveRaw = valueOf("--approve-live");
 const approveLive = approveRaw === null ? null : Number(approveRaw);
 
 const runRoot = mkdtempSync(path.join(os.tmpdir(), "harness2-preflight-"));
+const expectRaw = valueOf("--expect");
+let expected = { plugins: ["rrsi"], surfaces: [{ plugin: "rrsi", name: "rrsi" }] };
+if (expectRaw) {
+  try {
+    expected = JSON.parse(expectRaw.startsWith("{") || expectRaw.startsWith("[") ? expectRaw : readFileSync(expectRaw, "utf8"));
+  } catch (error) {
+    process.stderr.write(`invalid --expect: ${error.message}\n`);
+    process.exit(2);
+  }
+}
 const mountDir = path.join(runRoot, "mount");
 let isolation = null;
 try {
@@ -55,7 +65,7 @@ try {
   loading = collectLoadingReceipt({
     sourceHead: valueOf("--source-head") ?? null,
     targets: ["gjc-plugins/registry.json", "gjc-plugins/rrsi"],
-    expected: { guards: [{ id: "m1-preflight", resolved: true }] },
+    expected,
   });
 } catch (error) {
   loading = { loaded: false, sha256: null, failures: ["loading_not_probed"] };
