@@ -234,8 +234,7 @@ decision, wallMs, usd, costMeasured, sourceDigest, harnessDigest) — no rate,
 delta or verdict — and there is no `efficacyClaimsAllowed` field, asserted by
 `tests/quality-cohort.test.ts`. Byte-identical repeats collapse into
 `duplicate` and count once; a genuine re-run is a separate cell only through
-`repeat`. The cohort is a library export exercised by the tests: the `rrsi`
-tool's four actions (`capture`, `import`, `dream`, `status`) do not return it.
+`repeat`. The cohort is a library export exercised by the tests and returned by the bounded `cohort` tool action (counts only: no rate, delta or verdict).
 
 **`taskAdvice[]` projection.** One journal record is one attempt. The advice
 entries a record carries are its compact `taskAdvice[]` batch (one entry per

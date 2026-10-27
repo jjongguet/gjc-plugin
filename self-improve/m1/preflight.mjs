@@ -67,7 +67,9 @@ export function planBudget({ budget, cells = [] } = {}) {
   const rows = [];
   let projected = 0;
   let refused = null;
-  const maxCalls = Number(budget?.maxCalls);
+  const rawMaxCalls = budget?.maxCalls;
+  const maxCalls = rawMaxCalls === undefined || rawMaxCalls === null ? null : Number(rawMaxCalls);
+  if (rawMaxCalls !== undefined && rawMaxCalls !== null && (!Number.isSafeInteger(maxCalls) || maxCalls <= 0)) refused = "invalid_max_calls";
   for (let index = 0; index < cells.length; index += 1) {
     const cell = cells[index];
     if (refused) {

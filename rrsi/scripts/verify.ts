@@ -512,6 +512,18 @@ async function runSuite(root) {
 		const afterHold = JSON.parse(readFileSync(holdPaths.state, "utf8"));
 		assert.equal(afterHold.lastSuccessAt, beforeHold.lastSuccessAt, "uncovered must not renew freshness");
 		assert.deepEqual(afterHold.blocking_segments, ["journal-a.jsonl"]);
+		const holdReceipts = readdirSync(holdPaths.receipts).map((name) => JSON.parse(readFileSync(path.join(holdPaths.receipts, name), "utf8"))).filter((receipt) => receipt.status === "uncovered");
+		assert.equal(holdReceipts.length, 1);
+		assert.deepEqual(holdReceipts[0].blocking_segments, ["journal-a.jsonl"], "the receipt names the offending segments");
+
+		const inventoryHome = path.join(root, "periodic-home-inventory");
+		mkdirSync(inventoryHome, { mode: 0o700 });
+		const inventoryDir = seedRecords(inventoryHome, "seg-1.jsonl", Array.from({ length: 6 }, (_, i) => record("f", i)));
+		writeFileSync(path.join(inventoryDir, "inventory.json"), JSON.stringify({ schemaVersion: 1, next: 2, segments: [{ name: "seg-0.jsonl" }] }));
+		const staleInventory = readJournalRecords({ journalDir: inventoryDir });
+		assert.equal(staleInventory.inventory.stale, true);
+		assert.deepEqual(staleInventory.inventory.missingDeclared, ["seg-0.jsonl"]);
+		assert.equal(journalWindowCoverage(staleInventory.segmentReport, 160).covered, true);
 	});
 
 	await check("periodic: unchanged content skips byte-identically; changed content replaces the one derived set; legacy episodes close by class", async () => {

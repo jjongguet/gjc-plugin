@@ -58,6 +58,17 @@ test("an injected comparator with prompts flips the oracle blockers to zero", ()
   assert.equal(oracle.resolved, 6);
 });
 
+test("the call cap is enforced and an invalid cap fails closed", () => {
+  const cells = Array.from({ length: 4 }, (_, index) => ({ taskId: `c${index}`, arm: "B0", repeat: 1 }));
+  const capped = planBudget({ budget: { ...budget, capUsd: 10, maxCalls: 3 }, cells });
+  assert.equal(capped.refused, "call_cap_exceeded");
+  assert.equal(capped.cells.filter((row) => row.allowed).length, 3);
+  assert.ok(capped.cells.slice(3).every((row) => row.reason === "call_cap_exceeded"));
+  const invalid = planBudget({ budget: { ...budget, capUsd: 10, maxCalls: "abc" }, cells });
+  assert.equal(invalid.refused, "invalid_max_calls");
+  assert.equal(invalid.admitted, false);
+});
+
 test("the five live refusal cases are exhaustive", () => {
   assert.deepEqual(resolveLive({ live: false }), { status: "skipped", code: "live_not_approved", exit: 0 });
   assert.deepEqual(resolveLive({ live: false, approveLive: 1 }), { status: "refused", code: "live_approval_without_live", exit: 2 });
