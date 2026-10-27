@@ -1,0 +1,120 @@
+JJO-272	Blocked	2026-10-27T17:14:27.009Z	gjc-plugin	Harness² M3 — cue·lesson·evidence 경험 학습
+JJO-271	Blocked	2026-10-27T17:14:24.427Z	gjc-plugin	Harness² M2 — 실행 근거 기반 Propose–Probe–Compose
+JJO-270	Done	2026-10-27T17:14:21.491Z	gjc-plugin	Harness² M1 — 실제 GJC 하네스 행동 비교 평가기
+JJO-946	Backlog	2026-10-27T17:14:10.618Z	gjc-plugin	harness2·rrsi 경계 잔여 — zero-call seam·accounting·게이트 밖 테스트
+JJO-945	Backlog	2026-10-27T17:14:06.360Z	gjc-plugin	Harness² M1 live pilot — loopback 프록시·36-task 캠페인·유료 승인 창 (미
+JJO-944	Done	2026-10-27T17:13:47.071Z	gjc-plugin	harness2: loading receipt 생산자와 M1 preflight 실행기 (비용 0, live 
+JJO-943	Done	2026-10-27T17:13:39.434Z	gjc-plugin	rrsi: counts-only quality cohort tool action 노출
+JJO-942	Done	2026-10-27T17:13:17.811Z	gjc-plugin	rrsi: 최신 구간 projection과 window-coverage 신선도 수정 (prefix 고착 해소
+JJO-936	In Progress	2026-10-27T17:07:08.709Z	lookbook-product	lookbook 생성 경로를 vm1 comfyq로 대체 — Kling 팩 미구매 결정 집행
+JJO-940	Done	2026-10-27T16:38:23.265Z	워크스페이스 운영	[지침] 근거 보고 — 주장·탐침 일치 규칙 추가 (RULES.md + agent-config 미러)
+JJO-273	Todo	2026-10-27T16:34:28.774Z	워크스페이스 운영	AGENTS 최신성 검사기·세션 시작 탐지·전달 전 검사와 누락 지도 보완
+JJO-941	Todo	2026-10-27T16:33:56.989Z	워크스페이스 운영	지침 표면 드리프트 잔여 정리 — 루트 핸드오프 계약·portfolio 스테일 문구·rules 잔여 사본·a
+JJO-137	Backlog	2026-10-27T16:13:14.687Z	Infra	이동 시나리오 리허설 — 세션 상주·복구·폴백
+JJO-908	In Progress	2026-10-27T16:07:39.600Z	Agent Reliability Monitor	ARM: Database.tx 중첩 금지 계약을 코드로 강제한다 (JJO-873 후속)
+JJO-937	Done	2026-10-27T16:02:44.699Z	워크스페이스 운영	지침 — 계획 요청을 네이티브 ralplan→ultragoal로 자동 진행(autoHandoff·Git 루트
+JJO-662	In Review	2026-10-27T15:58:31.004Z	워크스페이스 운영	비Git 세션 루트에서 ralplan 승인·ultragoal 경계 게이트 발급 불가
+JJO-939	Backlog	2026-10-27T15:55:59.581Z	워크스페이스 운영	GJC 0.19.0 결함 — skill 본문 지연 전달·심링크 cwd에서 ralplan→ultragoal 자
+JJO-938	Done	2026-10-27T15:30:33.771Z	Infra	Entire(entire.com) 도입 검토 — 네이티브 forge 이전은 ARC 제외와 같아 보류
+JJO-880	Todo	2026-10-27T15:18:48.710Z	gpu	vm1 comfyq — Wan 2.2 5B 우선 16GB 영상 recipe 최적화 검증
+JJO-904	Todo	2026-10-27T13:49:38.039Z	워크스페이스 운영	Linear MCP API 키 노출 — 진단 출력에서 Authorization 값이 로컬 로그에 남음
+JJO-584	Blocked	2026-10-27T13:49:29.866Z	워크스페이스 운영	[구조 7] 보안 위생 — 평문 토큰·공개 저장소 PR CI·운영 연결 lane
+JJO-593	Blocked	2026-10-27T13:49:23.830Z	워크스페이스 운영	[구조 16] gajaeway·GJC 로컬 런타임 잔재 정리
+JJO-509	Blocked	2026-10-27T13:49:18.013Z	AdCP Supply Agent	[JJO-463 후속] afflink-seoul adcp 이미지·소스 스냅샷 정리로 디스크 회수
+JJO-508	Blocked	2026-10-27T13:49:11.677Z	AdCP Supply Agent	[JJO-463 후속] 배포 영수증이 만든 운영 DB 합성 데이터 정리 결정
+JJO-439	Blocked	2026-10-27T13:47:32.839Z	AdCP Supply Agent	보안·운영·전달 — 외부 운영 연결
+JJO-656	Blocked	2026-10-27T13:47:30.336Z	AI App Monetization	운영·검증·전달 — 외부 운영 연결
+JJO-528	Blocked	2026-10-27T13:47:28.802Z	Short Studio	short_studio 관측 live 활성화 — GA4 measurement id·Discord webhoo
+JJO-925	Blocked	2026-10-27T13:47:26.159Z	dev-utility	GA4 정기 리포트 운영 미구성 — production env 4종 누락, cron 401
+JJO-913	In Review	2026-10-27T13:47:24.680Z	-	[워크스페이스 운영] 세션 슈퍼바이저 — 10분 주기 상태 점검·정체 세션 재개
+JJO-512	Blocked	2026-10-27T13:47:19.393Z	Cainer	외부 피어 초대·이름 검증 모델 검토 — F2 경계 후보 C-10
+JJO-510	Blocked	2026-10-27T13:47:17.494Z	Cainer	S6 Cainer 비이메일 검증 잔여 — AC1 설치 클라이언트 MCP, AC3 실행자 first succe
+JJO-417	Blocked	2026-10-27T13:47:15.628Z	Short Studio	short_studio 프로덕션 로그인 실패 원인 수정·Supabase Auth 수명주기 완성
+JJO-109	Blocked	2026-10-27T13:47:14.236Z	Cainer	cainer M3 — 원인 수정 + 창2 2-nonce 증명(라이브)
+JJO-108	Blocked	2026-10-27T13:47:12.775Z	Cainer	cainer M2 — 창1 dots 구독 진단 1회(라이브)
+JJO-103	Blocked	2026-10-27T13:47:11.337Z	Cainer	Muse 지원 접근·자동 소비 계약 차단 추적
+JJO-102	Blocked	2026-10-27T13:47:09.643Z	Cainer	Grok 기존 봇 루틴·Cainer 회신 자동 E2E 검증
+JJO-261	Blocked	2026-10-27T13:47:08.170Z	Cainer	Grok connector 재인증(OAuth exchange) 차단 — 사람 단계
+JJO-665	Blocked	2026-10-27T13:46:56.273Z	Agent Reliability Monitor	ARM production 잔여 게이트: arm_main 역할 축소·preview dev E2E·구 dev 
+JJO-634	Blocked	2026-10-27T13:46:54.780Z	lookbook-product	Supabase 프로젝트 1개로 통합하고 dev_/main_ 테이블 접두사로 환경 분리
+JJO-633	Blocked	2026-10-27T13:46:53.373Z	Short Studio	Supabase 프로젝트 1개로 통합하고 dev_/main_ 테이블 접두사로 환경 분리
+JJO-631	In Review	2026-10-27T13:46:52.017Z	Notelier	Supabase 프로젝트 1개로 통합하고 dev_/main_ 테이블 접두사로 환경 분리
+JJO-630	Blocked	2026-10-27T13:46:50.611Z	Cainer	Supabase 프로젝트 1개로 통합하고 dev_/main_ 테이블 접두사로 환경 분리
+JJO-629	In Review	2026-10-27T13:46:49.214Z	Whoos	Supabase 프로젝트 1개로 통합하고 dev_/main_ 테이블 접두사로 환경 분리
+JJO-580	Blocked	2026-10-27T13:46:47.855Z	워크스페이스 운영	[구조 3] 형상관리 밖 공용 자산 처리 — docs·shared Git화, yyaz·도메인_* 백업
+JJO-557	Blocked	2026-10-27T13:46:41.154Z	Agent Task Marketplace	ATM: S1 결과 dev→main 승격 PR (S1 종료 후, 사용자 승인 필요)
+JJO-530	Blocked	2026-10-27T13:46:33.479Z	Agent Task Marketplace	S1 ATM: boundary cohort(cleaner·executor QA·validationBatchC
+JJO-548	Blocked	2026-10-27T13:46:31.781Z	Agent Task Marketplace	S1 ATM: T-369 P5 미구현 — tool-boundary observer·consumer oracl
+JJO-845	Blocked	2026-10-27T13:46:30.516Z	Infra	Aside 설치 여부 결정 및 프로필 이전 검증
+JJO-851	Blocked	2026-10-27T13:46:29.187Z	YYAZ	YYAZ 승인 정본 저장소 결정(R-02) — 판정·승인 기록을 어디에 둘지
+JJO-887	Blocked	2026-10-27T13:46:27.874Z	YYAZ	yyaz 아카이브 선재 결함 — civitai-cost-zimage-20261022-r01 R6 위반 5건으
+JJO-905	Blocked	2026-10-27T13:46:26.524Z	Whoos	whoos 15분 정지 감시에 GitHub schedule 대신 신뢰 가능한 클록을 둔다
+JJO-395	In Review	2026-10-27T13:46:24.997Z	lookbook-product	lookbook-product — Kling 대체 provider 선정
+JJO-383	Blocked	2026-10-27T13:46:23.033Z	lookbook-product	lookbook-product — Kling 팩 만료(2026-11-01) 후 pack_expired 전환 
+JJO-752	Blocked	2026-10-27T13:46:21.691Z	lookbook-product	[판정 대기] lookbook 재개 조건 — 색 드리프트 A/B 미실행·팩 구매 보류·잔여 17 units 
+JJO-637	Backlog	2026-10-27T13:45:59.060Z	업무생산성	Notion 정리 내용을 Discord 공유·Linear 할 일로 연결
+JJO-278	Backlog	2026-10-27T13:45:55.113Z	YYAZ	Grok Imagine 생성 경로 — xAI 키·지출 상한·생성 도구·1장 실측
+JJO-210	Backlog	2026-10-27T13:45:47.368Z	제휴 콘텐츠 실험(Threads/X)	2주 파일럿 승인과 첫 주 게시 준비
+JJO-281	Backlog	2026-10-27T13:45:42.200Z	제휴 콘텐츠 실험(Threads/X)	Hermes 제휴 게시 자동화 검토 — 한계점·선결 결정(게시 계약·프로필 격리·템플릿)
+JJO-225	Backlog	2026-10-27T13:45:37.375Z	Agent Ads Protocols(에이전트 프로토콜 광고)	에이전트 커머스 표면 광고 실증 — Rufus 무료 스폰서 선점과 카탈로그 피드 적합성
+JJO-202	Backlog	2026-10-27T13:45:29.592Z	Agent Ads Protocols(에이전트 프로토콜 광고)	멀티플랫폼 광고 API/MCP 어댑터 레이어 프로토타입 — 2개 플랫폼 심사 제출 사이클
+JJO-436	Backlog	2026-10-27T13:45:25.701Z	AdCP Supply Agent	SaaS 요금·이용량 — 구독·청구
+JJO-432	Backlog	2026-10-27T13:45:22.551Z	AdCP Supply Agent	미디어 구매 수명주기 — 실제 매체 실행
+JJO-652	Backlog	2026-10-27T13:45:18.642Z	AI App Monetization	SaaS 요금·이용량 — 유료 구독
+JJO-649	Backlog	2026-10-27T13:45:14.743Z	AI App Monetization	광고 네트워크 — 실광고 승인
+JJO-644	Backlog	2026-10-27T13:45:11.007Z	AI App Monetization	계정·워크스페이스 — 계정 복구
+JJO-590	Todo	2026-10-27T12:29:01.311Z	워크스페이스 운영	[구조 13] 디스크·캐시 회수 2차와 ComfyUI 보관 정리
+JJO-935	Backlog	2026-10-27T12:29:00.724Z	워크스페이스 운영	Downloads/Legacy·Legacy2 정리 — 1.7GB 분류·이관·삭제 판정
+JJO-933	In Review	2026-10-27T12:01:25.136Z	워크스페이스 운영	lane-orchestrate 정합화 — 중복 PR·빈 머지 22건 재발 방지, 점유 오판, 승격 PR 자동
+JJO-902	Todo	2026-10-27T11:53:22.096Z	Cainer	[cainer] dev→main 승격 + 운영 task_dispatched 카드 실수신 검증 (JJO-681
+JJO-635	Blocked	2026-10-27T11:53:19.066Z	AI App Monetization	Vercel·단일 Supabase·k3s로 dev/main 배포하고 ARC 승격·실제 E2E 검증
+JJO-862	Todo	2026-10-27T11:53:16.137Z	affiliate-search	[Discord] affiliate_search 발신 환경 확인·shopscan main 승격 반영 — pr
+JJO-570	Todo	2026-10-27T11:53:10.796Z	lookbook-product	lookbook-product dev→main 승격 판단·실행 — v2 기반·검출기·디자인 키트 등 26커밋
+JJO-573	In Review	2026-10-27T11:53:02.311Z	워크스페이스 운영	whoos·notelier·ARM dev→main 승격 판단 — 디자인 키트 포함 미승격 커밋(23·10·1
+JJO-900	Todo	2026-10-27T11:52:54.092Z	Notelier	NOT-F06 승격 후 운영 재검증 — 버전 연결·비교·미연결 404·이전 결과 불변 (JJO-712 잔여)
+JJO-771	In Review	2026-10-27T11:52:39.441Z	워크스페이스 운영	[GJC] managed_append_identity_mismatch로 세션 중단·트랜스크립트 기록 실패
+JJO-882	Todo	2026-10-27T11:52:33.045Z	Short Studio	Short Studio 사용자 편집 흐름 실제 구현 — PR #113 보류 D1~D5 연결
+JJO-932	In Review	2026-10-27T11:52:26.203Z	Short Studio	short_studio dev 머지 후 배포 경로 실측 + 매니페스트 drift 신호 (DEPLOY-shor
+JJO-934	Backlog	2026-10-27T11:19:31.097Z	워크스페이스 운영	[GJC] 터미널 턴에서 큐 메시지가 기록 없이 소실 (JJO-771 파생, 재현 미확인)
+JJO-455	Blocked	2026-10-27T04:06:53.909Z	Infra	개인 장비별 Tailscale 설치·동일 계정 로그인 및 외부망 접속
+JJO-914	Done	2026-10-27T01:30:35.791Z	-	[워크스페이스 운영] 맥미니 형상관리 — 미니 산출물·설정의 추적 방안
+JJO-920	Done	2026-10-27T01:30:29.566Z	워크스페이스 운영	형상관리 커버리지 감사 — 비Git 자산 분류·검사기
+JJO-915	Done	2026-10-27T01:30:24.745Z	-	whoos — SaaS 표면 완성: 디자인 토큰·Storybook·실제 흐름
+JJO-921	Done	2026-10-26T21:31:19.586Z	-	short_studio — 숏폼 품질 REA·루브릭·실측 개선
+JJO-919	Done	2026-10-26T21:31:15.888Z	-	civitaired — vm1 comfyq 생성 대시보드 + Discord 생성 알림
+JJO-917	Done	2026-10-26T21:31:12.689Z	-	cainer — SaaS 표면 완성: 디자인 토큰·Storybook·연결 흐름
+JJO-916	Done	2026-10-26T21:31:08.391Z	-	notelier — SaaS 표면 완성: 디자인 토큰·Storybook·GA4
+JJO-918	Done	2026-10-26T21:30:29.324Z	-	lookbook — SaaS 표면 완성: 디자인 토큰·Storybook·생성 흐름
+JJO-895	Backlog	2026-10-26T19:23:42.661Z	gpu	세션 중복 방지 — 같은 티켓에 살아있는 세션이 있으면 시작을 차단한다
+JJO-931	In Review	2026-10-26T19:09:32.106Z	affiliate-search	GAP-shopscan — 계약 표면 실측 + 릴리스 식별 주입
+JJO-863	In Review	2026-10-26T19:07:24.519Z	affiliate-search	운영 배포 갭 해소 — 통합 계약 v1(폴백·meta·실패 계약) shopscan 배포 반영
+JJO-930	Backlog	2026-10-26T19:06:15.107Z	Site Digest	[site-digest] /api/status.records.total은 전체 건수가 아니라 1000건 스캔
+JJO-929	Backlog	2026-10-26T19:06:14.376Z	Site Digest	[site-digest] URL 입력 --title이 Discord 메시지와 이력 레코드에서 다르게 반영된다
+JJO-928	In Review	2026-10-26T19:06:13.813Z	Site Digest	[site-digest] 표면 사용량 타일이 전송 생략을 누락 + 실채널 E2E
+JJO-894	Blocked	2026-10-26T18:50:05.957Z	gpu	comfyq 상한 가드가 그래프 로더를 검사하지 않아 두 번째 체크포인트 recipe가 통과한다 — live
+JJO-821	Todo	2026-10-26T18:47:44.085Z	워크스페이스 운영	[Penpot] 쓰기 자동화 경로 확정 — penpot-mcp·plugin API 실증
+JJO-822	Todo	2026-10-26T18:47:37.621Z	워크스페이스 운영	[Penpot] 입력 정규화 파서 정비 — 8개 제품 토큰·화면
+JJO-924	Done	2026-10-26T18:39:35.516Z	YYAZ	[yyaz] NSFW 코퍼스 참조·인덱싱 — Dataset-Freethread-NSFW 활용 계약
+JJO-923	Done	2026-10-26T18:39:29.780Z	YYAZ	[yyaz] 프롬프트 생성 기능 — OpenRouter Grok·Gemini 기반 프롬프트 빌더
+JJO-875	Done	2026-10-26T18:39:26.808Z	Agent Traffic	agent-traffic 실행기 fetch·산출물 저장 포트 도입
+JJO-234	In Review	2026-10-26T18:38:36.759Z	Lookbook (제작·캐스팅)	룩북 2단계 — 반복 제작 루프·비용 원장 운영
+JJO-233	In Review	2026-10-26T18:37:31.103Z	Lookbook (제작·캐스팅)	룩북 2단계 — QA 게이트·검증 절차 정착
+JJO-927	Done	2026-10-26T18:07:59.123Z	Site Digest	[site-digest] REA 기준선 + 제품 표면(이력·사용량·상태) + OpenAPI 계약
+JJO-926	Backlog	2026-10-26T18:07:33.293Z	Site Digest	[site-digest] GA4 측정 ID 프로비저닝과 표면 계측 활성화
+JJO-912	Backlog	2026-10-26T17:57:32.920Z	-	[워크스페이스 운영] vm1 request 과다 할당 정리 — 실사용 1.1% vs request 59.6%
+JJO-922	Backlog	2026-10-26T17:49:56.687Z	워크스페이스 운영	[구조 11] lanes 세션 워크트리 형상관리·수명주기 — 계측·종료 정리·산출물 분리
+JJO-911	In Review	2026-10-26T17:45:48.815Z	lookbook-product	lookbook web SaaS 표면 — Claymorphism 토큰·Storybook·/pricing·/a
+JJO-577	Todo	2026-10-26T17:41:30.655Z	워크스페이스 운영	워크스페이스 구조 재편 — 폴더 유형·형상관리·산출물 계약·문서 정비 상시화 (상위)
+JJO-669	Todo	2026-10-26T17:29:31.057Z	Infra	GJC 현황판 세션 표 표시 결함 — snapshot epoch 노출·빈 percent 괄호·ws=. 표기
+JJO-910	Done	2026-10-26T17:25:21.185Z	워크스페이스 운영	지침 — 핸드오프의 사용할 스킬 블록에 설치 스킬 매핑·skill_discovery 선조회 강제
+JJO-868	In Review	2026-10-26T17:04:27.169Z	제휴 콘텐츠 실험(Threads/X)	social-affiliate 원장 접근 모듈화 — 원자 append·단일 파서
+JJO-903	In Review	2026-10-26T17:00:51.762Z	lookbook-product	V07 완료 조건 '승격 요청 403' 판정 — 경로 부재 계약과 문구 정합화
+JJO-482	Done	2026-10-26T17:00:42.353Z	lookbook-product	V07 개인 사진 레인 분리 — 공유 페르소나 승격 차단
+JJO-760	In Review	2026-10-26T16:51:31.669Z	Cainer	Cainer 동작 불변 리팩토링 — 아키텍처 위반 해소 (기능 커밋과 분리)
+JJO-820	In Review	2026-10-26T16:50:26.437Z	워크스페이스 운영	[Penpot] 로컬 인스턴스 정본화·자격증명 위생
+JJO-761	Done	2026-10-26T16:49:47.908Z	Cainer	[CAIN-F05] 승인 봉투 대상·선언 비용 배선 — MCP request_approval·게이트
+JJO-655	In Review	2026-10-26T16:46:25.360Z	AI App Monetization	운영·검증·전달
+JJO-865	In Review	2026-10-26T16:38:07.393Z	lookbook-product	[bug] 0015_v2_drafts 함수가 v2_consents.created_at 참조 — 컬럼은 acc
+JJO-712	Dev QA	2026-10-26T16:36:57.912Z	Notelier	NOT-F06 반복 경고·새 버전 초안 — Notelier MVP
+JJO-678	Production Verification	2026-10-26T16:34:40.072Z	Short Studio	short_studio 워커 폴링 루프가 일시 DNS·DB 오류에 프로세스 종료 — 재연결·백오프 필요
+JJO-729	Done	2026-10-26T16:30:17.103Z	AdCP Supply Agent	[REA] 콘솔 운영자 검토 정합 — 제안·소재·보고 의무·복구 UX
