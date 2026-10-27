@@ -59,7 +59,7 @@ test('all handled operations and plugins accept missing repository/receipt ident
     { plugin: 'wiki', operations: ['wiki_query', 'wiki_propose'] },
     { plugin: 'rea', operations: ['rea_readiness'] },
     { plugin: 'backplan', operations: ['backplan_check'] },
-    { plugin: 'rrsi', operations: ['capture', 'import', 'dream', 'status'] },
+    { plugin: 'rrsi', operations: ['capture', 'import', 'dream', 'status', 'cohort'] },
   ];
   for (const { plugin, operations: pluginOperations } of newer) {
     for (const operation of pluginOperations) expect((await appendPluginOutcome(plugin, { operation, repositoryDigest: null, receiptId: null }, { baseDir })).persisted).toBe(true);
@@ -81,6 +81,9 @@ test('rrsi outcomes round-trip the action counters and reject malformed fields',
   const minimal: PluginOutcome = { operation: 'status', rrsi: { action: 'status', storage: 'missing' } };
   expect((await appendPluginOutcome('rrsi', minimal, { baseDir })).persisted).toBe(true);
   expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1')))[1].rrsi).toEqual({ action: 'status', storage: 'missing' });
+  const cohort: PluginOutcome = { operation: 'cohort', rrsi: { action: 'cohort', storage: 'ok' } };
+  expect((await appendPluginOutcome('rrsi', cohort, { baseDir })).persisted).toBe(true);
+  expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1')))[2]).toMatchObject({ operation: 'cohort', rrsi: { action: 'cohort', storage: 'ok' } });
   const rejected: PluginOutcome[] = [
     { operation: 'capture', rrsi: { action: 'explore' as any, storage: 'ok' } },
     { operation: 'capture', rrsi: { action: 'capture', storage: 'repaired' as any } },
@@ -90,7 +93,7 @@ test('rrsi outcomes round-trip the action counters and reject malformed fields',
     { operation: 'capture', rrsi: { action: 'capture', storage: 'ok', policies: 1.5 } },
   ];
   for (const value of rejected) expect((await appendPluginOutcome('rrsi', value, { baseDir })).persisted).toBe(false);
-  expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1'))).length).toBe(2);
+  expect((await records(path.join(baseDir, 'rrsi', 'journal', 'v1'))).length).toBe(3);
 });
 
 test('gate and loop outcomes round-trip canonical enums and reject malformed or unknown fields', async () => {

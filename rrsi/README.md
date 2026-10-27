@@ -16,7 +16,7 @@ store contains and are reported with the same pinned caveat as the loop.
 
 ## Tool surface
 
-One explicitly invoked tool — `rrsi` — with four actions, plus one
+One explicitly invoked tool — `rrsi` — with five actions, plus one
 `session_start` hook (`hooks/rrsi-periodic.ts`) that performs the due-gated
 periodic refresh described below.
 
@@ -25,6 +25,7 @@ periodic refresh described below.
 | `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |
 | `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`), `projectionDigest` and `projection` (`records` / `projected` / `omitted` / `ratio` / `limited`), and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
 | `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |
+| `cohort` | `recordsPath`, `limit?` | Reads one bounded `gjc.quality_trial.v2` receipt file (JSON array or JSONL, symlinked/oversized/unreadable paths refused) and returns the counts-only `rrsi.quality_cohort.v2` cohort: `total`, `admissible[]`, `excluded[{reason,count}]`, `duplicate`. No rate, delta or verdict; `efficacyClaimsAllowed` does not exist. Missing or empty input returns `total: 0` with `source.status: "missing"`. |
 | _other_ | — | Rejected as a tool error (`isError: true`) with `error: "unknown action: <value>"`; the store is read, never written. |
 | `status` | — | Store counts (episodes/attempts/adoptions, where `adoptions` counts attempts whose `decision` is `adopt`, including projected advice records), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
 

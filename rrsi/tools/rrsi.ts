@@ -13,7 +13,7 @@ import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypt
 import { performance as resultsClock } from 'node:perf_hooks';
 
 export type PluginOutcome = {
-  operation: 'run' | 'status' | 'advise' | 'calibration' | 'check' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check' | 'gate_emitted' | 'loop_run' | 'capture' | 'import' | 'dream';
+  operation: 'run' | 'status' | 'advise' | 'calibration' | 'check' | 'task_advice' | 'task_launch' | 'subagent_terminal' | 'wiki_query' | 'wiki_propose' | 'rea_readiness' | 'backplan_check' | 'gate_emitted' | 'loop_run' | 'capture' | 'import' | 'dream' | 'cohort';
   repositoryDigest?: string | null;
   receiptId?: string | null;
   toolCallDigest?: string;
@@ -32,14 +32,14 @@ export type PluginOutcome = {
   loop?: { status: 'clean' | 'gaps' | 'blocked'; openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKind[] };
   rrsi?: { action: RrsiAction; episodes?: number; attempts?: number; imported?: number; policies?: number; storage: 'ok' | 'missing' | 'unavailable' | 'invalid' };
 };
-export type RrsiAction = 'capture' | 'import' | 'dream' | 'status';
+export type RrsiAction = 'capture' | 'import' | 'dream' | 'status' | 'cohort';
 export type LoopGapKind = 'no_receipt_after_gate' | 'receipt_not_passed' | 'receipt_no_tests' | 'receipt_incomplete' | 'receipt_stale' | 'receipt_changed_during_run' | 'receipt_freshness_unavailable' | 'changed_test_uncovered' | 'state_unavailable' | 'not_a_repository';
 type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan' | 'rrsi';
 type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
 type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
 const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
-const resultsOperations = ['run', 'status', 'advise', 'calibration', 'check', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream'];
-const resultsRrsiActions = ['capture', 'import', 'dream', 'status'];
+const resultsOperations = ['run', 'status', 'advise', 'calibration', 'check', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream', 'cohort'];
+const resultsRrsiActions = ['capture', 'import', 'dream', 'status', 'cohort'];
 const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'];
 const resultsHex = /^[a-f0-9]{64}$/;
 const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -2359,6 +2359,47 @@ export function projectLedgerRows(rows, { limit = 4000 } = {}) {
   return { attempts };
 }
 
+/**
+ * Bounded reader for `gjc.quality_trial.v2` receipts: one JSON array file or a
+ * JSONL file. A symlinked, oversized or unreadable path is reported, never
+ * repaired; malformed lines are skipped and counted by the cohort validator.
+ */
+export function readTrialRecords({ recordsPath, limit = 4000 } = {}) {
+  if (typeof recordsPath !== "string" || recordsPath.length === 0) return { status: "missing", reason: "no_path", records: [] };
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 4000) : 4000;
+  try {
+    const stat = fs.lstatSync(recordsPath);
+    if (stat.isSymbolicLink() || !stat.isFile()) return { status: "invalid", reason: "unsafe_path", records: [] };
+    if (stat.size > RRSI_LIMITS.maxReadBytes) return { status: "invalid", reason: "oversized", records: [] };
+    const text = fs.readFileSync(recordsPath, "utf8");
+    const trimmed = text.trim();
+    let records = [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) return { status: "invalid", reason: "not_an_array", records: [] };
+        records = parsed;
+      } catch {
+        return { status: "invalid", reason: "malformed_json", records: [] };
+      }
+    } else {
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        if (records.length >= bound) break;
+        try {
+          records.push(JSON.parse(line));
+        } catch {
+          /* malformed lines are skipped, never repaired */
+        }
+      }
+    }
+    records = records.slice(0, bound);
+    return { status: records.length > 0 ? "ok" : "missing", reason: records.length > 0 ? null : "no_records", records };
+  } catch {
+    return { status: "missing", reason: "unreadable", records: [] };
+  }
+}
+
 export function readLedgerRows({ ledgerPath } = {}) {
   if (typeof ledgerPath !== "string" || ledgerPath.length === 0) return { status: "missing", rows: [], reason: "no_ledger" };
   try {
@@ -2656,7 +2697,7 @@ export type QualityCohort = {
 
 /** Counts-only cohort over `gjc.quality_trial.v2` records (delegates to the canonical validator). */
 export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
-  return projectTrialCohort(records, { limit }) as QualityCohort;
+  return projectQualityTrialCohort(records, { limit }) as QualityCohort;
 }
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);
@@ -3310,7 +3351,7 @@ export async function runPeriodicWorker({ env = process.env, now = new Date().to
 // (store_busy on contention; see lib/rrsi.ts withStoreLock).
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
-const ACTIONS = ['capture', 'import', 'dream', 'status'] as const;
+const ACTIONS = ['capture', 'import', 'dream', 'status', 'cohort'] as const;
 type RrsiAction = (typeof ACTIONS)[number];
 
 function rrsiParseInt(value: unknown, fallback: number, max = 100000): number {
@@ -3340,10 +3381,11 @@ export default function rrsi(pi: {
 			goal: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: one bounded goal label for the episode' })),
 			attempts: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: JSON array of attempts [{objective, hypothesisNovelty, decision, wallMs, guardFailures, budgetRung, files, hunks}]' })),
 			ledgerPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: optional path to a self-improve ledger.jsonl to project (read-only)' })),
+			recordsPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'cohort: path to a bounded gjc.quality_trial.v2 receipt file (JSON array or JSONL, read-only)' })),
 			limit: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: maximum attempts to project (default 200)' })),
 			seed: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'dream: deterministic seed (default 1)' })),
 		}),
-		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; limit?: string; seed?: string }) {
+		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; recordsPath?: string; limit?: string; seed?: string }) {
 			const started = Date.now();
 			const action = (ACTIONS as readonly string[]).includes(String(params?.action ?? '')) ? (params!.action as RrsiAction) : null;
 			const limit = rrsiParseInt(params?.limit, RRSI_PERIODIC_DEFAULTS.projectionLimit, 4000);
@@ -3501,6 +3543,27 @@ export default function rrsi(pi: {
 						projection,
 					},
 					written.persisted ? 'ok' : 'unavailable',
+				);
+			}
+
+			if (action === 'cohort') {
+				const cohortLimit = rrsiParseInt(params?.limit, 4000, 4000);
+				const trials = readTrialRecords({ recordsPath: params?.recordsPath, limit: cohortLimit });
+				const source = { status: trials.status, reason: trials.reason ?? null, path: typeof params?.recordsPath === 'string' ? params.recordsPath : null };
+				if (trials.status !== 'ok') {
+					return finish(
+						{
+							store: loaded.store,
+							cohort: { schema: 'rrsi.quality_cohort.v2', total: 0, admissible: [], excluded: [], duplicate: 0 },
+							source,
+							counts: storeCounts(loaded.store),
+						},
+						storage,
+					);
+				}
+				return finish(
+					{ store: loaded.store, cohort: projectQualityCohort(trials.records, { limit: cohortLimit }), source, counts: storeCounts(loaded.store) },
+					storage,
 				);
 			}
 

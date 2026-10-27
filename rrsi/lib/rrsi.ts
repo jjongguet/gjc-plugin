@@ -21,7 +21,7 @@ import { sha256Hex } from "../../self-improve/lib/types.mjs";
 import { corpusFromAttempts } from "../../self-improve/lib/replay.mjs";
 import { runDream } from "../../self-improve/lib/dream.mjs";
 import {
-  projectQualityTrialCohort as projectTrialCohort,
+  projectQualityTrialCohort,
   QUALITY_COHORT_SCHEMA,
   QUALITY_TRIAL_SCHEMA,
 } from "../../self-improve/lib/quality-trial.mjs";
@@ -461,6 +461,47 @@ export function projectLedgerRows(rows, { limit = 4000 } = {}) {
   return { attempts };
 }
 
+/**
+ * Bounded reader for `gjc.quality_trial.v2` receipts: one JSON array file or a
+ * JSONL file. A symlinked, oversized or unreadable path is reported, never
+ * repaired; malformed lines are skipped and counted by the cohort validator.
+ */
+export function readTrialRecords({ recordsPath, limit = 4000 } = {}) {
+  if (typeof recordsPath !== "string" || recordsPath.length === 0) return { status: "missing", reason: "no_path", records: [] };
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? Math.min(limit, 4000) : 4000;
+  try {
+    const stat = fs.lstatSync(recordsPath);
+    if (stat.isSymbolicLink() || !stat.isFile()) return { status: "invalid", reason: "unsafe_path", records: [] };
+    if (stat.size > RRSI_LIMITS.maxReadBytes) return { status: "invalid", reason: "oversized", records: [] };
+    const text = fs.readFileSync(recordsPath, "utf8");
+    const trimmed = text.trim();
+    let records = [];
+    if (trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (!Array.isArray(parsed)) return { status: "invalid", reason: "not_an_array", records: [] };
+        records = parsed;
+      } catch {
+        return { status: "invalid", reason: "malformed_json", records: [] };
+      }
+    } else {
+      for (const line of text.split("\n")) {
+        if (!line.trim()) continue;
+        if (records.length >= bound) break;
+        try {
+          records.push(JSON.parse(line));
+        } catch {
+          /* malformed lines are skipped, never repaired */
+        }
+      }
+    }
+    records = records.slice(0, bound);
+    return { status: records.length > 0 ? "ok" : "missing", reason: records.length > 0 ? null : "no_records", records };
+  } catch {
+    return { status: "missing", reason: "unreadable", records: [] };
+  }
+}
+
 export function readLedgerRows({ ledgerPath } = {}) {
   if (typeof ledgerPath !== "string" || ledgerPath.length === 0) return { status: "missing", rows: [], reason: "no_ledger" };
   try {
@@ -758,7 +799,7 @@ export type QualityCohort = {
 
 /** Counts-only cohort over `gjc.quality_trial.v2` records (delegates to the canonical validator). */
 export function projectQualityCohort(records: readonly unknown[], { limit = 4000 }: { limit?: number } = {}): QualityCohort {
-  return projectTrialCohort(records, { limit }) as QualityCohort;
+  return projectQualityTrialCohort(records, { limit }) as QualityCohort;
 }
 
 export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);

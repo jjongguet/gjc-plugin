@@ -16,6 +16,8 @@ import {
 	projectionCoverage,
 	projectJournalRecords,
 	journalWindowCoverage,
+	projectQualityCohort,
+	readTrialRecords,
 	projectLedgerRows,
 	readJournalRecords,
 	readLedgerRows,
@@ -30,7 +32,7 @@ import {
 import { RRSI_PERIODIC_DEFAULTS, readPeriodicState, summarizePeriodicState } from '../lib/periodic';
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
-const ACTIONS = ['capture', 'import', 'dream', 'status'] as const;
+const ACTIONS = ['capture', 'import', 'dream', 'status', 'cohort'] as const;
 type RrsiAction = (typeof ACTIONS)[number];
 
 function rrsiParseInt(value: unknown, fallback: number, max = 100000): number {
@@ -60,10 +62,11 @@ export default function rrsi(pi: {
 			goal: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: one bounded goal label for the episode' })),
 			attempts: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: JSON array of attempts [{objective, hypothesisNovelty, decision, wallMs, guardFailures, budgetRung, files, hunks}]' })),
 			ledgerPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: optional path to a self-improve ledger.jsonl to project (read-only)' })),
+			recordsPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'cohort: path to a bounded gjc.quality_trial.v2 receipt file (JSON array or JSONL, read-only)' })),
 			limit: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: maximum attempts to project (default 200)' })),
 			seed: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'dream: deterministic seed (default 1)' })),
 		}),
-		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; limit?: string; seed?: string }) {
+		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; recordsPath?: string; limit?: string; seed?: string }) {
 			const started = Date.now();
 			const action = (ACTIONS as readonly string[]).includes(String(params?.action ?? '')) ? (params!.action as RrsiAction) : null;
 			const limit = rrsiParseInt(params?.limit, RRSI_PERIODIC_DEFAULTS.projectionLimit, 4000);
@@ -221,6 +224,27 @@ export default function rrsi(pi: {
 						projection,
 					},
 					written.persisted ? 'ok' : 'unavailable',
+				);
+			}
+
+			if (action === 'cohort') {
+				const cohortLimit = rrsiParseInt(params?.limit, 4000, 4000);
+				const trials = readTrialRecords({ recordsPath: params?.recordsPath, limit: cohortLimit });
+				const source = { status: trials.status, reason: trials.reason ?? null, path: typeof params?.recordsPath === 'string' ? params.recordsPath : null };
+				if (trials.status !== 'ok') {
+					return finish(
+						{
+							store: loaded.store,
+							cohort: { schema: 'rrsi.quality_cohort.v2', total: 0, admissible: [], excluded: [], duplicate: 0 },
+							source,
+							counts: storeCounts(loaded.store),
+						},
+						storage,
+					);
+				}
+				return finish(
+					{ store: loaded.store, cohort: projectQualityCohort(trials.records, { limit: cohortLimit }), source, counts: storeCounts(loaded.store) },
+					storage,
 				);
 			}
 

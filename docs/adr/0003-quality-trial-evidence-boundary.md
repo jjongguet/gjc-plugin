@@ -169,9 +169,10 @@ measured result.
 - Holdout correctness is a predicate over a declared flag
   (`holdout.usedEarly === true` fails validity); the code cannot detect a false
   declaration.
-- `rrsi` exposes the cohort as a library export (`projectQualityCohort`) used
-  by its tests. The `rrsi` tool's four actions (`capture`, `import`, `dream`,
-  `status`) do not return it.
+- `rrsi` exposes the cohort as a library export (`projectQualityCohort`) and,
+  since the S2 slice, through the bounded `cohort` tool action. `cohort`
+  returns counts only: `total`, `admissible[]`, `excluded[{reason,count}]` and
+  `duplicate`; no rate, delta, verdict or `efficacyClaimsAllowed` field exists.
 - `loaded` is a pilot-receipt (`harness2`) property: `validateTrialReceipt`
   requires it and re-derives the embedded loading payload, while
   `validateQualityTrial` keeps digest-pin admission. The divergence is

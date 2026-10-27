@@ -14,6 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
+import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
@@ -87,7 +88,7 @@ async function runSuite(root) {
 			advice: index % 3 === 0 ? { status: "decision", tier: ["fast", "balanced", "strong"][index % 3] } : { status: "no_decision", reason: "provider_error" },
 		}));
 
-	await check("manifest declares one tool, one session_start hook (no target/phase), and the four actions", async () => {
+	await check("manifest declares one tool, one session_start hook (no target/phase), and the five actions", async () => {
 		assert.equal(manifest.name, "rrsi");
 		assert.equal(manifest.version, "0.0.4");
 		assert.equal(manifest.tools.length, 1);
@@ -215,6 +216,52 @@ async function runSuite(root) {
 		assert.equal(ledgerEpisode.attempts.length, 2, "malformed ledger rows are skipped, never repaired");
 		assert.equal(ledgerEpisode.attempts.some((attempt) => attempt.decision === "adopt"), true);
 		assert.equal(readFileSync(ledgerPath, "utf8"), before, "the ledger source is never modified");
+	});
+
+	await check("cohort returns a counts-only v2 cohort and never repairs the source file", async () => {
+		const evidenceDigest = "e".repeat(64);
+		const harnessDigest = "b".repeat(64);
+		const receipt = {
+			schema: "gjc.quality_trial.v2",
+			trialId: "trial-1",
+			taskId: "t1",
+			taskVersion: 1,
+			split: "development",
+			arm: "B1",
+			repeat: 1,
+			goalRevision: 0,
+			producer: { id: "producer-a", kind: "producer" },
+			executor: { id: "executor-a", receiptId: "run-1", receiptDigest: "a".repeat(64) },
+			harness: { sourceDigest: "c".repeat(64), harnessDigest, manifestDigest: "d".repeat(64), version: "1" },
+			oracle: { kind: "json-expectation", verifierId: "verifier-a", evidenceDigest, independentFromProducer: true },
+			outcome: "passed",
+			denominator: { planned: 1, passed: 1, failed: 0, error: 0, skipped: 0 },
+			cost: { measured: true, wallMs: 10, inputTokens: 12, outputTokens: 3, usd: 0.0001 },
+			createdAt: "2026-10-27T00:00:00.000Z",
+			sourceHead: "e6e38a1",
+			executionKey: executionKeyFor({ taskId: "t1", taskVersion: "1", arm: "B1", repeat: 1, harnessDigest, oracleDigest: evidenceDigest, goalRevision: "0" }),
+		};
+		const recordsPath = path.join(root, "trials.jsonl");
+		const text = `${JSON.stringify(receipt)}\n{"schema":"gjc.quality_trial.v1"}\nnot json\n`;
+		writeFileSync(recordsPath, text);
+		const cohort = await call({ action: "cohort", recordsPath });
+		assert.equal(cohort.cohort.schema, "rrsi.quality_cohort.v2");
+		assert.equal(cohort.cohort.total, 2, "malformed lines are skipped, not repaired");
+		assert.equal(cohort.cohort.admissible.length, 1);
+		assert.deepEqual(cohort.cohort.excluded, [{ reason: "legacy_schema", count: 1 }]);
+		assert.equal("efficacyClaimsAllowed" in cohort.cohort, false, "no boolean efficacy permission");
+		assert.equal(readFileSync(recordsPath, "utf8"), text, "the source file is never modified");
+		assert.equal(cohort.journalStorage.persisted, true);
+
+		const missing = await call({ action: "cohort", recordsPath: path.join(root, "missing-trials.jsonl") });
+		assert.equal(missing.cohort.total, 0);
+		assert.equal(missing.source.status, "missing");
+
+		const linkPath = path.join(root, "linked-trials.jsonl");
+		symlinkSync(recordsPath, linkPath);
+		const unsafe = await call({ action: "cohort", recordsPath: linkPath });
+		assert.equal(unsafe.cohort.total, 0);
+		assert.equal(unsafe.source.reason, "unsafe_path");
 	});
 
 	await check("dream reports the frozen below-gate verdict for a small store", async () => {
@@ -703,7 +750,7 @@ async function runSuite(root) {
 
 	await check("the shared results registry accepts rrsi outcomes and rejects malformed ones", async () => {
 		const shared = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
-		for (const action of ["capture", "import", "dream", "status"]) {
+		for (const action of ["capture", "import", "dream", "cohort", "status"]) {
 			const result = await shared.appendPluginOutcome("rrsi", { operation: action, rrsi: { action, storage: "ok" } });
 			assert.equal(result.persisted, true, action);
 		}
