@@ -1,0 +1,2 @@
+invalid_manifest: tasks must hold at least two planted-defect tasks
+exit=1

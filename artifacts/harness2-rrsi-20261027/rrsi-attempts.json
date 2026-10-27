@@ -1,0 +1,44 @@
+[
+  {
+    "objective": "B0:generated-surface-drift",
+    "hypothesisNovelty": true,
+    "decision": "adopt",
+    "wallMs": 11,
+    "guardFailures": [],
+    "budgetRung": 0,
+    "files": 0,
+    "hunks": 0
+  },
+  {
+    "objective": "B1:generated-surface-drift",
+    "hypothesisNovelty": true,
+    "decision": "adopt",
+    "wallMs": 2862,
+    "guardFailures": [],
+    "budgetRung": 0,
+    "files": 0,
+    "hunks": 0
+  },
+  {
+    "objective": "B0:manifest-tool-path",
+    "hypothesisNovelty": true,
+    "decision": "reject",
+    "wallMs": 8,
+    "guardFailures": [
+      "manifest-tool-path"
+    ],
+    "budgetRung": 0,
+    "files": 0,
+    "hunks": 0
+  },
+  {
+    "objective": "B1:manifest-tool-path",
+    "hypothesisNovelty": true,
+    "decision": "adopt",
+    "wallMs": 2794,
+    "guardFailures": [],
+    "budgetRung": 0,
+    "files": 0,
+    "hunks": 0
+  }
+]

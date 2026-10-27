@@ -117,6 +117,29 @@ What is deliberately not regularized yet:
   no bootstrap or multi-campaign calibration exists.
 - Held-out coverage remains best-effort per the threat model above.
 
+## M1 measured guard coverage (2026-10-27, cost 0)
+
+Measured by `self-improve/m1/run-m1.mjs` over sourceHead `0aeecc3`
+(artifact `artifacts/harness2-rrsi-20261027/`): two planted-defect tasks × two
+guard sets, one isolated `git archive` snapshot per cell.
+
+| task | B0 drift-only | B1 drift+acceptance |
+| --- | --- | --- |
+| generated-surface drift | 5 (11 ms, 1 call) | 5 (2.86 s, 2 calls) |
+| manifest tool path broken | **0 — missed** (8 ms) | 5 (2.79 s) |
+| clean control | 5 (8 ms) | 5 (2.78 s) |
+
+Resulting rule: `bun rrsi/scripts/build.mjs --check` is a drift-only guard. It
+never saw the `gajae-plugin.json` contract defect, and the acceptance suite that
+did costs ~2.8 s — two orders of magnitude more wall time, so there is no cost
+argument for substituting the drift gate on a manifest or contract change. Run
+`bun rrsi/scripts/verify.ts` whenever the touched files include
+`gajae-plugin.json`, a tool schema or a generated surface; the drift gate alone is
+enough only for source-only edits the builder regenerates.
+
+Scope: guard coverage, not agent behaviour. No model call, no spend, no
+significance claim; the paid M1 pilot is still unrun.
+
 ## Honesty
 
 Missing is not zero; unmeasured is `null`; unrun is `skipped`. No completion
