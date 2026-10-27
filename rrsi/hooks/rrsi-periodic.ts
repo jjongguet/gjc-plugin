@@ -2121,43 +2121,144 @@ export function writeStore({ store, env = process.env }) {
   }
 }
 
+const SEGMENT_INDEX_RE = /-(\d+)\.jsonl$/;
+
+/** Numeric suffix of a journal segment name, or null when the name is unproven. */
+export function journalSegmentIndex(name) {
+  const match = SEGMENT_INDEX_RE.exec(String(name ?? ""));
+  return match ? Number.parseInt(match[1], 10) : null;
+}
+
 /**
- * Read-only projection of the jev-advisor journal segments. Records are read in
- * segment order and never modified; the caller decides what to persist.
+ * Segment order: the numeric suffix ascending is authoritative. Names without
+ * a numeric suffix sort last lexicographically for reporting only and are
+ * never coverage evidence.
+ */
+export function orderJournalSegments(names) {
+  const numeric = [];
+  const unproven = [];
+  for (const name of Array.isArray(names) ? names : []) {
+    const index = journalSegmentIndex(name);
+    if (index === null) unproven.push(String(name));
+    else numeric.push({ name: String(name), index });
+  }
+  numeric.sort((left, right) => left.index - right.index || left.name.localeCompare(right.name));
+  unproven.sort();
+  return [
+    ...numeric.map((entry) => ({ name: entry.name, index: entry.index, ordering: "numeric" })),
+    ...unproven.map((name) => ({ name, index: null, ordering: "unproven" })),
+  ];
+}
+
+function readJournalInventory(dir) {
+  try {
+    const file = path.join(dir, "inventory.json");
+    const stat = fs.lstatSync(file);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 64 * 1024) return { status: "invalid", declared: null, next: null };
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    const declared = Array.isArray(parsed?.segments) ? new Set(parsed.segments.map((entry) => String(entry?.name ?? "")).filter(Boolean)) : null;
+    return { status: "ok", declared, next: Number.isSafeInteger(parsed?.next) ? parsed.next : null };
+  } catch (error) {
+    return { status: error && error.code === "ENOENT" ? "missing" : "invalid", declared: null, next: null };
+  }
+}
+
+/**
+ * Read-only projection of the jev-advisor journal segments. Records are read
+ * in ascending numeric segment order and never modified. The return value
+ * carries a per-segment report so a caller can prove whether the newest
+ * records were covered: a skipped, truncated or unproven segment inside the
+ * retained window cannot count as covered. A torn tail line is excluded and
+ * reported; it is not a coverage failure.
  */
 export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJournalSegments } = {}) {
   const dir = journalDir ?? rrsiJournalDir();
+  const empty = (status, reason) => ({
+    status,
+    reason,
+    records: [],
+    segments: 0,
+    segmentReport: [],
+    skippedSegments: [],
+    truncatedSegments: [],
+    newestSegment: null,
+    inventory: { status: "missing", stale: false },
+    ordering: "none",
+  });
   let names;
   try {
-    names = fs.readdirSync(dir).filter((name) => name.endsWith(".jsonl")).sort();
+    names = fs.readdirSync(dir).filter((name) => name.endsWith(".jsonl"));
   } catch {
-    return { status: "missing", records: [], segments: 0, reason: "no_journal" };
+    return empty("missing", "no_journal");
   }
-  const segments = names.slice(-maxSegments);
+  const ordered = orderJournalSegments(names);
+  const selected = ordered.slice(-maxSegments);
+  const inventory = readJournalInventory(dir);
+  const stale = inventory.status === "ok" && inventory.declared !== null && selected.some((entry) => !inventory.declared.has(entry.name));
   const records = [];
-  for (const name of segments) {
-    let text;
+  const segmentReport = [];
+  for (const entry of selected) {
+    let text = null;
+    let state = "read";
+    let reason = null;
     try {
-      const file = path.join(dir, name);
+      const file = path.join(dir, entry.name);
       const stat = fs.lstatSync(file);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > RRSI_LIMITS.maxReadBytes) continue;
-      text = fs.readFileSync(file, "utf8");
-    } catch {
-      continue;
-    }
-    let count = 0;
-    for (const line of text.split("\n")) {
-      if (!line.trim()) continue;
-      count += 1;
-      if (count > RRSI_LIMITS.maxJournalRecordsPerSegment) break;
-      try {
-        records.push(JSON.parse(line));
-      } catch {
-        /* a malformed line is skipped, never repaired */
+      if (!stat.isFile() || stat.isSymbolicLink()) {
+        state = "skipped";
+        reason = "unsafe_segment";
+      } else if (stat.size > RRSI_LIMITS.maxReadBytes) {
+        state = "skipped";
+        reason = "oversized_segment";
+      } else {
+        text = fs.readFileSync(file, "utf8");
       }
+    } catch {
+      state = "skipped";
+      reason = "unreadable_segment";
     }
+    const lines = [];
+    let torn = false;
+    let malformed = 0;
+    let count = 0;
+    if (text !== null) {
+      const chunks = text.split("\n");
+      const tail = chunks.length > 0 ? chunks[chunks.length - 1] : "";
+      torn = tail !== "";
+      if (torn) chunks.pop();
+      for (const line of chunks) {
+        if (!line.trim()) continue;
+        count += 1;
+        if (count > RRSI_LIMITS.maxJournalRecordsPerSegment) {
+          if (state === "read") {
+            state = "truncated";
+            reason = "record_cap";
+          }
+          break;
+        }
+        try {
+          lines.push(JSON.parse(line));
+        } catch {
+          malformed += 1;
+        }
+      }
+      records.push(...lines);
+    }
+    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state, tornTail: torn, malformed, reason });
   }
-  return { status: records.length > 0 ? "ok" : "missing", records, segments: segments.length, reason: records.length > 0 ? null : "no_records" };
+  const newest = segmentReport.length > 0 ? segmentReport[segmentReport.length - 1] : null;
+  return {
+    status: records.length > 0 ? "ok" : "missing",
+    reason: records.length > 0 ? null : "no_records",
+    records,
+    segments: selected.length,
+    segmentReport,
+    skippedSegments: segmentReport.filter((entry) => entry.state === "skipped").map((entry) => entry.name),
+    truncatedSegments: segmentReport.filter((entry) => entry.state === "truncated").map((entry) => entry.name),
+    newestSegment: newest ? { name: newest.name, state: newest.state, tornTail: newest.tornTail, ordering: newest.ordering } : null,
+    inventory: { status: inventory.status, stale },
+    ordering: selected.some((entry) => entry.ordering === "unproven") ? "unproven" : "numeric",
+  };
 }
 
 /**
@@ -2187,21 +2288,17 @@ function journalAdviceEntries(record) {
  *   decision = "adopt" when the representative entry is a decision else "reject"
  *   wallMs = durationMs; provenance = the journal record id
  *
- * One record is one attempt. `scanned` counts inspected records and `truncated`
- * reports a prefix cut: the retained bound was reached while newer records were
- * still unread, so this projection is an incomplete prefix of the journal.
+ * One record is one attempt. Novelty is computed over the full read order,
+ * then the newest `limit` attempts are retained. `scanned` counts inspected
+ * records and `headOmitted` counts the older attempts the window dropped.
  */
 export function projectJournalRecords(records, { limit = 4000 } = {}) {
   const input = Array.isArray(records) ? records : [];
   const seen = new Map();
-  const attempts = [];
+  const all = [];
   let scanned = 0;
-  let truncated = false;
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
   for (const record of input) {
-    if (attempts.length >= limit) {
-      truncated = true;
-      break;
-    }
     scanned += 1;
     if (!record || typeof record !== "object") continue;
     const entries = journalAdviceEntries(record);
@@ -2212,25 +2309,29 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
     const tier = boundedText(entry.tier, 16) || status;
     const objective = `${operation}:${tier}`;
     const branch = seen.get(objective) ?? { records: 0, failures: 0 };
-    attempts.push(
-      normalizeAttempt(
-        {
-          objective,
-          hypothesisNovelty: branch.records === 0,
-          decision: decision ? "adopt" : "reject",
-          wallMs: boundedInteger(record.durationMs, 86_400_000),
-          guardFailures: [],
-          budgetRung: 0,
-          files: 0,
-          hunks: 0,
-          provenance: boundedText(record.id, RRSI_LIMITS.maxIdChars),
-        },
-        attempts.length,
-      ),
-    );
+    all.push({
+      objective,
+      hypothesisNovelty: branch.records === 0,
+      decision: decision ? "adopt" : "reject",
+      wallMs: boundedInteger(record.durationMs, 86_400_000),
+      guardFailures: [],
+      budgetRung: 0,
+      files: 0,
+      hunks: 0,
+      provenance: boundedText(record.id, RRSI_LIMITS.maxIdChars),
+    });
     seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
   }
-  return { attempts, branches: seen.size, scanned, truncated };
+  const headOmitted = Math.max(0, all.length - Math.min(all.length, bound));
+  const attempts = all.slice(all.length - Math.min(all.length, bound)).map((attempt, index) => normalizeAttempt(attempt, index));
+  const novel = attempts.filter((attempt) => attempt.hypothesisNovelty).length;
+  return {
+    attempts,
+    branches: seen.size,
+    scanned,
+    headOmitted,
+    novelty: { retained: attempts.length, novel, shared: attempts.length - novel, density: attempts.length > 0 ? novel / attempts.length : null },
+  };
 }
 
 /** Ledger cycle rows -> attempts (read-only summary of the repo search history). */
@@ -2299,6 +2400,29 @@ export function projectionCoverage(records, attempts) {
   const projected = Array.isArray(attempts) ? attempts.length : 0;
   const omitted = Math.max(0, total - projected);
   return { records: total, projected, omitted, ratio: total > 0 ? projected / total : null, limited: omitted > 0 };
+}
+
+/**
+ * Window coverage: walk the segment report newest-first until the retained
+ * window is filled. A skipped, truncated or unproven segment inside that walk
+ * cannot prove coverage; a torn tail is reported and does not block.
+ */
+export function journalWindowCoverage(segmentReport, limit) {
+  const report = Array.isArray(segmentReport) ? segmentReport : [];
+  const bound = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
+  let collected = 0;
+  const touched = [];
+  for (let index = report.length - 1; index >= 0; index -= 1) {
+    touched.push(report[index]);
+    collected += Number.isSafeInteger(report[index].records) ? report[index].records : 0;
+    if (collected >= bound) break;
+  }
+  const blocking = touched.filter((entry) => entry.state === "skipped" || entry.state === "truncated" || entry.ordering === "unproven");
+  return {
+    covered: touched.length > 0 && blocking.length === 0,
+    touched: touched.map((entry) => entry.name),
+    blocking: blocking.map((entry) => entry.name),
+  };
 }
 
 /**
@@ -2875,7 +2999,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         lastStatus: null,
         lastReason: null,
         nextRetryAt: null,
-        incomplete_prefix: baseState?.incomplete_prefix ?? false,
+        newest_covered: baseState?.newest_covered ?? null,
+        head_omitted: baseState?.head_omitted ?? null,
+        novelty: baseState?.novelty ?? null,
         consecutiveFailures: baseState?.consecutiveFailures ?? 0,
         lastReceiptId: baseState?.lastReceiptId ?? null,
 		lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
@@ -2905,10 +3031,13 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     }
     const digest = projectionDigestFor(projected.attempts, RRSI_PERIODIC_DEFAULTS.projectionLimit);
     const coverage = projectionCoverage(journal.records, projected.attempts);
-    // A prefix cut means newer records exist beyond the retained bound. The
-    // projection (and its digest) then covers only the head of the journal, so
-    // it must never renew freshness: lastSuccessAt stays at its prior value.
-    const incompletePrefix = projected.truncated === true;
+    // Freshness is keyed to window coverage, not to an attempt bound: the run
+    // renews lastSuccessAt only when every segment holding the retained window
+    // was read completely. Older records outside the window are normal.
+    const window = journalWindowCoverage(journal.segmentReport, RRSI_PERIODIC_DEFAULTS.projectionLimit);
+    const newestCovered = projected.failed !== true && window.covered;
+    const headOmitted = Number.isSafeInteger(projected.headOmitted) ? projected.headOmitted : coverage.omitted;
+    const novelty = projected.novelty ?? null;
     const { episodes: derivedSet } = derivedEpisodeSetFor({ digest, attempts: projected.attempts });
 
     const loaded = readStore(env);
@@ -2920,16 +3049,18 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return await finish({ status: "error", mode, reason, receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
     }
 
-    const lockResult = withStoreLock(env, () => {
-      const current = readStore(env);
-      const replaced = replaceDerivedSet({ store: current.store, sourceClass: "jev-journal", derivedSet });
-      if (replaced.storeWrite === "unchanged") {
-        return { store: current.store, replaced, written: { persisted: true, reason: "unchanged", bytes: 0 } };
-      }
-      const written = writeStore({ store: replaced.store, env });
-      return { store: written.persisted ? replaced.store : current.store, replaced, written };
-    });
-    if (!lockResult.ok) {
+    const lockResult = newestCovered
+      ? withStoreLock(env, () => {
+          const current = readStore(env);
+          const replaced = replaceDerivedSet({ store: current.store, sourceClass: "jev-journal", derivedSet });
+          if (replaced.storeWrite === "unchanged") {
+            return { store: current.store, replaced, written: { persisted: true, reason: "unchanged", bytes: 0 } };
+          }
+          const written = writeStore({ store: replaced.store, env });
+          return { store: written.persisted ? replaced.store : current.store, replaced, written };
+        })
+      : null;
+    if (lockResult && !lockResult.ok) {
       const failures = (baseState?.consecutiveFailures ?? 0) + 1;
       const reason = lockResult.reason ?? "store_busy";
       const stateWrite = writeState({ lastStatus: "error", lastReason: reason, storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString(), clockSkew });
@@ -2937,9 +3068,11 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return await finish({ status: "error", mode, reason, receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
     }
 
-    const { store, replaced, written } = lockResult.result;
+    const { store, replaced, written } = lockResult
+      ? lockResult.result
+      : { store: loaded.store, replaced: { storeWrite: "held", episodesDelta: 0, attemptsDelta: 0 }, written: { persisted: false, reason: "held" } };
     const counts = storeCounts(store);
-    if (!written.persisted && written.reason !== "unchanged") {
+    if (newestCovered && !written.persisted && written.reason !== "unchanged") {
       const failures = (baseState?.consecutiveFailures ?? 0) + 1;
       const reason = written.reason;
       const stateWrite = writeState({ lastStatus: "error", lastReason: reason, storeWrite: "rejected", lastProjectionDigest: digest, derivedChunks: derivedSet.length, consecutiveFailures: failures, nextRetryAt: new Date(Date.parse(now) + backoffMs(failures, intervalMs)).toISOString() });
@@ -2967,7 +3100,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
-          incomplete_prefix: incompletePrefix,
+          newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
           clockSkew,
@@ -2978,10 +3113,10 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       return await finish({ status: "error", mode, reason, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted });
     }
 
-    const status = replaced.storeWrite === "unchanged" ? "unchanged" : "ran";
+    const status = !newestCovered ? "uncovered" : replaced.storeWrite === "unchanged" ? "unchanged" : "ran";
     const corpusAttempts = counts.attempts;
 
-    if (mode === "inline" && corpusAttempts > RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts) {
+    if (newestCovered && mode === "inline" && corpusAttempts > RRSI_PERIODIC_DEFAULTS.inlineDreamMaxAttempts) {
       const spawned = await spawnWorker({ env, mode: "worker" });
       if (!spawned || !spawned.ok) {
         const failures = (baseState?.consecutiveFailures ?? 0) + 1;
@@ -2989,7 +3124,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         const journalStorage = await appendPeriodicRecord({ env, startedMs, summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: 0 }, storage: "ok" });
         return await finish({ status: "error", mode, reason: "worker_spawn_failed", receipt: false, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage) });
       }
-      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew, incomplete_prefix: incompletePrefix });
+      const stateWrite = writeState({ lastStatus: "deferred", lastReason: "dream_deferred", storeWrite: replaced.storeWrite, lastProjectionDigest: digest, derivedChunks: derivedSet.length, nextRetryAt: null, consecutiveFailures: 0, clockSkew, newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty });
       const deferredReceipt = writeReceipt({
         env,
         receipt: {
@@ -3013,7 +3150,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
           attemptsOmitted: coverage.omitted,
           projection: coverage,
           limited_projection: coverage.limited,
-          incomplete_prefix: incompletePrefix,
+          newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty,
           limits: appliedLimits(intervalMs),
           storage: { store: loaded.status, journalStorage: null },
           clockSkew,
@@ -3021,7 +3160,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         },
       });
       if (deferredReceipt.persisted) pruneReceipts({ env });
-      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted, incomplete_prefix: incompletePrefix });
+      return await finish({ status: "deferred", mode, spawned: true, storeWrite: replaced.storeWrite, receipt: deferredReceipt.persisted, stateWrite: stateWrite.persisted, newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty });
     }
 
     let dream = null;
@@ -3068,7 +3209,9 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         attemptsOmitted: coverage.omitted,
         projection: coverage,
         limited_projection: coverage.limited,
-        incomplete_prefix: incompletePrefix,
+        newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty,
         limits: appliedLimits(intervalMs),
         storage: { store: loaded.status, journalStorage: mapStorage(journalStorage) },
         clockSkew,
@@ -3079,22 +3222,24 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
     const stateWrite = writeState({
       lastStatus: dreamFailure ? "error" : status,
       lastReason: dreamFailure,
-      lastSuccessAt: dreamFailure || incompletePrefix ? (baseState?.lastSuccessAt ?? null) : now,
+      lastSuccessAt: dreamFailure || !newestCovered ? (baseState?.lastSuccessAt ?? null) : now,
       lastReceiptId: receiptWrite.persisted ? receiptId : null,
-	      lastProjectionDigest: digest,
-	      lastProjection: coverage,
+	      lastProjectionDigest: newestCovered ? digest : (baseState?.lastProjectionDigest ?? null),
+	      lastProjection: newestCovered ? coverage : (baseState?.lastProjection ?? null),
 	      storeWrite: replaced.storeWrite,
-	      derivedChunks: derivedSet.length,
-      incomplete_prefix: incompletePrefix,
+	      derivedChunks: newestCovered ? derivedSet.length : (baseState?.derivedChunks ?? null),
+      newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty,
 	      nextRetryAt: dreamFailure
         ? new Date(Date.parse(now) + backoffMs(failuresAfter, intervalMs)).toISOString()
-        : incompletePrefix
-          ? new Date(Date.parse(now) + backoffMs(1, intervalMs)).toISOString()
-          : new Date(Date.parse(now) + intervalMs).toISOString(),
+        : new Date(Date.parse(now) + intervalMs).toISOString(),
       consecutiveFailures: failuresAfter,
       clockSkew,
     });
-    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs, incomplete_prefix: incompletePrefix });
+    return await finish({ status: dreamFailure ? "error" : status, mode, reason: dreamFailure, storeWrite: replaced.storeWrite, episodesDelta: replaced.episodesDelta, attemptsDelta: replaced.attemptsDelta, receipt: receiptWrite.persisted, journal: true, stateWrite: stateWrite.persisted, journalStorage: mapStorage(journalStorage), durationMs: Date.now() - startedMs, newest_covered: newestCovered,
+          head_omitted: headOmitted,
+          novelty });
   } catch (error) {
     return await finish({ status: "error", mode, reason: bounded(error && error.message ? error.message : "periodic_failed", 120), receipt: false, journal: false, stateWrite: false });
   }
@@ -3138,7 +3283,9 @@ export function summarizePeriodicState({ state, env = process.env, now = new Dat
     lastStatus: state?.lastStatus ?? null,
     lastReason: state?.lastReason ?? null,
     nextRetryAt: state?.nextRetryAt ?? null,
-    incomplete_prefix: state?.incomplete_prefix === true,
+    newest_covered: state?.newest_covered === true,
+    head_omitted: Number.isSafeInteger(state?.head_omitted) ? state.head_omitted : null,
+    novelty: state?.novelty ?? null,
     storeWrite: state?.storeWrite ?? null,
     lastProjectionDigest: state?.lastProjectionDigest ?? null,
     lastProjection: state?.lastProjection ?? null,

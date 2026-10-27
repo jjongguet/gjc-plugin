@@ -21,7 +21,7 @@ test("documented projection limit and interval behaviour match the implementatio
 });
 
 test("import coverage and adoption counting are documented", () => {
-  expect(readme).toContain("returns journal coverage as `projection`");
+  expect(readme).toContain("`import` returns the same");
   expect(readme).toContain("counts attempts whose `decision` is `adopt`");
 });
 

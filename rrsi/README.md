@@ -57,16 +57,16 @@ is out of scope and unprovided.
   (`RRSI_PERIODIC_WORKER=1 bun hooks/rrsi-periodic.ts`, spawned by the hook,
   re-running under the same locks) instead of inside the session.
 - **Coverage labels.** The periodic receipt carries `projection`
-  `{records, projected, omitted, ratio, limited}`, `limited_projection` and
-  `incomplete_prefix`; omitted records are labeled in the periodic receipt,
-  never silently dropped by that path; `import` returns journal coverage as `projection`.
-  The same projection is stored as `lastProjection` for
-  `rrsi status`.
+  `{records, projected, omitted, ratio, limited}` plus `newest_covered`,
+  `head_omitted` and `novelty` (`{retained, novel, shared, density}`); omitted
+  older records are labeled, never silently dropped. `import` returns the same
+  labels under `journal`/`window`. The same projection is stored as
+  `lastProjection` for `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
   (schema `gjc.rrsi.periodic.v1`, 0600 in the 0700 root) records
   `lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`,
   `consecutiveFailures`, `lastReceiptId`, `lastProjectionDigest`, `storeWrite`,
-  `derivedChunks`, `incomplete_prefix` and `intervalMs`. Run receipts live in
+  `derivedChunks`, `newest_covered`, `head_omitted`, `novelty` and `intervalMs`. Run receipts live in
   `~/.gjc-plugin/rrsi/runs/v1/<receiptId>.json` (schema
   `gjc.rrsi.periodic.run.v1`, ≤ 64 KiB each, ≤ 60 retained, oldest pruned on
   write). Each executed run — including `no_input` and error outcomes —
@@ -74,7 +74,9 @@ is out of scope and unprovided.
   `~/.gjc-plugin/rrsi/journal/v1/`; `skipped_due` / `skipped_locked` /
   `skipped_disabled` write nothing.
 - **Outcome taxonomy.** `ran` (store written: `added`/`replaced`) ·
-  `unchanged` (due run, byte-identical content, no write) · `deferred` (large
+  `unchanged` (due run, byte-identical content, no write) · `uncovered`
+  (newest window could not be proven current: store held byte-identically,
+  freshness not renewed, next attempt at the full interval) · `deferred` (large
   corpus handed to the detached worker) · `no_input` (journal missing/empty;
   state `lastStatus: "empty"`, next attempt at the interval) · `skipped_due`
   (interval or backoff) · `skipped_locked` · `skipped_disabled` · `error`
@@ -239,17 +241,27 @@ delegated task) when that batch holds any entry; otherwise the older single
 exists. The representative entry is the first real decision, else the first
 entry; the branch objective is `<operation>:<tier|status>` of that entry,
 `decision` is `adopt` only when it is a decision, and the rest count as
-`reject`. `projectJournalRecords` also returns `scanned` (records inspected)
-and `truncated` (a prefix cut).
+`reject`. `projectJournalRecords` also returns `scanned` (records inspected),
+`headOmitted` (older attempts the newest window dropped) and `novelty`
+(`{retained, novel, shared, density}`; novelty keeps the journal read order, so
+a mature journal's retained window is novelty-empty by construction).
 
-**`incomplete_prefix` freshness rule.** `truncated: true` means the attempt
-bound was reached while newer records were still unread, so the projection and
-its digest cover only the head of the journal. The periodic run records
-`incomplete_prefix: true` on its receipt, state and `finish` result, does
-**not** renew `lastSuccessAt`, and — when the run is not already a dream
-failure — schedules the next attempt at one backoff step
-(`backoffMs(1, intervalMs)`) instead of the full interval. A prefix projection
-therefore never counts as freshness evidence.
+**Segment order and window coverage.** Numeric segment suffixes (`-<n>.jsonl`)
+order the journal ascending; `inventory.json` is a membership/staleness
+cross-check, not a replacement for numeric order. A segment without a numeric
+suffix is reported as `ordering: "unproven"` and is never coverage evidence.
+The periodic run walks the segment report newest-first until the retained
+window is filled: a skipped, truncated or unproven segment inside that walk
+means the window is **uncovered**. A torn tail line (a final chunk without a
+trailing newline) is excluded from the projection and reported; it does not
+block coverage.
+
+**Newest-coverage freshness rule.** `lastSuccessAt` renews only when the newest
+window was covered. On `uncovered` the run performs **no store write** (the
+previous derived set is held byte-identically, `storeWrite: "held"`), keeps the
+prior `lastSuccessAt`, and schedules the next attempt at the full interval — no
+backoff spin. Older records outside the window are normal and never block
+freshness.
 
 **What this does not prove.** Counts and digests are contract evidence, not
 efficacy evidence: no trial receipts are committed, no comparison has been run,

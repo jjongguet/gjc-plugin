@@ -15,6 +15,7 @@ import {
 	projectionDigestFor,
 	projectionCoverage,
 	projectJournalRecords,
+	journalWindowCoverage,
 	projectLedgerRows,
 	readJournalRecords,
 	readLedgerRows,
@@ -26,7 +27,7 @@ import {
 	withStoreLock,
 	writeStore,
 } from '../lib/rrsi';
-import { readPeriodicState, summarizePeriodicState } from '../lib/periodic';
+import { RRSI_PERIODIC_DEFAULTS, readPeriodicState, summarizePeriodicState } from '../lib/periodic';
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
 const ACTIONS = ['capture', 'import', 'dream', 'status'] as const;
@@ -65,7 +66,7 @@ export default function rrsi(pi: {
 		async execute(_toolCallId: string, params: { action?: string; goal?: string; attempts?: string; ledgerPath?: string; limit?: string; seed?: string }) {
 			const started = Date.now();
 			const action = (ACTIONS as readonly string[]).includes(String(params?.action ?? '')) ? (params!.action as RrsiAction) : null;
-			const limit = rrsiParseInt(params?.limit, 200, 4000);
+			const limit = rrsiParseInt(params?.limit, RRSI_PERIODIC_DEFAULTS.projectionLimit, 4000);
 			const seed = rrsiParseInt(params?.seed, 1, 1_000_000);
 			const now = new Date().toISOString();
 			const finish = async (payload: Record<string, unknown>, storage: RrsiStorage) => {
@@ -151,6 +152,19 @@ export default function rrsi(pi: {
 				const journal = readJournalRecords({ journalDir: rrsiJournalDir() });
 				const projected = projectJournalRecords(journal.records, { limit });
 				const projection = projectionCoverage(journal.records, projected.attempts);
+				const window = journalWindowCoverage(journal.segmentReport, limit);
+				const journalSummary = {
+					status: journal.status,
+					segments: journal.segments,
+					records: journal.records.length,
+					branches: projected.branches,
+					newestCovered: window.covered,
+					ordering: journal.ordering,
+					inventory: journal.inventory,
+					skippedSegments: journal.skippedSegments,
+					truncatedSegments: journal.truncatedSegments,
+					window: { headOmitted: projected.headOmitted, novelty: projected.novelty },
+				};
 				const projectionDigest = projectionDigestFor(projected.attempts, limit);
 				const derived = derivedEpisodeSetFor({ digest: projectionDigest, attempts: projected.attempts });
 				let ledgerCount = 0;
@@ -164,6 +178,9 @@ export default function rrsi(pi: {
 				}
 				const locked = withStoreLock(process.env, () => {
 					const current = readStore();
+					if (!window.covered) {
+						return { store: current.store, storeWrite: 'held' as const, written: { persisted: false, reason: 'held', bytes: 0 } };
+					}
 					const replacedJournal = replaceDerivedSet({ store: current.store, sourceClass: 'jev-journal', derivedSet: derived.episodes });
 					const replacedLedger =
 						ledgerDerived.episodes.length > 0
@@ -181,7 +198,7 @@ export default function rrsi(pi: {
 						{
 							store: loaded.store,
 							imported: 0,
-							journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
+							journal: journalSummary,
 							counts: storeCounts(loaded.store),
 							wrote: { persisted: false, reason: locked.reason ?? 'store_busy' },
 							storeWrite: 'rejected',
@@ -195,8 +212,8 @@ export default function rrsi(pi: {
 				return finish(
 					{
 						store,
-						imported: projected.attempts.length + ledgerCount,
-						journal: { status: journal.status, segments: journal.segments, records: journal.records.length, branches: projected.branches },
+						imported: storeWrite === 'held' ? 0 : projected.attempts.length + ledgerCount,
+						journal: journalSummary,
 						counts: storeCounts(store),
 						wrote: written,
 						storeWrite,
