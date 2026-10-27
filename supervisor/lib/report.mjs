@@ -1,10 +1,18 @@
 // Snapshot and report rendering.
 //
 // The summary numbers are computed here from the snapshot; no model writes them.
+// The Discord report fingerprint and its state file live here too: the snapshot is
+// the only input, so "did anything worth reporting change?" is a pure function.
+import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile, appendFile } from "node:fs/promises";
 import path from "node:path";
 
 export const SNAPSHOT_SCHEMA_VERSION = 1;
+export const REPORT_STATE_SCHEMA_VERSION = 1;
+export const REPORT_STATE_FILE = "last-report.json";
+
+/** Judgments that make an existing session worth a second look. */
+const REPORT_CHANGE_STATES = new Set(["stalled", "thrashing"]);
 
 export function sessionLine(session, judgment) {
   const age = session.ageMinutes === null ? "?" : `${session.ageMinutes}m`;
@@ -53,6 +61,69 @@ export function buildSummary(snapshot) {
     lines.push(`- 수집 오류 ${snapshot.errors.length}: ${snapshot.errors.map(entry => `${entry.target}:${entry.error}`).join(", ")}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * Fingerprint of everything a Discord summary must report: the state counts, which
+ * sessions are stuck, collection errors, the monitored session set and steer
+ * outcomes. Volatile facts (timestamps, run id, ages, dirty counts, pane digests)
+ * are dropped on purpose, so an unchanged workspace does not re-post every ten
+ * minutes. Array order is normalized so only real changes move the hash.
+ */
+export function reportFingerprint(snapshot) {
+  const canonical = {
+    host: snapshot.host?.hostname ?? null,
+    counts: Object.keys(snapshot.counts ?? {})
+      .sort()
+      .map(key => [key, snapshot.counts[key]]),
+    stuck: (snapshot.judgments ?? [])
+      .filter(judgment => REPORT_CHANGE_STATES.has(judgment.state))
+      .map(judgment => `${judgment.id}:${judgment.state}`)
+      .sort(),
+    errors: (snapshot.errors ?? []).map(entry => `${entry.target}:${entry.error}`).sort(),
+    sessions: (snapshot.sessions ?? []).map(session => session.id).sort(),
+    interventions: (snapshot.interventions ?? [])
+      .map(entry => `${entry.target}:${entry.mode}:${entry.delivered ? "delivered" : "undelivered"}:${entry.verified ? "verified" : "unverified"}:${entry.error ?? ""}`)
+      .sort(),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
+}
+
+export function reportStatePath(outDir) {
+  return path.join(outDir, REPORT_STATE_FILE);
+}
+
+/**
+ * Reads the fingerprint of the last *sent* report. A missing file is a normal
+ * first run; a damaged one is reported through `error` and treated as missing by
+ * the caller, which then sends instead of silently dropping the report.
+ * @returns {Promise<{state: object|null, error: string|null}>}
+ */
+export async function readReportState(outDir) {
+  let raw;
+  try {
+    raw = await readFile(reportStatePath(outDir), "utf8");
+  } catch (error) {
+    return { state: null, error: error.code === "ENOENT" ? null : `read_${error.code ?? error.message}` };
+  }
+  try {
+    const state = JSON.parse(raw);
+    if (!state || typeof state.fingerprint !== "string") return { state: null, error: "invalid_shape" };
+    return { state, error: null };
+  } catch {
+    return { state: null, error: "parse_error" };
+  }
+}
+
+export async function writeReportState({ outDir, fingerprint, runId, now }) {
+  await mkdir(outDir, { recursive: true, mode: 0o700 });
+  const body = `${JSON.stringify(
+    { schemaVersion: REPORT_STATE_SCHEMA_VERSION, fingerprint, runId, sentAt: new Date(now).toISOString() },
+    null,
+    2,
+  )}\n`;
+  await writeFile(reportStatePath(outDir), body, { mode: 0o600 });
+  return reportStatePath(outDir);
 }
 
 export function snapshotPaths(outDir, now) {

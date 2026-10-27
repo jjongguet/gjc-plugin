@@ -20,7 +20,7 @@ first). There is no launchd/cron install: the loop lives only inside the tmux
 session the operator started.
 
 Flags: `--out DIR` (state directory, default `~/.gjc-plugin/supervisor`),
-`--no-discord`, `--no-mini`, `--json`, `--count N`.
+`--no-discord`, `--no-mini`, `--json`, `--count N`, `--force-report`.
 
 ## Duplicate session guard (JJO-895)
 
@@ -92,14 +92,17 @@ by code, never written by a model.
 
 ## Interventions
 
-- **Discord summary** — one message per run to `DISCORD_REPORT_WEBHOOK_URL`. The URL
-  must be an `https://discord.com/api/webhooks/...` URL; mentions are disabled and the
-  body is capped at the Discord limit. No webhook means `skipped`, not a failed run.
+- **Discord summary** — one message per run to `DISCORD_REPORT_WEBHOOK_URL`, sent only
+  when the report changed. The URL must be an `https://discord.com/api/webhooks/...` URL;
+  mentions are disabled and the body is capped at the Discord limit. No webhook means
+  `skipped`, not a failed run.
+- **Change-only reporting** — a sha256 fingerprint of the reportable facts (state counts, stalled/thrashing sessions, collection errors, the monitored session set, steer outcomes) is compared with the last delivered report; timestamps, ages, dirty counts and the run id are excluded, so a quiet workspace stays quiet. The fingerprint is kept in `last-report.json` (mode 0600) in the state directory, and it advances only on a delivered POST, so a failed send is retried and a missing or damaged state file reports instead of dropping the message. `discord: skipped: unchanged` prints the reason (also in `events.jsonl`), and `--force-report` sends an unchanged summary; a missing webhook stays `webhook_missing`.
 - **Steer** — `tmux send-keys` into exactly one `lane-<name>` session, only when that
   session judged `stalled` or `thrashing`. The message carries a `sv-<id>` marker and
   the run verifies the marker on screen before recording `verified: true`.
-- **Repeat stalls** — the summary repeats the stalled line each run; replacing or
-  killing a session stays a human decision. This tool has no kill path.
+- **Repeat stalls** — a still-stalled session keeps the same line in the next report but
+  does not post a new message on its own (change-only reporting); replacing or killing a
+  session stays a human decision. This tool has no kill path.
 
 ## Snapshot
 
@@ -115,7 +118,8 @@ bun run test:supervisor     # node --test supervisor/tests/*.test.mjs
 
 The suite pins the judgment rules (including the 30-minute stall, 10-minute progress
 and dirty-growth cases), fixture collection for lane and mini, decision fallback for
-every failure kind, dry-run versus real steer, webhook validation, and two loop
+every failure kind, dry-run versus real steer, webhook validation, change-only reporting
+(suppression, forced send, damaged state file, webhook missing), and two loop
 iterations against an injected clock.
 
 ## Non-goals

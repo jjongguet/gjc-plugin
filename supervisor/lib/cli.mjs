@@ -9,7 +9,7 @@ import { collectSessions } from "./collect.mjs";
 import { createCiResolver } from "./ci.mjs";
 import { resolveJudgment } from "./decide.mjs";
 import { defaultRunner } from "./exec.mjs";
-import { formatSteerMessage, sendDiscord, steerSession } from "./intervene.mjs";
+import { formatSteerMessage, sendDiscord, steerSession, validateWebhookUrl } from "./intervene.mjs";
 import { judgeSession } from "./judge.mjs";
 import {
   appendEvents,
@@ -17,8 +17,11 @@ import {
   buildSummary,
   eventsFor,
   loadPreviousSnapshot,
+  readReportState,
+  reportFingerprint,
   sessionLine,
   snapshotPaths,
+  writeReportState,
   writeSnapshot,
 } from "./report.mjs";
 
@@ -27,12 +30,13 @@ export const MIN_INTERVAL_SECONDS = 10;
 const STEERABLE_STATES = new Set(["stalled", "thrashing"]);
 
 const USAGE = `usage:
-  supervisor once [--out DIR] [--no-discord] [--no-mini] [--steer TARGET] [--dry-run] [--json]
-  supervisor loop [--interval SECONDS] [--count N] [--out DIR] [--no-discord] [--no-mini] [--steer TARGET] [--dry-run]
+  supervisor once [--out DIR] [--no-discord] [--no-mini] [--steer TARGET] [--force-report] [--dry-run] [--json]
+  supervisor loop [--interval SECONDS] [--count N] [--out DIR] [--no-discord] [--no-mini] [--steer TARGET] [--force-report] [--dry-run]
 
   --interval   seconds between loop runs (default ${DEFAULT_INTERVAL_SECONDS}, minimum ${MIN_INTERVAL_SECONDS})
   --count      stop after N loop runs (default: run until stopped)
   --steer      one lane session (lane-<name>, <name> or lane:<name>) to nudge; single target only
+  --force-report  send the Discord summary even when nothing changed since the last one
   --dry-run    collect and judge, print the report, touch no session and no webhook
   --no-discord skip the Discord summary; --no-mini skip the mini host
   --out        state directory (default ~/.gjc-plugin/supervisor)
@@ -50,6 +54,7 @@ export function parseArgs(argv) {
     includeMini: true,
     steer: null,
     dryRun: false,
+    forceReport: false,
     json: false,
     intervalSeconds: DEFAULT_INTERVAL_SECONDS,
     count: null,
@@ -78,6 +83,9 @@ export function parseArgs(argv) {
       }
       case "--dry-run":
         options.dryRun = true;
+        break;
+      case "--force-report":
+        options.forceReport = true;
         break;
       case "--json":
         options.json = true;
@@ -216,7 +224,21 @@ export async function runOnce(options, deps = {}) {
 
   if (options.discord && !options.dryRun) {
     const webhookUrl = deps.webhookUrl ?? process.env.DISCORD_REPORT_WEBHOOK_URL;
-    snapshot.discord = await sendDiscord({ webhookUrl, content: buildSummary(snapshot), fetchImpl: deps.fetchImpl });
+    const content = buildSummary(snapshot);
+    const fingerprint = reportFingerprint(snapshot);
+    const invalidWebhook = validateWebhookUrl(webhookUrl);
+    const prior = invalidWebhook ? null : await readReportState(options.out);
+    if (invalidWebhook) {
+      // A missing or malformed webhook stays visible as `webhook_<reason>` and
+      // records no fingerprint, so the next run with a webhook still reports.
+      snapshot.discord = await sendDiscord({ webhookUrl, content, fetchImpl: deps.fetchImpl });
+    } else if (!options.forceReport && prior?.state?.fingerprint === fingerprint) {
+      snapshot.discord = { ok: false, skipped: true, status: null, error: "unchanged", contentLength: content.length, fingerprint };
+    } else {
+      snapshot.discord = await sendDiscord({ webhookUrl, content, fetchImpl: deps.fetchImpl });
+      // Only a delivered report advances the fingerprint; a failed send is retried.
+      if (snapshot.discord.ok) await writeReportState({ outDir: options.out, fingerprint, runId, now });
+    }
     await writeSnapshot({ outDir: options.out, snapshot, now });
   }
   if (ciResolver.flush) await ciResolver.flush();
