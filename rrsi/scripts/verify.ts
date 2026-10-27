@@ -263,6 +263,12 @@ async function runSuite(root) {
 		const unsafe = await call({ action: "cohort", recordsPath: linkPath });
 		assert.equal(unsafe.cohort.total, 0);
 		assert.equal(unsafe.source.reason, "unsafe_path");
+
+		const oversizedPath = path.join(root, "oversized-trials.json");
+		writeFileSync(oversizedPath, `[${"x".repeat(4 * 1024 * 1024 + 1)}]`);
+		const oversized = await call({ action: "cohort", recordsPath: oversizedPath });
+		assert.equal(oversized.cohort.total, 0);
+		assert.equal(oversized.source.reason, "oversized");
 	});
 
 	await check("dream reports the frozen below-gate verdict for a small store", async () => {
@@ -413,14 +419,40 @@ async function runSuite(root) {
 		const paths = periodicPaths(homeLimit);
 		const result = await withHome(homeLimit, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
 		assert.equal(result.status, "ran");
+		assert.equal(result.newest_covered, true);
+		assert.equal(result.head_omitted, 40);
 		const receiptFile = readdirSync(paths.receipts)[0];
 		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, receiptFile), "utf8"));
 		assert.deepEqual(receipt.projection, { records: 200, projected: 160, omitted: 40, ratio: 0.8, limited: true });
+		assert.equal(receipt.newest_covered, true);
+		assert.equal(receipt.head_omitted, 40);
 		assert.equal(receipt.limited_projection, true);
 		assert.equal(receipt.attemptsOmitted, 40);
 		assert.equal(receipt.limits.limit, 160);
 		const state = JSON.parse(readFileSync(paths.state, "utf8"));
 		assert.deepEqual(state.lastProjection, receipt.projection);
+		assert.equal(state.newest_covered, true);
+		assert.equal(Number.isFinite(Date.parse(state.lastSuccessAt)), true, "a covered newest window renews freshness");
+		assert.equal(Date.parse(state.nextRetryAt) - Date.parse(state.lastAttemptAt), 24 * 60 * 60 * 1000, "success arms the full interval, not a backoff step");
+	});
+
+	await check("periodic: a torn tail is reported and renews freshness", async () => {
+		const homeTorn = path.join(root, "periodic-home-torn");
+		mkdirSync(homeTorn, { mode: 0o700 });
+		const dir = path.join(homeTorn, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const complete = syntheticRecords(12).map((entry) => JSON.stringify(entry)).join("\n");
+		writeFileSync(path.join(dir, "seg-1.jsonl"), `${complete}\n{"id":"torn-fragment","operation":"run","advice":[`);
+		const report = readJournalRecords({ journalDir: dir });
+		assert.equal(report.newestSegment.tornTail, true);
+		assert.equal(report.segmentReport[0].state, "torn");
+		assert.equal(report.records.length, 12);
+		assert.equal(journalWindowCoverage(report.segmentReport, 160).covered, true);
+		const result = await withHome(homeTorn, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(result.status, "ran");
+		assert.equal(result.newest_covered, true);
+		const state = JSON.parse(readFileSync(periodicPaths(homeTorn).state, "utf8"));
+		assert.equal(Number.isFinite(Date.parse(state.lastSuccessAt)), true);
 	});
 
 	await check("periodic: numeric segment order (-9/-10), record cap, symlinked newest and an existing-store hold", async () => {

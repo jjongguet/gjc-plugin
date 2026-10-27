@@ -346,7 +346,7 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
       }
       records.push(...lines);
     }
-    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state, tornTail: torn, malformed, reason });
+    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state: torn && state === "read" ? "torn" : state, tornTail: torn, malformed, reason });
   }
   const newest = segmentReport.length > 0 ? segmentReport[segmentReport.length - 1] : null;
   return {

@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -125,11 +126,11 @@ test("secret-like digest targets are excluded, and the receipt redacts absolute 
       }),
     });
     assert.equal(receipt.loaded, true);
-    assert.deepEqual(receipt.excludedTargets, [".env"]);
+    assert.deepEqual(receipt.payload.excludedTargets, [".env"]);
     const text = canonicalJson(receipt.payload);
     assert.equal(text.includes(root), false, "no absolute temp path survives redaction");
     assert.equal(text.includes("KEY=secret"), false, "no credential content is embedded");
-    assert.equal(text.includes(".env"), false, "the excluded target contributes no row");
+    assert.equal(receipt.payload.harness.rows.some((row) => row.path.includes(".env")), false, "the excluded target contributes no row");
     assert.equal(verifyLoadingReceipt(receipt).ok, true);
   } finally {
     rmSync(root, { recursive: true, force: true });
@@ -151,6 +152,7 @@ test("an oversized payload fails closed and cannot be verified", () => {
   assert.equal(receipt.loaded, false);
   assert.ok(receipt.failures.includes("payload_oversized"));
   assert.ok(receipt.canonicalBytes > 8 * 1024);
+  assert.equal(receipt.sha256, createHash("sha256").update(canonicalJson(receipt.payload)).digest("hex"), "the digest is over the full canonical payload, never a truncated one");
   assert.deepEqual(verifyLoadingReceipt(receipt), { ok: false, reason: "loading_payload_mismatch" });
 });
 

@@ -11,7 +11,7 @@ import { admitCall, planTrial, validateManifest } from "../lib/behavior-eval.mjs
 
 export const PREFLIGHT_SCHEMA = "harness2.m1.preflight.v1";
 export const PREFLIGHT_LIMITS = Object.freeze({ maxCells: 512, maxRepeats: 5, maxArms: 3 });
-export const LIVE_REFUSAL_CODES = Object.freeze([
+export const LIVE_RESPONSE_CODES = Object.freeze([
   "live_not_approved",
   "live_approval_invalid",
   "live_cap_exceeds_declared",
@@ -67,8 +67,15 @@ export function planBudget({ budget, cells = [] } = {}) {
   const rows = [];
   let projected = 0;
   let refused = null;
-  for (const cell of cells) {
+  const maxCalls = Number(budget?.maxCalls);
+  for (let index = 0; index < cells.length; index += 1) {
+    const cell = cells[index];
     if (refused) {
+      rows.push({ cell, allowed: false, reason: refused });
+      continue;
+    }
+    if (Number.isSafeInteger(maxCalls) && maxCalls > 0 && index >= maxCalls) {
+      refused = "call_cap_exceeded";
       rows.push({ cell, allowed: false, reason: refused });
       continue;
     }

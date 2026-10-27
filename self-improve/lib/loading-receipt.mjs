@@ -142,6 +142,7 @@ export function buildLoadingReceipt({
   pluginState,
   harnessDigest,
   expected = {},
+  excludedTargets = [],
   home = os.homedir(),
   repoRoot = null,
   agentDir = null,
@@ -194,6 +195,7 @@ export function buildLoadingReceipt({
         ? { rootHash: digest.rootHash ?? null, targets: rows.map((row) => row.path).slice(0, LOADING_RECEIPT_LIMITS.maxTargets), rows: rows.slice(0, LOADING_RECEIPT_LIMITS.maxTargets) }
         : null,
       expected: { plugins: wantedPlugins, surfaces: wantedSurfaces, guards: wantedGuards },
+      excludedTargets: Array.isArray(excludedTargets) ? excludedTargets.slice(0, LOADING_RECEIPT_LIMITS.maxTargets) : [],
       failures: [...new Set(failures)].sort(),
     },
     { home, repoRoot, agentDir },
@@ -249,12 +251,10 @@ export function collectLoadingReceipt({
     pluginState,
     harnessDigest: digest,
     expected,
+    excludedTargets,
     home: os.homedir(),
     repoRoot,
     agentDir,
   });
-  if (excludedTargets.length > 0) {
-    receipt.excludedTargets = excludedTargets;
-  }
   return receipt;
 }

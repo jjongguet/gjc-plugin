@@ -2245,7 +2245,7 @@ export function readJournalRecords({ journalDir, maxSegments = RRSI_LIMITS.maxJo
       }
       records.push(...lines);
     }
-    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state, tornTail: torn, malformed, reason });
+    segmentReport.push({ name: entry.name, index: entry.index, ordering: entry.ordering, records: lines.length, state: torn && state === "read" ? "torn" : state, tornTail: torn, malformed, reason });
   }
   const newest = segmentReport.length > 0 ? segmentReport[segmentReport.length - 1] : null;
   return {
@@ -3044,6 +3044,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         newest_covered: baseState?.newest_covered ?? null,
         head_omitted: baseState?.head_omitted ?? null,
         novelty: baseState?.novelty ?? null,
+        blocking_segments: baseState?.blocking_segments ?? null,
         consecutiveFailures: baseState?.consecutiveFailures ?? 0,
         lastReceiptId: baseState?.lastReceiptId ?? null,
 		lastProjectionDigest: baseState?.lastProjectionDigest ?? null,
@@ -3330,6 +3331,7 @@ export function summarizePeriodicState({ state, env = process.env, now = new Dat
     newest_covered: state?.newest_covered === true,
     head_omitted: Number.isSafeInteger(state?.head_omitted) ? state.head_omitted : null,
     novelty: state?.novelty ?? null,
+    blocking_segments: Array.isArray(state?.blocking_segments) ? state.blocking_segments : [],
     storeWrite: state?.storeWrite ?? null,
     lastProjectionDigest: state?.lastProjectionDigest ?? null,
     lastProjection: state?.lastProjection ?? null,

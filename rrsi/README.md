@@ -59,7 +59,8 @@ is out of scope and unprovided.
   re-running under the same locks) instead of inside the session.
 - **Coverage labels.** The periodic receipt carries `projection`
   `{records, projected, omitted, ratio, limited}` plus `newest_covered`,
-  `head_omitted` and `novelty` (`{retained, novel, shared, density}`); omitted
+  `head_omitted`, `novelty` (`{retained, novel, shared, density}`) and
+  `blocking_segments`; omitted
   older records are labeled, never silently dropped. `import` returns the same
   labels under `journal`/`window`. The same projection is stored as
   `lastProjection` for `rrsi status`.
