@@ -41,6 +41,7 @@ export const LOADING_FAILURE_CODES = Object.freeze([
   "surface_quarantined",
   "harness_target_missing",
   "guard_unresolved",
+  "payload_oversized",
   "loading_payload_missing",
   "loading_payload_mismatch",
   "loading_not_proven",
@@ -203,9 +204,9 @@ export function buildLoadingReceipt({
     schema: LOADING_RECEIPT_SCHEMA,
     loaded: failures.length === 0 && bounded,
     failures: bounded ? [...new Set(failures)].sort() : [...new Set([...failures, "payload_oversized"])].sort(),
-    sha256: sha256Hex(bounded ? text : `${text.slice(0, LOADING_RECEIPT_LIMITS.maxPayloadBytes)}`),
+    sha256: sha256Hex(text),
     payload,
-    canonicalBytes: Buffer.byteLength(bounded ? text : text.slice(0, LOADING_RECEIPT_LIMITS.maxPayloadBytes)),
+    canonicalBytes: Buffer.byteLength(text),
   };
 }
 

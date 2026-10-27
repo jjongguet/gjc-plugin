@@ -3554,7 +3554,7 @@ export default function rrsi(pi: {
 					return finish(
 						{
 							store: loaded.store,
-							cohort: { schema: 'rrsi.quality_cohort.v2', total: 0, admissible: [], excluded: [], duplicate: 0 },
+							cohort: { schema: RRSI_QUALITY_COHORT_SCHEMA, total: 0, admissible: [], excluded: [], duplicate: 0 },
 							source,
 							counts: storeCounts(loaded.store),
 						},

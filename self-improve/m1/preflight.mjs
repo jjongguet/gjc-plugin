@@ -161,7 +161,10 @@ export function preflight({
   if (liveState.status === "refused") blockers.push({ code: liveState.code, source: "live" });
 
   // The plan must fit the same resource ceiling for the compute-matched arm.
-  const trialPlan = planned.error ? null : planTrial({ arm: "B1", manifestDigest: manifest?.digest ?? "0".repeat(64), totalResourceMs: Number(budget?.maxWallMs ?? 60_000) });
+  // A missing manifest digest is not replaced by a fabricated one.
+  const trialPlan = !planned.error && typeof manifest?.digest === "string"
+    ? planTrial({ arm: "B1", manifestDigest: manifest.digest, totalResourceMs: Number(budget?.maxWallMs ?? 60_000) })
+    : null;
 
   const body = {
     schema: PREFLIGHT_SCHEMA,
@@ -179,7 +182,7 @@ export function preflight({
     cells: planned.cells,
     cellCount: planned.count,
     budget: spend,
-    trialPlan: trialPlan && trialPlan.ok ? { ok: true, arm: trialPlan.plan.arm } : { ok: false, reason: trialPlan?.reason ?? null },
+    trialPlan: trialPlan && trialPlan.ok ? { ok: true, arm: trialPlan.plan.arm } : { ok: false, reason: trialPlan?.reason ?? (planned.error ? "planning_failed" : "missing_manifest_digest") },
     oracle,
     isolation: isolation
       ? {
