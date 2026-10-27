@@ -8,7 +8,7 @@
     "attempts": 32,
     "adoptions": 7
   },
-  "journalDir": "/Users/jjong-macmini/.gjc-plugin/jev-advisor/journal/v1",
+  "journalDir": "~/.gjc-plugin/jev-advisor/journal/v1",
   "periodic": {
     "lastAttemptAt": null,
     "lastSuccessAt": null,
