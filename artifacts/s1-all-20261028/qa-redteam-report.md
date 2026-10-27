@@ -1,5 +1,7 @@
 # S1 기록·주장 QA/레드팀 보고서
 
+> 범위 주의: generation 1–4는 **증거 번들 커밋 전 집합**(`sha256:39d95a9b…`, pathCount 0)을 검사했다. 커밋 후 번들 10파일에 대한 별도 QA는 `qa-bundle-report.md`(저장소 밖)에 있고, 이 문서의 "0건 잔존" 스캔 주장은 그 파일 자신을 포함하지 않는다.
+
 - 작성: 2026-10-28 (KST) · 세션 `01a17e5b-85a8-7672-aa35-4ea864b8f966` QA 에이전트(`4-S1BoundaryQA`)
 - 대상: `~/jjongguet/artifacts/s1-all-20261028/` 전체 · 핸드오프 `S1-워크스페이스운영-GJC도구.md` §8-1 · Linear JJO 배정 41건(읽기 전용 재조회)
 - 동결 변경 집합: `sha256:39d95a9bd50b1802531f4051824f7962d35b982fce6d5f0a9f91dbda69010e9e`, pathCount 0 — `gjc ultragoal quality-gate source-hash --json`으로 재확인(§2-10)
@@ -23,7 +25,7 @@
 
 ## 1. 환경·방법
 
-- cwd: `/Users/kyeongminkim/jjongguet/lanes/all-s1-gjc-plugin-20261028` (브랜치 `feat/all-s1-gjc-plugin-20261028`)
+- cwd: `<repo>` (브랜치 `feat/all-s1-gjc-plugin-20261028`)
 - HEAD: `dbea329bbc99c73cef1e51df9723b1faceca84b8` = `origin/main` (아래 실측)
 - Linear 접근: `python3 ~/.gjc-user-policy/bin/linear-trace.py call|batch` — `list_issues`(4페이지 전수), `get_issue`×41, `list_comments`×41. 쓰기 도구 호출 0건.
 - 기법: 각 주장에 대해 ① 주장된 명령을 그대로 재실행 ② 산출물 파일과 API 실측을 교차 비교 ③ 주장을 반증할 입력(잘못된 마커, 계약 블록 제거, 없는 경로)을 넣어 측정이 실제로 0/실패를 내는지 확인.
@@ -106,7 +108,7 @@ $ gh pr list --state open --json number,title
 ### 2-6. `handoff-check` 정상 경로 / 실패 경로
 
 ```
-$ ~/.gjc-user-policy/bin/handoff-check "/Users/.../S1-워크스페이스운영-GJC도구.md"
+$ ~/.gjc-user-policy/bin/handoff-check "~/Desktop/handoffs/all-linear-2026-10-28-021134/S1-워크스페이스운영-GJC도구.md"
 (출력 없음)  exit 0
 $ ~/.gjc-user-policy/bin/handoff-check /tmp/s1-handoff-missing-approval.md
 handoff-check: '배포 승인 범위' 블록이 없다: /tmp/s1-handoff-missing-approval.md
@@ -452,7 +454,7 @@ awk -F'|' '/^\| JJO-/{n++} END{print "ROWS="n}' ~/jjongguet/artifacts/s1-all-202
 awk -F'|' '/^\| JJO-/{gsub(/ /,"",$3); c[$3]++} END{for(k in c) print k, c[k]}' ~/jjongguet/artifacts/s1-all-20261028/jjo-41-decisions.md | sort
 git log --all --oneline --grep=JJO-890 --grep=JJO-513 --grep=JJO-664 | wc -l
 gh pr list --state open
-~/.gjc-user-policy/bin/handoff-check "/Users/kyeongminkim/Desktop/handoffs/all-linear-2026-10-28-021134/S1-워크스페이스운영-GJC도구.md"; echo $?
+~/.gjc-user-policy/bin/handoff-check "~/Desktop/handoffs/all-linear-2026-10-28-021134/S1-워크스페이스운영-GJC도구.md"; echo $?
 ~/.gjc-user-policy/bin/handoff-check /tmp/s1-handoff-missing-approval.md; echo $?
 for s in build:check evidence:check paths:check docs:check policy:check; do bun run --silent "$s" >/dev/null 2>&1; echo "$s=$?"; done
 node --test scripts/tests/ultragoal-succession.test.mjs

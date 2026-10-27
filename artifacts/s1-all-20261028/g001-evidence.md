@@ -1,6 +1,6 @@
 # G001 증거 — 41건 대조와 판정표 확정 (2026-10-28 KST)
 
-cwd: `/Users/kyeongminkim/jjongguet/lanes/all-s1-gjc-plugin-20261028`
+cwd: `<repo>`
 branch: `feat/all-s1-gjc-plugin-20261028` · HEAD `dbea329bbc99c73cef1e51df9723b1faceca84b8` (= origin/main) · 작업트리 clean
 
 ## 1. 저장소 상태 재측정
@@ -38,7 +38,7 @@ branch: `feat/all-s1-gjc-plugin-20261028` · HEAD `dbea329bbc99c73cef1e51df9723b
 
 ## 3. 41행 판정표
 
-- 파일: `jjo-41-decisions.md` (정본: `/Users/kyeongminkim/jjongguet/lanes/all-s1-gjc-plugin-20261028/.gjc/_session-01a17e5b-85a8-7672-aa35-4ea864b8f966/plans/ralplan/s1-workspace-ops-20261028/stage-02-revision.md` 117–159행 발췌)
+- 파일: `jjo-41-decisions.md` (정본: `<repo>/.gjc/_session-01a17e5b-85a8-7672-aa35-4ea864b8f966/plans/ralplan/s1-workspace-ops-20261028/stage-02-revision.md` 117–159행 발췌)
 - 검산 명령과 출력:
 
 ```

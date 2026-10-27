@@ -16,7 +16,8 @@
 - 원인: 5개 파일 전부 `directory_entrypoint_only` — 워크스페이스 지도(`AGENTS.md`)가 `artifacts/` 디렉터리 단위로만 라우팅하고 개별 파일 항목은 두지 않는다.
 - 판정: **관찰 불가가 아니라 정상 범주**. `artifacts/`는 "로컬 전용; 원본 영수증·유일본 보존"으로 표에 등재돼 있고, 개별 증거 파일마다 지도 항목을 요구하지 않는다. 구조 검사 green은 문서 의미 정확성을 보증하지 않는다.
 - `historicalComparison: unavailable` — 이 스코프의 과거 비교 기준선이 없다. 사유 필드 표기는 호출 스코프에 따라 달라질 수 있어 특정 문자열을 정본으로 주장하지 않는다.
-- **핸드오프 경로 단독 검사(추가 실행, terminal critic 지적 반영)**: cwd `/Users/kyeongminkim/jjongguet`, scope `Desktop/handoffs/all-linear-2026-10-28-021134/S1-워크스페이스운영-GJC도구.md` → `status: unverifiable` · `missing_route`(severity review) · `missing_selected_file`(severity unverifiable) · selectedRoutes `coverage: missing`. 판정: **관찰 불가** — 워크스페이스 지도에 핸드오프 디렉터리 라우트가 없다. 이 세션은 지도를 편집하지 않았으므로 미해소로 남긴다.
+- **핸드오프 경로 단독 검사(추가 실행, terminal critic 지적 반영)**: cwd `~/jjongguet`, scope `Desktop/handoffs/all-linear-2026-10-28-021134/S1-워크스페이스운영-GJC도구.md` → `status: unverifiable` · `missing_route`(severity review) · `missing_selected_file`(severity unverifiable) · selectedRoutes `coverage: missing`. 판정: **관찰 불가** — 워크스페이스 지도에 핸드오프 디렉터리 라우트가 없다. 이 세션은 지도를 편집하지 않았으므로 미해소로 남긴다.
+- **커밋 후 정적 검사 재실행**: 번들을 커밋한 뒤 `paths:check`가 절대 홈 경로 9행을 잡아 exit 1로 실패했다(브랜치 red). 경로를 저장소 상대 표기로 고친 뒤 HEAD에서 5종을 다시 돌려 전부 exit 0을 확인했다: `paths:check 417 tracked files`, `docs:check 89 links in 53 files`, `build:check`·`evidence:check`·`policy:check` ok. 커밋 전 관측치(407 files, 46 files)는 `g002-evidence.md`에 그대로 남기고 여기서 구분해 정정한다.
 
 ## 773·564 완료 조건 검증 (cohort 지적 반영)
 
@@ -30,7 +31,7 @@
 ## 세션 종료 판정
 
 - 이 세션 배정 41건의 **다음 행동 확정**: 41/41 — 실행 0 · 판정만 25 · 차단확인 16. 그중 완료 조건 충족이 관찰된 2건(JJO-773·564)은 "Done 제안"으로 표기했고 상태는 바꾸지 않았다.
-- 코드 변경 **0건**. 단 이 번들을 저장소에 남기기 위한 evidence 커밋 1건을 만들었다(`artifacts/s1-all-20261028/`).
+- 코드 변경 **0건**. 이 번들을 저장소에 남기기 위한 evidence 커밋 2건(`27ba7de`, `f38f69c`)과 paths:check 회귀를 고치는 후속 커밋을 만들었다(`artifacts/s1-all-20261028/`).
 - Linear 쓰기: 이번 세션 댓글 **29건**(결과 27 + 검증 2). 상태 전이 0건.
 - 남은 일: 재배정 25건은 각 소유 레인에서, 차단 16건은 해소 조건 충족 시 재개.
 - **대기 중인 오너 결정** — 아래 O 코드는 계획의 Open Items와 같은 번호다.

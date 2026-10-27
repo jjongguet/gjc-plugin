@@ -1,6 +1,8 @@
 AI SLOP CLEANUP REPORT
 ======================
 
+> 범위 주의: 이 리포트는 **evidence 번들 커밋 전 집합**(sourceHash `sha256:39d95a9b…`, pathCount 0)을 검사한 것이다. 커밋 후 집합은 `artifacts/s1-all-20261028/` 10파일이며, 그 정적 검사는 저장소 `bun run paths:check` 등 5종으로 별도 확인했다.
+
 Scope: frozen change set `sha256:39d95a9bd50b1802531f4051824f7962d35b982fce6d5f0a9f91dbda69010e9e` (base origin/main, mergeBase dbea329, pathCount 0)
 Mode: read-only detector/report; no edits performed
 Blocking Findings: none — 저장소 tracked 변경 파일이 0건이다(`gjc ultragoal quality-gate source-hash --json` → pathCount 0)

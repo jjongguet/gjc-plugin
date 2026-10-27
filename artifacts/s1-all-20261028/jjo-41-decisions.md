@@ -1,6 +1,6 @@
 # JJO 41건 판정표 (S1 세션 01a17e5b · 2026-10-28 KST)
 
-- 정본 계획: `/Users/kyeongminkim/jjongguet/lanes/all-s1-gjc-plugin-20261028/.gjc/_session-01a17e5b-85a8-7672-aa35-4ea864b8f966/plans/ralplan/s1-workspace-ops-20261028/stage-02-revision.md` (sha256 `a4d0f0c463d291454bcbd7f5333c2df6cb4648cb487685b3be333e33b7bace44`). 이 세션 전용 `.gjc` 상태라 레인 정리 후에는 읽을 수 없다 — 그래서 이 파일이 자기완결 사본이다.
+- 정본 계획: `<repo>/.gjc/_session-01a17e5b-85a8-7672-aa35-4ea864b8f966/plans/ralplan/s1-workspace-ops-20261028/stage-02-revision.md` (sha256 `a4d0f0c463d291454bcbd7f5333c2df6cb4648cb487685b3be333e33b7bace44`). 이 세션 전용 `.gjc` 상태라 레인 정리 후에는 읽을 수 없다 — 그래서 이 파일이 자기완결 사본이다.
 - 합계: 행 41 · 상태 In Review 7 / Todo 13 / Backlog 5 / Blocked 16 · 행동 실행 0 / 판정만 25 / 차단확인 16.
 
 ## 근거 코드 (E0–E9)
@@ -20,17 +20,32 @@
 | E8 | `verification_run` 실행 관찰 — tests 7 / pass 6 / skip 1 / fail 0, exit 0, receipt `b9c3ee64` |
 | E9 | JJO-456 본문 지목 표면 3개 — `self-improve/evidence/audit-20261022/tools/render-battery.mjs:22`, `.../README.md:74-77`, `.github`의 executedAt 대조 0건 |
 
+## Open Item 코드 (O1–O8)
+
+`O` 코드는 ralplan 계획의 Open Items 번호다. 판정표 근거 열이 O2·O3·O4를 인용하므로 여기에 정의한다.
+
+| 코드 | 의미 | 기본값 |
+|---|---|---|
+| O1 | 우선순위 4건(904·273·941·933) 구현을 어느 레인으로 보낼지 | 다음 S 세션 |
+| O2 | JJO-890 미머지 브랜치(2커밋·21파일·4407줄) 재개/폐기/보존 | 보존 |
+| O3 | JJO-589 저장소 아카이브·개명 | 유지 |
+| O4 | JJO-588 원격 브랜치 삭제 | 삭제 없음 |
+| O5 | In Review 7건의 Done 판정 위치 | 본문 소유 저장소 |
+| O6 | JJO-590·935 파일 삭제 실행 | 보류 |
+| O7 | agents-freshness를 이 배포 인덱스로 편입할지 | 현 위치 유지 |
+| O8 | 핸드오프 §5 순서 미준수 | 사용자 지시로 확정 |
+
 ---
 
 | 티켓 | 상태 | 다음 행동 | 근거 | 완료 판정 기준 |
 |---|---|---|---|---|
 | JJO-662 | In Review | 판정만 | E0·E1·E8: open PR 0, 이 저장소 커밋 0. 결함 표면은 gjc 워크플로(본문 지목 저장소/릴리스) | `gh pr list --repo <본문 지목 저장소> --state all --search JJO-662` 또는 `git -C <경로> log --all --grep=JJO-662` 출력에서 PR/커밋 ≥1 관찰 → Done 후보. 출력이 0건이면 In Review 유지·Done 금지 |
-| JJO-933 | In Review | 판정만 | E0·E1·E2: `lane-orchestrate` 실체는 `.gjc-user-policy/bin`. 이 저장소 대응물 `supervisor/`는 JJO-913으로 머지 완료(`a7ccd36`~`e6e38a1`) | `grep -rn "JJO-933" /Users/kyeongminkim/.gjc-user-policy` 출력 file:line ≥1 + `lane-orchestrate --help`에 중복 PR/빈 머지 방지 옵션 노출을 관찰 → Done 후보. 미관찰이면 유지 |
+| JJO-933 | In Review | 판정만 | E0·E1·E2: `lane-orchestrate` 실체는 `.gjc-user-policy/bin`. 이 저장소 대응물 `supervisor/`는 JJO-913으로 머지 완료(`a7ccd36`~`e6e38a1`) | `grep -rn "JJO-933" ~/.gjc-user-policy` 출력 file:line ≥1 + `lane-orchestrate --help`에 중복 PR/빈 머지 방지 옵션 노출을 관찰 → Done 후보. 미관찰이면 유지 |
 | JJO-573 | In Review | 판정만 | E0·E1: whoos·notelier·ARM은 다른 제품 저장소 | 본문에서 승격 증거 토큰(PR 번호 또는 SHA)을 추출해 **3/3** 확인 → Done 후보. N/3 (N<3)이면 Done 금지 |
 | JJO-771 | In Review | 판정만 | E0·E1·E5: `managed_append_identity_mismatch`는 gjc 본체. 이 저장소에는 `supervisor/README.md:6`의 동기 언급뿐 | `gjc` 릴리스 노트/이슈에서 해당 결함 수정 확인 → 링크 1건 기록. 미확인이면 유지 |
 | JJO-820 | In Review | 판정만 | E0·E1: Penpot 로컬 인스턴스·자격증명 위생은 인프라 표면 | 본문이 지목한 인스턴스 정본 경로·자격증명 보관 위치 **2개**가 문서 1건에 존재함을 관찰 → Done 후보. 미관찰이면 유지 |
 | JJO-773 | In Review | 판정만 | E0·E1·E2: Linear 기록 규칙은 `rule://linear-work`(워크스페이스 룰) | **조건 충족 관측**: `search "완료된 실행" ~/.gjc/agent/rules/linear-work.md` → line 112·119 적중. **Done 제안**, 전이는 오너/다음 세션 결정 |
-| JJO-564 | In Review | 판정만 | E0·E1·E2: Aside 규칙은 `rule://aside-browser` 표면 | **조건 충족 관측**: `search -i "유료|오클릭|확인 후 실행" ~/.gjc/agent/rules/aside-browser.md` → line 51·57·59 적중. **Done 제안**, 전이는 오너/다음 세션 결정 |
+| JJO-564 | In Review | 판정만 | E0·E1·E2: Aside 규칙은 `rule://aside-browser` 표면 | **조건 충족 관측**: aside-browser 룰에서 「유료·비가역 버튼 클릭 규칙」과 「오클릭 시 보고」가 line 51·57·59에 실재. **Done 제안**, 전이는 오너/다음 세션 결정 |
 | JJO-273 | Todo | 판정만 | E2·E3: `agents-freshness` v0.1.0 source는 `.gjc-user-policy/plugins/agents-freshness`, 이 저장소 grep 0건 | 완료 조건 표면 1개 확정 + E8 관찰값(변경 파일 기준) 기록 |
 | JJO-941 | Todo | 판정만 | E2·E3·E5: `agents-freshness.mjs`가 지도로 쓰는 `docs/portfolio/AGENTS.md`는 이 저장소에 없고(`find` 0건), 제거는 `CHANGELOG.md:156`에 기록 | 드리프트 3분류(워크스페이스/룰/이 저장소) 표 + 이 저장소 몫 "없음" 확정 |
 | JJO-904 | Todo | 판정만 | E6: 노출 경로는 `~/.gjc/agent/mcp.json` 취급·진단 출력. 이 저장소 리댁션은 `self-improve/lib/loading-receipt.mjs:67`(경로만, 토큰 아님) | 노출 경로 1건 특정 + 회전 필요 여부 판정. 회전 실행 금지 |

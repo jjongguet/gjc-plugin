@@ -1,6 +1,6 @@
 # G002 증거 — 차단 근거·경계 사례·정적 검사 실행 (2026-10-28 KST)
 
-cwd: `/Users/kyeongminkim/jjongguet/lanes/all-s1-gjc-plugin-20261028`
+cwd: `<repo>`
 
 ## E2 — 차단 근거 실측 (JJO-513 · JJO-664)
 
