@@ -482,9 +482,14 @@ See the [repository README](../README.md#quick-start). Installation and activati
 separate operator actions, not part of building or offline verification:
 
 ```sh
+# 1. Plugin surface (jev_advise, jev_check, plugin_metrics)
 gjc plugin install "$(pwd)" --user     # from jev-advisor/, fresh install
 gjc plugin upgrade jev-advisor --user
 gjc plugin list && gjc plugin doctor
+
+# 2. Loose skill payload (bundles cannot register top-level skills)
+mkdir -p ~/.gjc/agent/skills/jev-advisor
+cp jev-advisor/subskills/jev-advisor/SKILL.md ~/.gjc/agent/skills/jev-advisor/SKILL.md
 ```
 
 Health labels alone do not prove terminal observation coverage or model routing.
