@@ -1,0 +1,4 @@
+HARNESS2_PILOT_RULE_V1_BEGIN
+Check structure and arithmetic separately. Respect inclusive decimal bounds despite binary rounding.
+JSON only; schema feedback is not semantic evidence.
+HARNESS2_PILOT_RULE_V1_END

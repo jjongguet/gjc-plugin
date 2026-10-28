@@ -1,0 +1,8 @@
+{
+  "schema": "harness2.m1.task.v1",
+  "id": "decision-probability-boundary-dev10",
+  "raw": "{\"tier\":\"fast\",\"confidence\":0.9,\"probabilities\":{\"fast\":0.499,\"balanced\":0.3,\"strong\":0.2}}",
+  "confidenceKind": "self_reported",
+  "contract": "Require tier fast|balanced|strong and finite confidence in [0,1]. Optional probabilities: exactly these 3 keys, finite values in [0,1], decimal sum within 0.001 of 1 inclusive. Optional rationale:string. No extra keys.",
+  "outputContract": "Only {\"accept\":true,\"tier\":\"fast\"|\"balanced\"|\"strong\"} or {\"accept\":false}; no extra keys, fences or prose."
+}

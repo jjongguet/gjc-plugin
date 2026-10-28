@@ -1,0 +1,11 @@
+{
+  "schema": "harness2.m1.subset.v1",
+  "taskIds": ["decision-probability-boundary-dev10"],
+  "manifestDigest": "c4f99ecc77ff1a88636f08709391f0f7210f40fc29be38774df9597c98a70da4",
+  "taskDigest": "50da0fef4d46d907188a5c30db9a8d754603f17f5b604b3f95aed9a429f02ce7",
+  "promptInputDigest": "10de883c897169ef27ea9c0a8901b07480a0d8e6a0889534c6d862916a838989",
+  "oracleDigest": "e5f92bb0432778b3c5014f89d88eed2799dac355e3ee30bbe2d222744999df57",
+  "ruleContentDigest": "879687f4be195c8c18f2ddaafe6e6f3341fc69a0aa1d6e21c21973bb8317717a",
+  "provenanceDigest": "ec0ce2546230384036e980151676fc1de04a3ab749233a0d3333978003b47188",
+  "bundleSourceDigest": "0006562297e8aaf6e4eecfb8c16d11da691248590d8ba1ae9fd38f397373afcf"
+}
