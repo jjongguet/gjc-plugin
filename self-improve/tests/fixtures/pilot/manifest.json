@@ -2,6 +2,16 @@
   "schema": "harness2.pilot.v1",
   "tasks": [
     {
+      "id": "decision-probability-boundary-dev10",
+      "klass": "artifact-check",
+      "split": "development",
+      "prompt": "Classify the supplied decision using the documented decimal probability tolerance, not the historical implementation's floating-point error. Return only the declared JSON decision.",
+      "oracle": {
+        "kind": "json-decision",
+        "path": "self-improve/tests/fixtures/pilot/oracle/decision-probability-boundary-dev10.json"
+      }
+    },
+    {
       "id": "artifact-valid",
       "klass": "artifact-check",
       "split": "development",

@@ -1,0 +1,17 @@
+{
+  "schema": "harness2.json-decision.v1",
+  "task": "decision-probability-boundary-dev10",
+  "independent": true,
+  "expected": { "accept": true, "tier": "fast" },
+  "provenance": {
+    "caseIndex": 10,
+    "metric": "probe.decision_accuracy",
+    "sourceCommit": "e836f4573f4e87b99ce7796dc1a5e7a01ec7d9a0",
+    "secondBaselineCommit": "c5f7a8433d66de2e7175f59d28b0bd3179e835d1",
+    "decisionBlob": "5fcf0f243e60a93be103e2ba8f998c48ee740ab0",
+    "fixturesBlob": "80f1e297bdeef1e4e850dadc69ef1517fc6f239b",
+    "sourceSha256": "05ef0f30183b2a731b79e694a325eb383f852d95a69146f11ccff02aaa17af4f",
+    "fixturesSha256": "5d81c64d75f1a596fc0251d1b4fb9f2859e9d3296dd8ac66a92a932faf0bf7f6",
+    "evidenceScope": "Identical source/input blobs at two recorded baselines; observed predicate mismatch, not a replay of every historical cycle or an efficacy result."
+  }
+}

@@ -1,7 +1,7 @@
 {
   "capUsd": 1.0,
   "modelPin": "openai/gpt-4o-mini",
-  "maxCalls": 54,
+  "maxCalls": 84,
   "pricePer1kInputUsd": 0.00015,
   "pricePer1kOutputUsd": 0.0006,
   "maxInputTokensPerCall": 2000,

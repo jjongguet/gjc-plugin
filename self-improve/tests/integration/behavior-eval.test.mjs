@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -18,15 +18,22 @@ import { buildLoadingReceipt } from "../../lib/loading-receipt.mjs";
 const SELF_IMPROVE = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(join(SELF_IMPROVE, "tests/fixtures/pilot/manifest.json"), "utf8"));
 
-test("the frozen pilot manifest is valid, balanced and digest-pinned", () => {
+test("the pilot manifest preserves class/split coverage and pins the added development case", () => {
   const result = validateManifest(manifest);
   assert.deepEqual(result.errors, []);
   assert.equal(result.ok, true);
-  for (const klass of Object.keys(result.counts)) assert.deepEqual(result.counts[klass], { development: 1, holdout: 1 });
+  assert.deepEqual(result.counts, {
+    "artifact-check": { development: 2, holdout: 1 },
+    "eligible-adequacy": { development: 1, holdout: 1 },
+    "small-repo-task": { development: 1, holdout: 1 },
+  });
   assert.match(result.digest, /^[a-f0-9]{64}$/);
   assert.equal(result.digest, manifestDigest(manifest));
-  // Every oracle is a repository file with an independent expectation.
+  // Every oracle remains a repository file. Holdout payloads stay unopened;
+  // only development expectations are inspected during this bounded pilot.
   for (const task of manifest.tasks) {
+    assert.equal(statSync(join(SELF_IMPROVE, "..", task.oracle.path)).isFile(), true, task.id);
+    if (task.split === "holdout") continue;
     const oracle = JSON.parse(readFileSync(join(SELF_IMPROVE, "..", task.oracle.path), "utf8"));
     assert.equal(oracle.independent, true, task.id);
     assert.equal(oracle.task, task.id);
