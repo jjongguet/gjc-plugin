@@ -2,11 +2,24 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
-## [Unreleased]
+## [0.0.15] - 2026-10-28
+
+Plugins: jev-advisor 0.0.11 · verification-receipts 0.0.7 · ui-regression 0.0.8 · wiki 0.0.6 · rea 0.0.6 · backplan 0.0.9 · rrsi 0.0.5 · aside-memory 0.0.2
 
 ### Added
 
+- **rrsi**: `cohort` action — reads one bounded `gjc.quality_trial.v2` receipt file and returns the counts-only `rrsi.quality_cohort.v2` cohort (`total`, `admissible[]`, `excluded[{reason,count}]`, `duplicate`); no rate, delta or verdict.
+- **self-improve** (repository tooling, not an installed plugin): Harness² M1 cost-zero guard-ablation runner, loading-receipt producer, preflight and the bounded native B0/B1/B2 pilot executor with recording proxy and live admission contract (JJO-270, JJO-944, JJO-945).
 - `supervisor/` — a repository-native workspace session supervisor (JJO-913): ten-minute collection over local lane sessions and the mini host, deterministic stall judgment (`progressing`/`thrashing`/`stalled`/`starting`/`unknown`), one `jev-omni` decision only for the dirty-tree ambiguity, a Discord summary, and a single-target `tmux send-keys` steer with marker verification. No kill path and no daemon install; the loop runs only in an operator-started tmux session.
+
+### Changed
+
+- **rrsi**: periodic import projects the newest journal window, and `lastSuccessAt` renews only when the projection covers every segment of the retained window (torn tails stay stale).
+- **jev-advisor, verification-receipts, ui-regression, wiki, rea, backplan**: the shared private-result reader accepts the new `cohort` operation; bundles regenerated.
+
+### Upgrade notes
+
+- Reinstall in order: `jev-advisor` first, `verification-receipts` second, then `ui-regression`, `wiki`, `rea`, `backplan`, `rrsi`. A pre-0.0.15 reader fails closed (`store_corrupt`) on journal records carrying the `cohort` operation. Start a new `gjc` session afterwards. — a repository-native workspace session supervisor (JJO-913): ten-minute collection over local lane sessions and the mini host, deterministic stall judgment (`progressing`/`thrashing`/`stalled`/`starting`/`unknown`), one `jev-omni` decision only for the dirty-tree ambiguity, a Discord summary, and a single-target `tmux send-keys` steer with marker verification. No kill path and no daemon install; the loop runs only in an operator-started tmux session.
 
 ## [0.0.14] - 2026-10-26
 
