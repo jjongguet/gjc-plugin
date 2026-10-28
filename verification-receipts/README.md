@@ -37,7 +37,18 @@ choices (`aligned`/`present` or `gap`/`missing`), confidence and the full
 probability map; confidence without full probabilities is
 `unscored`/`optional_scores_missing`.
 
-Safe template (the `caseNotes` id must be a real case id, `run` for a run):
+The only eligible `caseNotes[].id` is **`run`** for both tools, not an
+individual test name or a caller-defined label. The public schema enforces
+the finite allowed set `["run"]`; IDs must be unique, so combine run observations into one note.
+Notes are optional, capped at 8 entries and 300 characters each.
+A native schema rejection happens before adapter execution and creates no
+plugin receipt or journal entry. Direct adapter calls still validate membership
+and report `invalid_case_id` without echoing the rejected ID.
+Native errors are produced by GJC, not this plugin, and may include supplied
+arguments. The fresh-CLI smoke fails if a synthetic note canary is echoed;
+host-side sanitization is required before claiming end-to-end rejection privacy.
+
+Safe template:
 
 ```json
 {
@@ -48,11 +59,17 @@ Safe template (the `caseNotes` id must be a real case id, `run` for a run):
 ```
 
 Reason breakdown: `missing_context` (no assessment), `invalid_context`
-(unsafe or rejected), `insufficient_evidence` (execution not passed or source
+(unsafe text, invalid shape, duplicate IDs or exceeded limits),
+`invalid_case_id` (well-formed ID not eligible for this invocation),
+`insufficient_evidence` (execution not passed or source
 stale), `unknown_choice` (neither choice decided), `optional_scores_missing`
 (confidence without full probabilities), `off`/`missing_key` (provider
 unavailable), and `invalid_response` (provider shape). A scored adequacy result
 is advisory, never verification evidence.
+
+Rejected context makes no adequacy request. This does not imply the selected
+tests did not run: assessment follows test execution. Provider-off and
+missing-key outcomes precede evidence/context sufficiency checks.
 
 ## Boundaries
 
@@ -66,5 +83,10 @@ bun verification-receipts/scripts/verify.ts
 bun verification-receipts/scripts/build.mjs --check
 node verification-receipts/scripts/smoke-host.mjs --installed   # private isolated GJC root, loopback only
 ```
+
+Omit `--installed` to test the worktree bundles before installation. The smoke
+checks finite advertised IDs, distinguishes native schema errors from adapter
+results, and verifies native-error privacy. An explicit provider-off isolated
+environment is configuration evidence, not a measured zero-egress count.
 
 The full smoke matrix (metrics, advisor, UI) is listed in [`../CONTRIBUTING.md`](../CONTRIBUTING.md#smoke-tests).

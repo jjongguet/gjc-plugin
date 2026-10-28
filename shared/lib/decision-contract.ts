@@ -95,6 +95,13 @@ export function decisionProvider(id: string): DecisionProvider | undefined {
 export const CONFIDENCE_KINDS = ["provider_choice", "self_reported"] as const;
 export type DecisionConfidenceKind = (typeof CONFIDENCE_KINDS)[number];
 
+// Finite syntax survives hosts that strip string patterns/length constraints.
+// UI eligibility additionally requires an observed assertion.
+export const ASSESSMENT_CASE_IDS = {
+	verification: ["run"],
+	ui: Array.from({ length: 20 }, (_, index) => `step-${index}`),
+} as const;
+
 /** Deterministic outcomes that are not a decision, and never a scoring signal. */
 export const NO_DECISION_REASONS = [
 	"off",
@@ -102,6 +109,7 @@ export const NO_DECISION_REASONS = [
 	"missing_context",
 	"insufficient_evidence",
 	"invalid_context",
+	"invalid_case_id",
 	"invalid_facts",
 	"invalid_answer",
 	"request_cap",

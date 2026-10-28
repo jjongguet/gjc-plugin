@@ -4,6 +4,11 @@ Each plugin carries its own version in `gajae-plugin.json`; a repository release
 
 ## [Unreleased]
 
+### Fixed
+
+- **verification-receipts / ui-regression**: finite public case-note ID schemas, distinct `invalid_case_id`, and safe, journaled `scenario_*` rejection reasons with UI-specific recovery actions. Observed-assertion eligibility, unique notes and sensitive/loopback guards remain enforced. Direct journal readers are regenerated together; upgrade affected readers before writers.
+- **Verification probes**: native CLI schema discovery and rejection-privacy checks, observed-case run/status parity, and actual Aside-launch counters separate input rejection from post-execution assessment. Native host diagnostics that echo supplied arguments fail the privacy check rather than being treated as a passing plugin result.
+
 ### Added
 
 - `supervisor/` — a repository-native workspace session supervisor (JJO-913): ten-minute collection over local lane sessions and the mini host, deterministic stall judgment (`progressing`/`thrashing`/`stalled`/`starting`/`unknown`), one `jev-omni` decision only for the dirty-tree ambiguity, a Discord summary, and a single-target `tmux send-keys` steer with marker verification. No kill path and no daemon install; the loop runs only in an operator-started tmux session.

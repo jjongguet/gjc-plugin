@@ -96,6 +96,13 @@ export function decisionProvider(id: string): DecisionProvider | undefined {
 export const CONFIDENCE_KINDS = ["provider_choice", "self_reported"] as const;
 export type DecisionConfidenceKind = (typeof CONFIDENCE_KINDS)[number];
 
+// Finite syntax survives hosts that strip string patterns/length constraints.
+// UI eligibility additionally requires an observed assertion.
+export const ASSESSMENT_CASE_IDS = {
+	verification: ["run"],
+	ui: Array.from({ length: 20 }, (_, index) => `step-${index}`),
+} as const;
+
 /** Deterministic outcomes that are not a decision, and never a scoring signal. */
 export const NO_DECISION_REASONS = [
 	"off",
@@ -103,6 +110,7 @@ export const NO_DECISION_REASONS = [
 	"missing_context",
 	"insufficient_evidence",
 	"invalid_context",
+	"invalid_case_id",
 	"invalid_facts",
 	"invalid_answer",
 	"request_cap",
@@ -183,6 +191,13 @@ const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt
 const resultsHex = /^[a-f0-9]{64}$/;
 const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const resultsCountKeys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'];
+export const RESULTS_UI_SCENARIO_REASONS = [
+  'scenario_object', 'scenario_fields', 'scenario_id', 'scenario_expected_behavior', 'scenario_steps', 'scenario_step',
+  'scenario_first_goto', 'scenario_origin', 'scenario_url', 'scenario_url_scheme', 'scenario_url_host',
+  'scenario_url_unsafe', 'scenario_url_sensitive', 'scenario_selector', 'scenario_selector_unsafe',
+  'scenario_value', 'scenario_assert_kind', 'scenario_match', 'scenario_expected', 'scenario_no_assertion',
+  'scenario_action', 'scenario_sensitive',
+] as const;
 const resultsExecutionReasons = [
   'not_run', 'invalid_or_unavailable_input', 'receipt_unavailable', 'invalid_file_count', 'invalid_root', 'invalid_test_path',
   'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'invalid_timeout',
@@ -193,8 +208,9 @@ const resultsExecutionReasons = [
   'runtime_error', 'missing_observations', 'output_overflow', 'malformed_observations', 'runner_exit', 'partial_observations',
   'missing_account', 'unsafe_lock', 'busy', 'lock_unavailable', 'runner_signal', 'missing_cli', 'runner_unavailable',
   'missing_binary', 'not_a_repository', 'invalid_repository', 'repository_outside_session_cwd',
+  ...RESULTS_UI_SCENARIO_REASONS,
 ];
-const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
+const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_case_id', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
 const resultsAdviceReasons = ['invalid_task', 'unsupported_input', 'input_too_large', 'batch_limit', 'disabled', 'unconfigured', 'invalid_endpoint', 'rate_limited', 'budget_exceeded', 'already_pending', 'timeout', 'aborted', 'provider_error', 'invalid_response'];
 const resultsReceiptReasons = ['stored', 'invalid_metadata', 'store_busy', 'store_corrupt', 'store_full', 'store_unavailable', 'no_receipt', 'not_requested'];
 const resultsEvidenceReasons = ['locked', 'corrupt', 'unsupported_version', 'oversized', 'unsafe_path', 'io_error', 'invalid_input'];
@@ -1005,20 +1021,63 @@ const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
 };
 // Rejections raised by validateTestFiles before any test runs.
 export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
-export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = []) {
+const RECEIPT_UI_INPUT_ACTIONS: Record<string, string> = {
+ scenario_object: 'Provide a plain scenario object with id, expectedBehavior and steps.',
+ scenario_fields: 'Use exactly the documented fields for each scenario step; imported results and extra fields are unsupported.',
+ scenario_id: 'Use a non-sensitive scenario id of 1-64 letters, digits, underscores or hyphens, beginning with a letter or digit.',
+ scenario_expected_behavior: 'Describe the non-sensitive expected behavior in 1-2000 characters.',
+ scenario_steps: 'Provide 1-20 explicit supported steps.',
+ scenario_step: 'Provide each step as a plain object with a supported action.',
+ scenario_first_goto: 'Start the scenario with goto on an inspected, owned non-sensitive loopback fixture.',
+ scenario_origin: 'Keep all navigation on the same inspected loopback origin.',
+ scenario_url: 'Use a valid explicit HTTP or HTTPS loopback URL without sensitive content.',
+ scenario_url_scheme: 'Use HTTP or HTTPS for an inspected loopback fixture, not another URL scheme.',
+ scenario_url_host: 'This tool only supports explicit localhost, 127.0.0.1 or [::1]. Use the separately authorized browser workflow for real or deployed sites.',
+ scenario_url_unsafe: 'Use an inspected loopback URL without credentials, query, fragment or backslashes; do not disguise sensitive destinations.',
+ scenario_url_sensitive: 'Authentication, account, payment and other sensitive routes are unsupported. Use a separate authorized browser workflow for those paths; do not rename them to evade the guard.',
+ scenario_selector: 'Use a current visible CSS selector of 1-256 characters for the owned fixture.',
+ scenario_selector_unsafe: 'Use only non-sensitive supported visible controls and current CSS selectors. Authentication, uploads, payment, script expressions and snapshot references are unsupported.',
+ scenario_value: 'Use only non-sensitive fixture text within the documented fill limit.',
+ scenario_assert_kind: 'Use a visible or text DOM assertion; screenshots and arbitrary JavaScript are unsupported.',
+ scenario_match: 'Choose exact or substring for a literal text assertion.',
+ scenario_expected: 'Use bounded non-sensitive literal expected text; substring assertions must not be empty.',
+ scenario_no_assertion: 'Include at least one visible or literal text assertion on the owned fixture.',
+ scenario_action: 'Use only goto, click, fill or assert. Arbitrary JavaScript, screenshots and result imports are unsupported.',
+ scenario_sensitive: 'Remove sensitive data from the fixture scenario. Real sensitive workflows require a separate authorized browser workflow; do not encode data to evade screening.',
+};
+export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; reason?: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = [], context: {tool?: 'verification' | 'ui'; allowedCaseIds?: string[]} = {}) {
  const warnings: string[] = [], recommendedNextActions: string[] = [];
  const missingBinaries = receiptWarnings.filter(w => w.startsWith('missing_binary:')).map(w => w.slice('missing_binary:'.length));
  const reason = String(execution.reason);
+ if (assessment?.reason === 'invalid_case_id') {
+  warnings.push('assessment_case_id_rejected');
+  const allowed = [...new Set((context.allowedCaseIds ?? []).filter(id => /^(?:run|step-(?:0|[1-9]|1[0-9]))$/.test(id)))].slice(0,20);
+  recommendedNextActions.push(allowed.length
+   ? `Use unique assessment.caseNotes ids from this invocation: ${allowed.join(', ')}. UI ids refer only to observed assertions, not planned coverage.`
+   : 'This invocation has no observed eligible case ids. Omit caseNotes; do not invent ids or infer coverage from planned assertions.');
+ } else if (assessment?.reason === 'invalid_context') {
+  warnings.push('assessment_context_rejected');
+  recommendedNextActions.push('Provide only non-sensitive changeSummary and expectedBehavior (1-2000 characters), with at most 8 unique case notes of 1-300 characters and documented ids. Do not include URLs, paths, credentials or raw source.');
+ }
+ if (context.tool === 'ui' && execution.status === 'not_run') {
+  warnings.push('execution_not_passed');
+  if (Object.hasOwn(RECEIPT_UI_INPUT_ACTIONS, reason)) {
+   warnings.push('scenario_rejected');
+   recommendedNextActions.push(`${reason}: ${RECEIPT_UI_INPUT_ACTIONS[reason]}`);
+  } else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (!recommendedNextActions.length) recommendedNextActions.push('Correct the documented account routing, timeout and scenario input shape. Use an inspected owned non-sensitive loopback fixture; unsupported workflows need a separate authorized browser entry point.');
+  return {warnings, recommendedNextActions:recommendedNextActions.slice(0,3), advisoryOnly:true};
+ }
  if (execution.status !== 'passed') {
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
-  else recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.');
+  else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
- if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push('Run verification again against the current source.'); }
+ if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push(context.tool === 'ui' ? 'Stored browser observations do not establish current UI state. Reobserve only an allowed, authorized non-sensitive loopback scenario.' : 'Run verification again against the current source.'); }
  if (assessment && (assessment.status !== 'scored' || Object.values(assessment.answers ?? {}).some(a => a.confidence === undefined || a.confidence < 0.8 || a.probabilities?.[a.choice] === undefined || Number(a.probabilities[a.choice]) < 0.8))) { warnings.push('adequacy_unknown'); recommendedNextActions.push('Inspect coverage and boundary evidence; no confident adequacy claim is available.'); }
- else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push('Inspect changed behavior and add relevant boundary tests.'); }
+ else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push(context.tool === 'ui' ? 'Inspect changed behavior and add relevant allowed DOM boundary assertions.' : 'Inspect changed behavior and add relevant boundary tests.'); }
  return { warnings, recommendedNextActions: recommendedNextActions.slice(0, 3), advisoryOnly: true };
 }
 
@@ -1195,7 +1254,7 @@ export type AssessmentInput = { changeSummary: string; expectedBehavior: string;
 export type AdequacyChoice<L extends string> = { type: "choice"; choice: L; confidence?: number; probabilities?: Partial<Record<L, number>> };
 export type AssessmentResult = {
  status: "scored" | "unscored" | "unknown" | "unavailable" | "invalid_input" | "invalid_response";
- reason: "scored" | "optional_scores_missing" | "unknown_choice" | "missing_context" | "insufficient_evidence" | "invalid_context" | "invalid_facts" | "off" | "missing_key" | "request_cap" | "response_cap" | "invalid_answer" | "http_auth" | "http_credit" | "http_rate" | "http_server" | "http_error" | "redirect" | "timeout" | "transport";
+ reason: "scored" | "optional_scores_missing" | "unknown_choice" | "missing_context" | "insufficient_evidence" | "invalid_context" | "invalid_case_id" | "invalid_facts" | "off" | "missing_key" | "request_cap" | "response_cap" | "invalid_answer" | "http_auth" | "http_credit" | "http_rate" | "http_server" | "http_error" | "redirect" | "timeout" | "transport";
  answers?: { coverage_alignment: AdequacyChoice<"aligned" | "gap" | "none" | "unknown">; boundary_evidence: AdequacyChoice<"present" | "missing" | "none" | "unknown"> };
 };
 const adequacyLabels = { coverage_alignment: ["aligned", "gap", "none", "unknown"], boundary_evidence: ["present", "missing", "none", "unknown"] } as const;
@@ -1203,15 +1262,18 @@ function adequacyObject(value: unknown): value is Record<string, unknown> { retu
 function adequacySafeText(value: unknown, limit: number): value is string {
  return typeof value === "string" && value.trim().length > 0 && value.length <= limit && !/[\x00-\x08\x0b-\x1f]|(?:bearer\s|sk-[\w-]+|-----BEGIN|(?:api[_ -]?key|password|secret|token|cookie|authorization|account[_ -]?id|fill|raw[_ -]?(?:source|logs?|diff)|snapshot)\s*[:=]|https?:\/\/|(?:\/(?:Users|home|tmp|var|etc)\/|[A-Z]:\\)|(?:^|\n)(?:diff --git|@@|\+\+\+|--- |\s*at .*:\d+|\s*(?:export |import |function\s|const\s+\w+\s*=|console\.|\[?(?:INFO|DEBUG|ERROR)\]?\s))|```|[a-f0-9]{40,}|[A-Za-z0-9+/=_-]{48,})/i.test(value);
 }
-function adequacyInput(value: unknown, caseIds: string[] = []): value is AssessmentInput {
+function adequacyInputShape(value: unknown): value is AssessmentInput {
  if (!adequacyObject(value) || Object.keys(value).some(k => !["changeSummary", "expectedBehavior", "caseNotes"].includes(k)) || !adequacySafeText(value.changeSummary, 2000) || !adequacySafeText(value.expectedBehavior, 2000)) return false;
  if (value.caseNotes === undefined) return true;
  if (!Array.isArray(value.caseNotes) || value.caseNotes.length > 8) return false;
  const seen = new Set<string>();
  return value.caseNotes.every(n => {
-  if (!adequacyObject(n) || Object.keys(n).some(k => !["id", "note"].includes(k)) || typeof n.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(n.id) || !adequacySafeText(n.id, 64) || !adequacySafeText(n.note, 300) || seen.has(n.id) || !caseIds.includes(n.id)) return false;
+  if (!adequacyObject(n) || Object.keys(n).some(k => !["id", "note"].includes(k)) || typeof n.id !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(n.id) || !adequacySafeText(n.id, 64) || !adequacySafeText(n.note, 300) || seen.has(n.id)) return false;
   seen.add(n.id); return true;
  });
+}
+export function assessmentShapeRejection(value: unknown): AssessmentResult | undefined {
+ if (value !== undefined && !adequacyInputShape(value)) return { status: "invalid_input", reason: "invalid_context" };
 }
 function adequacyFacts(facts: unknown): { status: string; freshness: string; counts: Record<string, number> | null; assertions?: {step:number;id:string;kind:string;status:string}[] } | undefined {
  if (!adequacyObject(facts) || typeof facts.status !== "string" || typeof facts.freshness !== "string" || !["passed", "failed", "no_tests", "incomplete", "not_run", "unavailable"].includes(facts.status) || !["fresh", "stale", "changed_during_run", "unavailable"].includes(facts.freshness)) return;
@@ -1259,7 +1321,9 @@ function adequacyAnswer(value: unknown, labels: readonly string[]): AdequacyChoi
 export async function assessAdequacy(input: unknown, facts: { status: string; counts: unknown; freshness: string; caseIds?: string[]; assertions?:{step:number;id:string;kind:'visible'|'text_exact'|'text_substring';status:string}[] }, deps: { fetch?: typeof fetch; env?: Record<string, string | undefined>; envFile?: string } = {}): Promise<AssessmentResult> {
  const observed = adequacyFacts(facts);
  if (!observed) return { status: "invalid_input", reason: "invalid_facts" };
- if (input !== undefined && !adequacyInput(input, facts.caseIds)) return { status: "invalid_input", reason: "invalid_context" };
+ const rejected = assessmentShapeRejection(input);
+ if (rejected) return rejected;
+ if ((input as AssessmentInput | undefined)?.caseNotes?.some(note => !(facts.caseIds ?? []).includes(note.id))) return { status: "invalid_input", reason: "invalid_case_id" };
  const evidenceIncomplete = observed.status !== 'passed' || observed.freshness !== 'fresh' || (observed.counts === null && !observed.assertions?.length) || (observed.counts !== null && (observed.counts.passed < 1 || observed.counts.failed > 0 || observed.counts.cancelled > 0)) || observed.assertions?.some(a => a.status !== 'passed');
  const environment = deps.env ?? process.env;
  // Explicit off needs neither file access nor credentials.
@@ -1346,7 +1410,7 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
  return {
   name:'verification_status',label:'Verification Status',
   description:'Read one immutable repository-scoped local verification receipt and recompute source freshness. Historical execution is never rerun. Automatically attempt Jev adequacy on every lookup, including stale or missing evidence, at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Optional assessment supplies non-sensitive context, not an opt-in switch. Only selected summaries/notes and bounded status/counts/freshness leave; no logs, diffs, source, test names, paths, keys or accounts. Missing context, failures and stale evidence cannot establish sufficient current verification. Warning-only; no automatic repair or blocking.',
-  parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'The repository the receipt was recorded for, as passed to verification_run; defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))},{additionalProperties:false}),
+  parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'The repository the receipt was recorded for, as passed to verification_run; defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.Union(ASSESSMENT_CASE_IDS.verification.map(id=>T.Literal(id)),{description:'Use run, the only eligible case id for this invocation. Case note ids must be unique.'}),note:T.String({maxLength:300})},{additionalProperties:false}),{maxItems:8}))},{additionalProperties:false}))},{additionalProperties:false}),
   async execute(_toolCallId:string,params:{receiptId:string;repository?:string;assessment?:unknown}) {
    const text=async(v:Record<string,any>)=>({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','status',v))}]});
    try {
@@ -1355,7 +1419,7 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
     if (!receipt || receipt.plugin !== 'verification-receipts') throw new Error('receipt_unavailable');
     const freshness=await currentReceiptFreshness(root,receipt);
     const assessment=await assessAdequacy(params.assessment,{status:String(receipt.execution.status),counts:receipt.execution.counts,freshness,caseIds:['run']});
-    return text({receipt,freshness,assessment,...staticReceiptGuidance(receipt.execution,freshness,assessment,receipt.warnings)});
+    return text({receipt,freshness,assessment,...staticReceiptGuidance(receipt.execution,freshness,assessment,receipt.warnings,{allowedCaseIds:['run']})});
    } catch (error) {
     const cause=error instanceof Error ? error.message : '';
     const reason=(RECEIPT_REPOSITORY_REASONS as readonly string[]).includes(cause) ? cause : 'receipt_unavailable';

@@ -2,7 +2,7 @@ import { describe, test, expect, jest } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assessAdequacy } from "../lib/decision";
+import { assessAdequacy, assessmentShapeRejection } from "../lib/decision";
 
 const context = { changeSummary: "Reject empty requests", expectedBehavior: "Empty requests fail safely", caseNotes: [{ id: "empty", note: "An empty request exercises the failure boundary" }] };
 const facts = { status: "passed", freshness: "fresh", counts: { tests: 2, suites: 0, topLevel: 2, passed: 2, failed: 0, skipped: 0, todo: 0, cancelled: 0 }, caseIds: ["empty"] };
@@ -14,6 +14,28 @@ function harness(payload: unknown = { answers: choices() }, status = 200) {
  return { calls, deps: { fetch: transport, env: environment, envFile: "/nonexistent/synthetic-env" } };
 }
 describe("adequacy Decisions contract", () => {
+ test('unknown case ids are distinct from unsafe or duplicate context without transport or input echoes',async()=>{
+  for(const id of ['policy','machinery','native-read','C1','C2','step-20','step-x']){
+   const input={...context,caseNotes:[{id,note:'Boundary behavior observed'}]};
+   const h=harness();
+   expect(assessmentShapeRejection(input)).toBeUndefined();
+   expect(await assessAdequacy(input,{...facts,caseIds:['run']},h.deps)).toEqual({status:'invalid_input',reason:'invalid_case_id'});
+   expect(h.calls).toHaveLength(0);
+  }
+  for(const input of [
+   {...context,caseNotes:[{id:'policy',note:'password=PRIVATE_CANARY'}]},
+   {...context,caseNotes:[context.caseNotes[0],context.caseNotes[0]]},
+   {...context,caseNotes:Array.from({length:9},(_,i)=>({id:`case-${i}`,note:'Boundary observed'}))},
+  ]){
+   const h=harness(),preflight=assessmentShapeRejection(input);
+   expect(preflight).toEqual({status:'invalid_input',reason:'invalid_context'});
+   expect(await assessAdequacy(input,facts,h.deps)).toEqual(preflight);
+   expect(h.calls).toHaveLength(0);expect(JSON.stringify(preflight)).not.toContain('PRIVATE_CANARY');
+  }
+  const h=harness();
+  expect((await assessAdequacy({...context,caseNotes:[{id:'run',note:'Normal and failure paths observed'}]},{...facts,caseIds:['run']},h.deps)).status).toBe('unscored');
+  expect(h.calls).toHaveLength(1);
+ });
  test('nonpassing stale and unavailable evidence is decided before any call',async()=>{
   for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(0);}
   for(const freshness of ['stale','changed_during_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,freshness},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(h.calls.length).toBe(0);}

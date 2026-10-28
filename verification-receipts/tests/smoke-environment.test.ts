@@ -2,8 +2,8 @@ import {test,expect} from 'bun:test';
 import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import {execFileSync} from 'node:child_process';
-import {createSmokeEnvironment,assertSmokeIsolation} from '../scripts/smoke-environment.mjs';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {createSmokeEnvironment,assertSmokeIsolation,asideLaunchCounterPath,asideLaunchCount,writeAsideProbeWrapper,parseAdapterResult,receiptFileCount,journalRecordCount,advertisedCaseIds,advertisedCaseIdSchema,isNativeValidationDiagnostic} from '../scripts/smoke-environment.mjs';
 
 async function fixture(run: (root: string, owned: string, user: string) => Promise<void>) {
  const root=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'smoke-isolation-')));
@@ -52,4 +52,66 @@ test('extra overrides, external providers and real credentials fail closed',asyn
   await expect(assertSmokeIsolation({...env,OPENAI_BASE_URL:url},owned)).rejects.toThrow('nonlocal_smoke_provider');
  }
  await assertSmokeIsolation({...env,OPENAI_BASE_URL:'http://127.0.0.1:12345/v1'},owned);
+}));
+
+test('native host validation is never mistaken for an adapter response',()=>{
+ const adapter=JSON.stringify({execution:{status:'not_run',reason:'invalid_context'},journalStorage:{persisted:true,id:'x'}});
+ expect(parseAdapterResult('Tool result: '+adapter)?.execution.reason).toBe('invalid_context');
+ expect(parseAdapterResult('prefix {"report":"plugin_metrics"} suffix')?.report).toBe('plugin_metrics');
+ expect(parseAdapterResult('Tool "verification_run" failed: invalid arguments for tool call')).toBeNull();
+ expect(parseAdapterResult('{"some":"json"}')).toBeNull();
+ expect(parseAdapterResult('{"execution":')).toBeNull();
+ // A begin hint keeps the advisor-mode journal prefix selection working.
+ expect(parseAdapterResult('noise {"execution":{}} trailing {"journalStorage":{"persisted":true}}','noise {"execution":{}} trailing '.length)?.journalStorage.persisted).toBe(true);
+});
+
+test('advertised case id schemas normalize nullable const/enum/union literals',()=>{
+ expect(advertisedCaseIds({anyOf:[{type:'string',const:'run'},{type:'null'}]})).toEqual({ids:['run'],description:''});
+ expect(advertisedCaseIds({anyOf:[{const:'step-0'},{const:'step-1'},{type:'null'}]}).ids).toEqual(['step-0','step-1']);
+ expect(advertisedCaseIds({enum:['step-19']}).ids).toEqual(['step-19']);
+ // A source pattern is not a wire contract: no finite set means no assertion.
+ expect(advertisedCaseIds({type:'string',pattern:'^run$',maxLength:64,description:'Only observed are eligible.'})).toEqual({ids:null,description:'Only observed are eligible.'});
+ expect(advertisedCaseIds({type:'string'}).ids).toBeNull();
+ const note={type:'object',properties:{id:{anyOf:[{const:'run'},{type:'null'}]}}};
+ const assessment={type:'object',properties:{caseNotes:{anyOf:[{type:'array',items:note},{type:'null'}]}}};
+ const wrapped={properties:{assessment:{anyOf:[assessment,{type:'null'}]}}};
+ expect(advertisedCaseIds(advertisedCaseIdSchema(wrapped)).ids).toEqual(['run']);
+ expect(advertisedCaseIdSchema({properties:{}})).toBeNull();
+});
+
+test('only a recognizable host validation failure counts as a native rejection',()=>{
+ expect(isNativeValidationDiagnostic('Tool "verification_run" failed: invalid arguments for tool call')).toBe(true);
+ expect(isNativeValidationDiagnostic('Invalid value for caseNotes[0].id: expected one of "run"')).toBe(true);
+ expect(isNativeValidationDiagnostic('timeout while contacting the model provider')).toBe(false);
+ expect(isNativeValidationDiagnostic('')).toBe(false);
+});
+
+test('the aside probe wrapper counts each launch and preserves the exit code',async()=>fixture(async(_root,owned,user)=>{
+ const counter=asideLaunchCounterPath(owned);
+ expect(await asideLaunchCount(counter)).toBe(0);
+ const fake=path.join(owned,'fake-aside');
+ await fs.writeFile(fake,'#!/bin/sh\nexit 7\n',{mode:0o755});
+ const wrapper=await writeAsideProbeWrapper({binDir:path.join(owned,'bin'),realAside:fake,counterFile:counter,env:{HOME:user,PATH:process.env.PATH,TMPDIR:owned}});
+ const result=spawnSync(process.execPath,[wrapper,'repl'],{stdio:'pipe'});
+ expect(result.status).toBe(7);
+ expect(await asideLaunchCount(counter)).toBe(1);
+ expect(spawnSync(process.execPath,[wrapper,'repl'],{stdio:'pipe'}).status).toBe(7);
+ expect(await asideLaunchCount(counter)).toBe(2);
+}));
+
+test('receipt and journal counters are zero before any store exists',async()=>fixture(async(_root,owned,_user)=>{
+ const env=await createSmokeEnvironment(owned);
+ expect(await receiptFileCount(env)).toBe(0);
+ expect(await journalRecordCount(env,'verification-receipts')).toBe(0);
+ const receipts=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1','repo-digest');
+ await fs.mkdir(receipts,{recursive:true});
+ await fs.writeFile(path.join(receipts,'one.json'),'{}');
+ await fs.writeFile(path.join(receipts,'two.json'),'{}');
+ await fs.writeFile(path.join(receipts,'.admission.lock'),'');
+ expect(await receiptFileCount(env)).toBe(2);
+ const journal=path.join(env.HOME,'.gjc-plugin','verification-receipts','journal','v1');
+ await fs.mkdir(journal,{recursive:true});
+ await fs.writeFile(path.join(journal,'segment-a.jsonl'),'{"id":"a"}\n{"id":"b"}\n');
+ await fs.writeFile(path.join(journal,'inventory.json'),JSON.stringify({segments:[{name:'segment-a.jsonl',bytes:26,digest:'d'}]}));
+ expect(await journalRecordCount(env,'verification-receipts')).toBe(2);
 }));

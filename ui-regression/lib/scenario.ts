@@ -1,4 +1,11 @@
 import { createHash as uiScenarioCreateHash } from 'node:crypto';
+import { RESULTS_UI_SCENARIO_REASONS } from '../../shared/lib/results';
+
+export function uiScenarioReason(message: string): typeof RESULTS_UI_SCENARIO_REASONS[number] | undefined {
+  if (!/^UI_SCENARIO_[A-Z_]+$/.test(message)) return;
+  const reason = message.slice('UI_'.length).toLowerCase();
+  return RESULTS_UI_SCENARIO_REASONS.find(allowed => allowed === reason);
+}
 
 export type UiStep =
   | { action: 'goto'; url: string }
