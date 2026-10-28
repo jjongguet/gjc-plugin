@@ -10,7 +10,7 @@
     "lint": "next lint",
     "test": "tsc --noEmit --incremental false",
     "vercel-build": "next build",
-    "validate": "node ../../workspace-standard/validator/cli.mjs validate --root .."
+    "validate": "node ../../shared/workspace-standard/validator/cli.mjs validate --root .."
   },
   "dependencies": {
     "next": "^16.3.6",

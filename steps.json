@@ -13,7 +13,7 @@
       "title": "Verify — run the workspace-standard validator and confirm it is green (maintainer-only; the validator lives outside this repository)",
       "kind": "server",
       "depends_on": ["record"],
-      "manual_cmd": "node ../workspace-standard/validator/cli.mjs validate --root ."
+      "manual_cmd": "node ../shared/workspace-standard/validator/cli.mjs validate --root ."
     },
     {
       "id": "review",
