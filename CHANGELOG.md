@@ -2,6 +2,25 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.16] - 2026-10-29
+
+Plugins: jev-advisor 0.0.12 · verification-receipts 0.0.8 · ui-regression 0.0.9 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Added
+
+- **verification-receipts, ui-regression**: `invalid_case_id` no-decision reason for a well-formed case-note id outside the invocation's eligible set; the result names only host-owned eligible ids (`run` for verification tools, observed `step-N` assertions for UI tools) and never echoes the rejected id or note (JJO-1056).
+- **ui-regression**: specific `scenario_*` execution reasons (for example `scenario_url_sensitive`, `scenario_url_host`, `scenario_action`) with fixed recovery guidance in place of the generic not-run reason.
+
+### Changed
+
+- **verification-receipts, ui-regression**: the public `assessment` schema (all four tools) and the `ui_regression_run` `scenario` schema are plain strings. Eligible ids, actions and limits are stated in field descriptions and decided in-plugin, because GJC validates declared constraints before the plugin runs and its error can echo the call arguments. Top-level parameter constraints are unchanged.
+- **jev-advisor, verification-receipts, ui-regression, wiki, rea, backplan, rrsi**: the shared private-result reader accepts `invalid_case_id` and the `scenario_*` reasons; bundles regenerated.
+- `smoke-host.mjs` requires a non-member case id to reach the plugin and asserts that neither the id nor a synthetic note canary appears in the result or journal; `--ui-rejections` adds an unsupported-action canary probe.
+
+### Upgrade notes
+
+- Reinstall in order: `jev-advisor` first, `verification-receipts` second, then `ui-regression`, `wiki`, `rea`, `backplan`, `rrsi`. A pre-0.0.16 reader fails closed (`store_corrupt`) on journal records carrying the new reasons. Start a new `gjc` session afterwards.
+
 ## [0.0.15] - 2026-10-28
 
 Plugins: jev-advisor 0.0.11 · verification-receipts 0.0.7 · ui-regression 0.0.8 · wiki 0.0.6 · rea 0.0.6 · backplan 0.0.9 · rrsi 0.0.5 · aside-memory 0.0.2

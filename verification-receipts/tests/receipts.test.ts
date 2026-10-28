@@ -8,7 +8,34 @@ import {runNodeTests} from '../lib/runner';
 import {createHash} from 'node:crypto';
 import verificationStatus from '../src/status.adapter';
 import {finalizeVerificationOutcome} from '../lib/outcomes';
+import {RESULTS_UI_SCENARIO_REASONS} from '../../shared/lib/results';
+import {uiScenarioReason} from '../../ui-regression/lib/scenario';
+import {readFileSync} from 'node:fs';
 const owned:string[]=[];
+test('every allowlisted UI rejection has a safe mapping and actionable non-retry guidance',()=>{
+ for(const reason of RESULTS_UI_SCENARIO_REASONS){
+  expect(uiScenarioReason('UI_'+reason.toUpperCase())).toBe(reason);
+  const guidance=staticReceiptGuidance({status:'not_run',reason},'unavailable',{status:'unavailable',reason:'off'},[],{tool:'ui'});
+  expect(guidance.warnings).toContain('scenario_rejected');
+  expect(guidance.recommendedNextActions[0]).toContain(reason);
+  expect(guidance.recommendedNextActions.join(' ')).not.toMatch(/tests|Run verification again/);
+ }
+ for(const message of ['UI_SCENARIO_UNKNOWN','UI_SCENARIO_URL_HOST PRIVATE_CANARY','PRIVATE_CANARY','ui_scenario_url_host']) expect(uiScenarioReason(message)).toBeUndefined();
+ // Closed set in the other direction: every code validateScenario can throw is allowlisted.
+ const source=readFileSync(new URL('../../ui-regression/lib/scenario.ts',import.meta.url),'utf8');
+ const thrown=new Set([...source.matchAll(/uiScenarioFail\('([A-Z_]+)'\)/g)].map(match=>match[1]));
+ for(const match of source.matchAll(/uiScenarioString\([^)]*?, \d+, '([A-Z_]+)'/g)) thrown.add(match[1]);
+ expect([...thrown].sort()).toEqual(['ACTION','ASSERT_KIND','EXPECTED','EXPECTED_BEHAVIOR','FIELDS','FIRST_GOTO','ID','MATCH','NO_ASSERTION','OBJECT','ORIGIN','SELECTOR','SELECTOR_UNSAFE','SENSITIVE','STEP','STEPS','URL','URL_HOST','URL_SCHEME','URL_SENSITIVE','URL_UNSAFE','VALUE']);
+ for(const code of thrown) expect(uiScenarioReason('UI_SCENARIO_'+code)).toBe('scenario_'+code.toLowerCase());
+ const rejected=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{tool:'ui',allowedCaseIds:['step-1','PRIVATE_CANARY','step-2']});
+ expect(rejected.recommendedNextActions[0]).toContain('step-1, step-2');
+ expect(JSON.stringify(rejected)).not.toContain('PRIVATE_CANARY');
+ const verification=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{allowedCaseIds:['run']});
+ expect(verification.recommendedNextActions[0]).toBe('Use unique assessment.caseNotes ids from this invocation: run.');
+ const none=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{tool:'ui',allowedCaseIds:[]});
+ expect(none.warnings).toContain('assessment_case_id_rejected');
+ expect(none.recommendedNextActions[0]).toContain('no observed eligible case ids');
+});
 afterEach(async()=>{for(const p of owned.splice(0)) await fs.rm(p,{recursive:true,force:true});});
 async function setup(){const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'receipt-test-')));owned.push(dir);const root=path.join(dir,'repo');await fs.mkdir(root);const git=(...args:string[])=>execFileSync('git',args,{cwd:root,env:{PATH:process.env.PATH},stdio:'pipe'});git('init','-q');await fs.writeFile(path.join(root,'a.mjs'),'export const value=1;');git('add','a.mjs');git('-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture');const base=path.join(dir,'store');return {root,base,git};}
 async function make(root:string){const specDigest=specFingerprint({files:['a.mjs']});const before=await fingerprintSource(root,specDigest);return createReceipt({plugin:'verification-receipts',toolCallId:'fixture',repositoryDigest:await repositoryDigest(root),durationMs:1,specDigest,before,after:before,freshness:'fresh',execution:{status:'passed',reason:'native_success',counts:{tests:1,suites:0,topLevel:1,passed:1,failed:0,skipped:0,todo:0,cancelled:0},exitCode:0,signal:null,runnerVersion:'v24.15.0'},warnings:[],limitations:[]});}

@@ -2,29 +2,35 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import http from 'node:http';
-import {spawn,execFileSync} from 'node:child_process';
+import {spawn,spawnSync,execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {createSmokeEnvironment,assertSmokeIsolation} from './smoke-environment.mjs';
+import {createSmokeEnvironment,assertSmokeIsolation,asideLaunchCounterPath,asideLaunchCount,writeAsideProbeWrapper,parseAdapterResult,receiptFileCount,journalText,advertisedAssessmentContract,rejectableConstraints} from './smoke-environment.mjs';
+// Synthetic canary for the caller-text echo privacy checks. Never a real value.
+const nativeCanary='SYNTHETIC_NATIVE_PROBE_CANARY';
 const worktree=process.cwd();
 const uiMode=process.argv.includes('--ui');
+// Bounded deviation surface: proves the UI rejection preflight without a browser or an
+// installed Aside. Never a substitute for the real positive browser observation.
+const uiRejectionsMode=process.argv.includes('--ui-rejections');
 const advisorMode=process.argv.includes('--advisor');
 const checkMode=process.argv.includes('--check');
 const metricsMode=process.argv.includes('--metrics');
 const loopMode=process.argv.includes('--loop');
 const delegationMode=process.argv.includes('--delegation');
-assert.ok([uiMode,advisorMode,checkMode,metricsMode,loopMode,delegationMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
+assert.ok([uiMode,uiRejectionsMode,advisorMode,checkMode,metricsMode,loopMode,delegationMode].filter(Boolean).length<=1,'ambiguous_smoke_surface');
 const installedMode=process.argv.includes('--installed');
-const plugin=advisorMode||checkMode||metricsMode?'jev-advisor':uiMode?'ui-regression':'verification-receipts';
-const toolNames=delegationMode?['task','subagent','job','verification_run','verification_loop']:metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:checkMode?['jev_check']:uiMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
+const plugin=advisorMode||checkMode||metricsMode?'jev-advisor':uiMode||uiRejectionsMode?'ui-regression':'verification-receipts';
+const toolNames=delegationMode?['task','subagent','job','verification_run','verification_loop']:metricsMode?['plugin_metrics']:advisorMode?['jev_advise']:checkMode?['jev_check']:uiMode||uiRejectionsMode?['ui_regression_run','ui_regression_status']:['verification_run','verification_status'];
 const account=process.env.UI_REGRESSION_ACCOUNT;
-if(uiMode&&!account)throw Error('explicit_ephemeral_account_required');
+if((uiMode||uiRejectionsMode)&&!account)throw Error('explicit_ephemeral_account_required');
 const userAgent=path.resolve(process.env.GJC_CODING_AGENT_DIR || process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(),'.gjc','agent'));
 const userConfig=path.join(userAgent,'config.yml');
 async function configDigest(){try{return createHash('sha256').update(await fs.readFile(userConfig)).digest('hex');}catch(error){if(error.code==='ENOENT')return null;throw error;}}
 const beforeConfig=await configDigest();
 const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'gjc-installed-smoke-')));
 const root=path.join(owned,'repo');
+let asideControlLaunches=0,asideObserverControl=false;
 let env,server,report;
 async function child(args,timeout=60000,command='gjc'){await assertSmokeIsolation(env,owned);return new Promise((resolve,reject)=>{let output='',errors='',bytes=0;const p=spawn(command,args,{cwd:root,env,shell:false,detached:true});const timer=setTimeout(()=>{try{process.kill(-p.pid,'SIGKILL');}catch{} reject(Error('host_timeout'));},timeout);p.stdout.on('data',c=>{bytes+=c.length;if(bytes<4e6)output+=c;});p.stderr.on('data',c=>{bytes+=c.length;if(bytes<4e6)errors+=c;});p.on('error',reject);p.on('close',code=>{clearTimeout(timer);resolve({code,output,errors});});});}
 try {
@@ -43,9 +49,24 @@ try {
  if(uiMode){
   const bin=path.join(owned,'bin');await fs.mkdir(bin,{mode:0o700});
   const realAside=execFileSync('which',['aside'],{encoding:'utf8',env:{PATH:process.env.PATH}}).trim();
-  // Test-only router preserves existing Aside HOME while GJC and receipts stay isolated.
-  const wrapper='#!/usr/bin/env node\nimport {spawn} from "node:child_process";const p=spawn('+JSON.stringify(realAside)+',process.argv.slice(2),{env:{HOME:'+JSON.stringify(process.env.HOME)+',PATH:'+JSON.stringify(process.env.PATH)+',TMPDIR:'+JSON.stringify(owned)+'},stdio:"inherit",shell:false});p.on("error",()=>process.exit(1));p.on("close",code=>process.exit(code??1));\n';
-  await fs.writeFile(path.join(bin,'aside'),wrapper,{mode:0o700});env.PATH=bin+path.delimiter+process.env.PATH;
+  // Test-only router preserves existing Aside HOME while GJC and receipts stay isolated,
+  // and appends one line per launch to the owned counter (the launch oracle).
+  await writeAsideProbeWrapper({binDir:bin,realAside,counterFile:asideLaunchCounterPath(owned),env:{HOME:process.env.HOME,PATH:process.env.PATH,TMPDIR:owned}});
+  env.PATH=bin+path.delimiter+process.env.PATH;
+ }else if(uiRejectionsMode){
+  // Inert Aside fixture: records the invocation, then fails. Rejections must never reach it.
+  const bin=path.join(owned,'bin');await fs.mkdir(bin,{mode:0o700});
+  const inertAside=path.join(owned,'inert-aside');await fs.writeFile(inertAside,'#!/bin/sh\nexit 1\n',{mode:0o755});
+  const counter=asideLaunchCounterPath(owned);
+  const wrapper=await writeAsideProbeWrapper({binDir:bin,realAside:inertAside,counterFile:counter,env:{HOME:process.env.HOME,PATH:process.env.PATH,TMPDIR:owned}});
+  env.PATH=bin+path.delimiter+process.env.PATH;
+  // Positive control for the observer itself: one direct synthetic launch is counted,
+  // then the counter becomes the baseline every rejected probe must not move.
+  const control=spawnSync(process.execPath,[wrapper,'repl'],{env,stdio:'pipe'});
+  assert.equal(control.status,1,'inert_aside_control_exit');
+  asideControlLaunches=await asideLaunchCount(counter);
+  assert.equal(asideControlLaunches,1,'aside_observer_control_missing');
+  asideObserverControl=true;
  }
  const git=(...args)=>execFileSync('git',args,{cwd:root,env:{PATH:process.env.PATH},stdio:'pipe'});
  git('init','-q');
@@ -54,14 +75,22 @@ try {
  await fs.writeFile(path.join(root,'empty.mjs'),'');await fs.writeFile(path.join(root,'.gitignore'),'ignored/\n');await fs.mkdir(path.join(root,'ignored'));
  await fs.writeFile(path.join(root,'ignored','case.mjs'),"import test from 'node:test';test('explicit ignored fixture',()=>{});");
  git('add','.');git('-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture');
+ // Owned repository outside the session cwd: exercises repository_outside_session_cwd, never launched.
+ const external=path.join(owned,'external');await fs.mkdir(external,{mode:0o700});
+ execFileSync('git',['init','-q'],{cwd:external,env:{PATH:process.env.PATH},stdio:'pipe'});
+ await fs.writeFile(path.join(external,'fixture.mjs'),'');
+ execFileSync('git',['add','.'],{cwd:external,env:{PATH:process.env.PATH},stdio:'pipe'});
+ execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:external,env:{PATH:process.env.PATH},stdio:'pipe'});
  // Installed bundles are read-only inputs; never run a test against the live user agent root.
  const bundle=installedMode?path.join(userAgent,'gjc-plugins',plugin):path.join(worktree,plugin);
  const install=await child(['plugin','install',bundle,'--user','--json']);
  assert.equal(install.code,0,'isolated_install_failed');
  const listing=await child(['plugin','list','--json']);assert.equal(listing.code,0,'isolated_list_failed');assert.ok(listing.output.includes(plugin),'installed_catalog_missing');
  if(uiMode)assert.ok(!listing.output.includes('verification-receipts'),'unexpected_sibling_install');
- let step=0,passId,capacitySeeds=0;const evidence=[],journalIds=[];let discovered=[];let mockError='';
+ let step=0,passId,capacitySeeds=0;const evidence=[],journalIds=[],discoveredSchemas=[];let discovered=[];let mockError='';
  let scenario;let submissions=0;
+ // Launch/receipt deltas per probe; the Aside counter is the only launch oracle.
+ let launchSnapshot=asideControlLaunches,receiptSnapshot=0;
  const fixtureBody=uiMode?await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/index.html')):null;
  const calls=metricsMode?[
   ()=>({name:'plugin_metrics',args:{}}),
@@ -80,8 +109,43 @@ try {
   ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'local-mismatch',steps:scenario.steps.map((s,i)=>i===4?{...s,expected:'Deliberate mismatch'}:s)}}}),
   ()=>({name:toolNames[1],args:{receiptId:passId}}),
   ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'empty-substring',steps:scenario.steps.map((s,i)=>i===4?{...s,match:'substring',expected:'   '}:s)}}}),
-  ()=>({name:toolNames[1],args:{receiptId:'missing'}})
- ]:[()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['fail.mjs']}}),()=>({name:'verification_run',args:{files:['empty.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_run',args:{files:['../escape.mjs']}}),()=>({name:'verification_status',args:{receiptId:'missing'}}),()=>({name:'verification_run',args:{files:['pass.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['pass.mjs']}})];
+  ()=>({name:toolNames[1],args:{receiptId:'missing'}}),
+  // Bounded rejection probes: each must fail before any Aside launch or receipt.
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'unsafe-selector',steps:scenario.steps.map((s,i)=>i===1?{action:'assert',selector:'#password',kind:'visible'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'sensitive-fill',steps:scenario.steps.map((s,i)=>i===2?{...s,value:'user@example.com'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'non-loopback',steps:scenario.steps.map((s,i)=>i===0?{action:'goto',url:'http://example.invalid/'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'sensitive-url',steps:scenario.steps.map((s,i)=>i===0?{action:'goto',url:'http://127.0.0.1:9/login'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario,repository:'../external'}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'unsupported-action',expectedBehavior:nativeCanary,steps:scenario.steps.map((s,i)=>i===2?{action:'screenshot'}:s)}}}),
+  // Shape-valid but unobserved assertion id: executes, then journaled invalid_case_id.
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'unobserved-case',steps:scenario.steps.slice(0,4)},assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'step-3',note:'Local fixture case note.'}]}}}),
+  // Shape/unsafe assessment text with a valid scenario: invalid_context before any browser.
+  ()=>({name:toolNames[0],args:{account,scenario,assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'step-1',note:'See https://example.invalid/private for details.'}]}}})
+ ]:uiRejectionsMode?[
+  // Pre-browser rejection surface only: sensitive URL, sensitive value, non-loopback,
+  // outside repository and unsafe assessment. No browser, no Aside, no receipt.
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'sensitive-url',steps:scenario.steps.map((s,i)=>i===0?{action:'goto',url:'http://127.0.0.1:9/login'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'sensitive-fill',steps:scenario.steps.map((s,i)=>i===2?{...s,value:'user@example.com'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'non-loopback',steps:scenario.steps.map((s,i)=>i===0?{action:'goto',url:'http://example.invalid/'}:s)}}}),
+  ()=>({name:toolNames[0],args:{account,scenario,repository:'../external'}}),
+  ()=>({name:toolNames[0],args:{account,scenario,assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'step-1',note:'See https://example.invalid/private for details.'}]}}}),
+  // Unsupported action plus a caller canary: the plugin, not the host schema, rejects it.
+  ()=>({name:toolNames[0],args:{account,scenario:{...scenario,id:'unsupported-action',expectedBehavior:nativeCanary,steps:scenario.steps.map((s,i)=>i===2?{action:'screenshot'}:s)}}})
+ ]:[()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['fail.mjs']}}),()=>({name:'verification_run',args:{files:['empty.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['ignored/case.mjs']}}),()=>({name:'verification_run',args:{files:['../escape.mjs']}}),()=>({name:'verification_status',args:{receiptId:'missing'}}),()=>({name:'verification_run',args:{files:['pass.mjs']}}),()=>({name:'verification_status',args:{receiptId:passId}}),()=>({name:'verification_run',args:{files:['pass.mjs']}}),
+  // Case-id membership probe: a well-formed non-member id with a caller canary note
+  // reaches the plugin, which rejects it as invalid_case_id without echoing either.
+  ()=>({name:'verification_run',args:{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'policy',note:nativeCanary}]}}}),
+  // The same tool remains usable in the same session with an eligible id.
+  ()=>({name:'verification_run',args:{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'run',note:'Local fixture case note.'}]}}})];
+ // Fixed, non-sensitive expectations for the ui-rejections surface (reasons only).
+ const uiRejectionExpectations=[
+  {probe:'sensitive_url',reason:'scenario_url_sensitive',assessment:null,forbidden:['127.0.0.1:9']},
+  {probe:'sensitive_fill',reason:'scenario_sensitive',assessment:null,forbidden:['user@example.com']},
+  {probe:'non_loopback',reason:'scenario_url_host',assessment:null,forbidden:['example.invalid']},
+  {probe:'outside_repository',reason:'repository_outside_session_cwd',assessment:null,forbidden:['"../external"']},
+  {probe:'unsafe_assessment',reason:'invalid_or_unavailable_input',assessment:'invalid_context',forbidden:['example.invalid']},
+  {probe:'unsupported_action',reason:'scenario_action',assessment:null,forbidden:[nativeCanary]},
+ ];
  // Content-reactive delegation router. Parent and child sessions share one loopback provider;
  // dispatch keys on the child executor system prompt and each step keys on tool-result content.
  const delegationMarker='Fixture delegated slice',delegationGate='[delegation-verification-gate]';
@@ -161,9 +225,11 @@ try {
 import {appendPluginOutcome} from ${JSON.stringify(path.join(worktree,'shared/lib/results.ts'))};
 const baseDir=${JSON.stringify(metricsBase)};
 const cases=[
- ['verification-receipts',{operation:'run',durationMs:1234}],
+ // Seed the new enum reasons so the installed reader must accept them, without
+ // changing the asserted operation/duration counts.
+ ['verification-receipts',{operation:'run',durationMs:1234,assessment:{status:'invalid_input',reason:'invalid_case_id'}}],
  ['verification-receipts',{operation:'status',durationMs:9999}],
- ['ui-regression',{operation:'run',durationMs:0}],
+ ['ui-regression',{operation:'run',durationMs:0,execution:{status:'not_run',reason:'scenario_url_host'}}],
  ['jev-advisor',{operation:'task_advice',durationMs:42,taskAdvice:[{index:0,status:'no_decision',reason:'disabled'}]}],
  ['jev-advisor',{operation:'advise',advice:{status:'no_decision',reason:'disabled'}}],
 ];
@@ -196,13 +262,38 @@ for(const [plugin,outcome] of cases){
    const responses=req.url==='/v1/responses';
    let body='';for await(const c of req){body+=c;if(body.length>2e6)throw Error('local_request_cap');}
    const data=JSON.parse(body);mockHits++;
-   if(step===0){discovered=(data.tools??[]).map(t=>t.function?.name??t.name);assert.ok(toolNames.every(n=>discovered.includes(n)),'installed_tool_discovery_failed');}
+   if(step===0){
+    const schemas=new Map((data.tools??[]).map(t=>{const f=t.function??t;return [f.name,f.parameters??f.input_schema];}));
+    discovered=[...schemas.keys()];assert.ok(toolNames.every(n=>discovered.includes(n)),'installed_tool_discovery_failed');
+    if(!advisorMode&&!checkMode&&!metricsMode&&!delegationMode){
+     // Caller text must reach the plugin: inside assessment (and the UI scenario) the wire
+     // schema carries no host-rejectable keyword; eligible ids live only in the description.
+     const expectedIds=uiMode||uiRejectionsMode?['step-0','step-19']:['run'];
+     for(const name of toolNames){
+      const parameters=schemas.get(name),contract=advertisedAssessmentContract(parameters);
+      const scenarioConstraints=name==='ui_regression_run'?rejectableConstraints(parameters?.properties?.scenario,'scenario'):[];
+      // Record the advertised schema first so a mismatch still leaves an observation.
+      discoveredSchemas.push({tool:name,assessment:contract.present,idType:contract.idType,descriptionLength:contract.idDescription.length,descriptionNamesIds:expectedIds.every(id=>contract.idDescription.includes(id)),descriptionNamesRejection:contract.idDescription.includes('invalid_case_id'),assessmentConstraints:contract.constraints,scenarioConstraints});
+      assert.ok(contract.present,`assessment_schema_missing:${name}`);
+      assert.equal(contract.idType,'string',`case_note_id_not_plain_string:${name}`);
+      assert.deepEqual(contract.constraints,[],`assessment_host_rejectable_keywords:${name}`);
+      assert.deepEqual(scenarioConstraints,[],`scenario_host_rejectable_keywords:${name}`);
+      assert.ok(expectedIds.every(id=>contract.idDescription.includes(id)),`case_note_id_description_missing_ids:${name}`);
+      assert.ok(contract.idDescription.includes('invalid_case_id'),`case_note_id_description_missing_rejection:${name}`);
+     }
+    }
+   }
    else if(!delegationMode){
     const tool=[...(data.messages??data.input)].reverse().find(m=>m.role==='tool'||m.type==='function_call_output');assert.ok(tool,'host_tool_result_missing');
     const content=tool.output??tool.content;
     const text=typeof content==='string'?content:content.map(c=>c.text??'').join('');
-    const begin=advisorMode&&step===2?text.lastIndexOf('{"journalStorage":'):text.indexOf('{'),end=text.lastIndexOf('}');const result=JSON.parse(text.slice(begin,end+1));
-    if(metricsMode){
+    const begin=advisorMode&&step===2?text.lastIndexOf('{"journalStorage":'):text.indexOf('{');
+    const result=parseAdapterResult(text,begin);
+    if(!result){
+     // Every probe must reach the adapter: a host-side rejection here is the echo path this
+     // smoke exists to forbid. Record whether caller text leaked, then fail.
+     assert.fail('unexpected_unparsable_tool_result:'+step+':'+JSON.stringify({canaryEcho:text.includes(nativeCanary),idEcho:text.includes('policy')}));
+    }else if(metricsMode){
      assert.equal(result.schemaVersion,1);assert.equal(result.report,'plugin_metrics');
      assert.equal(result.mode,'offline_descriptive');assert.equal(result.window,'all_retained');
      assert.equal(result.scope,'current_process_home_all_repositories');
@@ -228,7 +319,10 @@ for(const [plugin,outcome] of cases){
     }else{
     const expectedJournalFailure=!advisorMode&&!uiMode&&!checkMode&&step===11;
     assert.equal(result.journalStorage.persisted,!expectedJournalFailure,'outcome_journal_confirmation_mismatch');if(!expectedJournalFailure)journalIds.push(result.journalStorage.id);
-    if(!advisorMode&&!checkMode)assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
+    // Deliberate assessment outcomes: ui steps 13/14 (invalid_case_id / invalid_context),
+    // the default case-id membership probe (step 12) and the ui-rejections unsafe assessment.
+    const deliberateAssessment=uiMode?step===13||step===14:uiRejectionsMode?step===5:step===12;
+    if(!advisorMode&&!checkMode&&!deliberateAssessment)assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'},'automatic_assessment_missing_or_offline_guard_failed');
     if(advisorMode){
      if(step===1||step===3){assert.equal(result.status,'no_decision');assert.equal(result.reason,step===1?'disabled':'invalid_task');evidence.push({probe:step===1?'manual_disabled':'manual_invalid',status:result.status,reason:result.reason});}
      if(step===2){assert.ok(text.includes('No v2 store exists yet.'));evidence.push({probe:'calibration',networkFree:true,correlationReadOnly:true});}
@@ -240,13 +334,55 @@ for(const [plugin,outcome] of cases){
 	     assert.ok(!text.includes('PRIVATE-CHECK-QUESTION'),'check_result_leaked_private_text');
     }else if(uiMode){
      assert.equal(result.advisoryOnly,true);
-     if(step===1){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.assertions.length,2);assert.equal(result.receipt.execution.cleanup,'confirmed');assert.equal(result.persisted,true);passId=result.receipt.id;evidence.push({probe:'pass',status:'passed',assertions:result.receipt.execution.assertions,cleanup:'confirmed'});}
+     // Deltas cover the call emitted by the previous step; the Aside counter is the launch oracle.
+     const launches=await asideLaunchCount(asideLaunchCounterPath(owned)),receipts=await receiptFileCount(env);
+     const launchDelta=launches-launchSnapshot,receiptDelta=receipts-receiptSnapshot;launchSnapshot=launches;receiptSnapshot=receipts;
+     if(step===1){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.assertions.length,2);assert.equal(result.receipt.execution.cleanup,'confirmed');assert.equal(result.persisted,true);assert.ok(launchDelta>=1,'positive_control_not_launched');passId=result.receipt.id;evidence.push({probe:'pass',status:'passed',assertions:result.receipt.execution.assertions,cleanup:'confirmed',launchDelta});}
      if(step===2){assert.equal(result.freshness,'fresh');assert.equal(result.currentUiState,'not_reobserved');assert.equal(result.browserBuildBinding,'unverified');evidence.push({probe:'status',freshness:'fresh',currentUiState:'not_reobserved'});}
      if(step===3){assert.equal(result.receipt.execution.status,'failed');assert.equal(result.receipt.execution.reason,'assertion_failed');assert.equal(result.receipt.execution.cleanup,'confirmed');assert.ok(result.recommendedNextActions.length>0);await fs.writeFile(path.join(root,'pass.mjs'),'// changed source\n');evidence.push({probe:'mismatch',status:'failed',assertions:result.receipt.execution.assertions,cleanup:'confirmed',warningOnly:true});}
      if(step===4){assert.equal(result.freshness,'stale');assert.equal(result.receipt.execution.status,'passed');evidence.push({probe:'source_change',freshness:'stale',historicalStatus:'passed'});}
      if(step===5){assert.equal(result.execution.status,'not_run');assert.equal(result.receiptLoadable,false);evidence.push({probe:'empty_substring',status:'not_run'});}
      if(step===6){assert.equal(result.execution.status,'unavailable');evidence.push({probe:'missing_receipt',status:'unavailable'});}
+     const rejected=(probe,reason,forbidden)=>{assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,reason);assert.ok(!result.receipt,'rejection_wrote_receipt');assert.equal(launchDelta,0,'rejection_launched_browser');assert.equal(receiptDelta,0,'rejection_wrote_receipt_file');assert.ok(!text.includes(forbidden),'rejection_echoed_input');evidence.push({probe,status:'rejected',reason,launchDelta,receiptDelta});};
+     if(step===7)rejected('scene_selector_unsafe','scenario_selector_unsafe','#password');
+     if(step===8)rejected('scene_sensitive_fill','scenario_sensitive','user@example.com');
+     if(step===9)rejected('scene_non_loopback','scenario_url_host','example.invalid');
+     if(step===10)rejected('scene_sensitive_url','scenario_url_sensitive','127.0.0.1:9');
+     if(step===12)rejected('scene_unsupported_action','scenario_action',nativeCanary);
+     if(step===11){assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,'repository_outside_session_cwd');assert.ok(!result.receipt);assert.equal(launchDelta,0,'external_repository_launched_browser');assert.equal(receiptDelta,0,'external_repository_wrote_receipt');evidence.push({probe:'external_repository',status:'rejected',reason:result.execution.reason,launchDelta,receiptDelta});}
+     if(step===13){
+      // Shape-valid but unobserved id: the scenario really runs, then membership rejects the note.
+      assert.equal(result.receipt?.execution.status,'passed','unobserved_case_did_not_execute');
+      assert.equal(result.assessment?.reason,'invalid_case_id');
+      assert.ok(launchDelta>=1,'unobserved_case_not_launched');assert.equal(receiptDelta,1,'unobserved_case_receipt_delta');
+      assert.ok(text.includes('step-1'),'guidance_missing_observed_case_id');
+      assert.ok(!text.includes('step-3'),'unobserved_case_id_echoed');
+      evidence.push({probe:'unobserved_case_id',status:'invalid_case_id',reason:result.assessment.reason,launchDelta,receiptDelta,guidanceNamesObservedId:true,unobservedIdEchoed:false});
+     }
+     if(step===14){
+      // Unsafe/shape assessment: deterministic invalid_context before any launch; the
+      // execution reason stays the generic not_run reason, not a caller value.
+      assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,'invalid_or_unavailable_input');
+      assert.equal(result.assessment?.reason,'invalid_context');assert.ok(!result.receipt);
+      assert.equal(launchDelta,0,'unsafe_assessment_launched_browser');assert.equal(receiptDelta,0,'unsafe_assessment_wrote_receipt');
+      assert.ok(!text.includes('example.invalid'),'unsafe_assessment_echoed');
+      evidence.push({probe:'unsafe_assessment',status:'invalid_context',launchDelta,receiptDelta,executionReason:result.execution.reason});
+     }
      assert.ok(!text.includes('fixture message')&&!text.includes(account),'private_ui_data_in_result');
+    }else if(uiRejectionsMode){
+     // Pre-browser rejection proof: the inert Aside observer must never move, no receipt
+     // may be written, and only fixed reasons may reach the journal.
+     assert.equal(result.advisoryOnly,true);
+     const launches=await asideLaunchCount(asideLaunchCounterPath(owned)),receipts=await receiptFileCount(env);
+     const launchDelta=launches-launchSnapshot,receiptDelta=receipts-receiptSnapshot;launchSnapshot=launches;receiptSnapshot=receipts;
+     const expected=uiRejectionExpectations[step-1];assert.ok(expected,'ui_rejection_probe_unexpected_step:'+step);
+     assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,expected.reason);
+     assert.ok(!result.receipt,'ui_rejection_returned_receipt');
+     assert.equal(launchDelta,0,'ui_rejection_launched_aside');assert.equal(receiptDelta,0,'ui_rejection_wrote_receipt');
+     if(expected.assessment){assert.equal(result.assessment?.status,'invalid_input');assert.equal(result.assessment?.reason,expected.assessment);}
+     for(const value of expected.forbidden)assert.ok(!text.includes(value),'ui_rejection_echoed_input:'+expected.probe);
+     assert.ok(!text.includes(account),'ui_rejection_echoed_account');
+     evidence.push({probe:expected.probe,status:'rejected',reason:result.execution.reason,assessmentReason:result.assessment?.reason??null,launchDelta,receiptDelta});
     }else{
     if(step===1){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.counts.tests,1);assert.equal(result.persisted,true,'receipt_admission:'+result.reason);passId=result.receipt.id;evidence.push({probe:'pass',status:'passed',counts:result.receipt.execution.counts});}
     if(step===2){assert.equal(result.freshness,'fresh');evidence.push({probe:'status',freshness:'fresh'});}
@@ -258,7 +394,23 @@ for(const [plugin,outcome] of cases){
     if(step===8){assert.equal(result.execution.status,'unavailable');evidence.push({probe:'missing_receipt',status:'unavailable'});await seedCapacityFixtures();}
     if(step===9){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.counts.passed,1);assert.equal(result.persisted,false);assert.equal(result.reason,'store_full');assert.equal(result.receiptLoadable,false);assert.ok(result.warnings.includes('receipt_store_full'));evidence.push({probe:'receipt_full',status:'passed',receiptPersisted:false,receiptLoadable:false,journalPersisted:true,count:result.count});}
     if(step===10){assert.equal(result.freshness,'stale');assert.equal(result.receiptLoadable,true);evidence.push({probe:'status_after_full',freshness:'stale',journalPersisted:true});await fs.writeFile(journalLock(),'foreign-owned-smoke-lock',{mode:0o600,flag:'wx'});}
-    if(step===11){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.counts.passed,1);assert.equal(result.journalStorage.reason,'store_busy');assert.ok(result.warnings.includes('journal_not_persisted'));assert.equal(await fs.readFile(journalLock(),'utf8'),'foreign-owned-smoke-lock');await fs.unlink(journalLock());evidence.push({probe:'journal_busy',status:'passed',receiptPersisted:false,journalPersisted:false,journalReason:'store_busy',foreignLockUnchanged:true});}
+    if(step===11){assert.equal(result.receipt.execution.status,'passed');assert.equal(result.receipt.execution.counts.passed,1);assert.equal(result.journalStorage.reason,'store_busy');assert.ok(result.warnings.includes('journal_not_persisted'));assert.equal(await fs.readFile(journalLock(),'utf8'),'foreign-owned-smoke-lock');await fs.unlink(journalLock());evidence.push({probe:'journal_busy',status:'passed',receiptPersisted:false,journalPersisted:false,journalReason:'store_busy',foreignLockUnchanged:true});
+    }
+    if(step===12){
+     // Privacy is asserted unconditionally on result and journal bytes; the receipt-store
+     // outcome is recorded as evidence only, never as the condition of this probe.
+     assert.equal(result.receipt.execution.status,'passed');
+     assert.deepEqual(result.assessment,{status:'invalid_input',reason:'invalid_case_id'});
+     assert.ok(result.warnings.includes('assessment_case_id_rejected'),'case_id_rejection_warning_missing');
+     assert.ok(result.recommendedNextActions.includes('Use unique assessment.caseNotes ids from this invocation: run.'),'case_id_guidance_missing_allowed_ids');
+     assert.equal(result.journalStorage.persisted,true);
+     const journal=await journalText(env,plugin);
+     const canaryEcho=text.includes(nativeCanary),idEcho=text.includes('policy'),journalCanaryEcho=journal.includes(nativeCanary),journalIdEcho=journal.includes('policy');
+     assert.ok(!canaryEcho,'case_id_result_echoed_canary');assert.ok(!idEcho,'case_id_result_echoed_id');
+     assert.ok(!journalCanaryEcho,'case_id_journal_echoed_canary');assert.ok(!journalIdEcho,'case_id_journal_echoed_id');
+     evidence.push({probe:'case_id_membership',status:'invalid_case_id',canaryEcho,idEcho,journalCanaryEcho,journalIdEcho,journalPersisted:true,receiptStorageObserved:{persisted:result.persisted,reason:result.reason??null}});
+    }
+    if(step===13){assert.equal(result.receipt.execution.status,'passed');assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'});assert.ok(result.journalStorage.persisted);evidence.push({probe:'valid_after_rejection',status:'passed',assessmentReason:result.assessment.reason,receiptStorageObserved:{persisted:result.persisted,reason:result.reason??null}});}
     }
    }
    }
@@ -287,12 +439,12 @@ for(const [plugin,outcome] of cases){
   }catch(error){mockError='step='+step+' '+error.message;res.writeHead(500,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'local_probe_failed'}}));}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));env.OPENAI_BASE_URL='http://127.0.0.1:'+server.address().port+'/v1';
- if(uiMode){scenario=JSON.parse(await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/scenario.json'),'utf8'));scenario.steps[0].url='http://127.0.0.1:'+server.address().port+'/';}
+ if(uiMode||uiRejectionsMode){scenario=JSON.parse(await fs.readFile(path.join(worktree,'ui-regression/tests/fixtures/scenario.json'),'utf8'));scenario.steps[0].url='http://127.0.0.1:'+server.address().port+'/';}
  let host,hostTimeout=false;
  try{host=await child(['--print','--no-session','--no-title','--no-mcp','--no-lsp','--no-rules','--no-pty','--model','openai/gpt-4o','--thinking','off','--tools',toolNames.join(','),'Execute explicitly authorized non-sensitive local fixture tools selected by the local test provider. Do not assess or use other tools.'],delegationMode?180000:90000);}
  catch(error){if(!(delegationMode&&error.message==='host_timeout'))throw error;hostTimeout=true;host={code:'timeout',output:'',errors:''};}
  assert.equal(mockError,'',mockError);
- if(!hostTimeout){assert.equal(host.code,0,'installed_dispatch_failed');if(!delegationMode)assert.equal(step,calls.length+1,'installed_dispatch_incomplete');assert.equal(submissions,0);}
+ if(!hostTimeout){assert.equal(host.code,0,'installed_dispatch_failed');if(!delegationMode)assert.equal(step,calls.length+1,'installed_dispatch_incomplete');assert.equal(submissions,0);if(!loopMode)assert.ok(mockHits>0,'host_chat_router_requests_missing');}
  if(hostTimeout){
   report={schemaVersion:1,kind:'package-consumer-report',mode:'delegation',hostMode:'delegation',timedOut:true,lastTurn:delegationTurn,polls:delegationPolls,providerRequests:mockHits,step};
   process.exitCode=1;
@@ -314,7 +466,7 @@ for(const [plugin,outcome] of cases){
   assert.equal((await fs.stat(journal)).mode&0o777,0o700);
   const receipts=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');let receiptCount=0;for(const dir of await fs.readdir(receipts))for(const name of await fs.readdir(path.join(receipts,dir))){assert.ok(JSON.parse(await fs.readFile(path.join(receipts,dir,name),'utf8')).receipt.id);receiptCount++;}
   assert.equal(receiptCount,1,'delegation_receipt_count');
-  report={schemaVersion:1,kind:'package-consumer-report',mode:'delegation',hostMode:'delegation',delegatedFromHost:true,hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,providerRequests:mockHits,submissions,standalone:false,tools:discovered.filter(n=>toolNames.includes(n)),chain:{launchEnvelope:delegationChain.launchEnvelope,jobId:delegationChain.jobId,polls:delegationPolls,terminalGate:delegationChain.terminalGate,loopStatuses:delegationChain.loopStatuses,run:{status:delegationChain.runStatus,persisted:delegationChain.receiptPersisted}},persistence:{root:'.gjc-plugin',operations:records.map(record=>record.operation),journalIds:records.map(record=>record.id),receiptCount,scratchArtifacts:['feature.mjs','feature.test.mjs'],privateModes:true}};
+  report={schemaVersion:1,kind:'package-consumer-report',mode:'delegation',hostMode:'delegation',delegatedFromHost:true,hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:null,providerRequests:mockHits,submissions,standalone:false,tools:discovered.filter(n=>toolNames.includes(n)),chain:{launchEnvelope:delegationChain.launchEnvelope,jobId:delegationChain.jobId,polls:delegationPolls,terminalGate:delegationChain.terminalGate,loopStatuses:delegationChain.loopStatuses,run:{status:delegationChain.runStatus,persisted:delegationChain.receiptPersisted}},persistence:{root:'.gjc-plugin',operations:records.map(record=>record.operation),journalIds:records.map(record=>record.id),receiptCount,scratchArtifacts:['feature.mjs','feature.test.mjs'],privateModes:true}};
  }else if(metricsMode){
   report={schemaVersion:1,kind:'package-consumer-report',isolated:true,installedBundle:installedMode,productionCredentials:false,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,nonmutating:true};
  }else{
@@ -322,8 +474,14 @@ for(const [plugin,outcome] of cases){
  const records=[];for(const segment of inventory.segments){const file=path.join(journal,segment.name),body=await fs.readFile(file);assert.equal(body.length,segment.bytes);assert.equal(createHash('sha256').update(body).digest('hex'),segment.digest);assert.equal((await fs.stat(file)).mode&0o777,0o600);records.push(...body.toString().trimEnd().split('\n').map(line=>JSON.parse(line)));}
  assert.deepEqual(records.map(record=>record.id),journalIds);assert.equal((await fs.stat(journal)).mode&0o777,0o700);
  let receiptCount=0;
- if(!advisorMode&&!checkMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?2:200);}
- report={schemaVersion:1,kind:'package-consumer-report',hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:0,submissions,standalone:uiMode,tools:discovered.filter(n=>toolNames.includes(n)),probes:evidence,persistence:{root:'.gjc-plugin',receiptCount,syntheticCapacityMetadataEntries:capacitySeeds,journalIds,operations:records.map(record=>record.operation),privateModes:true}};
+ if(uiRejectionsMode){
+  // Zero receipts and exactly the fixed rejection reasons in the journal.
+  receiptCount=await receiptFileCount(env);assert.equal(receiptCount,0,'ui_rejections_wrote_receipt');
+  assert.deepEqual(records.map(record=>record.execution?.reason).filter(Boolean),uiRejectionExpectations.map(entry=>entry.reason),'ui_rejection_journal_reasons');
+ }else if(!advisorMode&&!checkMode){const base=path.join(env.HOME,'.gjc-plugin','verification-receipts','receipts','v1');for(const dir of await fs.readdir(base)){for(const name of await fs.readdir(path.join(base,dir))){const envelope=JSON.parse(await fs.readFile(path.join(base,dir,name),'utf8'));assert.equal(envelope.storageSchemaVersion,1);assert.equal((await fs.stat(path.join(base,dir,name))).nlink,1);assert.ok(envelope.receipt.id);receiptCount++;}}assert.equal(receiptCount,uiMode?3:200);}
+ const asideLaunches=uiMode||uiRejectionsMode?await asideLaunchCount(asideLaunchCounterPath(owned)):null;
+ assert.equal(submissions,0,'local_fixture_mutation');
+ report={schemaVersion:1,kind:'package-consumer-report',mode:uiRejectionsMode?'ui-rejections':null,realBrowserObserved:uiMode,counterControl:uiRejectionsMode?'synthetic-launch-only':null,hostVersion:execFileSync('gjc',['--version'],{env,encoding:'utf8'}).trim(),isolated:true,installedBundle:installedMode,productionCredentials:false,remoteProviderRequests:null,submissions,standalone:uiMode,tools:discovered.filter(n=>toolNames.includes(n)),schemas:discoveredSchemas,probes:evidence,evidenceScopes:{assessment:'explicit_off_isolated_home_configuration_only',hostChatRequests:mockHits,asideLaunches,asideLaunchCounterControl:asideObserverControl?'synthetic-launch-counted':'not_run',measuredAdequacyCalls:null},persistence:{root:'.gjc-plugin',receiptCount,syntheticCapacityMetadataEntries:capacitySeeds,journalIds,operations:records.map(record=>record.operation),privateModes:true}};
  }
  }
 } finally {

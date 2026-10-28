@@ -106,6 +106,7 @@ export const NO_DECISION_REASONS = [
 	"missing_context",
 	"insufficient_evidence",
 	"invalid_context",
+	"invalid_case_id",
 	"invalid_facts",
 	"invalid_answer",
 	"request_cap",
@@ -185,6 +186,13 @@ const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt
 const resultsHex = /^[a-f0-9]{64}$/;
 const resultsId = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const resultsCountKeys = ['tests', 'suites', 'topLevel', 'passed', 'failed', 'skipped', 'todo', 'cancelled'];
+export const RESULTS_UI_SCENARIO_REASONS = [
+  'scenario_object', 'scenario_fields', 'scenario_id', 'scenario_expected_behavior', 'scenario_steps', 'scenario_step',
+  'scenario_first_goto', 'scenario_origin', 'scenario_url', 'scenario_url_scheme', 'scenario_url_host',
+  'scenario_url_unsafe', 'scenario_url_sensitive', 'scenario_selector', 'scenario_selector_unsafe',
+  'scenario_value', 'scenario_assert_kind', 'scenario_match', 'scenario_expected', 'scenario_no_assertion',
+  'scenario_action', 'scenario_sensitive',
+] as const;
 const resultsExecutionReasons = [
   'not_run', 'invalid_or_unavailable_input', 'receipt_unavailable', 'invalid_file_count', 'invalid_root', 'invalid_test_path',
   'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'invalid_timeout',
@@ -195,8 +203,9 @@ const resultsExecutionReasons = [
   'runtime_error', 'missing_observations', 'output_overflow', 'malformed_observations', 'runner_exit', 'partial_observations',
   'missing_account', 'unsafe_lock', 'busy', 'lock_unavailable', 'runner_signal', 'missing_cli', 'runner_unavailable',
   'missing_binary', 'not_a_repository', 'invalid_repository', 'repository_outside_session_cwd',
+  ...RESULTS_UI_SCENARIO_REASONS,
 ];
-const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
+const resultsAssessmentReasons = ['scored', 'optional_scores_missing', 'unknown_choice', 'missing_context', 'insufficient_evidence', 'invalid_context', 'invalid_case_id', 'invalid_facts', 'off', 'missing_key', 'request_cap', 'response_cap', 'invalid_answer', 'http_auth', 'http_credit', 'http_rate', 'http_server', 'http_error', 'redirect', 'timeout', 'transport'];
 const resultsAdviceReasons = ['invalid_task', 'unsupported_input', 'input_too_large', 'batch_limit', 'disabled', 'unconfigured', 'invalid_endpoint', 'rate_limited', 'budget_exceeded', 'already_pending', 'timeout', 'aborted', 'provider_error', 'invalid_response'];
 const resultsReceiptReasons = ['stored', 'invalid_metadata', 'store_busy', 'store_corrupt', 'store_full', 'store_unavailable', 'no_receipt', 'not_requested'];
 const resultsEvidenceReasons = ['locked', 'corrupt', 'unsupported_version', 'oversized', 'unsafe_path', 'io_error', 'invalid_input'];

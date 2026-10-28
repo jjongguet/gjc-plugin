@@ -8,6 +8,10 @@ import {
 	validateProbabilityMap,
 } from "../lib/decision-contract";
 
+test("invalid_case_id is a deterministic no-decision reason, never a scoring signal", () => {
+	expect(NO_DECISION_REASONS).toContain("invalid_case_id");
+});
+
 describe("provider table", () => {
 	test("records exact ids without appending context windows", () => {
 		const ids = DECISION_PROVIDERS.map(entry => entry.id);

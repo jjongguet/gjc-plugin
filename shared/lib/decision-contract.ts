@@ -102,6 +102,7 @@ export const NO_DECISION_REASONS = [
 	"missing_context",
 	"insufficient_evidence",
 	"invalid_context",
+	"invalid_case_id",
 	"invalid_facts",
 	"invalid_answer",
 	"request_cap",

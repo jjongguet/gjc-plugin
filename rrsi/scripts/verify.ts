@@ -91,7 +91,7 @@ async function runSuite(root) {
 
 	await check("manifest declares one tool, one session_start hook (no target/phase), and the five actions", async () => {
 		assert.equal(manifest.name, "rrsi");
-		assert.equal(manifest.version, "0.0.5");
+		assert.equal(manifest.version, "0.0.6");
 		assert.equal(manifest.tools.length, 1);
 		assert.equal(manifest.tools[0].path, "tools/rrsi.ts");
 		assert.equal(typeof tool.execute, "function");

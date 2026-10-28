@@ -2,7 +2,11 @@ import { describe, test, expect, jest } from "bun:test";
 import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { assessAdequacy } from "../lib/decision";
+import { assessAdequacy, assessmentShapeRejection } from "../lib/decision";
+import verificationRun from "../src/run.adapter";
+import verificationStatus from "../src/status.adapter";
+import uiRun from "../../ui-regression/src/run.adapter";
+import uiStatus from "../../ui-regression/src/status.adapter";
 
 const context = { changeSummary: "Reject empty requests", expectedBehavior: "Empty requests fail safely", caseNotes: [{ id: "empty", note: "An empty request exercises the failure boundary" }] };
 const facts = { status: "passed", freshness: "fresh", counts: { tests: 2, suites: 0, topLevel: 2, passed: 2, failed: 0, skipped: 0, todo: 0, cancelled: 0 }, caseIds: ["empty"] };
@@ -14,6 +18,84 @@ function harness(payload: unknown = { answers: choices() }, status = 200) {
  return { calls, deps: { fetch: transport, env: environment, envFile: "/nonexistent/synthetic-env" } };
 }
 describe("adequacy Decisions contract", () => {
+ test('unknown case ids are distinct from unsafe or duplicate context without transport or input echoes',async()=>{
+  for(const id of ['policy','machinery','native-read','C1','C2','step-20','step-x']){
+   const input={...context,caseNotes:[{id,note:'Boundary behavior observed'}]};
+   const h=harness();
+   expect(assessmentShapeRejection(input)).toBeUndefined();
+   expect(await assessAdequacy(input,{...facts,caseIds:['run']},h.deps)).toEqual({status:'invalid_input',reason:'invalid_case_id'});
+   expect(h.calls).toHaveLength(0);
+  }
+  for(const input of [
+   {...context,caseNotes:[{id:'policy',note:'password=PRIVATE_CANARY'}]},
+   {...context,caseNotes:[context.caseNotes[0],context.caseNotes[0]]},
+   {...context,caseNotes:Array.from({length:9},(_,i)=>({id:`case-${i}`,note:'Boundary observed'}))},
+  ]){
+   const h=harness(),preflight=assessmentShapeRejection(input);
+   expect(preflight).toEqual({status:'invalid_input',reason:'invalid_context'});
+   expect(await assessAdequacy(input,facts,h.deps)).toEqual(preflight);
+   expect(h.calls).toHaveLength(0);expect(JSON.stringify(preflight)).not.toContain('PRIVATE_CANARY');
+  }
+  const h=harness();
+  expect((await assessAdequacy({...context,caseNotes:[{id:'run',note:'Normal and failure paths observed'}]},{...facts,caseIds:['run']},h.deps)).status).toBe('unscored');
+  expect(h.calls).toHaveLength(1);
+ });
+ test('a keyed non-member id is rejected with zero outbound calls and no id or note bytes',async()=>{
+  const h=harness();
+  const input={...context,caseNotes:[{id:'policy',note:'SYNTHETIC_NATIVE_PROBE_CANARY observed'}]};
+  const result=await assessAdequacy(input,{...facts,caseIds:['run']},h.deps);
+  expect(result).toEqual({status:'invalid_input',reason:'invalid_case_id'});
+  expect(h.calls).toHaveLength(0);
+  expect(JSON.stringify(result)).not.toContain('policy');expect(JSON.stringify(result)).not.toContain('SYNTHETIC_NATIVE_PROBE_CANARY');
+ });
+ test('shape bounds removed from the public schema are pinned to invalid_context in-plugin',async()=>{
+  const bounded=[
+   {...context,changeSummary:'word '.repeat(400)+'x'},
+   {...context,expectedBehavior:'word '.repeat(400)+'x'},
+   {...context,caseNotes:[{id:'empty',note:'note '.repeat(60)+'x'}]},
+   {...context,caseNotes:Array.from({length:9},(_,i)=>({id:`case-${i}`,note:'Boundary observed'}))},
+   {...context,caseNotes:[{id:'empty',note:'First observation'},{id:'empty',note:'Second observation'}]},
+   {...context,caseNotes:[{id:'x'.repeat(65),note:'Boundary observed'}]},
+   {...context,caseNotes:[{id:'empty',note:'Boundary observed',extra:'value'}]},
+   {...context,extra:'value'},
+   {...context,caseNotes:[{id:7,note:'Boundary observed'}]},
+  ];
+  for(const input of bounded){
+   const h=harness();
+   expect(await assessAdequacy(input,{...facts,caseIds:['empty','case-0']},h.deps)).toEqual({status:'invalid_input',reason:'invalid_context'});
+   expect(h.calls).toHaveLength(0);
+  }
+  // The upper bounds themselves still pass the shape check.
+  expect(assessmentShapeRejection({...context,changeSummary:'word '.repeat(400),caseNotes:Array.from({length:8},(_,i)=>({id:`case-${i}`,note:'note '.repeat(60)}))})).toBeUndefined();
+ });
+ test('the public assessment and scenario schemas declare no host-rejectable keyword on caller text',()=>{
+  // Recording stub: each node keeps its constructor so a literal union cannot pass as a string.
+  const T={Object:(properties:unknown,options:unknown={})=>({kind:'Object',properties,options}),String:(options:unknown={})=>({kind:'String',options}),Number:(options:unknown={})=>({kind:'Number',options}),Array:(items:unknown,options:unknown={})=>({kind:'Array',items,options}),Optional:(inner:unknown)=>({kind:'Optional',inner}),Union:(branches:unknown,options:unknown={})=>({kind:'Union',branches,options}),Literal:(value:unknown)=>({kind:'Literal',value})};
+  const rejectable=['enum','const','pattern','maxLength','minLength','maxItems','minItems','additionalProperties'];
+  const walk=(node:any,found:string[]=[]):string[]=>{
+   if(!node||typeof node!=='object')return found;
+   if(node.kind==='Union'||node.kind==='Literal')found.push(node.kind);
+   for(const key of rejectable)if(node.options&&Object.hasOwn(node.options,key))found.push(key);
+   for(const child of [node.inner,node.items,...(node.branches??[]),...Object.values(node.properties??{})])walk(child,found);
+   return found;
+  };
+  for(const [factory,ids] of [[verificationRun,['run']],[verificationStatus,['run']],[uiRun,['step-0','step-19']],[uiStatus,['step-0','step-19']]] as const){
+   const tool:any=(factory as any)({cwd:process.cwd(),typebox:{Type:T}});
+   const assessment=tool.parameters.properties.assessment.inner;
+   expect(walk(assessment)).toEqual([]);
+   const id=assessment.properties.caseNotes.inner.items.properties.id;
+   expect(id.kind).toBe('String');
+   expect(id.options.description).toContain('invalid_case_id');
+   for(const eligible of ids)expect(id.options.description).toContain(eligible);
+   if(tool.name==='ui_regression_run')expect(walk(tool.parameters.properties.scenario)).toEqual([]);
+  }
+  // Top-level constraints are deliberately unchanged; removing one needs an explicit decision.
+  const topLevel=(factory:any)=>{const p=factory({cwd:process.cwd(),typebox:{Type:T}}).parameters;const kept:Record<string,unknown>={additionalProperties:p.options.additionalProperties};for(const [name,node] of Object.entries(p.properties) as [string,any][]){if(name==='assessment'||name==='scenario')continue;const inner=node.kind==='Optional'?node.inner:node;const options=Object.fromEntries(Object.entries(inner.options??{}).filter(([key])=>key!=='description'));if(Object.keys(options).length)kept[name]=options;}return kept;};
+  expect(topLevel(verificationRun)).toEqual({additionalProperties:false,files:{minItems:1,maxItems:32},repository:{minLength:1,maxLength:4096},timeoutMs:{minimum:1,maximum:120000}});
+  expect(topLevel(verificationStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
+  expect(topLevel(uiRun)).toEqual({additionalProperties:false,account:{minLength:1,maxLength:64},timeoutMs:{minimum:1,maximum:90000},repository:{minLength:1,maxLength:4096}});
+  expect(topLevel(uiStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
+ });
  test('nonpassing stale and unavailable evidence is decided before any call',async()=>{
   for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(0);}
   for(const freshness of ['stale','changed_during_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,freshness},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(h.calls.length).toBe(0);}

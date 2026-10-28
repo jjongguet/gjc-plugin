@@ -37,7 +37,22 @@ choices (`aligned`/`present` or `gap`/`missing`), confidence and the full
 probability map; confidence without full probabilities is
 `unscored`/`optional_scores_missing`.
 
-Safe template (the `caseNotes` id must be a real case id, `run` for a run):
+The only eligible `caseNotes[].id` is **`run`** for both tools, not an
+individual test name or a caller-defined label. IDs must be unique, so combine
+run observations into one note. Notes are optional, capped at 8 entries and 300
+characters each.
+
+The public `assessment` schema is plain strings: the eligible ID and the limits
+are stated in field descriptions, not declared as enum, pattern, length, item or
+`additionalProperties` constraints. GJC validates declared constraints before the
+plugin runs and its error can echo the call arguments, so every assessment bound
+is decided in-plugin instead. A well-formed ID other than `run` returns
+`invalid_case_id` with the constant allowed list in `recommendedNextActions`; it
+never echoes the rejected ID or note into the result, journal or decision request.
+Top-level parameters (`files`, `repository`, `timeoutMs`, unknown keys) keep their
+schema constraints; whether a host rejection there echoes arguments is unmeasured.
+
+Safe template:
 
 ```json
 {
@@ -48,11 +63,17 @@ Safe template (the `caseNotes` id must be a real case id, `run` for a run):
 ```
 
 Reason breakdown: `missing_context` (no assessment), `invalid_context`
-(unsafe or rejected), `insufficient_evidence` (execution not passed or source
+(unsafe text, invalid shape, duplicate IDs or exceeded limits),
+`invalid_case_id` (well-formed ID not eligible for this invocation),
+`insufficient_evidence` (execution not passed or source
 stale), `unknown_choice` (neither choice decided), `optional_scores_missing`
 (confidence without full probabilities), `off`/`missing_key` (provider
 unavailable), and `invalid_response` (provider shape). A scored adequacy result
 is advisory, never verification evidence.
+
+Rejected context makes no adequacy request. This does not imply the selected
+tests did not run: assessment follows test execution. Provider-off and
+missing-key outcomes precede evidence/context sufficiency checks.
 
 ## Boundaries
 
@@ -66,5 +87,11 @@ bun verification-receipts/scripts/verify.ts
 bun verification-receipts/scripts/build.mjs --check
 node verification-receipts/scripts/smoke-host.mjs --installed   # private isolated GJC root, loopback only
 ```
+
+Omit `--installed` to test the worktree bundles before installation. The smoke
+checks that the advertised assessment schema carries no host-rejectable keyword,
+that a non-member case ID reaches the plugin and is rejected as `invalid_case_id`,
+and that neither the ID nor a synthetic note canary appears in the result or journal. An explicit provider-off isolated
+environment is configuration evidence, not a measured zero-egress count.
 
 The full smoke matrix (metrics, advisor, UI) is listed in [`../CONTRIBUTING.md`](../CONTRIBUTING.md#smoke-tests).

@@ -178,20 +178,63 @@ const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
 };
 // Rejections raised by validateTestFiles before any test runs.
 export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
-export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = []) {
+const RECEIPT_UI_INPUT_ACTIONS: Record<string, string> = {
+ scenario_object: 'Provide a plain scenario object with id, expectedBehavior and steps.',
+ scenario_fields: 'Use exactly the documented fields for each scenario step; imported results and extra fields are unsupported.',
+ scenario_id: 'Use a non-sensitive scenario id of 1-64 letters, digits, underscores or hyphens, beginning with a letter or digit.',
+ scenario_expected_behavior: 'Describe the non-sensitive expected behavior in 1-2000 characters.',
+ scenario_steps: 'Provide 1-20 explicit supported steps.',
+ scenario_step: 'Provide each step as a plain object with a supported action.',
+ scenario_first_goto: 'Start the scenario with goto on an inspected, owned non-sensitive loopback fixture.',
+ scenario_origin: 'Keep all navigation on the same inspected loopback origin.',
+ scenario_url: 'Use a valid explicit HTTP or HTTPS loopback URL without sensitive content.',
+ scenario_url_scheme: 'Use HTTP or HTTPS for an inspected loopback fixture, not another URL scheme.',
+ scenario_url_host: 'This tool only supports explicit localhost, 127.0.0.1 or [::1]. Use the separately authorized browser workflow for real or deployed sites.',
+ scenario_url_unsafe: 'Use an inspected loopback URL without credentials, query, fragment or backslashes; do not disguise sensitive destinations.',
+ scenario_url_sensitive: 'Authentication, account, payment and other sensitive routes are unsupported. Use a separate authorized browser workflow for those paths; do not rename them to evade the guard.',
+ scenario_selector: 'Use a current visible CSS selector of 1-256 characters for the owned fixture.',
+ scenario_selector_unsafe: 'Use only non-sensitive supported visible controls and current CSS selectors. Authentication, uploads, payment, script expressions and snapshot references are unsupported.',
+ scenario_value: 'Use only non-sensitive fixture text within the documented fill limit.',
+ scenario_assert_kind: 'Use a visible or text DOM assertion; screenshots and arbitrary JavaScript are unsupported.',
+ scenario_match: 'Choose exact or substring for a literal text assertion.',
+ scenario_expected: 'Use bounded non-sensitive literal expected text; substring assertions must not be empty.',
+ scenario_no_assertion: 'Include at least one visible or literal text assertion on the owned fixture.',
+ scenario_action: 'Use only goto, click, fill or assert. Arbitrary JavaScript, screenshots and result imports are unsupported.',
+ scenario_sensitive: 'Remove sensitive data from the fixture scenario. Real sensitive workflows require a separate authorized browser workflow; do not encode data to evade screening.',
+};
+export function staticReceiptGuidance(execution: Record<string, unknown>, freshness: ReceiptFreshness, assessment?: {status: string; reason?: string; answers?: Record<string, {choice:string;confidence?:number;probabilities?:Record<string,number|undefined>}>}, receiptWarnings: string[] = [], context: {tool?: 'verification' | 'ui'; allowedCaseIds?: string[]} = {}) {
  const warnings: string[] = [], recommendedNextActions: string[] = [];
  const missingBinaries = receiptWarnings.filter(w => w.startsWith('missing_binary:')).map(w => w.slice('missing_binary:'.length));
  const reason = String(execution.reason);
+ if (assessment?.reason === 'invalid_case_id') {
+  warnings.push('assessment_case_id_rejected');
+  const allowed = [...new Set((context.allowedCaseIds ?? []).filter(id => /^(?:run|step-(?:0|[1-9]|1[0-9]))$/.test(id)))].slice(0,20);
+  recommendedNextActions.push(allowed.length
+   ? `Use unique assessment.caseNotes ids from this invocation: ${allowed.join(', ')}.${context.tool === 'ui' ? ' UI ids refer only to observed assertions, not planned coverage.' : ''}`
+   : 'This invocation has no observed eligible case ids. Omit caseNotes; do not invent ids or infer coverage from planned assertions.');
+ } else if (assessment?.reason === 'invalid_context') {
+  warnings.push('assessment_context_rejected');
+  recommendedNextActions.push('Provide only non-sensitive changeSummary and expectedBehavior (1-2000 characters), with at most 8 unique case notes of 1-300 characters and documented ids. Do not include URLs, paths, credentials or raw source.');
+ }
+ if (context.tool === 'ui' && execution.status === 'not_run') {
+  warnings.push('execution_not_passed');
+  if (Object.hasOwn(RECEIPT_UI_INPUT_ACTIONS, reason)) {
+   warnings.push('scenario_rejected');
+   recommendedNextActions.push(`${reason}: ${RECEIPT_UI_INPUT_ACTIONS[reason]}`);
+  } else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (!recommendedNextActions.length) recommendedNextActions.push('Correct the documented account routing, timeout and scenario input shape. Use an inspected owned non-sensitive loopback fixture; unsupported workflows need a separate authorized browser entry point.');
+  return {warnings, recommendedNextActions:recommendedNextActions.slice(0,3), advisoryOnly:true};
+ }
  if (execution.status !== 'passed') {
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
-  else recommendedNextActions.push('Inspect the relevant failing or incomplete tests locally.');
+  else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
- if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push('Run verification again against the current source.'); }
+ if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push(context.tool === 'ui' ? 'Stored browser observations do not establish current UI state. Reobserve only an allowed, authorized non-sensitive loopback scenario.' : 'Run verification again against the current source.'); }
  if (assessment && (assessment.status !== 'scored' || Object.values(assessment.answers ?? {}).some(a => a.confidence === undefined || a.confidence < 0.8 || a.probabilities?.[a.choice] === undefined || Number(a.probabilities[a.choice]) < 0.8))) { warnings.push('adequacy_unknown'); recommendedNextActions.push('Inspect coverage and boundary evidence; no confident adequacy claim is available.'); }
- else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push('Inspect changed behavior and add relevant boundary tests.'); }
+ else if (assessment && Object.values(assessment.answers ?? {}).some(a => ['gap', 'missing'].includes(a.choice))) { warnings.push('adequacy_gap'); recommendedNextActions.push(context.tool === 'ui' ? 'Inspect changed behavior and add relevant allowed DOM boundary assertions.' : 'Inspect changed behavior and add relevant boundary tests.'); }
  return { warnings, recommendedNextActions: recommendedNextActions.slice(0, 3), advisoryOnly: true };
 }
 
