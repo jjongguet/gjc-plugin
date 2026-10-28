@@ -29,12 +29,12 @@ function gitHead() {
 export async function runPilot({ outputDir, mode = "dry", budget = null, pricing = null, nativeProof = null, sharedDelivery = null, apiKey = null, approveLive = null, gjcBin = path.join(os.homedir(), ".local/bin/gjc") }) {
   if (!["dry", "live"].includes(mode) || typeof outputDir !== "string") throw new Error("invalid_pilot_arguments");
   if (mode === "dry" && (apiKey || approveLive !== null)) throw new Error("dry_credentials_or_approval_forbidden");
+  if (mode === "live" && (approveLive !== 1 || typeof apiKey !== "string" || !apiKey.trim())) throw new Error("live_not_authorized");
   const inputs = pilotInputs();
   const source = sourceDigest();
   const sourceHead = gitHead();
   let admission = null;
   if (mode === "live") {
-    if (approveLive !== 1 || typeof apiKey !== "string" || !apiKey.trim()) throw new Error("live_not_authorized");
     admission = checkLiveEvidence({ budget, pricing, nativeProof, sharedDelivery, currentSourceDigest: source });
   }
   mkdirSync(outputDir, { mode: 0o700 });

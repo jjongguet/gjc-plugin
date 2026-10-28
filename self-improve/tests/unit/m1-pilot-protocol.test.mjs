@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { checkLiveEvidence, pilotInputs, selectPublic, sourceDigest, cellReceipt } from "../../m1/pilot-protocol.mjs";
@@ -62,6 +64,14 @@ test("unapproved live execution is refused before creating artifacts or invoking
   const outputDir = path.join(root, "not-created");
   try {
     await assert.rejects(runPilot({ outputDir, mode: "live", apiKey: "fake-test-only" }), /live_not_authorized/);
+    assert.equal(existsSync(outputDir), false);
+    const cli = spawnSync(process.execPath, [fileURLToPath(new URL("../../m1/run-pilot.mjs", import.meta.url)), "--live", "--out", outputDir], {
+      env: { PATH: process.env.PATH, GIT_DIR: path.join(root, "missing-git"), OPENROUTER_API_KEY: "fake-test-only" },
+      encoding: "utf8",
+      timeout: 5000,
+    });
+    assert.equal(cli.status, 1);
+    assert.match(cli.stderr, /live_not_authorized/);
     assert.equal(existsSync(outputDir), false);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
