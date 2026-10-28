@@ -14,6 +14,7 @@
     "policy:check": "node scripts/check-pr-policy.mjs",
     "demo": "bun scripts/demo.mjs",
     "onboarding:smoke": "node scripts/onboarding-smoke.mjs",
+    "hermes:test": "cd integrations/hermes/jev-gate && python3 -m unittest discover -s tests",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:scripts": "node --test scripts/tests/checks.test.mjs scripts/tests/ultragoal-gate.test.mjs scripts/tests/ultragoal-succession.test.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",

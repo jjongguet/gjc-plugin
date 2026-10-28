@@ -66,6 +66,8 @@ local tree sits beside the repository (`self-improve/lib/guards.mjs`); the test 
 planned guard ids, guard statuses and skip counts, so green runs disclose what was planned out and
 what was skipped instead of hiding it. The workflow also creates an empty, never-committed `AGENTS.md`
 placeholder for the local-only existence contract.
+- `bun run hermes:test` — runs the Hermes gate unit tests under `integrations/hermes/jev-gate/` (requires `python3`; deliberately kept off the `test:*` chain so CI gains no Python dependency). Verified locally: 24 tests OK.
+- `node scripts/onboarding-smoke.mjs` — the real-gjc onboarding smoke; requires an actual `gjc` binary on `PATH`, so CI only covers it via the self-skip guards. Verified locally: status `passed`.
 
 ## Adding a plugin
 
