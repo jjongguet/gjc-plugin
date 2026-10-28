@@ -96,17 +96,6 @@ export function decisionProvider(id: string): DecisionProvider | undefined {
 export const CONFIDENCE_KINDS = ["provider_choice", "self_reported"] as const;
 export type DecisionConfidenceKind = (typeof CONFIDENCE_KINDS)[number];
 
-// Eligible assessment case-note ids. Public schemas name these only in field
-// descriptions (literal text the host reads statically): a host that validates a
-// declared enum/pattern rejects before the plugin runs and may echo the caller's
-// arguments, so membership is decided in-plugin (invalid_case_id). UI eligibility
-// additionally requires an observed assertion.
-export const ASSESSMENT_CASE_IDS = {
-	verification: ["run"],
-	ui: Array.from({ length: 20 }, (_, index) => `step-${index}`),
-} as const;
-
-
 /** Deterministic outcomes that are not a decision, and never a scoring signal. */
 export const NO_DECISION_REASONS = [
 	"off",

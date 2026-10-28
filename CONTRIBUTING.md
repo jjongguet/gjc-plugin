@@ -50,6 +50,7 @@ node verification-receipts/scripts/smoke-host.mjs --metrics
 node verification-receipts/scripts/smoke-host.mjs --installed
 node verification-receipts/scripts/smoke-host.mjs --installed --advisor
 node jev-advisor/scripts/smoke-results.mjs
+UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui-rejections
 UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui
 ```
 

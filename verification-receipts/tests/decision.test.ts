@@ -89,6 +89,12 @@ describe("adequacy Decisions contract", () => {
    for(const eligible of ids)expect(id.options.description).toContain(eligible);
    if(tool.name==='ui_regression_run')expect(walk(tool.parameters.properties.scenario)).toEqual([]);
   }
+  // Top-level constraints are deliberately unchanged; removing one needs an explicit decision.
+  const topLevel=(factory:any)=>{const p=factory({cwd:process.cwd(),typebox:{Type:T}}).parameters;const kept:Record<string,unknown>={additionalProperties:p.options.additionalProperties};for(const [name,node] of Object.entries(p.properties) as [string,any][]){if(name==='assessment'||name==='scenario')continue;const inner=node.kind==='Optional'?node.inner:node;const options=Object.fromEntries(Object.entries(inner.options??{}).filter(([key])=>key!=='description'));if(Object.keys(options).length)kept[name]=options;}return kept;};
+  expect(topLevel(verificationRun)).toEqual({additionalProperties:false,files:{minItems:1,maxItems:32},repository:{minLength:1,maxLength:4096},timeoutMs:{minimum:1,maximum:120000}});
+  expect(topLevel(verificationStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
+  expect(topLevel(uiRun)).toEqual({additionalProperties:false,account:{minLength:1,maxLength:64},timeoutMs:{minimum:1,maximum:90000},repository:{minLength:1,maxLength:4096}});
+  expect(topLevel(uiStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
  });
  test('nonpassing stale and unavailable evidence is decided before any call',async()=>{
   for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(0);}

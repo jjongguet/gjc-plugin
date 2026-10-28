@@ -87,9 +87,9 @@ bun ui-regression/scripts/build.mjs --check
 UI_REGRESSION_ACCOUNT=synthetic-route node verification-receipts/scripts/smoke-host.mjs --ui-rejections
 ```
 
-`--ui-rejections` uses a counted inert launcher and five fresh-CLI rejection
+`--ui-rejections` uses a counted inert launcher and six fresh-CLI rejection
 probes (sensitive route/value, nonloopback host, external repository, unsafe
-assessment). Its synthetic launch is an observer control only: it observes no
+assessment, unsupported action with a synthetic canary). Its synthetic launch is an observer control only: it observes no
 real browser. Every tool probe must add zero launches and zero receipts.
 Add `--installed` only after the released user bundle is installed.
 

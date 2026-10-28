@@ -5,7 +5,7 @@ import http from 'node:http';
 import {spawn,spawnSync,execFileSync} from 'node:child_process';
 import assert from 'node:assert/strict';
 import {createHash,randomUUID} from 'node:crypto';
-import {createSmokeEnvironment,assertSmokeIsolation,asideLaunchCounterPath,asideLaunchCount,writeAsideProbeWrapper,parseAdapterResult,receiptFileCount,journalRecordCount,journalText,advertisedAssessmentContract,rejectableConstraints} from './smoke-environment.mjs';
+import {createSmokeEnvironment,assertSmokeIsolation,asideLaunchCounterPath,asideLaunchCount,writeAsideProbeWrapper,parseAdapterResult,receiptFileCount,journalText,advertisedAssessmentContract,rejectableConstraints} from './smoke-environment.mjs';
 // Synthetic canary for the caller-text echo privacy checks. Never a real value.
 const nativeCanary='SYNTHETIC_NATIVE_PROBE_CANARY';
 const worktree=process.cwd();
@@ -355,10 +355,9 @@ for(const [plugin,outcome] of cases){
       assert.equal(result.receipt?.execution.status,'passed','unobserved_case_did_not_execute');
       assert.equal(result.assessment?.reason,'invalid_case_id');
       assert.ok(launchDelta>=1,'unobserved_case_not_launched');assert.equal(receiptDelta,1,'unobserved_case_receipt_delta');
-      const allowed=result.guidance?.allowedCaseIds??result.allowedCaseIds;if(allowed!==undefined)assert.deepEqual(allowed,['step-1']);
       assert.ok(text.includes('step-1'),'guidance_missing_observed_case_id');
       assert.ok(!text.includes('step-3'),'unobserved_case_id_echoed');
-      evidence.push({probe:'unobserved_case_id',status:'invalid_case_id',reason:result.assessment.reason,launchDelta,receiptDelta,allowedCaseIds:allowed??['step-1'],guidanceNamesObservedId:true});
+      evidence.push({probe:'unobserved_case_id',status:'invalid_case_id',reason:result.assessment.reason,launchDelta,receiptDelta,guidanceNamesObservedId:true,unobservedIdEchoed:false});
      }
      if(step===14){
       // Unsafe/shape assessment: deterministic invalid_context before any launch; the
