@@ -210,7 +210,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('assessment_case_id_rejected');
   const allowed = [...new Set((context.allowedCaseIds ?? []).filter(id => /^(?:run|step-(?:0|[1-9]|1[0-9]))$/.test(id)))].slice(0,20);
   recommendedNextActions.push(allowed.length
-   ? `Use unique assessment.caseNotes ids from this invocation: ${allowed.join(', ')}. UI ids refer only to observed assertions, not planned coverage.`
+   ? `Use unique assessment.caseNotes ids from this invocation: ${allowed.join(', ')}.${context.tool === 'ui' ? ' UI ids refer only to observed assertions, not planned coverage.' : ''}`
    : 'This invocation has no observed eligible case ids. Omit caseNotes; do not invent ids or infer coverage from planned assertions.');
  } else if (assessment?.reason === 'invalid_context') {
   warnings.push('assessment_context_rejected');

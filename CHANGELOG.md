@@ -8,7 +8,7 @@ Plugins: jev-advisor 0.0.12 · verification-receipts 0.0.8 · ui-regression 0.0.
 
 ### Added
 
-- **verification-receipts, ui-regression**: `invalid_case_id` no-decision reason for a well-formed case-note id outside the invocation's eligible set; the result names the constant allowed ids and never echoes the rejected id or note (JJO-1056).
+- **verification-receipts, ui-regression**: `invalid_case_id` no-decision reason for a well-formed case-note id outside the invocation's eligible set; the result names only host-owned eligible ids (`run` for verification tools, observed `step-N` assertions for UI tools) and never echoes the rejected id or note (JJO-1056).
 - **ui-regression**: specific `scenario_*` execution reasons (for example `scenario_url_sensitive`, `scenario_url_host`, `scenario_action`) with fixed recovery guidance in place of the generic not-run reason.
 
 ### Changed

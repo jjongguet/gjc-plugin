@@ -402,7 +402,7 @@ for(const [plugin,outcome] of cases){
      assert.equal(result.receipt.execution.status,'passed');
      assert.deepEqual(result.assessment,{status:'invalid_input',reason:'invalid_case_id'});
      assert.ok(result.warnings.includes('assessment_case_id_rejected'),'case_id_rejection_warning_missing');
-     assert.ok(result.recommendedNextActions.some(action=>action.includes('run')),'case_id_guidance_missing_allowed_ids');
+     assert.ok(result.recommendedNextActions.includes('Use unique assessment.caseNotes ids from this invocation: run.'),'case_id_guidance_missing_allowed_ids');
      assert.equal(result.journalStorage.persisted,true);
      const journal=await journalText(env,plugin);
      const canaryEcho=text.includes(nativeCanary),idEcho=text.includes('policy'),journalCanaryEcho=journal.includes(nativeCanary),journalIdEcho=journal.includes('policy');

@@ -30,6 +30,11 @@ test('every allowlisted UI rejection has a safe mapping and actionable non-retry
  const rejected=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{tool:'ui',allowedCaseIds:['step-1','PRIVATE_CANARY','step-2']});
  expect(rejected.recommendedNextActions[0]).toContain('step-1, step-2');
  expect(JSON.stringify(rejected)).not.toContain('PRIVATE_CANARY');
+ const verification=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{allowedCaseIds:['run']});
+ expect(verification.recommendedNextActions[0]).toBe('Use unique assessment.caseNotes ids from this invocation: run.');
+ const none=staticReceiptGuidance({status:'passed',reason:'complete'},'fresh',{status:'invalid_input',reason:'invalid_case_id'},[],{tool:'ui',allowedCaseIds:[]});
+ expect(none.warnings).toContain('assessment_case_id_rejected');
+ expect(none.recommendedNextActions[0]).toContain('no observed eligible case ids');
 });
 afterEach(async()=>{for(const p of owned.splice(0)) await fs.rm(p,{recursive:true,force:true});});
 async function setup(){const dir=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'receipt-test-')));owned.push(dir);const root=path.join(dir,'repo');await fs.mkdir(root);const git=(...args:string[])=>execFileSync('git',args,{cwd:root,env:{PATH:process.env.PATH},stdio:'pipe'});git('init','-q');await fs.writeFile(path.join(root,'a.mjs'),'export const value=1;');git('add','a.mjs');git('-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture');const base=path.join(dir,'store');return {root,base,git};}
