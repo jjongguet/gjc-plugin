@@ -67,7 +67,10 @@ function fixture() {
   };
 }
 
+// Simulated probes inject their runtime as well as fakeRun; real kernel tests
+// below retain host runtime detection and their explicit macOS boundary.
 const liveArgs = (f) => ({
+  runtime: SEATBELT_RUNTIME,
   mountDir: f.mount,
   readRoots: [f.system, f.mount],
   protectedReadRoots: [f.oracle, f.store, f.credential],
