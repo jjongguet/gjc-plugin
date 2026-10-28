@@ -108,3 +108,28 @@ test('post-execution repository loss preserves observations and journals the out
   expect(result.receiptStorage.persisted).toBe(false);expect(result.journalStorage.persisted).toBe(true);expect(result.warnings).toContain('source_not_fresh');
  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
 },30000);
+
+test('a rejected case id persists a receipt envelope and journal without the id or note bytes',async()=>{
+ const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'adapter-case-id-'))),root=path.join(owned,'repo'),home=path.join(owned,'home');
+ await fs.mkdir(root);await fs.mkdir(home,{mode:0o700});const oldHome=process.env.HOME,oldProvider=process.env.JEV_ADVISOR_PROVIDER;
+ process.env.HOME=home;process.env.JEV_ADVISOR_PROVIDER='off';
+ const canary='SYNTHETIC_NATIVE_PROBE_CANARY';
+ try {
+  execFileSync('git',['init','-q'],{cwd:root});
+  await fs.writeFile(path.join(root,'pass.mjs'),"import test from 'node:test';test('local fixture',()=>{});");
+  execFileSync('git',['add','.'],{cwd:root});execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:root});
+  const result=parse(await verificationRun({cwd:root,typebox:{Type}}).execute('case-id',{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'policy',note:canary+' observed'}]}}));
+  expect(result.receipt.execution.status).toBe('passed');
+  expect(result.assessment).toEqual({status:'invalid_input',reason:'invalid_case_id'});
+  // Below the receipt cap, so the envelope is really persisted and inspected.
+  expect(result.receiptStorage.persisted).toBe(true);expect(result.journalStorage.persisted).toBe(true);
+  expect(result.warnings).toContain('assessment_case_id_rejected');
+  expect(result.recommendedNextActions.some((action:string)=>action.includes('run'))).toBe(true);
+  const text=JSON.stringify(result);expect(text).not.toContain('policy');expect(text).not.toContain(canary);
+  const store=path.join(home,'.gjc-plugin');
+  const files:string[]=[];const walk=async(dir:string)=>{for(const entry of await fs.readdir(dir,{withFileTypes:true})){const p=path.join(dir,entry.name);if(entry.isDirectory())await walk(p);else files.push(p);}};await walk(store);
+  expect(files.some(file=>file.includes(path.join('verification-receipts','receipts')))).toBe(true);
+  expect(files.some(file=>file.includes(path.join('verification-receipts','journal')))).toBe(true);
+  for(const file of files){const body=await fs.readFile(file,'utf8');expect(body).not.toContain('policy');expect(body).not.toContain(canary);}
+ }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
+},30000);

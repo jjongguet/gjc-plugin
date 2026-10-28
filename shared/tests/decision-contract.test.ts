@@ -1,12 +1,22 @@
 import { describe, expect, test } from "bun:test";
 import {
 	CONFIDENCE_KINDS,
+	ASSESSMENT_CASE_IDS,
 	DECISION_PROVIDERS,
 	NO_DECISION_REASONS,
 	decisionProvider,
 	isAllowedDecisionEndpoint,
 	validateProbabilityMap,
 } from "../lib/decision-contract";
+
+test("assessment syntax rejects invented verification IDs and out-of-range UI indices", () => {
+	expect(ASSESSMENT_CASE_IDS.verification).toEqual(["run"]);
+	const ui = ASSESSMENT_CASE_IDS.ui;
+	expect(ui).toHaveLength(20);
+	for (let n = 0; n < 20; n++) expect(ui).toContain(`step-${n}`);
+	for (const id of ["run", "step-20", "step--1", "step-01", "step-x", "", "policy", "C1", "C2"]) expect(ui).not.toContain(id);
+	expect(NO_DECISION_REASONS).toContain("invalid_case_id");
+});
 
 describe("provider table", () => {
 	test("records exact ids without appending context windows", () => {

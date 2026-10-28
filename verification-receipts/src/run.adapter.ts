@@ -15,7 +15,7 @@ export default function verificationRun(pi: {cwd: string; typebox: {Type: any}})
    files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs test files; no globs, symlinks, custom flags or loaders.'}),
    repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
    timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
-   assessment: T.Optional(T.Object({changeSummary:T.String({maxLength:2000}),expectedBehavior:T.String({maxLength:2000}),caseNotes:T.Optional(T.Array(T.Object({id:T.String(),note:T.String({maxLength:300})}),{maxItems:8}))},{additionalProperties:false}))
+   assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))
   }, {additionalProperties:false}),
   async execute(toolCallId: string, params: {files:string[];repository?:string;timeoutMs?:number;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
    const started = performance.now();
@@ -33,7 +33,7 @@ export default function verificationRun(pi: {cwd: string; typebox: {Type: any}})
     const receipt = createReceipt({plugin:'verification-receipts',toolCallId,repositoryDigest:await repositoryDigest(root),durationMs:Math.round(performance.now()-started),specDigest,before,after,freshness,execution,warnings:diagnostics.missingBinaries.map(name => `missing_binary:${name}`),limitations:['Native counts are not assertion counts or coverage proof.','Excluded credential and cache paths are not freshness-covered.','Local test code is not sandboxed; timestamps are descriptive.']});
     const storage = await persistReceipt(receipt,undefined,params.files);
     const assessment = await assessAdequacy(params.assessment,{status:execution.status,counts:execution.counts,freshness,caseIds:['run']});
-    return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment,receipt.warnings)});
+    return text({receipt,...storage,assessment,...staticReceiptGuidance(execution,freshness,assessment,receipt.warnings,{allowedCaseIds:['run']})});
    } catch (error) {
     const reason = error instanceof Error ? error.message : '';
     if (execution.status === 'not_run' && RUN_INPUT_REASONS.includes(reason)) execution = {status:'not_run',reason};

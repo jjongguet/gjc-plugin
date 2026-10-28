@@ -6,6 +6,7 @@ import {execFileSync} from 'node:child_process';
 import uiRun from '../src/run.adapter';
 import uiStatus from '../src/status.adapter';
 import {createReceipt,persistReceipt,fingerprintSource,specFingerprint,repositoryDigest} from '../../verification-receipts/lib/receipts';
+import {readPluginOutcomeSnapshot} from '../../shared/lib/results';
 const Type=new Proxy({}, {get:()=> (...args:unknown[])=>({args})});
 const parse=(r:any)=>JSON.parse(r.content[0].text);
 let originalFetch:typeof fetch,originalProvider:string|undefined,originalKey:string|undefined;
@@ -81,4 +82,94 @@ test('standalone generated UI tools load with only declared installed files',asy
  const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'ui-standalone-')));
  try{for(const [file,name] of [['ui-regression-run.ts','ui_regression_run'],['ui-regression-status.ts','ui_regression_status']]){await fs.copyFile(path.resolve(import.meta.dir,'../tools',file),path.join(owned,file));const module=await import(path.join(owned,file));expect(module.default({cwd:process.cwd(),typebox:{Type}}).name).toBe(name);}}
  finally{await fs.rm(owned,{recursive:true,force:true});}
+});
+
+test('safe rejection reasons precede launch and observed membership agrees with status',async()=>{
+ const repo=path.join(adapterHome,'repo'),bin=path.join(adapterHome,'bin'),launches=path.join(adapterHome,'launches'),outside=path.join(adapterHome,'outside');
+ await fs.mkdir(repo);await fs.mkdir(bin);await fs.mkdir(outside);
+ execFileSync('git',['init','-q'],{cwd:outside});
+ execFileSync('git',['init','-q'],{cwd:repo});
+ await fs.writeFile(path.join(repo,'fixture.js'),'export const ready = true;\n');
+ execFileSync('git',['add','.'],{cwd:repo});
+ execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:repo});
+ // Fixed local protocol fixture: no network, browser or production client.
+ await fs.writeFile(path.join(bin,'aside'),`#!/usr/bin/env node
+const fs=require('node:fs');
+fs.appendFileSync(${JSON.stringify(launches)},'launch\\n');
+const code=process.argv.slice(2)[5];
+const nonce=JSON.parse(code.match(/const nonce = ("[^"]+");/)[1]);
+const emit=frame=>console.log('UI_ASIDE_FRAME '+JSON.stringify({version:1,nonce,...frame}));
+emit({type:'step',step:0,status:'passed',assertion:false});
+emit({type:'step',step:1,status:'failed',assertion:true});
+emit({type:'terminal',completed:1,reason:'assertion_failed'});
+emit({type:'cleanup',status:'confirmed'});
+`,{mode:0o755});
+ const oldPath=process.env.PATH;process.env.PATH=`${bin}${path.delimiter}${oldPath??''}`;
+ const scenario={id:'safe-fixture',expectedBehavior:'A local label is visible',steps:[{action:'goto',url:'http://127.0.0.1:4311/'},{action:'assert',selector:'#result',kind:'visible'},{action:'assert',selector:'#later',kind:'visible'}]};
+ const assessment={changeSummary:'Change local label behavior',expectedBehavior:'A local label is visible',caseNotes:[{id:'step-2',note:'A later boundary observation'}]};
+ const run=uiRun({cwd:repo,typebox:{Type}}),lookup=uiStatus({cwd:repo,typebox:{Type}});
+ const count=async()=>{try{return (await fs.readFile(launches,'utf8')).trim().split('\n').length;}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return 0;throw e;}};
+ try{
+  // Positive observer control: an actual child invocation produces a failed observed assertion.
+  const observed=parse(await run.execute('observed',{account:'PRIVATE_ROUTE',scenario,assessment}));
+  expect(await count()).toBe(1);expect(observed.receipt.execution.reason).toBe('assertion_failed');
+  expect(observed.assessment.reason).toBe('invalid_case_id');expect(observed.persisted).toBe(true);
+  expect(observed.recommendedNextActions[0]).toContain('step-1');expect(observed.recommendedNextActions[0]).not.toContain('step-2');
+  const status=parse(await lookup.execute('lookup',{receiptId:observed.receipt.id,assessment}));
+  expect(status.assessment.reason).toBe('invalid_case_id');
+  const reached=parse(await lookup.execute('reached',{receiptId:observed.receipt.id,assessment:{...assessment,caseNotes:[{id:'step-1',note:'Reached failed assertion'}]}}));
+  expect(reached.assessment.reason).toBe('insufficient_evidence');expect(calls).toHaveLength(0);
+  const badScenario=(url:string)=>({...scenario,steps:[{action:'goto',url},scenario.steps[1]]});
+  for(const [input,reason] of [
+   [{account:'PRIVATE_ROUTE',scenario:badScenario('http://127.0.0.1:4311/login/PRIVATE_PATH')},'scenario_url_sensitive'],
+   [{account:'PRIVATE_ROUTE',scenario:badScenario('https://PRIVATE_HOST.invalid/')},'scenario_url_host'],
+   [{account:'PRIVATE_ROUTE',scenario:{...scenario,expectedBehavior:'password=PRIVATE_VALUE'}},'scenario_sensitive'],
+   [{account:'PRIVATE_ROUTE',scenario:{...scenario,steps:[scenario.steps[0],{action:'screenshot',path:'PRIVATE_OUTPUT'}]}},'scenario_action'],
+   [{account:'PRIVATE_ROUTE',scenario,repository:outside},'repository_outside_session_cwd'],
+   [{account:'PRIVATE_ROUTE',scenario,unexpected:'PRIVATE_EXTRA'},'invalid_or_unavailable_input'],
+   [{account:'PRIVATE_ROUTE',scenario:badScenario('http://127.0.0.1:4311/auth'),assessment:{...assessment,changeSummary:'password=PRIVATE_VALUE'}},'scenario_url_sensitive'],
+  ] as const){
+   const result=parse(await run.execute('rejection',input as any));
+   expect(result.execution).toEqual({status:'not_run',reason});expect(await count()).toBe(1);
+   expect(result.receipt).toBeUndefined();expect(result.journalStorage.persisted).toBe(true);
+   const text=JSON.stringify(result);expect(text).not.toContain('PRIVATE_');
+   expect(result.recommendedNextActions.join(' ')).not.toMatch(/tests|Run verification again/);
+  }
+  const unsafe=parse(await run.execute('unsafe',{account:'PRIVATE_ROUTE',scenario,repository:outside,assessment:{...assessment,changeSummary:'password=PRIVATE_VALUE'}}));
+  expect(unsafe.assessment.reason).toBe('invalid_context');expect(unsafe.execution.reason).not.toBe('repository_outside_session_cwd');
+  expect(unsafe.receipt).toBeUndefined();expect(unsafe.journalStorage.persisted).toBe(true);expect(await count()).toBe(1);
+  const journal=await readPluginOutcomeSnapshot('ui-regression');
+  expect(journal.status).toBe('ok');expect(JSON.stringify(journal)).not.toContain('PRIVATE_');
+  expect(JSON.stringify(journal)).toContain('scenario_url_sensitive');expect(JSON.stringify(journal)).toContain('invalid_case_id');
+  expect(calls).toHaveLength(0);
+ }finally{if(oldPath===undefined)delete process.env.PATH;else process.env.PATH=oldPath;}
+},30000);
+test('scenario bounds absent from the public schema are rejected in-plugin before any launch',async()=>{
+ const bin=path.join(adapterHome,'bin'),counter=path.join(adapterHome,'aside-launches.log');await fs.mkdir(bin);
+ await fs.writeFile(path.join(bin,'aside'),`#!/bin/sh\necho launch >> ${JSON.stringify(counter)}\nexit 1\n`,{mode:0o755});
+ const oldPath=process.env.PATH;process.env.PATH=`${bin}${path.delimiter}${oldPath??''}`;
+ const goto={action:'goto',url:'http://127.0.0.1:4311/'},assert={action:'assert',selector:'#result',kind:'visible'};
+ const base={id:'bounds',expectedBehavior:'Fixture page renders',steps:[goto,assert]};
+ const cases:[unknown,string][]=[
+  [{...base,steps:[]},'scenario_steps'],
+  [{...base,steps:[goto,...Array.from({length:20},()=>assert)]},'scenario_steps'],
+  [{...base,steps:[goto,{action:'fill',selector:'#name',value:'v '.repeat(500)+'x'},assert]},'scenario_value'],
+  [{...base,expectedBehavior:'word '.repeat(400)+'x'},'scenario_expected_behavior'],
+  [{...base,id:'a'.repeat(65)},'scenario_id'],
+  [{...base,steps:[goto,{action:'screenshot'},assert]},'scenario_action'],
+  [{...base,steps:[goto,{action:'assert',selector:'#result',kind:'hidden'}]},'scenario_assert_kind'],
+  [{...base,steps:[goto,{action:'assert',selector:'#result',kind:'text',match:'regex',expected:'Ready'}]},'scenario_match'],
+  [{...base,extra:'value'},'scenario_fields'],
+ ];
+ try{
+  const tool=uiRun({cwd:process.cwd(),typebox:{Type}});
+  for(const [scenario,reason] of cases){
+   const result=parse(await tool.execute('bounds',{account:'route',scenario} as any));
+   expect(result.execution).toEqual({status:'not_run',reason});
+   expect(result.receipt).toBeUndefined();
+   expect(result.recommendedNextActions.length).toBeGreaterThan(0);
+  }
+  await expect(fs.stat(counter)).rejects.toThrow();
+  expect(calls.length).toBe(0);
+ }finally{if(oldPath===undefined)delete process.env.PATH;else process.env.PATH=oldPath;}
 });
