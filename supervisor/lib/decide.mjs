@@ -21,7 +21,7 @@ export const DECISION_MIN_CONFIDENCE = 0.6;
  */
 export async function resolveJudgment(session, judgment, {
   runner = defaultRunner,
-  decisionAsk = process.env.SUPERVISOR_DECISION_ASK ?? path.join(os.homedir(), ".gjc-user-policy", "bin", "decision-ask"),
+  decisionAsk = process.env.SUPERVISOR_DECISION_ASK ?? path.join(os.homedir(), ".gjc", "agent", "policy", "bin", "decision-ask"),
   model = DECISION_MODEL,
   timeoutMs = 8000,
   now = Date.now(),

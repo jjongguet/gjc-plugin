@@ -81,7 +81,7 @@ host, rate limit or a repository without checks is recorded as `unavailable` /
 
 One ambiguity is escalated to a decisions model: a dirty tree that stopped growing
 past the stall window (`stalled` vs `thrashing`). That goes through
-`~/.gjc-user-policy/bin/decision-ask` (`jev-omni`, confidence ≥ 0.6). A missing CLI,
+`~/.gjc/agent/policy/bin/decision-ask` (`jev-omni`, confidence ≥ 0.6). A missing CLI,
 abstain, provider error, unknown label or low confidence falls back to the
 deterministic default and records `source: deterministic_fallback` plus the error in
 the snapshot and `events.jsonl`. No other state spends a model call.

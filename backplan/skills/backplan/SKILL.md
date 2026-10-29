@@ -10,7 +10,7 @@ execution-bound work arrives: derive it, grade it, register it, then execute.
 `backplan_check` (gjc-plugin `backplan`) is the deterministic gate that grades
 the draft and renders Linear-ready payloads. The plugin is keyless and local:
 it never writes to Linear; registration goes through the workspace Linear MCP
-tools and `~/.gjc-user-policy/bin/linear-trace.py`.
+tools and `~/.gjc/agent/policy/bin/linear-trace.py`.
 
 ## When this fires
 
@@ -94,7 +94,7 @@ instead of guessing what source availability cannot establish:
    `description` and `labels`, in plan order. Create any missing label first
    (`save_issue_label`) so registration cannot half-fail.
 4. Start trace:
-   `python3 ~/.gjc-user-policy/bin/linear-trace.py record --issue JJO-N --event start --authority user-approved --summary '실행 연결 …' --publish`.
+   `python3 ~/.gjc/agent/policy/bin/linear-trace.py record --issue JJO-N --event start --authority user-approved --summary '실행 연결 …' --publish`.
    Include the plan digest in the first trace summary or the issue footer.
 5. Execute issue-based. Checkpoint/commit/verification/delivery events follow
    `rule://linear-work`; a material plan change is a `scope-change` event and,

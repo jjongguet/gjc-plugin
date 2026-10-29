@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { resolveJudgment } from "../lib/decide.mjs";
 import { fail, fakeRunner, judgeFixture, NOW, ok } from "./helpers.mjs";
+import path from "node:path";
+import os from "node:os";
 
 const judgment = (ambiguous) => ({
   id: "lane:alpha",
@@ -16,6 +18,13 @@ test("a deterministic judgment never spends a decision call", async () => {
   assert.equal(resolved.source, "deterministic");
   assert.equal(resolved.state, "stalled");
   assert.deepEqual(runner.calls, []);
+});
+
+test("the default decision-ask path points at ~/.gjc/agent/policy/bin", async () => {
+  const runner = fakeRunner([(command) => (command.includes("decision-ask") ? ok(JSON.stringify({ choice: "thrashing", confidence: 0.9, model: "jev-omni" })) : null)]);
+  const resolved = await resolveJudgment(judgeFixture(), judgment(true), { runner, now: NOW });
+  assert.equal(resolved.source, "decision");
+  assert.ok(runner.calls[0].startsWith(`${path.join(os.homedir(), ".gjc", "agent", "policy", "bin", "decision-ask")} --question`), runner.calls[0]);
 });
 
 test("an ambiguous judgment adopts a confident decision-model choice", async () => {
