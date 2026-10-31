@@ -33,13 +33,14 @@ export type DecisionProvider = {
 
 export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 	{
-		id: "openrouter/typesafe/jev-1.13",
+		id: "openrouter/typesafe/jev-1.14",
 		provider: "openrouter",
-		model: "typesafe/jev-1.13",
+		model: "typesafe/jev-1.14",
 		endpoint: "https://openrouter.ai/api/alpha/decisions",
 		authEnv: ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"],
 		status: "baseline",
-		note: "Current advisor tier/check and verification adequacy baseline. OpenRouter's public catalog lists no per-token price for this alpha route, so no cost ceiling can be derived from it.",
+		contextTokens: 262144,
+		note: "Advisor tier/check and verification adequacy baseline. Jev 1.14 also reads image parts in state (image/png|jpeg, 256-1568 px per side) and answers box questions; $0.042 per 1M input tokens, output free. OpenRouter labels this credential `jjong-router`.",
 	},
 	{
 		id: "opengateway/sionic-ai/jev-omni",
@@ -1331,7 +1332,7 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
  if (evidenceIncomplete) return { status: "unknown", reason: "insufficient_evidence" };
  if (input === undefined) return { status: "unknown", reason: "missing_context" };
  const explicitContext = input === undefined ? { authorship: "not_supplied" } : { authorship: "caller_authored", ...(input as AssessmentInput) };
- const body = JSON.stringify({ model: "typesafe/jev-1.13", state: { explicitContext, observed }, questions: {
+ const body = JSON.stringify({ model: "typesafe/jev-1.14", state: { explicitContext, observed }, questions: {
   coverage_alignment: { type: "choice", instructions: "Assess whether caller-authored expected behavior and case notes align with the change. Counts are execution evidence, not proof of quality. If context is not_supplied, choose unknown. Failed, absent or stale execution is never a current passing verification.", criteria: { aligned: "Evidence aligns with expected behavior.", gap: "A coverage gap is evident.", none: "No applicable coverage evidence.", unknown: "Insufficient information." } },
   boundary_evidence: { type: "choice", instructions: "Assess boundary and failure evidence only from supplied context; never infer it from counts. If context is not_supplied, choose unknown. Empty observations cannot establish boundary coverage.", criteria: { present: "Relevant boundary or failure evidence is supplied.", missing: "Relevant boundary evidence is missing.", none: "No applicable boundary behavior.", unknown: "Insufficient information." } }
  } });
@@ -1402,7 +1403,7 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
  const T=pi.typebox.Type;
  return {
   name:'verification_status',label:'Verification Status',
-  description:'Read one immutable repository-scoped local verification receipt and recompute source freshness. Historical execution is never rerun. Automatically attempt Jev adequacy on every lookup, including stale or missing evidence, at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Optional assessment supplies non-sensitive context, not an opt-in switch. Only selected summaries/notes and bounded status/counts/freshness leave; no logs, diffs, source, test names, paths, keys or accounts. Missing context, failures and stale evidence cannot establish sufficient current verification. Warning-only; no automatic repair or blocking.',
+  description:'Read one immutable repository-scoped local verification receipt and recompute source freshness. Historical execution is never rerun. Automatically attempt Jev adequacy on every lookup, including stale or missing evidence, at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Optional assessment supplies non-sensitive context, not an opt-in switch. Only selected summaries/notes and bounded status/counts/freshness leave; no logs, diffs, source, test names, paths, keys or accounts. Missing context, failures and stale evidence cannot establish sufficient current verification. Warning-only; no automatic repair or blocking.',
   parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'The repository the receipt was recorded for, as passed to verification_run; defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))},{additionalProperties:false}),
   async execute(_toolCallId:string,params:{receiptId:string;repository?:string;assessment?:unknown}) {
    const text=async(v:Record<string,any>)=>({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','status',v))}]});

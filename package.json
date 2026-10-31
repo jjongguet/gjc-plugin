@@ -1,6 +1,6 @@
 {
   "name": "gjc-plugin",
-  "version": "0.0.16",
+  "version": "0.0.17",
   "private": true,
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",

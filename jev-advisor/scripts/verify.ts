@@ -126,8 +126,8 @@ async function runSuite(root: string) {
 	const launch = (id = "call-a", input = batch(), jobId = "job-a", extra: any = {}) => ({ type: "tool_result", toolName: "task", toolCallId: id, input, details: { results: [], async: { state: "running", type: "task", jobId }, ...extra }, isError: false });
 	const terminal = (entries: any[], extra: any = {}) => ({ type: "tool_result", toolName: "subagent", details: { subagents: entries }, isError: false, ...extra });
 	const entry = (jobId = "job-a", status = "completed", extra = {}) => ({ jobId, id: `allocated-${jobId}`, status, ...extra });
-	const manual = toolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
-	const checkTool = checkToolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+	const manual = toolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
+	const checkTool = checkToolModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 	const systemCheck = (value: { verdict?: unknown; confidence?: unknown; probabilities?: unknown; rationale?: unknown } = { verdict: "correct", confidence: 0.9 }) =>
 		new Response(JSON.stringify({ answers: { check: { type: "choice", choice: value.verdict, confidence: value.confidence, ...(value.probabilities !== undefined ? { probabilities: value.probabilities } : {}), ...(value.rationale !== undefined ? { rationale: value.rationale } : {}) } } }));
 	const text = (value: any) => value.content[0].text;
@@ -136,6 +136,23 @@ async function runSuite(root: string) {
 		assert.equal(init.redirect, "error");
 		return config.provider === "openrouter" ? chat(value) : system(value);
 	});
+
+	const pngBytes = (width: number, height: number, animated = false) => {
+		const signature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+		const chunk = (type: string, data: Buffer) => {
+			const length = Buffer.alloc(4); length.writeUInt32BE(data.length);
+			return Buffer.concat([length, Buffer.from(type, "ascii"), data, Buffer.alloc(4)]);
+		};
+		const header = Buffer.alloc(13); header.writeUInt32BE(width, 0); header.writeUInt32BE(height, 4); header[8] = 8; header[9] = 2;
+		const parts = [signature, chunk("IHDR", header)];
+		if (animated) parts.push(chunk("acTL", Buffer.alloc(8)));
+		parts.push(chunk("IDAT", Buffer.from([0x78, 0x9c, 0x03, 0x00, 0x00, 0x00, 0x00, 0x01])), chunk("IEND", Buffer.alloc(0)));
+		return Buffer.concat(parts);
+	};
+	const jpegBytes = (width: number, height: number) => Buffer.concat([
+		Buffer.from([0xff, 0xd8, 0xff, 0xc0, 0x00, 0x11, 0x08, height >> 8, height & 0xff, width >> 8, width & 0xff, 0x03, 0x01, 0x11, 0x00, 0x02, 0x11, 0x01, 0x03, 0x11, 0x01]),
+		Buffer.from([0xff, 0xd9]),
+	]);
 
 	await check("egress allowlist and credentials/redirect boundary", () => {
 		for (const url of ["https://openrouter.ai/api/alpha/decisions", "https://api.typesafe.ai/v1/systemone", "http://127.0.0.1:11435/v1/systemone", "http://[::1]:1234/"]) assert.equal(core.isAllowedEndpoint(url), true);
@@ -251,6 +268,66 @@ async function runSuite(root: string) {
 		const base = core.composeCheckPrompt({ question: "q", artifact: "" }).length;
 		assert.equal(core.prepareCheck("q", "a".repeat(cap - base), cap).status, "ok");
 		assert.equal(core.prepareCheck("q", "a".repeat(cap - base + 1), cap).status, "input_too_large");
+	});
+
+	await check("image evidence: deterministic inspection, bounds and jev-only wire parts", async () => {
+		const png512 = pngBytes(512, 512);
+		assert.deepEqual(core.inspectImage(png512).image, { mediaType: "image/png", base64: "", width: 512, height: 512 });
+		assert.deepEqual(core.inspectImage(jpegBytes(800, 600)).image, { mediaType: "image/jpeg", base64: "", width: 800, height: 600 });
+		assert.equal(core.inspectImage(pngBytes(255, 512)).status, "unsupported_input", "below the 256 px minimum");
+		assert.equal(core.inspectImage(pngBytes(512, 1569)).status, "input_too_large", "above the 1568 px maximum");
+		assert.equal(core.inspectImage(pngBytes(260, 260)).status, "unsupported_input", "below the total pixel floor");
+		assert.equal(core.inspectImage(pngBytes(512, 512, true)).status, "unsupported_input", "animated PNG is rejected");
+		assert.equal(core.inspectImage(Buffer.from("GIF89a")).status, "unsupported_input");
+		assert.equal(core.inspectImage(new Uint8Array(0)).status, "unsupported_input");
+
+		const base64 = png512.toString("base64");
+		const image = { mediaType: "image/png", base64, width: 512, height: 512 };
+		assert.equal(core.prepareCheck("q", "artifact", 4000, [image]).status, "ok");
+		assert.equal(core.prepareCheck("q", "artifact", 4000, [image, image, image, image, image]).status, "input_too_large");
+		assert.equal(core.prepareCheck("q", "artifact", 4000, [{ ...image, mediaType: "image/webp" }]).status, "unsupported_input");
+		assert.equal(core.prepareCheck("q", "artifact", 4000, [{ ...image, base64: "not base64!" }]).status, "unsupported_input");
+		assert.equal(core.prepareCheck("q", "artifact", 4000, [{ ...image, width: 100, height: 100 }]).status, "unsupported_input");
+		assert.equal(core.prepareCheck("q", "artifact", 4000, "images").status, "unsupported_input");
+
+		const prepared = core.prepareCheck("Does the screenshot show the retry banner?", "Observed UI state", 4000, [image]);
+		assert.equal(prepared.status, "ok");
+		let wire = "";
+		const decided = await core.askCheckModel(cfg(), prepared.check, async (_: any, init: any) => { wire = String(init.body); return systemCheck(); });
+		assert.equal(decided.status, "decision");
+		assert.deepEqual(JSON.parse(wire).state, ["Observed UI state", { type: "image_url", image_url: { url: `data:image/png;base64,${base64}` } }]);
+		assert.equal(JSON.parse(wire).model, "typesafe/jev-1.14");
+
+		let calls = 0;
+		const noFetch = async () => { calls++; return systemCheck(); };
+		for (const provider of ["openrouter", "ollaya", "typesafe-jev"]) {
+			assert.equal((await core.askCheckModel(cfg({ JEV_ADVISOR_PROVIDER: provider }), prepared.check, noFetch)).reason, "unsupported_input", provider);
+		}
+		assert.equal(calls, 0, "unverified image routes never call fetch");
+	});
+
+	await check("jev_check images: local inspection, no bytes leaked, deterministic rejection", async () => {
+		env({ JEV_ADVISOR_PROVIDER: "jev" });
+		const dir = path.join(root, "images"); mkdirSync(dir, { recursive: true });
+		const file = path.join(dir, "shot.png"); writeFileSync(file, pngBytes(512, 512));
+		const small = path.join(dir, "small.png"); writeFileSync(small, pngBytes(64, 64));
+		let body = "";
+		responder = (_url, init) => { body = String(init.body); return systemCheck({ verdict: "correct", confidence: 0.93 }); };
+		const accepted = await checkTool.execute("image-ok", { question: "Does the screenshot show the retry banner?", artifact: "Observed UI state", images: [file] });
+		const result = JSON.parse(text(accepted));
+		assert.equal(result.status, "decision");
+		assert.equal(result.verdict, "correct");
+		assert.ok(body.includes("data:image/png;base64,"));
+		assert.equal(body.includes("shot.png"), false, "file paths never reach the provider");
+		assert.equal(text(accepted).includes("iVBORw0KGgo"), false, "bytes never reach the tool result");
+
+		const before = fetchCalls;
+		for (const images of [[path.join(dir, "missing.png")], [small], [dir], [file, file, file, file, file]]) {
+			const rejected = JSON.parse(text(await checkTool.execute("image-reject", { question: "q", artifact: "a", images })));
+			assert.equal(rejected.status, "no_decision", JSON.stringify(images));
+			assert.ok(["unsupported_input", "input_too_large"].includes(rejected.reason), JSON.stringify(rejected));
+		}
+		assert.equal(fetchCalls, before, "rejected images never reach the provider");
 	});
 
 	await check("check path fails open with explicit reasons and rejected configurations never reach transport", async () => {
@@ -553,7 +630,7 @@ async function runSuite(root: string) {
 		};
 		for (const surface of ["src/check.adapter.ts", "tools/jev-check.ts"]) {
 			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
-			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 			assert.equal(tool.name, "jev_check", surface);
 			const before = fetchCalls;
 			const invalid = await tool.execute(`check-invalid-${surface}`, { question: "PRIVATE-CHECK-QUESTION" });
@@ -1145,7 +1222,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.12");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.13");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1764,8 +1841,8 @@ async function runSuite(root: string) {
 	await check("plugin_metrics tool: invalid_input rejection before any reads, exact envelope, nonmutation", async () => {
 		const metricsModule = await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href);
 		const sourceMetricsModule = await import(pathToFileURL(path.join(plugin, "src/metrics.adapter.ts")).href);
-		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
-		const sourceMetricsTool = sourceMetricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
+		const sourceMetricsTool = sourceMetricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 		const metricsSurfaces = [["generated", metricsTool], ["source", sourceMetricsTool]] as const;
 		assert.equal(metricsTool.name, "plugin_metrics");
 		const pluginMetricsFetchCalls = fetchCalls;
@@ -1927,7 +2004,7 @@ async function runSuite(root: string) {
 		await seedStateWithZeroDuration(await version2StateFileFixture(process.env.HOME!));
 		for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
 			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
-			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 			const native = await tool.execute("m-all-operations", {});
 			assert.notEqual(native.isError, true, surface);
 			const report = JSON.parse(text(native));
@@ -2003,7 +2080,7 @@ async function runSuite(root: string) {
 			const beforeState = readFileSync(file);
 			for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
 				const module = await import(pathToFileURL(path.join(plugin, surface)).href);
-				const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+				const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 				const native = await tool.execute(`m-correlation-${fixture.name}`, {});
 				assert.notEqual(native.isError, true, `${surface}: retained numeric boundary is a source-level result`);
 				const report = JSON.parse(text(native));
@@ -2046,7 +2123,7 @@ async function runSuite(root: string) {
 		const fixedError = { content: [{ type: "text", text: "plugin_metrics: unexpected_error. The report could not be produced." }], isError: true };
 		for (const surface of ["src/metrics.adapter.ts", "tools/plugin-metrics.ts"]) {
 			const module = await import(pathToFileURL(path.join(plugin, surface)).href);
-			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+			const tool = module.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 			for (const stage of ["report", "serialization"]) {
 				const originalISOString = Date.prototype.toISOString;
 				const originalStringify = JSON.stringify;
@@ -2074,7 +2151,7 @@ async function runSuite(root: string) {
 	await check("metrics corrupt inventory and digest-matching malformed segments stay source-local", async () => {
 		const { createHash } = await import("node:crypto");
 		const metricsModule = await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href);
-		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x } } });
+		const metricsTool = metricsModule.default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } });
 		const beforeFetch = fetchCalls;
 		const beforeUnexpectedFetches = unexpectedFetches;
 		const priorHome = process.env.HOME;

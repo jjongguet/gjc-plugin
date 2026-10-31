@@ -15,7 +15,7 @@ test("invalid_case_id is a deterministic no-decision reason, never a scoring sig
 describe("provider table", () => {
 	test("records exact ids without appending context windows", () => {
 		const ids = DECISION_PROVIDERS.map(entry => entry.id);
-		expect(ids).toContain("openrouter/typesafe/jev-1.13");
+		expect(ids).toContain("openrouter/typesafe/jev-1.14");
 		const omni = decisionProvider("opengateway/sionic-ai/jev-omni");
 		const decider = decisionProvider("opengateway/sionic-ai/decider-4b");
 		expect(omni.model).toBe("sionic-ai/jev-omni");
@@ -29,7 +29,7 @@ describe("provider table", () => {
 	});
 
 	test("candidates stay unverified until a consumer verifies the envelope", () => {
-		expect(decisionProvider("openrouter/typesafe/jev-1.13").status).toBe("baseline");
+		expect(decisionProvider("openrouter/typesafe/jev-1.14").status).toBe("baseline");
 		expect(decisionProvider("opengateway/sionic-ai/jev-omni").status).toBe("candidate_unverified");
 		expect(decisionProvider("sionic-ai/jev-omni")).toBeUndefined();
 	});

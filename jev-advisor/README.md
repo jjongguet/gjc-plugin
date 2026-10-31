@@ -93,7 +93,7 @@ policy independently; a confidence threshold alone does not establish safety.
 
 | Provider | Endpoint | Default model | Key variable |
 | --- | --- | --- | --- |
-| `jev` | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.13` | `OPENROUTER_API_KEY` |
+| `jev` | OpenRouter `/api/alpha/decisions` | `typesafe/jev-1.14` | `OPENROUTER_API_KEY` |
 | `openrouter` | OpenRouter `/api/v1/chat/completions` | `openai/gpt-5-mini` | `OPENROUTER_API_KEY` |
 | `typesafe-jev` | `https://api.typesafe.ai/v1/systemone` | `jev-latest` | `TYPESAFE_API_KEY` |
 | `ollaya` | `http://127.0.0.1:11435/v1/systemone` | `laya` | none |
@@ -102,6 +102,22 @@ Jev uses `state` plus typed `questions`, not chat completions. Provider/model
 selection remains explicit. Egress permits only HTTPS `openrouter.ai` and
 `api.typesafe.ai`, or loopback HTTP; redirects are rejected. OpenRouter alone
 receives attribution headers (`HTTP-Referer` and `X-Title`).
+
+## Image evidence (`jev_check`)
+
+Jev 1.14 reads images as well as text. `jev_check` takes an optional `images`
+array of PNG/JPEG paths (absolute, or relative to the session directory) and
+sends them as `state` image parts:
+`["<artifact>", {"type":"image_url","image_url":{"url":"data:image/png;base64,…"}}]`.
+Admission is deterministic and happens before any provider call: at most 4
+images, each 256–1,568 px per side and 78,400–2,458,624 px total, at most 16 MiB
+decoded, PNG/JPEG signature sniffed (never the extension), animated PNG
+rejected. A rejected set is never partially sent and yields
+`no_decision`/`unsupported_input` or `input_too_large`. Image bytes and paths
+never enter the journal, the store, a log or the tool result. Only the `jev`
+provider has a verified inline image contract; other providers reject images.
+An image-grounded request runs in TypeSafe's long-context mode (slower, less
+accurate) and costs roughly 1,080 input tokens for one 512 px image.
 
 ## Configuration
 

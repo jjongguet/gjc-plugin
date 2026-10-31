@@ -121,7 +121,7 @@ describe("adequacy Decisions contract", () => {
   expect(result.status).toBe("unscored"); expect(h.calls.length).toBe(1);
   const call = h.calls[0]; expect(call.url).toBe("https://openrouter.ai/api/alpha/decisions"); expect(call.options.method).toBe("POST"); expect(call.options.redirect).toBe("manual");
   const wire = JSON.parse(String(call.options.body));
-  expect(wire.model).toBe("typesafe/jev-1.13"); expect(Object.keys(wire.questions)).toEqual(["coverage_alignment", "boundary_evidence"]);
+  expect(wire.model).toBe("typesafe/jev-1.14"); expect(Object.keys(wire.questions)).toEqual(["coverage_alignment", "boundary_evidence"]);
   expect(wire.state).toEqual({ explicitContext: { authorship: "caller_authored", ...context }, observed: { status: facts.status, counts: facts.counts, freshness: facts.freshness } });
   expect(JSON.stringify(result)).not.toContain("synthetic-key"); expect(String(call.options.body)).not.toContain("canary");
  });

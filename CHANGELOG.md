@@ -2,6 +2,23 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.17] - 2026-11-01
+
+Plugins: jev-advisor 0.0.13 · verification-receipts 0.0.9 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Added
+
+- **jev-advisor**: `jev_check` takes an optional `images` array of PNG/JPEG paths (at most 4) and sends them as Jev 1.14 `state` image parts, so a screenshot or rendered artifact can be the evidence instead of a text description. Admission is deterministic before any provider call: signature sniffing (never the extension), 256–1,568 px per side, 78,400–2,458,624 px total, 16 MiB per file, animated PNG rejected. A rejected set is never partially sent and returns `no_decision` with `unsupported_input` or `input_too_large`. Paths and bytes never enter the journal, the store, a log or the tool result, and only the `jev` provider has a verified inline image contract.
+
+### Changed
+
+- **jev-advisor, verification-receipts, ui-regression**: decision model pin `typesafe/jev-1.13` → `typesafe/jev-1.14` (262,144-token context, $0.042 per 1M input tokens, output free; text and image decisions, `box` questions). The shared contract records the new id, context window and the `jjong-router` OpenRouter key label.
+- **integrations/hermes/jev-gate**: same model pin for the Hermes output gate.
+
+### Upgrade notes
+
+- Reinstall `jev-advisor` first, then `verification-receipts`, then `ui-regression`, and run `gjc plugin doctor` afterwards. Tools and hooks load at session start, so verify upgraded surfaces in a fresh `gjc` process. Rolling the model pin back to `typesafe/jev-1.13` is still served by OpenRouter.
+
 ## [0.0.16] - 2026-10-29
 
 Plugins: jev-advisor 0.0.12 · verification-receipts 0.0.8 · ui-regression 0.0.9 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
