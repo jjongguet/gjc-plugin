@@ -32,8 +32,13 @@ Advisory only by default. The plugin has four surfaces:
 3. **`jev_check` tool**: explicit one-shot check. Pass `question` (what must be
    verified) and `artifact` (what to check); returns a strictly validated
    `correct` / `incorrect` / `unsure` verdict with confidence (and probabilities
-   when the provider supplies them) or an explicit no-decision reason. The
-   composed prompt is admitted whole under the same 4,000/1,900-character bound
+   when the provider supplies them) or an explicit no-decision reason. Optional
+   `images` (PNG/JPEG paths, at most 4, 256–1,568 px per side, 16 MiB each) are
+   inspected locally and sent as image parts to the `jev` provider only, so a
+   screenshot or rendered artifact can be the evidence; bytes never enter the
+   journal, the result or a log, and a rejected set yields
+   `no_decision`/`unsupported_input`|`input_too_large` without a provider call.
+   The composed prompt is admitted whole under the same 4,000/1,900-character bound
    as tier prompts. The outcome is journaled as a sanitized `check` operation;
    correlation state is untouched. A verdict is an advisory decision-model
    opinion — not verification evidence, correctness proof or acceptance of
@@ -58,7 +63,7 @@ outcomes are never injected into advisories and no `prior` suffix exists in v2.
 | --- | --- | --- |
 | `JEV_ADVISOR_PROVIDER` | `jev` | `jev` = TypeSafe Jev on OpenRouter via `/api/alpha/decisions`; `openrouter` = chat; `typesafe-jev` = hosted systemone; `ollaya` = keyless local server; `off` disables provider/correlation, not local journaling |
 | `JEV_ADVISOR_API_KEY` | — | Environment overrides same-named file values in `~/.gjc/agent/jev-advisor/.env`; the merged plugin key takes priority over `OPENROUTER_API_KEY`. Credentials survive upgrades and are never result records |
-| `JEV_ADVISOR_MODEL` | per provider (`typesafe/jev-1.13`; `openai/gpt-5-mini` for openrouter chat; `laya` for ollaya) | decision model id |
+| `JEV_ADVISOR_MODEL` | per provider (`typesafe/jev-1.14`; `openai/gpt-5-mini` for openrouter chat; `laya` for ollaya) | decision model id |
 | `JEV_ADVISOR_MODE` | `shadow` | `shadow` / `hint` / `enforce` |
 | `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | per-task confidence threshold for explicit weaker-tier enforcement |
 | `JEV_ADVISOR_TIMEOUT_MS` | `8000` | decision request timeout |

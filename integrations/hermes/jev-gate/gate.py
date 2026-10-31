@@ -29,7 +29,7 @@ from pathlib import Path
 SCHEMA_RECEIPT = "jev-gate.receipt.v1"
 SCHEMA_STATE = "jev-gate.state.v1"
 DEFAULT_ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-DEFAULT_MODEL = "typesafe/jev-1.13"
+DEFAULT_MODEL = "typesafe/jev-1.14"
 CHECK_CRITERIA = {
     "correct": "The artifact satisfies the stated check question",
     "incorrect": "The artifact does not satisfy the stated check question",

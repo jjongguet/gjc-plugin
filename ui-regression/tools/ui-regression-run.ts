@@ -33,13 +33,14 @@ export type DecisionProvider = {
 
 export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 	{
-		id: "openrouter/typesafe/jev-1.13",
+		id: "openrouter/typesafe/jev-1.14",
 		provider: "openrouter",
-		model: "typesafe/jev-1.13",
+		model: "typesafe/jev-1.14",
 		endpoint: "https://openrouter.ai/api/alpha/decisions",
 		authEnv: ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"],
 		status: "baseline",
-		note: "Current advisor tier/check and verification adequacy baseline. OpenRouter's public catalog lists no per-token price for this alpha route, so no cost ceiling can be derived from it.",
+		contextTokens: 262144,
+		note: "Advisor tier/check and verification adequacy baseline. Jev 1.14 also reads image parts in state (image/png|jpeg, 256-1568 px per side) and answers box questions; $0.042 per 1M input tokens, output free. OpenRouter labels this credential `jjong-router`.",
 	},
 	{
 		id: "opengateway/sionic-ai/jev-omni",
@@ -1331,7 +1332,7 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
  if (evidenceIncomplete) return { status: "unknown", reason: "insufficient_evidence" };
  if (input === undefined) return { status: "unknown", reason: "missing_context" };
  const explicitContext = input === undefined ? { authorship: "not_supplied" } : { authorship: "caller_authored", ...(input as AssessmentInput) };
- const body = JSON.stringify({ model: "typesafe/jev-1.13", state: { explicitContext, observed }, questions: {
+ const body = JSON.stringify({ model: "typesafe/jev-1.14", state: { explicitContext, observed }, questions: {
   coverage_alignment: { type: "choice", instructions: "Assess whether caller-authored expected behavior and case notes align with the change. Counts are execution evidence, not proof of quality. If context is not_supplied, choose unknown. Failed, absent or stale execution is never a current passing verification.", criteria: { aligned: "Evidence aligns with expected behavior.", gap: "A coverage gap is evident.", none: "No applicable coverage evidence.", unknown: "Insufficient information." } },
   boundary_evidence: { type: "choice", instructions: "Assess boundary and failure evidence only from supplied context; never infer it from counts. If context is not_supplied, choose unknown. Empty observations cannot establish boundary coverage.", criteria: { present: "Relevant boundary or failure evidence is supplied.", missing: "Relevant boundary evidence is missing.", none: "No applicable boundary behavior.", unknown: "Insufficient information." } }
  } });
@@ -1775,7 +1776,7 @@ export default function uiRegressionRun(pi:{cwd:string;typebox:{Type:any}}) {
  const T=pi.typebox.Type;
  return {
   name:'ui_regression_run',label:'UI Regression Run',
-  description:'Execute one explicitly authorized non-sensitive loopback scenario through ONE Aside REPL invocation pinned to the local session host (--host local): the scenario origin is strictly loopback, so the browser must run on this machine and a cloud session host can never reach the fixture. Inspect handlers first: loopback is not a sandbox. Open/close only the owned new tab in the local Aside Browser and never attach to existing tabs; fresh snapshots and unique visible current CSS locators, literal exact/substring assertions; no screenshots, user tabs, result imports or arbitrary JS. Account is explicit ephemeral routing, never in receipts. Automatically attempt Jev adequacy every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known; omission does not disable the call. Only validated selected summaries/notes and bounded host facts leave, not scenario text, account, inputs, selectors or snapshots. Warning-only; no repair loops or blocking. Missing context is not adequate verification. Historical browser evidence is not current/deployed UI evidence.',
+  description:'Execute one explicitly authorized non-sensitive loopback scenario through ONE Aside REPL invocation pinned to the local session host (--host local): the scenario origin is strictly loopback, so the browser must run on this machine and a cloud session host can never reach the fixture. Inspect handlers first: loopback is not a sandbox. Open/close only the owned new tab in the local Aside Browser and never attach to existing tabs; fresh snapshots and unique visible current CSS locators, literal exact/substring assertions; no screenshots, user tabs, result imports or arbitrary JS. Account is explicit ephemeral routing, never in receipts. Automatically attempt Jev adequacy every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known; omission does not disable the call. Only validated selected summaries/notes and bounded host facts leave, not scenario text, account, inputs, selectors or snapshots. Warning-only; no repair loops or blocking. Missing context is not adequate verification. Historical browser evidence is not current/deployed UI evidence.',
   parameters:T.Object({
    account:T.String({minLength:1,maxLength:64,description:'Explicit Aside account routing only; not persisted or included in evidence.'}),
    scenario:T.Object({

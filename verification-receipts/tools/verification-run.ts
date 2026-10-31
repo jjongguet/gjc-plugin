@@ -33,13 +33,14 @@ export type DecisionProvider = {
 
 export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 	{
-		id: "openrouter/typesafe/jev-1.13",
+		id: "openrouter/typesafe/jev-1.14",
 		provider: "openrouter",
-		model: "typesafe/jev-1.13",
+		model: "typesafe/jev-1.14",
 		endpoint: "https://openrouter.ai/api/alpha/decisions",
 		authEnv: ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"],
 		status: "baseline",
-		note: "Current advisor tier/check and verification adequacy baseline. OpenRouter's public catalog lists no per-token price for this alpha route, so no cost ceiling can be derived from it.",
+		contextTokens: 262144,
+		note: "Advisor tier/check and verification adequacy baseline. Jev 1.14 also reads image parts in state (image/png|jpeg, 256-1568 px per side) and answers box questions; $0.042 per 1M input tokens, output free. OpenRouter labels this credential `jjong-router`.",
 	},
 	{
 		id: "opengateway/sionic-ai/jev-omni",
@@ -1577,7 +1578,7 @@ export async function assessAdequacy(input: unknown, facts: { status: string; co
  if (evidenceIncomplete) return { status: "unknown", reason: "insufficient_evidence" };
  if (input === undefined) return { status: "unknown", reason: "missing_context" };
  const explicitContext = input === undefined ? { authorship: "not_supplied" } : { authorship: "caller_authored", ...(input as AssessmentInput) };
- const body = JSON.stringify({ model: "typesafe/jev-1.13", state: { explicitContext, observed }, questions: {
+ const body = JSON.stringify({ model: "typesafe/jev-1.14", state: { explicitContext, observed }, questions: {
   coverage_alignment: { type: "choice", instructions: "Assess whether caller-authored expected behavior and case notes align with the change. Counts are execution evidence, not proof of quality. If context is not_supplied, choose unknown. Failed, absent or stale execution is never a current passing verification.", criteria: { aligned: "Evidence aligns with expected behavior.", gap: "A coverage gap is evident.", none: "No applicable coverage evidence.", unknown: "Insufficient information." } },
   boundary_evidence: { type: "choice", instructions: "Assess boundary and failure evidence only from supplied context; never infer it from counts. If context is not_supplied, choose unknown. Empty observations cannot establish boundary coverage.", criteria: { present: "Relevant boundary or failure evidence is supplied.", missing: "Relevant boundary evidence is missing.", none: "No applicable boundary behavior.", unknown: "Insufficient information." } }
  } });
@@ -1651,7 +1652,7 @@ export default function verificationRun(pi: {cwd: string; typebox: {Type: any}})
  const T = pi.typebox.Type;
  return {
   name: 'verification_run', label: 'Verification Run',
-  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.13). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
+  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
   parameters: T.Object({
    files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs test files; no globs, symlinks, custom flags or loaders.'}),
    repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),

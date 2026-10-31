@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "ui-regression",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "tools": [
     {
       "name": "ui_regression_run",

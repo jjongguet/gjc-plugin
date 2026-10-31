@@ -73,10 +73,28 @@ export type CheckAdvice =
 export interface CheckInput {
 	question: string;
 	artifact: string;
+	/** Optional image evidence. Only the OpenRouter jev route accepts it. */
+	images?: readonly CheckImage[];
 }
 
+/**
+ * One decoded image attached to a check. The base64 payload is wire material:
+ * it is never written to the outcome journal, the correlation store or a log.
+ */
+export interface CheckImage {
+	mediaType: "image/png" | "image/jpeg";
+	base64: string;
+	width: number;
+	height: number;
+}
+
+export type ImageInspection =
+	| { status: "ok"; image: CheckImage }
+	| { status: "unsupported_input" }
+	| { status: "input_too_large" };
+
 export const DEFAULTS = {
-	model: "typesafe/jev-1.13",
+	model: "typesafe/jev-1.14",
 	timeoutMs: 8000,
 	minIntervalMs: 15000,
 	minConfidence: 0.6,
@@ -85,6 +103,13 @@ export const DEFAULTS = {
 } as const;
 
 export const MAX_TASKS_PER_INVOCATION = 32;
+export const MAX_CHECK_IMAGES = 4;
+/** Jev image limits, inclusive (OpenRouter multimodal-decisions guide). */
+export const IMAGE_MIN_SIDE = 256;
+export const IMAGE_MAX_SIDE = 1568;
+export const IMAGE_MIN_AREA = 78_400;
+export const IMAGE_MAX_AREA = 2_458_624;
+export const IMAGE_MAX_BYTES = 16 * 1024 * 1024;
 export const MAX_PROVIDER_REQUESTS_PER_INVOCATION = 4;
 export const INVOCATION_BUDGET_MS = 8000;
 export const MAX_RESPONSE_BYTES = 64 * 1024;
@@ -240,11 +265,21 @@ const REQUEST_STYLES = {
 		checkRequest(cfg: { model: string; apiKey: string }, check: CheckInput) {
 			const headers: Record<string, string> = { "content-type": "application/json" };
 			if (cfg.apiKey) headers.authorization = `Bearer ${cfg.apiKey}`;
+			const images = check.images ?? [];
+			const state: string | unknown[] = images.length
+				? [
+						check.artifact,
+						...images.map(image => ({
+							type: "image_url",
+							image_url: { url: `data:${image.mediaType};base64,${image.base64}` },
+						})),
+					]
+				: check.artifact;
 			return {
 				headers,
 				body: JSON.stringify({
 					model: cfg.model,
-					state: check.artifact,
+					state,
 					questions: {
 						check: {
 							type: "choice",
@@ -262,7 +297,7 @@ export const PROVIDERS: Record<
 	string,
 	{ endpoint: string; style: keyof typeof REQUEST_STYLES; keyless?: boolean; model?: string }
 > = {
-	jev: { endpoint: "https://openrouter.ai/api/alpha/decisions", style: "systemone", model: "typesafe/jev-1.13" },
+	jev: { endpoint: "https://openrouter.ai/api/alpha/decisions", style: "systemone", model: "typesafe/jev-1.14" },
 	openrouter: { endpoint: "https://openrouter.ai/api/v1/chat/completions", style: "openai-chat", model: "openai/gpt-5-mini" },
 	"typesafe-jev": { endpoint: "https://api.typesafe.ai/v1/systemone", style: "systemone", model: "jev-latest" },
 	ollaya: { endpoint: "http://127.0.0.1:11435/v1/systemone", style: "systemone", keyless: true, model: "laya" },
@@ -469,21 +504,130 @@ export function composeCheckPrompt(check: CheckInput): string {
 	return `check question:\n${check.question}\n\nartifact:\n${check.artifact}`;
 }
 
+function readUInt32(bytes: Uint8Array, offset: number): number {
+	return ((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3];
+}
+
+/** Jev accepts 256-1568 px per side and 78,400-2,458,624 px in total, inclusive. */
+function imageBounds(width: number, height: number): ImageInspection | null {
+	if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return { status: "unsupported_input" };
+	if (width < IMAGE_MIN_SIDE || height < IMAGE_MIN_SIDE) return { status: "unsupported_input" };
+	const area = width * height;
+	if (width > IMAGE_MAX_SIDE || height > IMAGE_MAX_SIDE || area > IMAGE_MAX_AREA) return { status: "input_too_large" };
+	if (area < IMAGE_MIN_AREA) return { status: "unsupported_input" };
+	return null;
+}
+
+/**
+ * Deterministic PNG/JPEG inspection before any provider call: format, byte size,
+ * dimensions and animated PNG (acTL) rejection. Returns the decoded media facts,
+ * never the encoded payload, so callers decide what may be kept.
+ */
+export function inspectImage(bytes: Uint8Array): ImageInspection {
+	if (!(bytes instanceof Uint8Array) || bytes.length === 0) return { status: "unsupported_input" };
+	if (bytes.length > IMAGE_MAX_BYTES) return { status: "input_too_large" };
+	const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+	const isPng = bytes.length >= 33 && pngSignature.every((value, index) => bytes[index] === value);
+	if (isPng) {
+		let offset = 8;
+		let width = 0;
+		let height = 0;
+		let header = false;
+		while (offset + 8 <= bytes.length) {
+			const length = readUInt32(bytes, offset);
+			const type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+			if (type === "acTL") return { status: "unsupported_input" };
+			if (type === "IHDR") {
+				if (length !== 13 || offset + 33 > bytes.length) return { status: "unsupported_input" };
+				width = readUInt32(bytes, offset + 8);
+				height = readUInt32(bytes, offset + 12);
+				header = true;
+			}
+			if (type === "IDAT" || type === "IEND") break;
+			if (length > bytes.length) break;
+			offset += 12 + length;
+		}
+		if (!header) return { status: "unsupported_input" };
+		const invalid = imageBounds(width, height);
+		return invalid ?? { status: "ok", image: { mediaType: "image/png", base64: "", width, height } };
+	}
+	if (bytes.length >= 4 && bytes[0] === 0xff && bytes[1] === 0xd8) {
+		let offset = 2;
+		while (offset + 4 <= bytes.length) {
+			if (bytes[offset] !== 0xff) return { status: "unsupported_input" };
+			let marker = bytes[offset + 1];
+			let cursor = offset;
+			while (marker === 0xff && cursor + 2 < bytes.length) {
+				cursor += 1;
+				marker = bytes[cursor + 1];
+			}
+			if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) {
+				offset = cursor + 2;
+				continue;
+			}
+			const length = (bytes[cursor + 2] << 8) + bytes[cursor + 3];
+			if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+				if (cursor + 9 > bytes.length) return { status: "unsupported_input" };
+				const height = (bytes[cursor + 5] << 8) + bytes[cursor + 6];
+				const width = (bytes[cursor + 7] << 8) + bytes[cursor + 8];
+				const invalid = imageBounds(width, height);
+				return invalid ?? { status: "ok", image: { mediaType: "image/jpeg", base64: "", width, height } };
+			}
+			if (length < 2) return { status: "unsupported_input" };
+			offset = cursor + 2 + length;
+		}
+	}
+	return { status: "unsupported_input" };
+}
+
+/** Base64 length bound before the payload is accepted onto the wire. */
+function decodedImageBytes(base64: string): number {
+	const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+	return Math.floor((base64.length * 3) / 4) - padding;
+}
+
+function validateCheckImages(images: unknown): { status: "ok"; images: CheckImage[] } | { status: "unsupported_input" } | { status: "input_too_large" } {
+	if (images === undefined) return { status: "ok", images: [] };
+	if (!Array.isArray(images)) return { status: "unsupported_input" };
+	if (images.length > MAX_CHECK_IMAGES) return { status: "input_too_large" };
+	const accepted: CheckImage[] = [];
+	for (const raw of images) {
+		if (typeof raw !== "object" || raw === null) return { status: "unsupported_input" };
+		const entry = raw as Record<string, unknown>;
+		const mediaType = entry.mediaType;
+		const base64 = entry.base64;
+		if (mediaType !== "image/png" && mediaType !== "image/jpeg") return { status: "unsupported_input" };
+		if (typeof base64 !== "string" || base64.length === 0 || /[^A-Za-z0-9+/=]/.test(base64)) return { status: "unsupported_input" };
+		if (decodedImageBytes(base64) > IMAGE_MAX_BYTES) return { status: "input_too_large" };
+		const invalid = imageBounds(entry.width as number, entry.height as number);
+		if (invalid) return invalid;
+		accepted.push({ mediaType, base64, width: entry.width as number, height: entry.height as number });
+	}
+	return { status: "ok", images: accepted };
+}
+
 export type CheckPreparation =
 	| { status: "ok"; check: CheckInput }
 	| { status: "invalid_task" }
+	| { status: "unsupported_input" }
 	| { status: "input_too_large" };
 
 /**
  * Normalize one check request without truncating either field. The composed
  * prompt is the admission unit, mirroring the tier path's full-prompt bound.
+ * Image evidence is bounded deterministically: count, media type, base64 shape,
+ * decoded bytes and Jev's published dimension range.
  */
-export function prepareCheck(question: unknown, artifact: unknown, maxPromptChars: 1900 | 4000): CheckPreparation {
+export function prepareCheck(question: unknown, artifact: unknown, maxPromptChars: 1900 | 4000, images?: unknown): CheckPreparation {
 	if (typeof question !== "string" || typeof artifact !== "string") return { status: "invalid_task" };
 	const normalizedQuestion = normalizeField(question);
 	const normalizedArtifact = normalizeField(artifact);
 	if (!normalizedQuestion || !normalizedArtifact) return { status: "invalid_task" };
-	const check: CheckInput = { question: normalizedQuestion, artifact: normalizedArtifact };
+	const preparedImages = validateCheckImages(images);
+	if (preparedImages.status !== "ok") return preparedImages;
+	const check: CheckInput = preparedImages.images.length
+		? { question: normalizedQuestion, artifact: normalizedArtifact, images: preparedImages.images }
+		: { question: normalizedQuestion, artifact: normalizedArtifact };
 	return composeCheckPrompt(check).length <= maxPromptChars ? { status: "ok", check } : { status: "input_too_large" };
 }
 
@@ -2308,6 +2452,11 @@ async function requestDecision(
 	if (!isConfigured(cfg)) return { status: "no_decision", reason: "unconfigured" };
 	const provider = PROVIDERS[cfg.provider] ?? (cfg.endpoint ? { endpoint: cfg.endpoint, style: "openai-chat" as const } : undefined);
 	if (!provider) return { status: "no_decision", reason: "unconfigured" };
+	if (kind === "check" && (payload as CheckInput).images?.length && cfg.provider !== "jev") {
+		// Only the OpenRouter jev route has a verified inline image-part contract;
+		// the native SystemOne and local routes are not verified for image parts.
+		return { status: "no_decision", reason: "unsupported_input" };
+	}
 	const url = cfg.endpoint || provider.endpoint;
 	if (!isAllowedEndpoint(url)) return { status: "no_decision", reason: "invalid_endpoint" };
 	const style = REQUEST_STYLES[provider.style];

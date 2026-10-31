@@ -33,13 +33,14 @@ export type DecisionProvider = {
 
 export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 	{
-		id: "openrouter/typesafe/jev-1.13",
+		id: "openrouter/typesafe/jev-1.14",
 		provider: "openrouter",
-		model: "typesafe/jev-1.13",
+		model: "typesafe/jev-1.14",
 		endpoint: "https://openrouter.ai/api/alpha/decisions",
 		authEnv: ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"],
 		status: "baseline",
-		note: "Current advisor tier/check and verification adequacy baseline. OpenRouter's public catalog lists no per-token price for this alpha route, so no cost ceiling can be derived from it.",
+		contextTokens: 262144,
+		note: "Advisor tier/check and verification adequacy baseline. Jev 1.14 also reads image parts in state (image/png|jpeg, 256-1568 px per side) and answers box questions; $0.042 per 1M input tokens, output free. OpenRouter labels this credential `jjong-router`.",
 	},
 	{
 		id: "opengateway/sionic-ai/jev-omni",

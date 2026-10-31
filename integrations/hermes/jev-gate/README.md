@@ -4,7 +4,7 @@ A Python 3.9+ standard-library Hermes plugin (`__init__.py` entry point). It
 registers one `transform_llm_output` hook and evaluates final cron output before delivery:
 
 1. deterministic detection of empty/abort/truncated output;
-2. a strict, bounded JEV check (`typesafe/jev-1.13` through OpenRouter);
+2. a strict, bounded JEV check (`typesafe/jev-1.14` through OpenRouter);
 3. a metadata-only replacement notice when held;
 4. a bounded retry request and a final alert when the budget is exhausted.
 
