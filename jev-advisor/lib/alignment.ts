@@ -111,8 +111,10 @@ const STOP = /^\s*(?:please\s+)?(?:stop|halt|pause|중지|멈춰|그만|그만�
  * not an instruction to stop writing. The directive forms below are. */
 const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]?only\b|\bread[- ]?only\s+(?:mode\s+)?(?:please|for\s+(?:now|this))\b|\b(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s+(?:anything|any\s+files?|any\s+code|the\s+(?:code|source|repo|repository|files|tree|codebase)|files|code)\b|^\s*(?:please\s+)?(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s*[.!]*\s*$|\bno\s+(?:edits?|changes?|writes?)\b|\bwithout\s+(?:editing|modifying|changing)\s+(?:anything|any\s+files?|the\s+(?:code|repo|files))\b|읽기\s*전용(?:으로|으로만)?\s*(?:해|해줘|해라|유지|보|봐|설정|진행|처리)|(?:코드|소스|파일|저장소|전체)\s*(?:는|은|을|를)?\s*(?:수정|변경|작성)\s*하지\s*마|^\s*(?:수정|변경|작성)\s*하지\s*마\s*[.!]*\s*$|\b쓰기\s*금지|코드\s*수정\s*금지/i;
 /* `instead` alone is a style instruction ("use map instead of for loop"). Only
- * goal-level replacement wording supersedes the current request. */
-const SUPERSEDE = /\binstead\s+of\s+(?:the\s+)?(?:goal|request|task|plan|approach|work)\b|\binstead\s*[,:]\s*(?:do|use|work\s+on|implement|build)\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|새\s*(?:목표|작업)|목표\s*변경|다른\s*작업|이건\s*(?:하지\s*마|그만)/i;
+ * goal-level replacement wording supersedes the current request. Ambiguous phrases stay out: "다른 작업은
+ * 하지 마" narrows the scope of the current request instead of replacing it, so the Korean branch needs a
+ * switching verb ("다른 작업을 하자") and never fires on the bare noun. */
+const SUPERSEDE = /\binstead\s+of\s+(?:the\s+)?(?:goal|request|task|plan|approach|work)\b|\binstead\s*[,:]\s*(?:do|use|work\s+on|implement|build)\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|새\s*(?:목표|작업)|목표\s*변경|다른\s*작업(?:을|으로)?\s*(?:하자|하세|하겠|진행|시작|바꾸|해보자)|이건\s*(?:하지\s*마|그만)/i;
 const NARROW = /\bnarrow\b|\bonly\b|\bjust\b|\bscope\s*down\b|오직|범위\s*축소/i;
 const ADD = /\balso\b|\badditionally\b|\bplus\b|추가로|그리고\s*또/i;
 const FORBIDDEN = /\bdo\s+not\s+(?:touch|modify|edit|change|write)\b|\bdon'?t\s+(?:touch|modify|edit|change|write)\b|\bnever\s+(?:touch|modify|edit|change)\b|\bforbidden\b|건드리지\s*마|수정\s*금지|변경\s*금지|작성\s*금지/i;
