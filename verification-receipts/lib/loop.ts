@@ -11,7 +11,7 @@ import { execFile as loopExecFile } from 'node:child_process';
 import { promisify as loopPromisify } from 'node:util';
 import { performance as loopClock } from 'node:perf_hooks';
 import { pluginResultsRoot, ensurePrivateResultDirectory, readPrivateResultFile } from '../../shared/lib/results';
-import { loadReceipt, loadReceiptInputs, currentReceiptFreshness, receiptStoreBase } from './receipts';
+import { loadReceipt, loadReceiptInputs, currentReceiptFreshness, receiptStoreBase, RECEIPT_TEST_FILE } from './receipts';
 
 const loopExec = loopPromisify(loopExecFile);
 const loopDigest = (data: string | Uint8Array) => loopHash('sha256').update(data).digest('hex');
@@ -285,7 +285,7 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
   changedNames.push(name);
  }
  // Deleted files are changes but can never be covered by a receipt run; they are excluded from the coverage demand.
- const changedTestFiles = changedNames.filter(name => /\.(?:js|mjs|cjs)$/.test(name) && !deletedNames.has(name));
+ const changedTestFiles = changedNames.filter(name => RECEIPT_TEST_FILE.test(name) && !deletedNames.has(name));
  return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, commits, changedNames, namesOverflow };
 }
 

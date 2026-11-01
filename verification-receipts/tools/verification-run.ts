@@ -844,6 +844,20 @@ import { execFile as receiptExecFile } from 'node:child_process';
 import { promisify as receiptPromisify } from 'node:util';
 
 const receiptExec = receiptPromisify(receiptExecFile);
+// Test files a receipt can actually execute: Node's own runner with a fixed reporter, no loaders and no
+// custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
+// JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
+// demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
+// this one rule, so they can never disagree about which changed tests a receipt must cover.
+export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+const RECEIPT_TYPESCRIPT_TEST_FILE = /\.(?:ts|mts|cts)$/;
+export const receiptIsTypeScriptTestFile = (file: string): boolean => RECEIPT_TYPESCRIPT_TEST_FILE.test(file);
+export const receiptSupportsTypeScriptTests = (version: string | null): boolean => {
+ const match = /^v(\d+)\.(\d+)\.\d+$/.exec(version ?? '');
+ if (!match) return false;
+ const major = Number(match[1]);
+ return major > 22 || (major === 22 && Number(match[2]) >= 18);
+};
 export const RECEIPT_EXCLUSIONS = ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage', '.env*', '*credentials*', '*.pem', '*.key', '*secret*', '*cookie*', '*private*'];
 const receiptDigest = (data: string | Uint8Array) => receiptHash('sha256').update(data).digest('hex');
 const receiptHex = /^[a-f0-9]{64}$/;
@@ -912,7 +926,7 @@ function normalizedReceiptInputs(files: unknown): string[] | null {
  if (!receiptPlainData(files) || !Array.isArray(files) || files.length > 32) return null;
  const normalized: string[] = [];
  for (const file of files) {
-  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !/\.(?:js|mjs|cjs)$/.test(file)) return null;
+  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) return null;
   const name = receiptPath.posix.normalize(file);
   if (excludedReceiptPath(name) || normalized.includes(name)) return null;
   normalized.push(name);
@@ -1066,7 +1080,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
-  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
+  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
  if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push(context.tool === 'ui' ? 'Stored browser observations do not establish current UI state. Reobserve only an allowed, authorized non-sensitive loopback scenario.' : 'Run verification again against the current source.'); }
@@ -1245,7 +1259,6 @@ import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync a
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
-
 export type NodeExecution = {
   status: 'passed' | 'failed' | 'no_tests' | 'incomplete' | 'not_run' | 'unavailable';
   reason: string;
@@ -1266,7 +1279,7 @@ export function validateTestFiles(root: string, files: string[]): string[] {
   catch { return reject('invalid_root'); }
   const result: string[] = [];
   for (const file of files) {
-    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !/\.(?:js|mjs|cjs)$/.test(file)) reject('invalid_test_path');
+    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) reject('invalid_test_path');
     const target = vrNodeResolve(base, file);
     const rel = vrNodeRelative(base, target);
     if (!rel || rel.startsWith(`..${vrNodeSep}`) || vrNodeAbsolute(rel)) reject('path_escape');
@@ -1442,6 +1455,9 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
   if (probe.issue || probe.code !== 0 || !/^v\d+\.\d+\.\d+$/.test(version)) return { ...receipt, status: 'unavailable', reason: probe.issue ?? 'invalid_node_version' };
   receipt.runnerVersion = version;
   if (Number(version.split('.')[0].slice(1)) < 22) return { ...receipt, status: 'unavailable', reason: 'unsupported_node_version' };
+  // Admitting `.ts` is not enough: only Node >= 22.18 strips types without a flag, so an older runner
+  // rejects the request up front instead of failing every file with an unknown extension.
+  if (!receiptSupportsTypeScriptTests(version) && paths.some(file => receiptIsTypeScriptTestFile(file))) return { ...receipt, status: 'unavailable', reason: 'typescript_unsupported_node' };
   let directory: string | null = null;
   try {
     directory = vrNodeMkdtemp(vrNodeJoin(vrNodeTmpdir(), 'verification-node-'));
@@ -1652,9 +1668,9 @@ export default function verificationRun(pi: {cwd: string; typebox: {Type: any}})
  const T = pi.typebox.Type;
  return {
   name: 'verification_run', label: 'Verification Run',
-  description: 'Execute explicitly authorized non-sensitive JavaScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
+  description: 'Execute explicitly authorized non-sensitive JavaScript or TypeScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
   parameters: T.Object({
-   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs test files; no globs, symlinks, custom flags or loaders.'}),
+   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files; no globs, symlinks, custom flags or loaders. TypeScript needs Node >= 22.18 for native type stripping.'}),
    repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
    timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
    assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))
