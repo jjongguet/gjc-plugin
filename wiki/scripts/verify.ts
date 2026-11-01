@@ -53,6 +53,7 @@ async function runSuite(root: string) {
 	const queryTool = (await import(pathToFileURL(path.join(plugin, "tools/wiki-query.ts")).href)).default(fakePi);
 	const proposeTool = (await import(pathToFileURL(path.join(plugin, "tools/wiki-propose.ts")).href)).default(fakePi);
 	const sharedResults = await import(pathToFileURL(path.join(plugin, "../shared/lib/results.ts")).href);
+	const { wikiRootDir, wikiQueryRun } = core;
 
 	await check("lib exposes only the two intended operations (no approve/publish/refresh/configure)", () => {
 		const exported = Object.keys(core).sort();
@@ -168,6 +169,38 @@ async function runSuite(root: string) {
 		assert.equal(build.status, 0, build.stderr);
 		assert.equal(read("tools/wiki-query.ts"), before[0], "tools/wiki-query.ts drifted");
 		assert.equal(read("tools/wiki-propose.ts"), before[1], "tools/wiki-propose.ts drifted");
+	});
+
+	// JJO-1161 P3: the default root used to be one guessed workspace path, so a host without that checkout
+	// pointed the CLI at an unrelated directory. An explicit WIKI_ROOT wins, a verified checkout keeps the
+	// convenience, and anything else reports the missing setting instead of spawning into it.
+	await check("wiki root prefers WIKI_ROOT, falls back only to a verified checkout and otherwise names the setting", async () => {
+		// os.homedir() is read once per process, so the fallback is proved at the real isolated HOME
+		// instead of by rewriting HOME mid-run.
+		const original = process.env.WIKI_ROOT;
+		const home = os.homedir();
+		const checkout = path.join(home, "jjongguet", "personal-wiki");
+		const explicitRoot = path.join(home, "explicit-wiki");
+		try {
+			process.env.WIKI_ROOT = explicitRoot;
+			assert.equal(wikiRootDir(), explicitRoot, "an explicit WIKI_ROOT wins without any checkout check");
+			process.env.WIKI_ROOT = "   ";
+			assert.throws(() => wikiRootDir(), /WIKI_ROOT/, "a blank WIKI_ROOT is not a setting and no checkout exists");
+			delete process.env.WIKI_ROOT;
+			assert.throws(() => wikiRootDir(), /WIKI_ROOT/, "an unset setting with no checkout names WIKI_ROOT");
+			const failed = await wikiQueryRun("verify probe", 1000);
+			assert.equal(failed.status, "failed");
+			assert.equal(failed.status === "failed" ? failed.reason : "", "missing_wiki");
+			assert.match(failed.status === "failed" ? failed.stderr : "", /WIKI_ROOT/);
+
+			mkdirSync(path.join(checkout, "scripts"), { recursive: true });
+			writeFileSync(path.join(checkout, "scripts", "wiki.py"), "");
+			assert.equal(wikiRootDir(), checkout, "a verified checkout keeps the convenience");
+			rmSync(checkout, { recursive: true, force: true });
+		} finally {
+			if (original === undefined) delete process.env.WIKI_ROOT;
+			else process.env.WIKI_ROOT = original;
+		}
 	});
 
 	await check("shared results module accepts the wiki plugin and operations", async () => {
