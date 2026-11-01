@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.22] - 2026-11-01
+
+Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **jev-advisor**: `다른 작업` alone was a supersede signal, so a scope limit ("다른 작업은 하지 마") was labelled a goal replacement. The Korean branch now requires a switching verb (`다른 작업을 하자` / `진행` / `바꾸`) and stays out of the bare noun, matching the rule that ambiguous words are not signals.
+
 ## [0.0.21] - 2026-11-01
 
 Plugins: jev-advisor 0.0.15 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
@@ -284,6 +292,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.22]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.21...v0.0.22
 [0.0.21]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.20...v0.0.21
 [0.0.20]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.19...v0.0.20
 [0.0.19]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.18...v0.0.19

@@ -1222,7 +1222,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.15");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.16");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1371,6 +1371,10 @@ async function runSuite(root: string) {
 		}
 		for (const text of ["새 목표로 진행하자", "다른 작업을 하자", "instead, do the migration"]) {
 			assert.equal(alignmentCore.classifyChange(text), "supersede", text);
+		}
+		// 2026-11-01 실측(세션 d4e3084fd4f4c07c): "다른 작업은 하지 마"는 범위 축소이지 목표 교체가 아니다.
+		for (const text of ["다른 작업은 하지 마", "다른 작업 금지"]) {
+			assert.notEqual(alignmentCore.classifyChange(text), "supersede", text);
 		}
 		for (const text of ["This is read-only; do not modify anything.", "읽기 전용으로 진행해", "수정하지 마", "don't modify anything", "do not modify the code"]) {
 			assert.equal(readOnlyOf(text), true, text);
