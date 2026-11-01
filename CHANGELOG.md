@@ -2,6 +2,15 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.21] - 2026-11-01
+
+Plugins: jev-advisor 0.0.15 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **jev-advisor**: a scoped prohibition was promoted to a session-wide read-only goal. `do not modify` / `don't change` / `do not write` now count only with a blanket object (`anything`, `any files`, `the code`, `files`, …) or as a standalone instruction, so an assignment like "add one test and do not modify or delete the existing test" no longer blocks the write it asked for. Korean directives follow the same rule (`코드 수정하지 마`, standalone `수정하지 마` count; `기존 테스트는 수정하지 마` does not).
+- **jev-advisor**: a prohibition now only forbids targets named in the same sentence. Scanning to the end of the entry turned later prose and later paths into forbidden targets (`attribution/trailer`, `tests/pass/fail`, and the very file the entry asked to edit), which blocked writes no rule ever forbade.
+
 ## [0.0.20] - 2026-11-01
 
 Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
@@ -275,6 +284,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.21]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.20...v0.0.21
 [0.0.20]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.19...v0.0.20
 [0.0.19]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.18...v0.0.19
 [0.0.18]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.17...v0.0.18
