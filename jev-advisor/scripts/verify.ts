@@ -1222,7 +1222,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.14");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.15");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1348,6 +1348,23 @@ async function runSuite(root: string) {
 		}
 		assert.equal(readOnlyOf("이 설정은 읽기 전용 모드로 열어줘"), false, "a read-only feature is not a read-only directive");
 
+		// 2026-11-01 실측: 위임 프롬프트가 "add a test; do not modify or delete the existing test"라고 쓰면
+		// 범위 한정 금지가 세션 전체 읽기전용으로 승격돼 정작 요청한 쓰기까지 막혔다(라이브 서브에이전트 차단).
+		const scoped = [
+			"Add one test to service.test.ts and do not modify or delete the existing base test.",
+			"기존 테스트는 수정하지 마. 새 테스트를 추가해줘.",
+		];
+		for (const text of scoped) {
+			const authority = alignmentCore.collectAuthority([alignmentUser("scope-probe", text)]);
+			assert.equal(authority.constraints.some((constraint: any) => constraint.kind === "read_only"), false, text);
+			assert.equal(authority.constraints.some((constraint: any) => constraint.kind === "forbidden_target"), false, text);
+			assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("service.test.ts"), authority }).block, false, text);
+		}
+		// 한 문장 안에서 지목한 대상은 여전히 금지된다.
+		const sameSentence = alignmentCore.collectAuthority([alignmentUser("scope-keep", "implement `src/demo.ts` and do not touch src/other.ts")]);
+		assert.equal(sameSentence.constraints.filter((constraint: any) => constraint.kind === "forbidden_target").length, 1);
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/other.ts"), authority: sameSentence }).block, true);
+
 		// 반대 방향: 진짜 지시는 여전히 잡힌다.
 		for (const text of ["그만해", "stop", "Stop.", "stop the current work", "작업 중지해줘", "작업 취소", "do not continue", "cancel the task"]) {
 			assert.equal(alignmentCore.classifyChange(text), "cancel", text);
@@ -1355,7 +1372,7 @@ async function runSuite(root: string) {
 		for (const text of ["새 목표로 진행하자", "다른 작업을 하자", "instead, do the migration"]) {
 			assert.equal(alignmentCore.classifyChange(text), "supersede", text);
 		}
-		for (const text of ["This is read-only; do not modify anything.", "읽기 전용으로 진행해", "수정하지 마", "don't modify anything"]) {
+		for (const text of ["This is read-only; do not modify anything.", "읽기 전용으로 진행해", "수정하지 마", "don't modify anything", "do not modify the code"]) {
 			assert.equal(readOnlyOf(text), true, text);
 		}
 	});

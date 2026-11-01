@@ -113,7 +113,7 @@ export function targetsInText(text: string): string[] {
 const STOP = /^\s*(?:please\s+)?(?:stop|halt|pause|중지|멈춰|그만|그만해|작업\s*취소)\s*[.!?。]*\s*$|\bdo\s+not\s+continue\b|\bcancel\s+(?:the\s+)?(?:work|task|request|job)\b|\b(?:stop|halt|pause)\s+now\b|\b(?:stop|halt|pause)\s+(?:the\s+)?(?:current\s+)?(?:work|task|job|build|run|request|session|everything|all)\b|작업\s*(?:을|를)?\s*(?:중지|멈춰|그만)|작업\s*(?:을|를)?\s*취소\s*(?:해|해줘|해라|하세요|합니다|할게)|(?:중지|멈춰|그만해)\s*(?:해|해줘|해라|하세요|합니다|할게)/i;
 /* `read-only` as a feature name ("읽기 전용 모드로 열어줘", "read-only mode") is
  * not an instruction to stop writing. The directive forms below are. */
-const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]?only\b|\bread[- ]?only\s+(?:mode\s+)?(?:please|for\s+(?:now|this))\b|\bdo\s+not\s+(?:modify|change|edit|write)\b|\bdon'?t\s+(?:modify|change|edit|write)\b|\bno\s+(?:edits?|changes?|writes?)\b|\bwithout\s+(?:editing|modifying|changing)\b|읽기\s*전용(?:으로|으로만)?\s*(?:해|해줘|해라|유지|보|봐|설정|진행|처리)|수정\s*하지\s*마|변경\s*하지\s*마|작성\s*하지\s*마|쓰기\s*금지|코드\s*수정\s*금지/i;
+const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]?only\b|\bread[- ]?only\s+(?:mode\s+)?(?:please|for\s+(?:now|this))\b|\b(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s+(?:anything|any\s+files?|any\s+code|the\s+(?:code|source|repo|repository|files|tree|codebase)|files|code)\b|^\s*(?:please\s+)?(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s*[.!]*\s*$|\bno\s+(?:edits?|changes?|writes?)\b|\bwithout\s+(?:editing|modifying|changing)\s+(?:anything|any\s+files?|the\s+(?:code|repo|files))\b|읽기\s*전용(?:으로|으로만)?\s*(?:해|해줘|해라|유지|보|봐|설정|진행|처리)|(?:코드|소스|파일|저장소|전체)\s*(?:는|은|을|를)?\s*(?:수정|변경|작성)\s*하지\s*마|^\s*(?:수정|변경|작성)\s*하지\s*마\s*[.!]*\s*$|\b쓰기\s*금지|코드\s*수정\s*금지/i;
 /* `instead` alone is a style instruction ("use map instead of for loop"). Only
  * goal-level replacement wording supersedes the current request. */
 const SUPERSEDE = /\binstead\s+of\s+(?:the\s+)?(?:goal|request|task|plan|approach|work)\b|\binstead\s*[,:]\s*(?:do|use|work\s+on|implement|build)\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|새\s*(?:목표|작업)|목표\s*변경|다른\s*작업|이건\s*(?:하지\s*마|그만)/i;
@@ -284,9 +284,14 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 			targets = entryTargets.map(path => ({ path, digest: digestTarget(path) })).filter(target => target.digest !== "");
 			// Only targets named at or after the do-not-touch phrase are forbidden:
 			// "implement `a.ts` and do not touch `b.ts`" forbids b.ts, never a.ts.
+			// A prohibition names its object in the same sentence ("implement `a.ts` and do not touch `b.ts`
+			// forbids b.ts"). Scanning to the end of the entry instead collected later prose and later
+			// paths, so an assignment that says "add a test; do not delete the existing test" forbade the
+			// very file it asked for and blocked the write.
 			const forbiddenAt = FORBIDDEN.exec(entry.text)?.index;
 			if (forbiddenAt !== undefined) {
-				for (const path of targetsInText(entry.text.slice(forbiddenAt))) {
+				const prohibition = entry.text.slice(forbiddenAt).split(/[.\n。!?](?=\s|$)/)[0];
+				for (const path of targetsInText(prohibition)) {
 					const digest = digestTarget(path);
 					if (digest) forbidden.set(digest, { kind: "forbidden_target", sinceEntryId: entry.id, targetDigest: digest });
 				}
