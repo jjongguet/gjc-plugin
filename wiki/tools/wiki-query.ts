@@ -699,6 +699,7 @@ export async function readPluginOutcomeSnapshot(plugin: ResultsPlugin, deps: Res
 // authority stays with the human on the configured writer.
 import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { statSync as wikiStatSync } from "node:fs";
 import { homedir as wikiHomedir, tmpdir as wikiTmpdir } from "node:os";
 import path from "node:path";
 
@@ -713,8 +714,16 @@ export const WIKI_PAGE_PATH = /^(concepts|entities|references|synthesis|journal)
 export const WIKI_SOURCE_ID = /^[a-z0-9][a-z0-9-]*$/;
 
 export function wikiRootDir(override?: string): string {
-	const root = (override ?? process.env.WIKI_ROOT ?? "").trim();
-	return root || path.join(wikiHomedir(), "jjongguet", "personal-wiki");
+	const explicit = (override ?? process.env.WIKI_ROOT ?? "").trim();
+	if (explicit) return explicit;
+	// The previous default guessed one workspace layout and used whatever lived there, so a host without
+	// that checkout silently pointed the CLI at an unrelated directory. The convenience stays only when the
+	// checkout is actually present; otherwise the caller reports the missing setting (JJO-1161 P3).
+	const fallback = path.join(wikiHomedir(), "jjongguet", "personal-wiki");
+	try {
+		if (wikiStatSync(path.join(fallback, "scripts", "wiki.py")).isFile()) return fallback;
+	} catch { /* no verified checkout: report the setting instead of guessing again */ }
+	throw new Error(`WIKI_ROOT is not set and no personal-wiki checkout exists at ${fallback}; set WIKI_ROOT to a personal-wiki checkout`);
 }
 
 async function runWikiCommand(root: string, args: string[], timeoutMs: number): Promise<WikiCommandResult> {
@@ -759,7 +768,13 @@ async function runWikiCommand(root: string, args: string[], timeoutMs: number): 
 }
 
 export async function wikiQueryRun(query: string, timeoutMs: number = WIKI_QUERY_TIMEOUT_MS): Promise<WikiCommandResult> {
-	return runWikiCommand(wikiRootDir(), ["query", query], Math.min(Math.max(timeoutMs, 1000), WIKI_QUERY_TIMEOUT_MS));
+	let root: string;
+	try {
+		root = wikiRootDir();
+	} catch (error) {
+		return { status: "failed", reason: "missing_wiki", stderr: error instanceof Error ? error.message : String(error) };
+	}
+	return runWikiCommand(root, ["query", query], Math.min(Math.max(timeoutMs, 1000), WIKI_QUERY_TIMEOUT_MS));
 }
 
 export type WikiProposeResult =
@@ -773,7 +788,12 @@ export async function wikiProposeRun(input: {
 	sourceText: string;
 	changes: Record<string, string>;
 }, timeoutMs: number = WIKI_PROPOSE_TIMEOUT_MS): Promise<WikiProposeResult> {
-	const root = wikiRootDir();
+	let root: string;
+	try {
+		root = wikiRootDir();
+	} catch (error) {
+		return { status: "failed", stage: "capture", reason: "missing_wiki", stderr: error instanceof Error ? error.message : String(error) };
+	}
 	const bounded = Math.min(Math.max(timeoutMs, 1000), WIKI_PROPOSE_TIMEOUT_MS);
 	const dir = await mkdtemp(path.join(wikiTmpdir(), "gjc-wiki-"));
 	try {

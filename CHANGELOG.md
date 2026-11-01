@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.20] - 2026-11-01
+
+Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **wiki**: an unset `WIKI_ROOT` fell back to one guessed workspace path (`$HOME/jjongguet/personal-wiki`) and used whatever lived there, so a host without that checkout pointed `wiki.py` at an unrelated directory (JJO-1161 P3). The fallback now applies only when that checkout actually contains `scripts/wiki.py`; otherwise `wiki_query`/`wiki_propose` return `missing_wiki` with a message naming `WIKI_ROOT` instead of spawning into a directory with no wiki.
+
 ## [0.0.19] - 2026-11-01
 
 Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
@@ -267,6 +275,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.20]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.19...v0.0.20
 [0.0.19]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.18...v0.0.19
 [0.0.18]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.17...v0.0.18
 [0.0.12]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.11...v0.0.12
