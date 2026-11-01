@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.18] - 2026-11-01
+
+Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.9 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **jev-advisor**: the goal-alignment lexicon read nouns as directives, so ordinary implementation requests were classified as a cancel/read-only/supersede instruction and writes were blocked with `drift_write_after_stop` or `drift_write_vs_readonly` (JJO-1161 P1). `stop`/`halt`/`pause`/`중지`/`작업 취소` now signal only a standalone directive or a phrase that names the work being stopped; `read-only` as a feature name ("읽기 전용 모드로 열어줘") is no longer a read-only instruction, while `do not modify`, `수정하지 마`, `수정 금지` still are; bare `instead` (a style instruction such as "use map instead of for loop") no longer supersedes the request. Verified 7/7 previously misclassified inputs on the old lexicon, 0/7 after, and 8 cancel / 3 supersede / 4 read-only positives still fire.
+
 ## [0.0.17] - 2026-11-01
 
 Plugins: jev-advisor 0.0.13 · verification-receipts 0.0.9 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2

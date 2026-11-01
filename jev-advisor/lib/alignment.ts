@@ -102,9 +102,17 @@ export function targetsInText(text: string): string[] {
 /* Lexicon (deterministic, documented, never a model call)                    */
 /* ------------------------------------------------------------------------- */
 
-const READ_ONLY = /\bread[- ]?only\b|\breadonly\b|읽기\s*전용|수정\s*하지\s*마|변경\s*하지\s*마|작성\s*하지\s*마|쓰기\s*금지|코드\s*수정\s*금지/i;
-const STOP = /\bstop\b|\bhalt\b|\bpause\b|\bdo\s+not\s+continue\b|\bcancel\s+the\s+(?:work|task|request)\b|중지|멈춰|그만해|작업\s*취소/i;
-const SUPERSEDE = /\binstead\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|대신|새\s*목표|목표\s*변경|다른\s*작업/i;
+/* A bare `stop`/`pause`/`중지` is a noun at least as often as it is a directive:
+ * "stop 이벤트를 로깅해줘", "배포 중지 기능". Only a standalone directive or a
+ * phrase that names the work being stopped is a cancel (JJO-1161 P1). Every
+ * pattern here is deliberately explicit; ambiguous single words are not signals. */
+const STOP = /^\s*(?:please\s+)?(?:stop|halt|pause|중지|멈춰|그만|그만해|작업\s*취소)\s*[.!?。]*\s*$|\bdo\s+not\s+continue\b|\bcancel\s+(?:the\s+)?(?:work|task|request|job)\b|\b(?:stop|halt|pause)\s+now\b|\b(?:stop|halt|pause)\s+(?:the\s+)?(?:current\s+)?(?:work|task|job|build|run|request|session|everything|all)\b|작업\s*(?:을|를)?\s*(?:중지|멈춰|그만)|작업\s*(?:을|를)?\s*취소\s*(?:해|해줘|해라|하세요|합니다|할게)|(?:중지|멈춰|그만해)\s*(?:해|해줘|해라|하세요|합니다|할게)/i;
+/* `read-only` as a feature name ("읽기 전용 모드로 열어줘", "read-only mode") is
+ * not an instruction to stop writing. The directive forms below are. */
+const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]?only\b|\bread[- ]?only\s+(?:mode\s+)?(?:please|for\s+(?:now|this))\b|\bdo\s+not\s+(?:modify|change|edit|write)\b|\bdon'?t\s+(?:modify|change|edit|write)\b|\bno\s+(?:edits?|changes?|writes?)\b|\bwithout\s+(?:editing|modifying|changing)\b|읽기\s*전용(?:으로|으로만)?\s*(?:해|해줘|해라|유지|보|봐|설정|진행|처리)|수정\s*하지\s*마|변경\s*하지\s*마|작성\s*하지\s*마|쓰기\s*금지|코드\s*수정\s*금지/i;
+/* `instead` alone is a style instruction ("use map instead of for loop"). Only
+ * goal-level replacement wording supersedes the current request. */
+const SUPERSEDE = /\binstead\s+of\s+(?:the\s+)?(?:goal|request|task|plan|approach|work)\b|\binstead\s*[,:]\s*(?:do|use|work\s+on|implement|build)\b|\bsupersede\b|\breplace\s+the\s+(?:goal|request|task)\b|\bnew\s+(?:goal|request|target)\b|새\s*(?:목표|작업)|목표\s*변경|다른\s*작업|이건\s*(?:하지\s*마|그만)/i;
 const NARROW = /\bnarrow\b|\bonly\b|\bjust\b|\bscope\s*down\b|오직|범위\s*축소/i;
 const ADD = /\balso\b|\badditionally\b|\bplus\b|추가로|그리고\s*또/i;
 const FORBIDDEN = /\bdo\s+not\s+(?:touch|modify|edit|change|write)\b|\bdon'?t\s+(?:touch|modify|edit|change|write)\b|\bnever\s+(?:touch|modify|edit|change)\b|\bforbidden\b|건드리지\s*마|수정\s*금지|변경\s*금지|작성\s*금지/i;

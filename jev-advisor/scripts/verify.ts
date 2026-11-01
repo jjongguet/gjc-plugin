@@ -1222,7 +1222,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.13");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.14");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1327,6 +1327,37 @@ async function runSuite(root: string) {
 		assert.equal(writeOf(hedged).block, true);
 		const stopped = alignmentCore.collectAuthority([alignmentUser("u-stop", "stop the current work")]);
 		assert.deepEqual([stopped.changeSemantics, writeOf(stopped).ruleId], ["cancel", "drift_write_after_stop"]);
+	});
+
+	// JJO-1161 P1: 게이트가 명사의 "stop"/"중지"/"read-only"/"instead" 를 지시로 오판하면
+	// 일상적인 구현 요청이 cancel/read_only/supersede 로 분류되어 정상 쓰기가 막힌다.
+	await check("alignment lexicon: ordinary work requests never read as cancel, read-only or supersede", () => {
+		const readOnlyOf = (text: string) =>
+			alignmentCore.collectAuthority([alignmentUser("lex-ro", text)]).constraints.some((constraint: any) => constraint.kind === "read_only");
+		const notSignals = [
+			"버튼에 pause 상태를 추가하고 stop 이벤트를 로깅해줘",
+			"배포 중지 기능을 구현해줘",
+			"서버가 멈춰 있는 이유를 찾아줘",
+			"service stop 후 start 가 되는지 테스트해줘",
+			"use map instead of for loop",
+			"A 대신 B를 쓰자",
+		];
+		for (const text of notSignals) {
+			assert.equal(alignmentCore.classifyChange(text), "unknown", text);
+			assert.equal(readOnlyOf(text), false, text);
+		}
+		assert.equal(readOnlyOf("이 설정은 읽기 전용 모드로 열어줘"), false, "a read-only feature is not a read-only directive");
+
+		// 반대 방향: 진짜 지시는 여전히 잡힌다.
+		for (const text of ["그만해", "stop", "Stop.", "stop the current work", "작업 중지해줘", "작업 취소", "do not continue", "cancel the task"]) {
+			assert.equal(alignmentCore.classifyChange(text), "cancel", text);
+		}
+		for (const text of ["새 목표로 진행하자", "다른 작업을 하자", "instead, do the migration"]) {
+			assert.equal(alignmentCore.classifyChange(text), "supersede", text);
+		}
+		for (const text of ["This is read-only; do not modify anything.", "읽기 전용으로 진행해", "수정하지 마", "don't modify anything"]) {
+			assert.equal(readOnlyOf(text), true, text);
+		}
 	});
 
 	await check("goal alignment core: typed transition chain, mismatch, baseline and missing criterion", () => {
