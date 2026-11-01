@@ -844,6 +844,20 @@ import { execFile as receiptExecFile } from 'node:child_process';
 import { promisify as receiptPromisify } from 'node:util';
 
 const receiptExec = receiptPromisify(receiptExecFile);
+// Test files a receipt can actually execute: Node's own runner with a fixed reporter, no loaders and no
+// custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
+// JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
+// demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
+// this one rule, so they can never disagree about which changed tests a receipt must cover.
+export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+const RECEIPT_TYPESCRIPT_TEST_FILE = /\.(?:ts|mts|cts)$/;
+export const receiptIsTypeScriptTestFile = (file: string): boolean => RECEIPT_TYPESCRIPT_TEST_FILE.test(file);
+export const receiptSupportsTypeScriptTests = (version: string | null): boolean => {
+ const match = /^v(\d+)\.(\d+)\.\d+$/.exec(version ?? '');
+ if (!match) return false;
+ const major = Number(match[1]);
+ return major > 22 || (major === 22 && Number(match[2]) >= 18);
+};
 export const RECEIPT_EXCLUSIONS = ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage', '.env*', '*credentials*', '*.pem', '*.key', '*secret*', '*cookie*', '*private*'];
 const receiptDigest = (data: string | Uint8Array) => receiptHash('sha256').update(data).digest('hex');
 const receiptHex = /^[a-f0-9]{64}$/;
@@ -912,7 +926,7 @@ function normalizedReceiptInputs(files: unknown): string[] | null {
  if (!receiptPlainData(files) || !Array.isArray(files) || files.length > 32) return null;
  const normalized: string[] = [];
  for (const file of files) {
-  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !/\.(?:js|mjs|cjs)$/.test(file)) return null;
+  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) return null;
   const name = receiptPath.posix.normalize(file);
   if (excludedReceiptPath(name) || normalized.includes(name)) return null;
   normalized.push(name);
@@ -1066,7 +1080,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
-  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs test files: no absolute paths, .., symlinks or duplicates.');
+  else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
  if (freshness !== 'fresh') { warnings.push('source_not_fresh'); recommendedNextActions.push(context.tool === 'ui' ? 'Stored browser observations do not establish current UI state. Reobserve only an allowed, authorized non-sensitive loopback scenario.' : 'Run verification again against the current source.'); }
@@ -1525,7 +1539,7 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
   changedNames.push(name);
  }
  // Deleted files are changes but can never be covered by a receipt run; they are excluded from the coverage demand.
- const changedTestFiles = changedNames.filter(name => /\.(?:js|mjs|cjs)$/.test(name) && !deletedNames.has(name));
+ const changedTestFiles = changedNames.filter(name => RECEIPT_TEST_FILE.test(name) && !deletedNames.has(name));
  return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, commits, changedNames, namesOverflow };
 }
 

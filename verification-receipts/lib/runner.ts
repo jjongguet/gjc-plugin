@@ -3,7 +3,7 @@ import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync a
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
-
+import { RECEIPT_TEST_FILE, receiptIsTypeScriptTestFile, receiptSupportsTypeScriptTests } from './receipts';
 export type NodeExecution = {
   status: 'passed' | 'failed' | 'no_tests' | 'incomplete' | 'not_run' | 'unavailable';
   reason: string;
@@ -24,7 +24,7 @@ export function validateTestFiles(root: string, files: string[]): string[] {
   catch { return reject('invalid_root'); }
   const result: string[] = [];
   for (const file of files) {
-    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !/\.(?:js|mjs|cjs)$/.test(file)) reject('invalid_test_path');
+    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) reject('invalid_test_path');
     const target = vrNodeResolve(base, file);
     const rel = vrNodeRelative(base, target);
     if (!rel || rel.startsWith(`..${vrNodeSep}`) || vrNodeAbsolute(rel)) reject('path_escape');
@@ -200,6 +200,9 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
   if (probe.issue || probe.code !== 0 || !/^v\d+\.\d+\.\d+$/.test(version)) return { ...receipt, status: 'unavailable', reason: probe.issue ?? 'invalid_node_version' };
   receipt.runnerVersion = version;
   if (Number(version.split('.')[0].slice(1)) < 22) return { ...receipt, status: 'unavailable', reason: 'unsupported_node_version' };
+  // Admitting `.ts` is not enough: only Node >= 22.18 strips types without a flag, so an older runner
+  // rejects the request up front instead of failing every file with an unknown extension.
+  if (!receiptSupportsTypeScriptTests(version) && paths.some(file => receiptIsTypeScriptTestFile(file))) return { ...receipt, status: 'unavailable', reason: 'typescript_unsupported_node' };
   let directory: string | null = null;
   try {
     directory = vrNodeMkdtemp(vrNodeJoin(vrNodeTmpdir(), 'verification-node-'));

@@ -250,6 +250,32 @@ test('dedup keys canonicalize across job and subagent terminals and pending laun
  expect(resolution.id.length).toBe(36);
 }, 30000);
 
+ // JJO-1161 P2: the coverage demand recognized only .js/.mjs/.cjs, so a TypeScript repo's changed tests
+ // were silently exempt while the run tool could execute them on Node >= 22.18. Both sides now read one
+ // rule, and a file the runner cannot execute (.tsx) is demanded by neither.
+ test('TypeScript test files are demanded as coverage and unsupported extensions are not', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const repoDigest = await repositoryDigest(root);
+  const sessionDigest = sessionDigestOf('session-ts-coverage');
+  const base = await captureBaseline(root);
+  await fs.writeFile(path.join(root, 'one.test.ts'), 'export const a: number = 1;\n');
+  await fs.writeFile(path.join(root, 'two.spec.mts'), 'export const b: number = 1;\n');
+  await fs.writeFile(path.join(root, 'view.test.tsx'), 'export const view = null;\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'add typescript tests');
+  await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-ts-cov', { ...base!, toolCallId: '' });
+  const facts = await gitDeltaFacts(root, base!.head);
+  expect(facts.changedTestFiles).toEqual(['one.test.ts', 'two.spec.mts']);
+  await recordGate(repoDigest, sessionDigest, root, await gateEmission({ baselineToolCallId: 'call-ts-cov', changedFiles: 3, commits: 1 }));
+  await makeReceipt(root, ['one.test.ts'], 'passed');
+  const uncovered = await evaluateRepoGates(root, repoDigest, sessionDigest);
+  expect(uncovered.status).toBe('gaps');
+  expect(uncovered.gapKinds).toEqual(['changed_test_uncovered']);
+  await makeReceipt(root, ['one.test.ts', 'two.spec.mts'], 'passed');
+  expect((await evaluateRepoGates(root, repoDigest, sessionDigest)).status).toBe('clean');
+ }, 30000);
+
  test('changed test files must be covered and binding evidence blocks no-change resolution', async () => {
  await makeHome();
  const root = await makeRepo();

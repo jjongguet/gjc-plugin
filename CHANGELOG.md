@@ -2,6 +2,15 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.19] - 2026-11-01
+
+Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **verification-receipts**: the changed-test coverage demand recognized only `.js/.mjs/.cjs`, so a TypeScript repository's changed tests were silently exempt from `changed_test_uncovered` even though the runner can execute them (JJO-1161 P2). `verification_run`/`verification_status` now admit `.ts/.mts/.cts` alongside the JS family (Node's own runner with the same fixed reporter), and the receipt `files` list accepts them, so the demand and the executor read one rule (`RECEIPT_TEST_FILE`).
+- **verification-receipts**: TypeScript admission is decided by the runner version the tool probed, not by hope — a request for a `.ts` test on a Node older than 22.18 (no unflagged type stripping) returns `unavailable` with `typescript_unsupported_node` instead of failing every file with an unknown extension. JSX/TSX stays an `invalid_test_path` because it needs a transform.
+
 ## [0.0.18] - 2026-11-01
 
 Plugins: jev-advisor 0.0.14 · verification-receipts 0.0.9 · ui-regression 0.0.10 · wiki 0.0.7 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
@@ -258,6 +267,8 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.19]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.18...v0.0.19
+[0.0.18]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.17...v0.0.18
 [0.0.12]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.11...v0.0.12
 [0.0.11]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.10...v0.0.11
 [0.0.10]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.9...v0.0.10

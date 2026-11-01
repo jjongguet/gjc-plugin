@@ -195,7 +195,7 @@ test('selected inputs normalize once and ignored-only changes during a run remai
 
 test('unsafe, sensitive, excluded, duplicate and oversized selections never silently fall back',async()=>{
  const{root,base}=await setup();const r=await make(root);
- const invalid=[['../outside.mjs'],[path.join(root,'a.mjs')],['C:\\outside.mjs'],['a.mjs','./a.mjs'],['a.mjs','a.mjs'],['a.ts'],['--a.mjs'],['a\0.mjs'],['.envfoo.mjs'],['secret.mjs'],['.gjc-plugin/result.mjs'],['.git/a.mjs'],['node_modules/test.mjs'],['dist/test.mjs'],['coverage/test.mjs'],['.next/test.mjs'],['.gjc/test.mjs'],['private/test.js'],['cookies.cjs'],['credentials.js'],['x'.repeat(4097)+'.mjs'],Array.from({length:33},(_,i)=>`${i}.mjs`)];
+ const invalid=[['../outside.mjs'],[path.join(root,'a.mjs')],['C:\\outside.mjs'],['a.mjs','./a.mjs'],['a.mjs','a.mjs'],['a.tsx'],['--a.mjs'],['a\0.mjs'],['.envfoo.mjs'],['secret.mjs'],['.gjc-plugin/result.mjs'],['.git/a.mjs'],['node_modules/test.mjs'],['dist/test.mjs'],['coverage/test.mjs'],['.next/test.mjs'],['.gjc/test.mjs'],['private/test.js'],['cookies.cjs'],['credentials.js'],['x'.repeat(4097)+'.mjs'],Array.from({length:33},(_,i)=>`${i}.mjs`)];
  for(const files of invalid){
   expect((await fingerprintSource(root,r.specDigest,files)).status).toBe('unavailable');
   expect(await persistReceipt(r,base,files)).toMatchObject({persisted:false,reason:'invalid_metadata'});

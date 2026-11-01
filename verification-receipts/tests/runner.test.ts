@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, symlinkSync, mkdirSync, realpathSyn
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { runNodeTests, validateTestFiles, type NodeExecution } from '../lib/runner';
+import { receiptIsTypeScriptTestFile, receiptSupportsTypeScriptTests } from '../lib/receipts';
 
 async function withRunnerFixture(sources: Record<string, string>, run: (root: string) => Promise<void> | void) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'verification-runner-test-')));
@@ -238,12 +239,12 @@ describe('native Node verification runner', () => {
   });
 
   test('rejects escapes, flags, unsupported files, symlinks, missing and duplicate files', async () => {
-    await withRunnerFixture({ 'pass.cjs': passSource, 'source.ts': '' }, async root => {
+    await withRunnerFixture({ 'pass.cjs': passSource, 'source.tsx': '' }, async root => {
       symlinkSync(join(root, 'pass.cjs'), join(root, 'link.cjs'));
       mkdirSync(join(root, 'nested'));
       symlinkSync(join(root, 'nested'), join(root, 'linked'));
       writeFileSync(join(root, 'nested', 'pass.cjs'), passSource);
-      for (const files of [[], ['../pass.cjs'], ['/tmp/pass.cjs'], ['--test.cjs'], ['source.ts'], ['missing.cjs'], ['link.cjs'], ['linked/pass.cjs'], ['pass.cjs', 'pass.cjs'], Array(33).fill('pass.cjs')]) {
+      for (const files of [[], ['../pass.cjs'], ['/tmp/pass.cjs'], ['--test.cjs'], ['source.tsx'], ['missing.cjs'], ['link.cjs'], ['linked/pass.cjs'], ['pass.cjs', 'pass.cjs'], Array(33).fill('pass.cjs')]) {
         expect(() => validateTestFiles(root, files)).toThrow();
         const result = await runNodeTests(root, files);
         expect(result.status).toBe('not_run');
@@ -253,5 +254,27 @@ describe('native Node verification runner', () => {
       expect(validateTestFiles(root, ['pass.cjs'])).toEqual([join(root, 'pass.cjs')]);
       for (const timeout of [0, -1, NaN, Infinity, 120001]) expect((await runNodeTests(root, ['pass.cjs'], timeout)).reason).toBe('invalid_timeout');
     });
+  });
+
+  // JJO-1161 P2: TypeScript tests are admitted because Node >= 22.18 strips types for .ts/.mts/.cts with
+  // the same node:test reporter. JSX/TSX needs a transform, so it stays an invalid path rather than a
+  // silent failure, and an older runner rejects the request instead of failing every file.
+  test('TypeScript test files run on a stripping-capable runner and unsupported extensions are rejected', async () => {
+    await withRunnerFixture({ 'typed.test.ts': "import { test } from 'node:test';\nimport assert from 'node:assert/strict';\nconst n: number = 2;\ntest('owned typed pass', () => { assert.equal(n, 2); });\n", 'view.tsx': 'export const view = null;\n' }, async root => {
+      expect(validateTestFiles(root, ['typed.test.ts'])).toEqual([join(root, 'typed.test.ts')]);
+      const result = await runNodeTests(root, ['typed.test.ts']);
+      expectNativeRunner(result);
+      expect(result.status).toBe('passed');
+      expect(result.counts?.passed).toBe(1);
+      expect(() => validateTestFiles(root, ['view.tsx'])).toThrow();
+      expect((await runNodeTests(root, ['view.tsx'])).reason).toBe('invalid_test_path');
+      // An admitted extension that does not exist is still reported as missing, not as an invalid path.
+      expect((await runNodeTests(root, ['absent.test.ts'])).reason).toBe('missing_test_file');
+    });
+  });
+
+  test('TypeScript support is decided by the runner version, not by the defaulter', () => {
+    expect([receiptSupportsTypeScriptTests('v22.17.0'), receiptSupportsTypeScriptTests('v22.18.0'), receiptSupportsTypeScriptTests('v23.0.0'), receiptSupportsTypeScriptTests('v24.15.0'), receiptSupportsTypeScriptTests('v20.11.0'), receiptSupportsTypeScriptTests(null)]).toEqual([false, true, true, true, false, false]);
+    expect([receiptIsTypeScriptTestFile('a.test.ts'), receiptIsTypeScriptTestFile('a.spec.mts'), receiptIsTypeScriptTestFile('a.test.cts'), receiptIsTypeScriptTestFile('a.test.tsx'), receiptIsTypeScriptTestFile('a.test.mjs')]).toEqual([true, true, true, false, false]);
   });
 });
