@@ -15,6 +15,7 @@ import { collectRepo } from '../lib/collect.mjs';
 import { buildPrompt, selectLenses } from '../lib/lenses.mjs';
 import { gateFindings, indexDiff } from '../lib/gate.mjs';
 import { runAll, runLens } from '../lib/runner.mjs';
+import { makeDeadline } from '../lib/deadline.mjs';
 
 const DEFAULT_STATE_DIR = path.join(process.env.HOME ?? '.', '.gjc-plugin', 'nightly-review');
 
@@ -207,17 +208,16 @@ async function executeOnce(options) {
   const runDir = path.join(stateDir, runIdFrom());
   await mkdir(runDir, { recursive: true });
 
+  // Progress always goes to stderr, including under --json: a timer run has no
+  // other way to distinguish slow work from a hang. --json controls stdout only.
   const log = (message) => {
-    if (!options.json) process.stderr.write(`${message}\n`);
+    process.stderr.write(`${message}\n`);
   };
   log(`run: ${runDir}`);
   log(`since: ${since}, lenses: ${lenses.map((lens) => lens.id).join(',')}`);
   log(`deadline: ${deadlineSeconds}s from the first model call`);
 
   const startedAt = new Date().toISOString();
-  // The deadline covers the paid phase only: collection is free and needs to
-  // finish before the clock starts, or a slow GitHub would eat the budget.
-  let callPhaseStart = 0;
   const prs = [];
   for (const repo of options.repos) {
     try {
@@ -251,12 +251,13 @@ async function executeOnce(options) {
   // and must survive being stopped half way.
   const rawDir = path.join(runDir, 'raw');
   await mkdir(rawDir, { recursive: true });
-  callPhaseStart = Date.now();
-  const deadlineAt = callPhaseStart + deadlineSeconds * 1000;
+  // The deadline covers the paid phase only: collection is free and needs to
+  // finish before the clock starts, or a slow GitHub would eat the budget.
+  const deadline = makeDeadline(deadlineSeconds);
   const { results: calls, skipped } = await runAll({
     tasks,
     concurrency,
-    shouldStop: () => Date.now() >= deadlineAt,
+    shouldStop: () => deadline.reached(),
     onResult: (result) => {
       log(
         `${result.repo}#${result.pr} ${result.lens}: ${result.ok ? `${result.findings.length} findings` : result.error}`,
@@ -382,7 +383,13 @@ function gateAcross({ prs, calls, maxFindings }) {
   kept.sort((a, b) => b.confidence - a.confidence);
   const capped = kept.slice(0, maxFindings);
   for (const finding of kept.slice(maxFindings)) {
-    dropped.push({ reason: 'over_run_cap', file: finding.file, lens: finding.lens, quote: finding.quote });
+    dropped.push({
+      reason: 'over_run_cap',
+      prKey: `${finding.repo}#${finding.pr}`,
+      file: finding.file,
+      lens: finding.lens,
+      quote: finding.quote,
+    });
     stats.byReason.over_run_cap = (stats.byReason.over_run_cap ?? 0) + 1;
     stats.dropped += 1;
   }

@@ -23,7 +23,9 @@ A nightly job is unattended and paid, so the paid phase carries a hard ceiling:
 reached. Calls already in flight are finishable (they are already paid for), and the
 receipt records `deadline.reached`, `skippedCalls` and `plannedCalls` so a truncated
 sweep is visible rather than looking like a quiet night. The deadline starts after
-collection, which makes no model calls.
+collection, which makes no model calls. Progress is written to stderr even under
+`--json` (`--json` controls stdout only), because a timer run has no other way to
+distinguish slow work from a hang.
 
 Each lens call runs in its own process with its own temporary working directory, so
 no reviewer sees another reviewer's conclusion and no project context is injected —
@@ -109,7 +111,8 @@ visible per run and per lens.
 - `usage` — summed `inputTokens`, `outputTokens`, `cachedInputTokens`
 - `deadline` — `seconds`, `reached`, `skippedCalls`, `plannedCalls`
 - `gate` — `submitted`, `kept`, `dropped`, `byReason`
-- `dropped[]` — reason, file, lens, quote prefix (first 200)
+- `dropped[]` — reason, `prKey`, file, lens, quote prefix, so a run cap is
+  attributable to the pull request it cut rather than to the whole night
 - `findings[]` — survivors as quoted above
 - `linear` — `filed: 0` and the note that filing is a separate approved step
 - `recheckedAt` — set by `recheck`, which re-gates stored raw results offline
