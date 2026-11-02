@@ -359,6 +359,7 @@ async function executeOnce(options) {
     linear: { filed: 0, note: 'not filed: issue creation is a separate approved step' },
   };
 
+  let filingFailed = false;
   if (options.fileFindings) {
     const filing = await fileFindings({
       runDir,
@@ -368,6 +369,9 @@ async function executeOnce(options) {
       log,
     });
     receipt.linear = filing.receiptBlock;
+    // An unattended run must not look clean when a Linear write failed: the exit
+    // code is the only signal launchd keeps.
+    filingFailed = (filing.result?.errors?.length ?? 0) > 0;
   }
 
   await writeFile(path.join(runDir, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
@@ -385,7 +389,7 @@ async function executeOnce(options) {
         `report: ${path.join(runDir, 'report.md')}\nrecheck: nightly-review recheck --run ${runDir}\n`,
     );
   }
-  return 0;
+  return filingFailed ? 1 : 0;
 }
 
 function gateAcross({ prs, calls, maxFindings }) {
@@ -475,6 +479,7 @@ async function fileFindings({ runDir, findings, stateDir, options, log }) {
     publish: true,
   });
   const { state: nextState, result } = await applyFiling({ actions, client, state, runId });
+  await mkdir(stateDir, { recursive: true });
   await writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, 'utf8');
 
   log(`file: ${summarizeFiling(result)}`);
