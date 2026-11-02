@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.23] - 2026-11-03
+
+Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
+
+### Fixed
+
+- **verification-receipts**: a changed test file that imports a harness `node --test` cannot load (`bun:test` in every `.ts` test of this repository) was demanded as coverage while the only executor could never produce a passed receipt for it, so `changed_test_uncovered` stayed open no matter what ran (JJO-1604). Admission now refuses such a request as `unsupported_test_harness` with the alternative runner named, and the coverage demand reads the same fact instead of the extension alone: `gitDeltaFacts` excludes those files from `changedTestFiles` and reports them in `exemptTestFiles`, which `verification_loop` surfaces with the action to run them under the repository's own runner. TypeScript tests that use `node:test` stay admitted and demanded, and `.js/.mjs/.cjs` coverage demand is unchanged.
+
 ## [0.0.22] - 2026-11-01
 
 Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.10 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2
@@ -292,6 +300,7 @@ Plugins: jev-advisor 0.0.4 · verification-receipts 0.0.2 · ui-regression 0.0.2
 
 - Initial public snapshot: **jev-advisor** decision-model advisories for subagent task delegation.
 
+[0.0.23]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.22...v0.0.23
 [0.0.22]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.21...v0.0.22
 [0.0.21]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.20...v0.0.21
 [0.0.20]: https://github.com/jjongguet/gjc-plugin/compare/v0.0.19...v0.0.20

@@ -25,7 +25,7 @@ function readSessionId(ctx: unknown): string | null {
 	} catch { return null; }
 }
 function blockedEvaluation(kind: 'not_a_repository' | 'state_unavailable', detail: string): LoopEvaluation {
-	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
+	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], exemptTestFiles: [], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
 }
 
 export default function verificationLoop(pi: { cwd: string; typebox: { Type: any } }) {
@@ -86,9 +86,11 @@ export default function verificationLoop(pi: { cwd: string; typebox: { Type: any
 				if (unrecorded) warnings.push('ungated_session_cwd');
 				const requiredActions = unrecorded
 					? [...new Set(['Delegated work started outside a Git work tree is ungated; rerun it from inside the repository or report the missing gate explicitly in the final message.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
-					: requiredActionsFor(effective.gapKinds);
+					: effective.exemptTestFiles.length
+						? [...new Set(['Changed test files outside this runner\'s harness are not demanded by coverage; run them with the repository\'s own runner and report that result.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
+						: requiredActionsFor(effective.gapKinds);
 				return text({
-					status: effective.status, repositoryDigest: repoDigest, gaps: effective.gaps, gapKinds: effective.gapKinds, budgetExceeded: effective.budgetExceeded,
+					status: effective.status, repositoryDigest: repoDigest, gaps: effective.gaps, gapKinds: effective.gapKinds, budgetExceeded: effective.budgetExceeded, exemptTestFiles: effective.exemptTestFiles,
 					openGates: effective.openGates, resolvedGates: effective.resolvedGates,
 					scannedSessionFiles: effective.scannedSessionFiles, scanTruncated: effective.scanTruncated, silentPending: effective.silentPending,
 					requiredActions, warnings, ...(unrecorded ? { reason: 'not_a_repository' } : {}), journalStorage, advisoryOnly: true,

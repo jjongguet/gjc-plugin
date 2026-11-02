@@ -1,9 +1,9 @@
 import { spawn as vrNodeSpawn } from 'node:child_process';
-import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove, statSync as vrNodeStat, accessSync as vrNodeAccess, constants as vrNodeConstants } from 'node:fs';
+import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove, statSync as vrNodeStat, accessSync as vrNodeAccess, constants as vrNodeConstants, openSync as vrNodeOpen, readSync as vrNodeRead, closeSync as vrNodeClose } from 'node:fs';
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
-import { RECEIPT_TEST_FILE, receiptIsTypeScriptTestFile, receiptSupportsTypeScriptTests } from './receipts';
+import { RECEIPT_TEST_FILE, RECEIPT_HARNESS_SCAN_BYTES, receiptIsTypeScriptTestFile, receiptForeignTestScheme, receiptSupportsTypeScriptTests } from './receipts';
 export type NodeExecution = {
   status: 'passed' | 'failed' | 'no_tests' | 'incomplete' | 'not_run' | 'unavailable';
   reason: string;
@@ -15,6 +15,19 @@ export type NodeExecution = {
 // Commands a failing test could not start because they are absent from the runner PATH. Kept out of
 // the execution record, which must stay receipt-shaped, and out of every outbound payload.
 export type NodeRunDiagnostics = { missingBinaries: string[] };
+
+// Bounded prefix read for the harness check: only the import block matters, and an unreadable or
+// oversized file falls back to the previous behaviour instead of rejecting a valid request.
+function vrNodeHarnessScan(file: string): string {
+  let handle: number | undefined;
+  try {
+    handle = vrNodeOpen(file, 'r');
+    const buffer = Buffer.alloc(RECEIPT_HARNESS_SCAN_BYTES);
+    const read = vrNodeRead(handle, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, read).toString('utf8');
+  } catch { return ''; }
+  finally { if (handle !== undefined) { try { vrNodeClose(handle); } catch { /* Already unusable. */ } } }
+}
 
 export function validateTestFiles(root: string, files: string[]): string[] {
   const reject = (code: string): never => { throw new Error(code); };
@@ -40,6 +53,9 @@ export function validateTestFiles(root: string, files: string[]): string[] {
       if (error instanceof Error && ['symlink_test_path', 'invalid_test_file', 'path_escape'].includes(error.message)) throw error;
       reject('missing_test_file');
     }
+    // Admitted by path is not enough: a harness Node's resolver cannot load can never pass here, so the
+    // request is refused up front instead of failing every test in the file (JJO-1604).
+    if (receiptForeignTestScheme(vrNodeHarnessScan(target)) !== null) reject('unsupported_test_harness');
     if (result.includes(target)) reject('duplicate_test_file');
     result.push(target);
   }

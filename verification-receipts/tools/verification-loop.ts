@@ -848,8 +848,26 @@ const receiptExec = receiptPromisify(receiptExecFile);
 // custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
 // JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
 // demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
-// this one rule, so they can never disagree about which changed tests a receipt must cover.
+// this path rule and the harness fact below, so they can never disagree about which changed tests a
+// receipt must cover.
 export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+// Admission and coverage demand read the same two facts: the path rule above, and whether Node's own
+// resolver can load the file. A scheme-qualified specifier outside node:/file:/data: — `bun:test` is
+// the common case — is admitted by extension but can never resolve under `node --test`, so such a file
+// can never produce a passed receipt. It is rejected at admission and left out of the coverage demand:
+// demanding a run this executor cannot satisfy would keep a gate open forever (JJO-1604).
+const RECEIPT_FOREIGN_SCHEME = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['\"])([a-z][a-z0-9+.-]*):/gi;
+const RECEIPT_NODE_SCHEMES = new Set(['node', 'file', 'data']);
+// Imports live at the top, so the scan never reads more than a bounded prefix of a test file.
+export const RECEIPT_HARNESS_SCAN_BYTES = 64 * 1024;
+/** The first import scheme this runner cannot load, or null when every scheme is Node-loadable. */
+export function receiptForeignTestScheme(source: string): string | null {
+ for (const found of source.matchAll(RECEIPT_FOREIGN_SCHEME)) {
+  const scheme = found[2].toLowerCase();
+  if (!RECEIPT_NODE_SCHEMES.has(scheme)) return scheme;
+ }
+ return null;
+}
 const RECEIPT_TYPESCRIPT_TEST_FILE = /\.(?:ts|mts|cts)$/;
 export const receiptIsTypeScriptTestFile = (file: string): boolean => RECEIPT_TYPESCRIPT_TEST_FILE.test(file);
 export const receiptSupportsTypeScriptTests = (version: string | null): boolean => {
@@ -1028,7 +1046,7 @@ const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
  repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
 };
 // Rejections raised by validateTestFiles before any test runs.
-export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'unsupported_test_harness'];
 const RECEIPT_UI_INPUT_ACTIONS: Record<string, string> = {
  scenario_object: 'Provide a plain scenario object with id, expectedBehavior and steps.',
  scenario_fields: 'Use exactly the documented fields for each scenario step; imported results and extra fields are unsupported.',
@@ -1080,6 +1098,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (reason === 'unsupported_test_harness') recommendedNextActions.push('This runner executes only node:test through `node --test`; a file importing another harness (for example bun:test) cannot pass here. Run those tests with the repository\'s own runner and report that result.');
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
@@ -1309,13 +1328,13 @@ export type LoopState = {
  schemaVersion: 1; sessionDigest: string; repoDigest: string; repoRoot: string; updatedAt: string;
  baselines: LoopBaseline[]; pendingAsync: LoopPendingAsync[]; gates: LoopGate[];
 };
-export type LoopGitFacts = { available: boolean; head: string | null; treeClean: boolean; dirtyFiles: string[]; changedFiles: number; changedTestFiles: string[]; commits: number | null; changedNames: string[]; namesOverflow: boolean };
+export type LoopGitFacts = { available: boolean; head: string | null; treeClean: boolean; dirtyFiles: string[]; changedFiles: number; changedTestFiles: string[]; exemptTestFiles: string[]; commits: number | null; changedNames: string[]; namesOverflow: boolean };
 export type LoopReceiptSummary = { state: LoopReceiptState; id: string | null; observedAt: string | null; status: string | null; freshness: string | null };
 export type LoopCandidate = { id: string; observedAt: string; status: string; files: string[]; freshness: string; root: string };
 export type LoopGap = { gateId: string; trigger: LoopGateTrigger; kind: LoopGapKindName; detail: string };
 export type LoopEvaluation = {
  status: 'clean' | 'gaps' | 'blocked'; repositoryDigest: string | null; gaps: LoopGap[];
- openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; stateWritten: boolean; stateWriteAttempted: boolean; budgetExceeded: boolean;
+ openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKindName[]; exemptTestFiles: string[]; stateWritten: boolean; stateWriteAttempted: boolean; budgetExceeded: boolean;
 };
 
 export function sessionDigestOf(sessionId: string): string { return loopDigest(String(sessionId)); }
@@ -1511,11 +1530,30 @@ export async function captureBaseline(root: string, budgetMs = BEFORE_BUDGET_MS)
  return { toolCallId: '', head: headText, porcelainDigest: porcelain.digest, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), capturedAt: new Date().toISOString() };
 }
 
+// A changed test file whose own imports cannot resolve under `node --test` can never be covered by a
+// passed receipt, so demanding it would leave the gate open forever (JJO-1604). Only a bounded prefix is
+// read, contents never leave this call, and an unreadable file keeps the demand — a missing exemption
+// must never look like a satisfied one.
+async function loopForeignTestScheme(root: string, name: string, deadline: number): Promise<string | null> {
+ if (loopClock.now() >= deadline) return null;
+ const target = loopPath.join(root, name);
+ try {
+  if ((await loopFs.lstat(target)).isSymbolicLink()) return null;
+  const handle = await loopFs.open(target, loopConstants.O_RDONLY | loopConstants.O_NOFOLLOW);
+  try {
+   if (!(await handle.stat()).isFile()) return null;
+   const buffer = Buffer.alloc(RECEIPT_HARNESS_SCAN_BYTES);
+   const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+   return receiptForeignTestScheme(buffer.subarray(0, bytesRead).toString('utf8'));
+  } finally { await handle.close(); }
+ } catch { return null; }
+}
+
 export async function gitDeltaFacts(root: string, baselineHead: string | null, budgetMs = BEFORE_BUDGET_MS): Promise<LoopGitFacts> {
  const deadline = loopClock.now() + budgetMs;
  const head = await loopRunGit(root, ['rev-parse', 'HEAD'], deadline);
  const status = await loopRunGit(root, ['status', '--porcelain=v1', '-z'], deadline);
- if (!head || !status) return { available: false, head: null, treeClean: false, dirtyFiles: [], changedFiles: 0, changedTestFiles: [], commits: null, changedNames: [], namesOverflow: false };
+ if (!head || !status) return { available: false, head: null, treeClean: false, dirtyFiles: [], changedFiles: 0, changedTestFiles: [], exemptTestFiles: [], commits: null, changedNames: [], namesOverflow: false };
  const headText = head.bytes.toString('utf8').trim();
  const porcelain = splitPorcelain(status.bytes);
  const names = new Set<string>([...porcelain.entries, ...porcelain.deleted]);
@@ -1539,8 +1577,16 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
   changedNames.push(name);
  }
  // Deleted files are changes but can never be covered by a receipt run; they are excluded from the coverage demand.
- const changedTestFiles = changedNames.filter(name => RECEIPT_TEST_FILE.test(name) && !deletedNames.has(name));
- return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, commits, changedNames, namesOverflow };
+ // A test file that imports a harness Node's resolver cannot load can never be covered either, so it is named
+ // separately instead of demanded: a demand the only executor cannot satisfy keeps the gate open forever (JJO-1604).
+ const admittedTests = changedNames.filter(name => RECEIPT_TEST_FILE.test(name) && !deletedNames.has(name));
+ const changedTestFiles: string[] = [];
+ const exemptTestFiles: string[] = [];
+ for (const name of admittedTests) {
+  if (await loopForeignTestScheme(root, name, deadline) === null) changedTestFiles.push(name);
+  else exemptTestFiles.push(name);
+ }
+ return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, exemptTestFiles, commits, changedNames, namesOverflow };
 }
 
 export function taskDedupKey(toolCallId: string): string { return 'task:' + toolCallId; }
@@ -1737,10 +1783,10 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
  let truncated = false;
  try {
   const scan = await scanSessionFiles(repoDigest, sessionDigest);
-  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
+  if (scan.ownCorrupt) return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'own session state is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: scan.scanned, scanTruncated: scan.truncated, silentPending: 0, gapKinds: ['state_unavailable'], exemptTestFiles: [], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
   sessions = scan.sessions; scanned = scan.scanned; truncated = scan.truncated;
  } catch {
-  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
+  return { status: 'blocked', repositoryDigest: repoDigest, gaps: [{ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: 'loop state directory is unreadable' }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: ['state_unavailable'], exemptTestFiles: [], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
  }
  const factsCache = new Map<string, LoopGitFacts>();
  const gateFacts = async (baselineHead: string | null): Promise<LoopGitFacts> => {
@@ -1757,6 +1803,7 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
  let budgetExceeded = false;
  let skippedGates = 0;
  const gapKinds: LoopGapKindName[] = [];
+ const exemptTestFiles = new Set<string>();
  for (const session of sessions) {
   for (const pending of session.state.pendingAsync) if (pending.consumedAtGateId === null) silentPending++;
   for (const gate of session.state.gates) {
@@ -1783,6 +1830,7 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    }
    const sameRoot = gate.boundRoot === undefined || gate.boundRoot === root;
    const current = await gateFacts(baseline?.head ?? null);
+   if (current.available) for (const name of current.exemptTestFiles) exemptTestFiles.add(name);
    const noChange = gate.changedFiles === 0 && (gate.commits === 0 || gate.commits === null) && gate.bindingEvidence === 'absent' && sameRoot && baseline !== null && current.available && current.treeClean && current.changedFiles === 0 && current.commits === 0;
    if (noChange) {
     resolvedGates++;
@@ -1804,7 +1852,8 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    const kind = !current.available || scanStop.truncated ? 'state_unavailable' : gapKindForCandidate(candidates[0], changedTests);
    openGates++;
    if (scanStop.truncated) budgetExceeded = true;
-   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : scanStop.truncated ? 'receipt scan stopped at the evaluation budget; coverage could not be fully checked' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : 'no covering fresh passed receipt after gate' });
+   const exempt = current.available ? current.exemptTestFiles.slice(0, 8).join(', ') : '';
+   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : scanStop.truncated ? 'receipt scan stopped at the evaluation budget; coverage could not be fully checked' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : exempt ? `no covering fresh passed receipt after gate; changed test files outside this runner's harness are not demanded (${exempt}) and need the repository's own runner` : 'no covering fresh passed receipt after gate' });
    if (!gapKinds.includes(kind)) gapKinds.push(kind);
   }
  }
@@ -1829,7 +1878,7 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
   if (!gapKinds.includes('state_unavailable')) gapKinds.push('state_unavailable');
   boundedGaps.push({ gateId: '', trigger: 'task', kind: 'state_unavailable', detail: `evaluation budget reached; ${skippedGates} gate(s) unevaluated` });
  }
- return { status: openGates > 0 || budgetExceeded ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps.slice(0, 16), openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), stateWritten, stateWriteAttempted, budgetExceeded };
+ return { status: openGates > 0 || budgetExceeded ? 'gaps' : 'clean', repositoryDigest: repoDigest, gaps: boundedGaps.slice(0, 16), openGates, resolvedGates, scannedSessionFiles: scanned, scanTruncated: truncated, silentPending, gapKinds: gapKinds.slice(0, 10), exemptTestFiles: [...exemptTestFiles].sort().slice(0, 32), stateWritten, stateWriteAttempted, budgetExceeded };
 }
 
 export type GateTextView = {
@@ -1926,7 +1975,7 @@ function readSessionId(ctx: unknown): string | null {
 	} catch { return null; }
 }
 function blockedEvaluation(kind: 'not_a_repository' | 'state_unavailable', detail: string): LoopEvaluation {
-	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
+	return { status: 'blocked', repositoryDigest: null, gaps: [{ gateId: '', trigger: 'task', kind, detail }], openGates: 0, resolvedGates: 0, scannedSessionFiles: 0, scanTruncated: false, silentPending: 0, gapKinds: [kind], exemptTestFiles: [], stateWritten: false, stateWriteAttempted: false, budgetExceeded: false };
 }
 
 export default function verificationLoop(pi: { cwd: string; typebox: { Type: any } }) {
@@ -1987,9 +2036,11 @@ export default function verificationLoop(pi: { cwd: string; typebox: { Type: any
 				if (unrecorded) warnings.push('ungated_session_cwd');
 				const requiredActions = unrecorded
 					? [...new Set(['Delegated work started outside a Git work tree is ungated; rerun it from inside the repository or report the missing gate explicitly in the final message.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
-					: requiredActionsFor(effective.gapKinds);
+					: effective.exemptTestFiles.length
+						? [...new Set(['Changed test files outside this runner\'s harness are not demanded by coverage; run them with the repository\'s own runner and report that result.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
+						: requiredActionsFor(effective.gapKinds);
 				return text({
-					status: effective.status, repositoryDigest: repoDigest, gaps: effective.gaps, gapKinds: effective.gapKinds, budgetExceeded: effective.budgetExceeded,
+					status: effective.status, repositoryDigest: repoDigest, gaps: effective.gaps, gapKinds: effective.gapKinds, budgetExceeded: effective.budgetExceeded, exemptTestFiles: effective.exemptTestFiles,
 					openGates: effective.openGates, resolvedGates: effective.resolvedGates,
 					scannedSessionFiles: effective.scannedSessionFiles, scanTruncated: effective.scanTruncated, silentPending: effective.silentPending,
 					requiredActions, warnings, ...(unrecorded ? { reason: 'not_a_repository' } : {}), journalStorage, advisoryOnly: true,

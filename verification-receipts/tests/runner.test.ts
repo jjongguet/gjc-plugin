@@ -273,6 +273,22 @@ describe('native Node verification runner', () => {
     });
   });
 
+  // JJO-1604: admission is a path rule plus a harness fact. A file that imports a scheme Node's resolver
+  // cannot load (bun:test here) is refused before it runs instead of producing a receipt that can never
+  // pass, and the coverage demand reads the same fact so it never asks for that impossible run.
+  test('a test file importing a harness Node cannot load is refused before it runs', async () => {
+    await withRunnerFixture({ 'bun.test.ts': "import { test } from 'bun:test';\ntest('owned bun', () => {});\n", 'bun.test.js': "import { test } from 'bun:test';\ntest('owned bun', () => {});\n", 'node.test.ts': "import { test } from 'node:test';\ntest('owned node', () => {});\n" }, async root => {
+      for (const file of ['bun.test.ts', 'bun.test.js']) {
+        expect(() => validateTestFiles(root, [file])).toThrow('unsupported_test_harness');
+        const refused = await runNodeTests(root, [file]);
+        expect(refused.status).toBe('not_run');
+        expect(refused.reason).toBe('unsupported_test_harness');
+      }
+      expect(validateTestFiles(root, ['node.test.ts'])).toEqual([join(root, 'node.test.ts')]);
+      expect((await runNodeTests(root, ['node.test.ts'])).status).toBe('passed');
+    });
+  });
+
   test('TypeScript support is decided by the runner version, not by the defaulter', () => {
     expect([receiptSupportsTypeScriptTests('v22.17.0'), receiptSupportsTypeScriptTests('v22.18.0'), receiptSupportsTypeScriptTests('v23.0.0'), receiptSupportsTypeScriptTests('v24.15.0'), receiptSupportsTypeScriptTests('v20.11.0'), receiptSupportsTypeScriptTests(null)]).toEqual([false, true, true, true, false, false]);
     expect([receiptIsTypeScriptTestFile('a.test.ts'), receiptIsTypeScriptTestFile('a.spec.mts'), receiptIsTypeScriptTestFile('a.test.cts'), receiptIsTypeScriptTestFile('a.test.tsx'), receiptIsTypeScriptTestFile('a.test.mjs')]).toEqual([true, true, true, false, false]);

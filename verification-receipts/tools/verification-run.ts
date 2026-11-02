@@ -848,8 +848,26 @@ const receiptExec = receiptPromisify(receiptExecFile);
 // custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
 // JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
 // demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
-// this one rule, so they can never disagree about which changed tests a receipt must cover.
+// this path rule and the harness fact below, so they can never disagree about which changed tests a
+// receipt must cover.
 export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+// Admission and coverage demand read the same two facts: the path rule above, and whether Node's own
+// resolver can load the file. A scheme-qualified specifier outside node:/file:/data: — `bun:test` is
+// the common case — is admitted by extension but can never resolve under `node --test`, so such a file
+// can never produce a passed receipt. It is rejected at admission and left out of the coverage demand:
+// demanding a run this executor cannot satisfy would keep a gate open forever (JJO-1604).
+const RECEIPT_FOREIGN_SCHEME = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['\"])([a-z][a-z0-9+.-]*):/gi;
+const RECEIPT_NODE_SCHEMES = new Set(['node', 'file', 'data']);
+// Imports live at the top, so the scan never reads more than a bounded prefix of a test file.
+export const RECEIPT_HARNESS_SCAN_BYTES = 64 * 1024;
+/** The first import scheme this runner cannot load, or null when every scheme is Node-loadable. */
+export function receiptForeignTestScheme(source: string): string | null {
+ for (const found of source.matchAll(RECEIPT_FOREIGN_SCHEME)) {
+  const scheme = found[2].toLowerCase();
+  if (!RECEIPT_NODE_SCHEMES.has(scheme)) return scheme;
+ }
+ return null;
+}
 const RECEIPT_TYPESCRIPT_TEST_FILE = /\.(?:ts|mts|cts)$/;
 export const receiptIsTypeScriptTestFile = (file: string): boolean => RECEIPT_TYPESCRIPT_TEST_FILE.test(file);
 export const receiptSupportsTypeScriptTests = (version: string | null): boolean => {
@@ -1028,7 +1046,7 @@ const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
  repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
 };
 // Rejections raised by validateTestFiles before any test runs.
-export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'unsupported_test_harness'];
 const RECEIPT_UI_INPUT_ACTIONS: Record<string, string> = {
  scenario_object: 'Provide a plain scenario object with id, expectedBehavior and steps.',
  scenario_fields: 'Use exactly the documented fields for each scenario step; imported results and extra fields are unsupported.',
@@ -1080,6 +1098,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (reason === 'unsupported_test_harness') recommendedNextActions.push('This runner executes only node:test through `node --test`; a file importing another harness (for example bun:test) cannot pass here. Run those tests with the repository\'s own runner and report that result.');
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
@@ -1255,7 +1274,7 @@ export async function currentReceiptFreshness(root: string, receipt: Verificatio
 }
 
 import { spawn as vrNodeSpawn } from 'node:child_process';
-import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove, statSync as vrNodeStat, accessSync as vrNodeAccess, constants as vrNodeConstants } from 'node:fs';
+import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync as vrNodeMkdtemp, writeFileSync as vrNodeWrite, rmSync as vrNodeRemove, statSync as vrNodeStat, accessSync as vrNodeAccess, constants as vrNodeConstants, openSync as vrNodeOpen, readSync as vrNodeRead, closeSync as vrNodeClose } from 'node:fs';
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
@@ -1270,6 +1289,19 @@ export type NodeExecution = {
 // Commands a failing test could not start because they are absent from the runner PATH. Kept out of
 // the execution record, which must stay receipt-shaped, and out of every outbound payload.
 export type NodeRunDiagnostics = { missingBinaries: string[] };
+
+// Bounded prefix read for the harness check: only the import block matters, and an unreadable or
+// oversized file falls back to the previous behaviour instead of rejecting a valid request.
+function vrNodeHarnessScan(file: string): string {
+  let handle: number | undefined;
+  try {
+    handle = vrNodeOpen(file, 'r');
+    const buffer = Buffer.alloc(RECEIPT_HARNESS_SCAN_BYTES);
+    const read = vrNodeRead(handle, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, read).toString('utf8');
+  } catch { return ''; }
+  finally { if (handle !== undefined) { try { vrNodeClose(handle); } catch { /* Already unusable. */ } } }
+}
 
 export function validateTestFiles(root: string, files: string[]): string[] {
   const reject = (code: string): never => { throw new Error(code); };
@@ -1295,6 +1327,9 @@ export function validateTestFiles(root: string, files: string[]): string[] {
       if (error instanceof Error && ['symlink_test_path', 'invalid_test_file', 'path_escape'].includes(error.message)) throw error;
       reject('missing_test_file');
     }
+    // Admitted by path is not enough: a harness Node's resolver cannot load can never pass here, so the
+    // request is refused up front instead of failing every test in the file (JJO-1604).
+    if (receiptForeignTestScheme(vrNodeHarnessScan(target)) !== null) reject('unsupported_test_harness');
     if (result.includes(target)) reject('duplicate_test_file');
     result.push(target);
   }
@@ -1670,7 +1705,7 @@ export default function verificationRun(pi: {cwd: string; typebox: {Type: any}})
   name: 'verification_run', label: 'Verification Run',
   description: 'Execute explicitly authorized non-sensitive JavaScript or TypeScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
   parameters: T.Object({
-   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files; no globs, symlinks, custom flags or loaders. TypeScript needs Node >= 22.18 for native type stripping.'}),
+   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs/.ts/.mts/.cts node:test files; no globs, symlinks, custom flags or loaders. TypeScript needs Node >= 22.18 for native type stripping. A file importing another harness (for example bun:test) is rejected as unsupported_test_harness and is never demanded as coverage.'}),
    repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
    timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
    assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))

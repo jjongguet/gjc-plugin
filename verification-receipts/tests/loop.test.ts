@@ -251,8 +251,8 @@ test('dedup keys canonicalize across job and subagent terminals and pending laun
 }, 30000);
 
  // JJO-1161 P2: the coverage demand recognized only .js/.mjs/.cjs, so a TypeScript repo's changed tests
- // were silently exempt while the run tool could execute them on Node >= 22.18. Both sides now read one
- // rule, and a file the runner cannot execute (.tsx) is demanded by neither.
+ // were silently exempt while the run tool could execute them on Node >= 22.18. Both sides now read the
+ // path rule and the harness fact, and a file the runner cannot execute (.tsx) is demanded by neither.
  test('TypeScript test files are demanded as coverage and unsupported extensions are not', async () => {
   await makeHome();
   const root = await makeRepo();
@@ -274,6 +274,38 @@ test('dedup keys canonicalize across job and subagent terminals and pending laun
   expect(uncovered.gapKinds).toEqual(['changed_test_uncovered']);
   await makeReceipt(root, ['one.test.ts', 'two.spec.mts'], 'passed');
   expect((await evaluateRepoGates(root, repoDigest, sessionDigest)).status).toBe('clean');
+ }, 30000);
+
+ test('changed test files outside the runner harness are exempt instead of permanently uncovered', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const repoDigest = await repositoryDigest(root);
+  const sessionDigest = sessionDigestOf('session-ts-harness');
+  const base = await captureBaseline(root);
+  // A bun:test file can be admitted by path but can never resolve under `node --test`, so demanding it
+  // would leave changed_test_uncovered open forever (JJO-1604).
+  await fs.writeFile(path.join(root, 'bun.test.ts'), "import { test } from 'bun:test';\ntest('owned', () => {});\n");
+  await fs.writeFile(path.join(root, 'node.test.ts'), "import { test } from 'node:test';\ntest('owned', () => {});\n");
+  await fs.writeFile(path.join(root, 'plain.test.mjs'), 'export const value = 1;\n');
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'add mixed harness tests');
+  await recordTaskBaseline(repoDigest, sessionDigest, root, 'call-harness-cov', { ...base!, toolCallId: '' });
+  const facts = await gitDeltaFacts(root, base!.head);
+  expect(facts.changedTestFiles).toEqual(['node.test.ts', 'plain.test.mjs']);
+  expect(facts.exemptTestFiles).toEqual(['bun.test.ts']);
+  await recordGate(repoDigest, sessionDigest, root, await gateEmission({ baselineToolCallId: 'call-harness-cov', changedFiles: 3, commits: 1 }));
+  // Only the runnable files are demanded: a receipt covering them resolves the gate even though the
+  // bun:test file was never covered, and the exemption is reported instead of becoming a silent pass.
+  await makeReceipt(root, ['node.test.ts'], 'passed');
+  const partial = await evaluateRepoGates(root, repoDigest, sessionDigest);
+  expect(partial.status).toBe('gaps');
+  expect(partial.gapKinds).toEqual(['changed_test_uncovered']);
+  expect(partial.exemptTestFiles).toEqual(['bun.test.ts']);
+  await makeReceipt(root, ['node.test.ts', 'plain.test.mjs'], 'passed');
+  const resolved = await evaluateRepoGates(root, repoDigest, sessionDigest);
+  expect(resolved.status).toBe('clean');
+  expect(resolved.gapKinds).not.toContain('changed_test_uncovered');
+  expect(resolved.exemptTestFiles).toEqual(['bun.test.ts']);
  }, 30000);
 
  test('changed test files must be covered and binding evidence blocks no-change resolution', async () => {
