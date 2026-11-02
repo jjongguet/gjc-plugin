@@ -18,6 +18,13 @@ separate, explicitly approved step turns them into issues.
 | gate | quote/path/line verification, near-duplicate collapse, per-run cap | none |
 | report | `report.md` plus `receipt.json` in the run directory | none |
 
+A nightly job is unattended and paid, so the paid phase carries a hard ceiling:
+`--deadline-seconds` (default 3600) stops *starting* new lens calls once it is
+reached. Calls already in flight are finishable (they are already paid for), and the
+receipt records `deadline.reached`, `skippedCalls` and `plannedCalls` so a truncated
+sweep is visible rather than looking like a quiet night. The deadline starts after
+collection, which makes no model calls.
+
 Each lens call runs in its own process with its own temporary working directory, so
 no reviewer sees another reviewer's conclusion and no project context is injected —
 the diff and the repository's rules are the only evidence. Concurrency is capped so
@@ -48,7 +55,8 @@ nightly-review/bin/nightly-review.mjs loop --repos infra --interval 86400
 Flags: `--repos` (required for `once`), `--since` (default yesterday), `--lenses`,
 `--out` (default `~/.gjc-plugin/nightly-review`), `--max-diff-bytes` (default
 40000), `--concurrency` (default 4), `--soft-bytes` (default 100663296),
-`--max-findings` (default 15), `--no-rules`, `--json`.
+`--max-findings` (default 15), `--deadline-seconds` (default 3600), `--no-rules`,
+`--json`.
 
 Exit codes: `0` ok, `2` invalid arguments.
 
@@ -99,6 +107,7 @@ visible per run and per lens.
 - `calls[]` — repo, pr, lens, model, `ok`, `error`, `latencyMs`, `streamBytes`,
   `streamTrimmed`, `findings`, `usage`, `cost`
 - `usage` — summed `inputTokens`, `outputTokens`, `cachedInputTokens`
+- `deadline` — `seconds`, `reached`, `skippedCalls`, `plannedCalls`
 - `gate` — `submitted`, `kept`, `dropped`, `byReason`
 - `dropped[]` — reason, file, lens, quote prefix (first 200)
 - `findings[]` — survivors as quoted above

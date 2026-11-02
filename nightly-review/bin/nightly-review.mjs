@@ -22,7 +22,7 @@ function usage() {
   return `usage: nightly-review <command> [options]
 
   once   --repos a,b [--since YYYY-MM-DD] [--lenses id,id] [--out DIR]
-         [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--json]
+         [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--deadline-seconds N] [--json]
   loop   (same options) --interval SECONDS
   recheck --run DIR [--max-findings N] [--json]
 
@@ -40,6 +40,7 @@ Options
   --concurrency  parallel model calls (default 4)
   --soft-bytes   stop reading a call's stream after this many bytes once the answer is in (default 100663296)
   --max-findings kept findings per run (default 15)
+  --deadline-seconds  stop starting new model calls after this long in the paid phase (default 3600)
   --no-rules     do not attach the repository's AGENTS.md to the review
 
 Exit codes: 0 ok, 2 invalid arguments.
@@ -85,6 +86,9 @@ function parseArgs(argv) {
         break;
       case 'soft-bytes':
         options.softBytes = Number(takeValue());
+        break;
+      case 'deadline-seconds':
+        options.deadlineSeconds = Number(takeValue());
         break;
       case 'max-findings':
         options.maxFindings = Number(takeValue());
@@ -197,6 +201,7 @@ async function executeOnce(options) {
   const concurrency = options.concurrency ?? 4;
   const softBytes = options.softBytes ?? 96 * 1024 * 1024;
   const maxFindings = options.maxFindings ?? 15;
+  const deadlineSeconds = options.deadlineSeconds ?? 3600;
   const stateDir = options.out ?? DEFAULT_STATE_DIR;
   const lenses = selectLenses(options.lenses);
   const runDir = path.join(stateDir, runIdFrom());
@@ -207,8 +212,12 @@ async function executeOnce(options) {
   };
   log(`run: ${runDir}`);
   log(`since: ${since}, lenses: ${lenses.map((lens) => lens.id).join(',')}`);
+  log(`deadline: ${deadlineSeconds}s from the first model call`);
 
   const startedAt = new Date().toISOString();
+  // The deadline covers the paid phase only: collection is free and needs to
+  // finish before the clock starts, or a slow GitHub would eat the budget.
+  let callPhaseStart = 0;
   const prs = [];
   for (const repo of options.repos) {
     try {
@@ -242,9 +251,12 @@ async function executeOnce(options) {
   // and must survive being stopped half way.
   const rawDir = path.join(runDir, 'raw');
   await mkdir(rawDir, { recursive: true });
-  const calls = await runAll({
+  callPhaseStart = Date.now();
+  const deadlineAt = callPhaseStart + deadlineSeconds * 1000;
+  const { results: calls, skipped } = await runAll({
     tasks,
     concurrency,
+    shouldStop: () => Date.now() >= deadlineAt,
     onResult: (result) => {
       log(
         `${result.repo}#${result.pr} ${result.lens}: ${result.ok ? `${result.findings.length} findings` : result.error}`,
@@ -260,6 +272,10 @@ async function executeOnce(options) {
   const { kept, dropped, stats } = gateAcross({ prs, calls, maxFindings });
   const usage = sumUsage(calls);
   const finishedAt = new Date().toISOString();
+  const deadlineReached = skipped > 0;
+  if (deadlineReached) {
+    log(`deadline reached: ${skipped} call(s) not started`);
+  }
 
   const gate = { kept, dropped, stats };
   const receipt = {
@@ -270,6 +286,12 @@ async function executeOnce(options) {
     finishedAt,
     since,
     repos: options.repos,
+    deadline: {
+      seconds: deadlineSeconds,
+      reached: deadlineReached,
+      skippedCalls: skipped,
+      plannedCalls: tasks.length,
+    },
     lenses: lenses.map((lens) => ({ id: lens.id, model: lens.model })),
     prs: prs.map((pr) => ({
       repo: pr.repo,

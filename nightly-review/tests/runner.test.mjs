@@ -7,6 +7,7 @@ import {
   lastAssistantText,
   parseJsonFindings,
   readTelemetry,
+  runAll,
 } from '../lib/runner.mjs';
 
 test('parseJsonFindings reads a bare JSON object', () => {
@@ -107,4 +108,35 @@ test('truncateDiff marks truncation so a half hunk is never read as complete', (
   assert.equal(long.truncated, true);
   assert.match(long.diff, /diff truncated at 100 bytes/);
   assert.ok(long.diff.length > 100);
+});
+
+test('runAll stops starting calls once shouldStop says so and counts the skipped ones', async () => {
+  const executed = [];
+  const tasks = Array.from({ length: 6 }, (_, index) => ({
+    meta: { repo: 'infra', pr: index, lens: 'contract' },
+    execute: async () => {
+      executed.push(index);
+      return { ok: true, findings: [], latencyMs: 1 };
+    },
+  }));
+
+  const { results, skipped } = await runAll({
+    tasks,
+    concurrency: 1,
+    shouldStop: () => executed.length >= 2,
+  });
+
+  assert.equal(results.length, 2);
+  assert.equal(skipped, 4);
+  assert.deepEqual(executed, [0, 1]);
+});
+
+test('runAll runs everything when the deadline is never reached', async () => {
+  const tasks = Array.from({ length: 3 }, (_, index) => ({
+    meta: { repo: 'infra', pr: index, lens: 'failure' },
+    execute: async () => ({ ok: true, findings: [], latencyMs: 1 }),
+  }));
+  const { results, skipped } = await runAll({ tasks, concurrency: 3, shouldStop: () => false });
+  assert.equal(results.length, 3);
+  assert.equal(skipped, 0);
 });

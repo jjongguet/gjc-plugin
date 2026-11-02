@@ -296,20 +296,29 @@ export async function runLens({ prompt, lens, timeoutMs = 240_000, gjcBin = 'gjc
 
 // Bounded fan-out. Concurrency is capped so the provider is not rate-limited
 // into partial results, which would look like "the model found nothing".
-export async function runAll({ tasks, concurrency = 4, onResult = () => {} }) {
+//
+// `shouldStop` stops *starting* work. A nightly run under a timer needs a hard
+// ceiling on paid calls, and a started call is already paid for, so the check is
+// made before each task instead of aborting one in flight.
+export async function runAll({ tasks, concurrency = 4, onResult = () => {}, shouldStop = () => false }) {
   const results = [];
   let cursor = 0;
+  let skipped = 0;
   const workers = Array.from({ length: Math.min(concurrency, tasks.length) }, async () => {
     for (;;) {
       const index = cursor;
       cursor += 1;
       const task = tasks[index];
       if (!task) return;
+      if (shouldStop()) {
+        skipped += 1;
+        continue;
+      }
       const result = await task.execute();
       results.push({ ...task.meta, ...result });
       onResult(results[results.length - 1]);
     }
   });
   await Promise.all(workers);
-  return results;
+  return { results, skipped };
 }
