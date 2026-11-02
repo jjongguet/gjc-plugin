@@ -13,7 +13,7 @@ import process from 'node:process';
 
 import { collectRepo } from '../lib/collect.mjs';
 import { buildPrompt, selectLenses } from '../lib/lenses.mjs';
-import { gateFindings, indexDiff } from '../lib/gate.mjs';
+import { DEFAULT_MAX_FINDINGS, gateFindings, indexDiff } from '../lib/gate.mjs';
 import { runAll, runLens } from '../lib/runner.mjs';
 import { makeDeadline } from '../lib/deadline.mjs';
 
@@ -40,7 +40,7 @@ Options
   --max-diff-bytes  per-PR diff cap (default 40000)
   --concurrency  parallel model calls (default 4)
   --soft-bytes   stop reading a call's stream after this many bytes once the answer is in (default 100663296)
-  --max-findings kept findings per run (default 15)
+  --max-findings kept findings per run (default 40)
   --deadline-seconds  stop starting new model calls after this long in the paid phase (default 3600)
   --no-rules     do not attach the repository's AGENTS.md to the review
 
@@ -201,7 +201,7 @@ async function executeOnce(options) {
   const maxDiffBytes = options.maxDiffBytes ?? 40_000;
   const concurrency = options.concurrency ?? 4;
   const softBytes = options.softBytes ?? 96 * 1024 * 1024;
-  const maxFindings = options.maxFindings ?? 15;
+  const maxFindings = options.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const deadlineSeconds = options.deadlineSeconds ?? 3600;
   const stateDir = options.out ?? DEFAULT_STATE_DIR;
   const lenses = selectLenses(options.lenses);
@@ -400,7 +400,7 @@ function gateAcross({ prs, calls, maxFindings }) {
 async function executeRecheck(options) {
   const runDir = options.run;
   if (!runDir || !existsSync(runDir)) throw new Error('--run DIR is required and must exist');
-  const maxFindings = options.maxFindings ?? 15;
+  const maxFindings = options.maxFindings ?? DEFAULT_MAX_FINDINGS;
   const { readFile, readdir } = await import('node:fs/promises');
 
   const prs = [];

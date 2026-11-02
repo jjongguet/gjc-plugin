@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {
+import { DEFAULT_MAX_FINDINGS,
   gateFindings,
   indexDiff,
   normalizePath,
@@ -202,4 +202,26 @@ test('gateFindings caps the run and sorts by confidence', () => {
 
 test('normalizeWhitespace keeps line structure', () => {
   assert.equal(normalizeWhitespace('  a  b \n\n\tc\t'), 'a b\nc');
+});
+
+test('the run cap defaults to the documented constant, not a stray literal', () => {
+  const files = indexDiff(
+    [
+      'diff --git a/a.mjs b/a.mjs',
+      '+++ b/a.mjs',
+      '@@ -1,0 +1,1 @@',
+      '+const alphaBravoChalieDeltaEcho = 1;',
+    ].join('\n'),
+  );
+  const findings = Array.from({ length: DEFAULT_MAX_FINDINGS + 5 }, (_, index) => ({
+    file: 'a.mjs',
+    kind: `kind-${index}`,
+    quote: 'const alphaBravoChalieDeltaEcho = 1;',
+    confidence: 0.5,
+  }));
+
+  const result = gateFindings(findings, files);
+  assert.equal(DEFAULT_MAX_FINDINGS, 40);
+  assert.equal(result.kept.length, DEFAULT_MAX_FINDINGS);
+  assert.equal(result.stats.byReason.over_cap, 5);
 });
