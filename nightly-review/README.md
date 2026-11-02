@@ -5,9 +5,10 @@ calls, then keeps only the findings whose quoted code actually exists in the mer
 diff. Models propose; a deterministic gate decides.
 
 The reason the gate exists: a finding a model cannot quote is a guess, and a guess
-that becomes a ticket costs more attention than it saves. Nothing here writes to
-Linear. Surviving findings land in a run directory as a report plus a receipt, and a
-separate, explicitly approved step turns them into issues.
+that becomes a ticket costs more attention than it saves. Survivors land in a run
+directory as a report plus a receipt; the `file` step then opens one Linear issue per
+`repo::file::kind` so the work starts from the evidence instead of from a summary,
+and reuses that issue when the same file produces new evidence.
 
 ## Pipeline
 
@@ -17,6 +18,7 @@ separate, explicitly approved step turns them into issues.
 | lenses | one headless GJC process per (PR × lens), no tools, no MCP, no rules, scratch cwd | one per cell |
 | gate | quote/path/line verification, near-duplicate collapse, per-run cap | none |
 | report | `report.md` plus `receipt.json` in the run directory | none |
+| file | one Linear issue per (repo, file, kind), reused instead of duplicated; plan only without `--publish` | none |
 
 A nightly job is unattended and paid, so the paid phase carries a hard ceiling:
 `--deadline-seconds` (default 3600) stops *starting* new lens calls once it is
@@ -51,6 +53,7 @@ to compare with and without.
 nightly-review/bin/nightly-review.mjs once --repos infra,yyaz-web --since 2026-11-02
 nightly-review/bin/nightly-review.mjs once --repos infra --lenses contract,failure --json
 nightly-review/bin/nightly-review.mjs recheck --run <run-dir>     # re-gate, no model calls
+nightly-review/bin/nightly-review.mjs file --run <run-dir>        # plan only; add --publish to write
 nightly-review/bin/nightly-review.mjs loop --repos infra --interval 86400
 ```
 
@@ -58,9 +61,10 @@ Flags: `--repos` (required for `once`), `--since` (default yesterday), `--lenses
 `--out` (default `~/.gjc-plugin/nightly-review`), `--max-diff-bytes` (default
 40000), `--concurrency` (default 4), `--soft-bytes` (default 100663296),
 `--max-findings` (default 40), `--deadline-seconds` (default 3600), `--no-rules`,
-`--json`.
+`--file-findings` (with `once`), `--publish`, `--max-issues` (default 8),
+`--linear-cli` (default `~/.gjc/agent/policy/bin/linear-trace.py`), `--json`.
 
-Exit codes: `0` ok, `2` invalid arguments.
+Exit codes: `0` ok, `1` some Linear writes failed, `2` invalid arguments.
 
 `loop` runs only inside the terminal you started. There is no launchd or cron
 installation in this repository: a timer is a separate decision with its own budget
@@ -117,7 +121,10 @@ visible per run and per lens.
 - `dropped[]` — reason, `prKey`, file, lens, quote prefix, so a run cap is
   attributable to the pull request it cut rather than to the whole night
 - `findings[]` — survivors as quoted above
-- `linear` — `filed: 0` and the note that filing is a separate approved step
+- `linear` — what the file step did: `filed`, `published`, `commented`,
+  `skipped[]` (key + reason, including `over_issue_cap`, `issue_completed`,
+  `no_project`) and `issues[]` with the created identifiers. Without
+  `--file-findings` it stays `filed: 0` with the note that filing is a separate step.
 - `recheckedAt` — set by `recheck`, which re-gates stored raw results offline
 
 ## Operational notes
@@ -142,9 +149,34 @@ A call whose assistant message is not a JSON object with a `findings` array is
 recorded as failed with its stderr tail, never as "no findings". A run that fails
 every call reports failed calls, not a clean sheet.
 
+## Filing
+
+The report is evidence, not a ticket. `file` turns the gated survivors of one run
+into work that can actually be picked up:
+
+- **One issue per `repo::file::kind`.** A fix lands on a file, so a second finding in
+the same file becomes more evidence on the open ticket instead of a second ticket.
+- **Reuse before create.** `filed.json` in the state directory (`--out`, default
+  `~/.gjc-plugin/nightly-review`) maps each cluster to its issue and the evidence
+  hashes already filed. A re-run is a no-op; new evidence on an open issue is
+  appended as a comment; a completed or canceled issue is left alone and reported.
+- **Nothing is invented.** A repository with no line in `config/projects.json` is
+  skipped as `no_project` — the tool never creates a Linear project. Priority comes
+  from the finding's confidence (≥0.85 High, ≥0.7 Medium, else Low).
+- **The cap is visible.** `--max-issues` (default 8) bounds one night's queue and
+  each cluster past it is reported as `over_issue_cap`.
+- **Plan by default.** Without `--publish` nothing is sent: the dry run prints
+  create/comment/skip per cluster and needs neither the credential nor the network.
+
+Writes go through `linear-trace.py call save_issue|save_comment --publish`, so the
+allowlist and the 429 → Aside rule stay in the policy layer. A failed write leaves
+that cluster unfiled and the run exits `1`, rather than reporting a clean sweep.
+
 ## What this does not do
 
-- No Linear writes, no issue creation, no status changes.
+- No automatic fixes, no pull requests, no status changes on the issues it files.
+- No Linear project creation and no re-labeling of existing issues.
+- No claim that a filed finding is a real defect: the issue asks for that judgment.
 - No repository mutation and no repair attempt: findings are evidence for a later
   decision, not an action.
 - No timer, no launchd/cron installation, no background service.
