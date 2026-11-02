@@ -848,8 +848,26 @@ const receiptExec = receiptPromisify(receiptExecFile);
 // custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
 // JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
 // demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
-// this one rule, so they can never disagree about which changed tests a receipt must cover.
+// this path rule and the harness fact below, so they can never disagree about which changed tests a
+// receipt must cover.
 export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+// Admission and coverage demand read the same two facts: the path rule above, and whether Node's own
+// resolver can load the file. A scheme-qualified specifier outside node:/file:/data: — `bun:test` is
+// the common case — is admitted by extension but can never resolve under `node --test`, so such a file
+// can never produce a passed receipt. It is rejected at admission and left out of the coverage demand:
+// demanding a run this executor cannot satisfy would keep a gate open forever (JJO-1604).
+const RECEIPT_FOREIGN_SCHEME = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['\"])([a-z][a-z0-9+.-]*):/gi;
+const RECEIPT_NODE_SCHEMES = new Set(['node', 'file', 'data']);
+// Imports live at the top, so the scan never reads more than a bounded prefix of a test file.
+export const RECEIPT_HARNESS_SCAN_BYTES = 64 * 1024;
+/** The first import scheme this runner cannot load, or null when every scheme is Node-loadable. */
+export function receiptForeignTestScheme(source: string): string | null {
+ for (const found of source.matchAll(RECEIPT_FOREIGN_SCHEME)) {
+  const scheme = found[2].toLowerCase();
+  if (!RECEIPT_NODE_SCHEMES.has(scheme)) return scheme;
+ }
+ return null;
+}
 const RECEIPT_TYPESCRIPT_TEST_FILE = /\.(?:ts|mts|cts)$/;
 export const receiptIsTypeScriptTestFile = (file: string): boolean => RECEIPT_TYPESCRIPT_TEST_FILE.test(file);
 export const receiptSupportsTypeScriptTests = (version: string | null): boolean => {
@@ -1028,7 +1046,7 @@ const RECEIPT_INPUT_ACTIONS: Record<string, string> = {
  repository_outside_session_cwd: '`repository` must be the session repository or a repository inside the session directory.',
 };
 // Rejections raised by validateTestFiles before any test runs.
-export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file'];
+export const RECEIPT_TEST_PATH_REASONS = ['invalid_file_count', 'invalid_root', 'invalid_test_path', 'path_escape', 'symlink_test_path', 'invalid_test_file', 'missing_test_file', 'duplicate_test_file', 'unsupported_test_harness'];
 const RECEIPT_UI_INPUT_ACTIONS: Record<string, string> = {
  scenario_object: 'Provide a plain scenario object with id, expectedBehavior and steps.',
  scenario_fields: 'Use exactly the documented fields for each scenario step; imported results and extra fields are unsupported.',
@@ -1080,6 +1098,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   warnings.push('execution_not_passed');
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
+  else if (reason === 'unsupported_test_harness') recommendedNextActions.push('This runner executes only node:test through `node --test`; a file importing another harness (for example bun:test) cannot pass here. Run those tests with the repository\'s own runner and report that result.');
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
