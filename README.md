@@ -188,7 +188,7 @@ All plugin-owned result and state writes go to `~/.gjc-plugin/` (owned `0700` di
 
 ## Nightly code review
 
-[`nightly-review/`](nightly-review/README.md) is a repository-native CLI (not a plugin) that reviews the pull requests merged in the last day with several independent reviewer calls — one lens per process, two model families — and then keeps only the findings whose quoted code actually exists in the merged diff. Models propose, a deterministic gate decides, and nothing is written to an issue tracker: survivors land in a run directory as a report plus a receipt, and filing them is a separate, explicitly approved step. It installs no timer; the loop runs only in the terminal the operator started.
+[`nightly-review/`](nightly-review/README.md) is a repository-native CLI (not a plugin) that reviews the pull requests merged in the last day with several independent reviewer calls — one lens per process, two model families — and then keeps only the findings whose quoted code actually exists in the merged diff. Models propose, a deterministic gate decides, and the `file` step opens one Linear issue per `repo::file::kind` — reusing the open ticket when the same file produces new evidence — so the work starts from quoted evidence rather than from a summary. It installs no timer; the loop runs only in the terminal the operator started.
 
 ## Contributing and security
 

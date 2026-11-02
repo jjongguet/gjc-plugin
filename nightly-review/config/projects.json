@@ -1,0 +1,18 @@
+{
+  "_note": "Repository → representative Linear project. Add a line only when the project already exists; a repository with no line is skipped by `nightly-review file` and reported as no_project.",
+  "repos": {
+    "gjc-plugin": "gjc-plugin",
+    "infra": "Infra",
+    "dev-utility": "dev-utility",
+    "civitaired": "Civitaired",
+    "lookbook": "Lookbook (제작·캐스팅)",
+    "lookbook-product": "lookbook-product",
+    "shortform_studio_yyaz": "shortform_studio_yyaz",
+    "yyaz-web": "shortform_studio_yyaz",
+    "shortform_studio_shorts": "shortform_studio_shorts",
+    "whoos": "Whoos",
+    "content-lanes": "워크스페이스 운영",
+    "shared": "워크스페이스 운영",
+    "personal-wiki": "워크스페이스 운영"
+  }
+}

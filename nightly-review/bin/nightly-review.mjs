@@ -2,11 +2,11 @@
 // nightly-review — daily post-merge review with independent lenses and a
 // deterministic gate.
 //
-// The models propose. The gate decides. Nothing in this tool writes to Linear:
-// surviving findings land in a run directory as a report plus a receipt, and a
-// separate, explicitly approved step turns them into issues.
+// The models propose. The gate decides. Surviving findings land in a run directory
+// as a report plus a receipt, and the `file` step turns them into Linear issues that
+// carry the evidence — one issue per (repo, file, kind), reused instead of duplicated.
 
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -16,21 +16,33 @@ import { buildPrompt, selectLenses } from '../lib/lenses.mjs';
 import { DEFAULT_MAX_FINDINGS, gateFindings, indexDiff } from '../lib/gate.mjs';
 import { runAll, runLens } from '../lib/runner.mjs';
 import { makeDeadline } from '../lib/deadline.mjs';
+import {
+  DEFAULT_MAX_ISSUES,
+  applyFiling,
+  clusterFindings,
+  planFiling,
+  summarizeFiling,
+} from '../lib/filing.mjs';
+import { DEFAULT_LINEAR_CLI, createLinearClient, loadProjectMap } from '../lib/linear.mjs';
 
 const DEFAULT_STATE_DIR = path.join(process.env.HOME ?? '.', '.gjc-plugin', 'nightly-review');
+const DEFAULT_FILED_STATE = 'filed.json';
 
 function usage() {
   return `usage: nightly-review <command> [options]
 
   once   --repos a,b [--since YYYY-MM-DD] [--lenses id,id] [--out DIR]
-         [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--deadline-seconds N] [--json]
+         [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--deadline-seconds N]
+         [--file-findings] [--publish] [--max-issues N] [--json]
   loop   (same options) --interval SECONDS
   recheck --run DIR [--max-findings N] [--json]
+  file   --run DIR [--publish] [--max-issues N] [--linear-cli PATH] [--json]
 
 Commands
   once     collect merged PRs, run every lens, gate findings, write report + receipt
   loop     run "once" repeatedly; lives only inside the terminal you started
   recheck  re-apply the gate to a finished run's stored findings (no model calls)
+  file     turn a finished run's kept findings into Linear issues; plan only without --publish
 
 Options
   --repos        comma-separated repository names under jjongguet/ (required for once)
@@ -43,8 +55,12 @@ Options
   --max-findings kept findings per run (default 40)
   --deadline-seconds  stop starting new model calls after this long in the paid phase (default 3600)
   --no-rules     do not attach the repository's AGENTS.md to the review
+  --file-findings  with once: run the file step after the receipt is written
+  --publish      actually write to Linear (default: print the plan and write nothing)
+  --max-issues   issue clusters filed per run (default 8)
+  --linear-cli   linear-trace.py path (default ${DEFAULT_LINEAR_CLI})
 
-Exit codes: 0 ok, 2 invalid arguments.
+Exit codes: 0 ok, 1 some Linear writes failed, 2 invalid arguments.
 `;
 }
 
@@ -96,6 +112,18 @@ function parseArgs(argv) {
         break;
       case 'interval':
         options.interval = Number(takeValue());
+        break;
+      case 'publish':
+        options.publish = true;
+        break;
+      case 'file-findings':
+        options.fileFindings = true;
+        break;
+      case 'max-issues':
+        options.maxIssues = Number(takeValue());
+        break;
+      case 'linear-cli':
+        options.linearCli = takeValue();
         break;
       case 'json':
         options.json = true;
@@ -331,6 +359,17 @@ async function executeOnce(options) {
     linear: { filed: 0, note: 'not filed: issue creation is a separate approved step' },
   };
 
+  if (options.fileFindings) {
+    const filing = await fileFindings({
+      runDir,
+      findings: kept,
+      stateDir,
+      options,
+      log,
+    });
+    receipt.linear = filing.receiptBlock;
+  }
+
   await writeFile(path.join(runDir, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
   await writeFile(
     path.join(runDir, 'report.md'),
@@ -397,6 +436,101 @@ function gateAcross({ prs, calls, maxFindings }) {
   return { kept: capped, dropped, stats };
 }
 
+async function fileFindings({ runDir, findings, stateDir, options, log }) {
+  const maxIssues = options.maxIssues ?? DEFAULT_MAX_ISSUES;
+  const statePath = path.join(stateDir, DEFAULT_FILED_STATE);
+  const state = existsSync(statePath)
+    ? JSON.parse(await readFile(statePath, 'utf8'))
+    : { version: 1, clusters: {} };
+  const runId = path.basename(runDir);
+  const clusters = clusterFindings(findings);
+  const actions = planFiling({ clusters, state, maxIssues });
+
+  if (!options.publish) {
+    // Offline by design: a dry run must not need the credential or the network.
+    for (const action of actions) {
+      log(`file: plan ${action.type} ${action.cluster.key}${action.reason ? ` (${action.reason})` : ''}`);
+    }
+    if (actions.length === 0) log('file: nothing to file (no kept findings)');
+    log('file: plan only — add --publish to write to Linear');
+    return {
+      plan: actions,
+      receiptBlock: {
+        filed: 0,
+        published: false,
+        planned: actions.map((action) => ({
+          type: action.type,
+          key: action.cluster.key,
+          reason: action.reason ?? null,
+        })),
+        note: 'dry run: --publish not given',
+      },
+    };
+  }
+
+  const projectMap = await loadProjectMap();
+  const client = createLinearClient({
+    cli: options.linearCli ?? DEFAULT_LINEAR_CLI,
+    projectMap,
+    publish: true,
+  });
+  const { state: nextState, result } = await applyFiling({ actions, client, state, runId });
+  await writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, 'utf8');
+
+  log(`file: ${summarizeFiling(result)}`);
+  for (const created of result.created) {
+    log(`file: created ${created.issue.id} ${created.issue.url ?? ''}`);
+  }
+  for (const skipped of result.skipped) log(`file: skipped ${skipped.key} (${skipped.reason})`);
+  for (const failure of result.errors) log(`file: failed ${failure.key}: ${failure.error}`);
+
+  return {
+    result,
+    receiptBlock: {
+      filed: result.created.length,
+      published: true,
+      commented: result.commented.length,
+      skipped: result.skipped,
+      errors: result.errors,
+      issues: result.created.map((created) => ({
+        key: created.key,
+        id: created.issue.id,
+        url: created.issue.url,
+      })),
+    },
+  };
+}
+
+async function executeFile(options) {
+  const runDir = options.run;
+  if (!runDir || !existsSync(runDir)) throw new Error('--run DIR is required and must exist');
+  const receiptPath = path.join(runDir, 'receipt.json');
+  const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+  const log = (message) => {
+    process.stderr.write(`${message}\n`);
+  };
+  const filing = await fileFindings({
+    runDir,
+    findings: receipt.findings ?? [],
+    stateDir: options.out ?? DEFAULT_STATE_DIR,
+    options,
+    log,
+  });
+  if (options.publish) {
+    receipt.linear = filing.receiptBlock;
+    await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
+  }
+  if (options.json) {
+    process.stdout.write(`${JSON.stringify(filing.receiptBlock, null, 2)}\n`);
+  } else if (filing.result) {
+    process.stdout.write(`${summarizeFiling(filing.result)}\n`);
+  } else {
+    const planned = filing.plan.filter((action) => action.type === 'create').length;
+    process.stdout.write(`plan only: ${planned} issue(s) would be created\n`);
+  }
+  return filing.result?.errors?.length ? 1 : 0;
+}
+
 async function executeRecheck(options) {
   const runDir = options.run;
   if (!runDir || !existsSync(runDir)) throw new Error('--run DIR is required and must exist');
@@ -450,6 +584,8 @@ async function main() {
       return executeOnce(options);
     case 'recheck':
       return executeRecheck(options);
+    case 'file':
+      return executeFile(options);
     case 'loop': {
       const interval = options.interval ?? 86_400;
       if (interval < 60) throw new Error('--interval must be at least 60 seconds');
