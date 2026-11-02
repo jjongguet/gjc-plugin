@@ -126,8 +126,8 @@ def load_config(path=None) -> dict:
         raise GateError("config must be a JSON object")
     cfg = dict(DEFAULTS)
     cfg.update(raw)
-    if cfg["mode"] not in ("off", "dry_run", "hold"):
-        raise GateError("mode must be off, dry_run or hold")
+    if cfg["mode"] not in ("off", "dry_run", "deterministic", "hold"):
+        raise GateError("mode must be off, dry_run, deterministic or hold")
     if not isinstance(cfg["allowlist"], list) or any(not isinstance(x, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", x) for x in cfg["allowlist"]):
         raise GateError("allowlist must be a list of job ids")
     if not isinstance(cfg["questions"], dict) or any(not isinstance(k, str) or not isinstance(v, str) or not v.strip() for k, v in cfg["questions"].items()):
@@ -429,7 +429,15 @@ def _clear_marker(profile: str, job_id: str):
 # -------------------------------------------------------------------- notices
 
 
-def _notice(job_name: str, job_id: str, attempt: int, max_attempts: int, stage: str, reason: str, sha: str, chars: int, exhausted: bool = False, retry_requested: bool = True) -> str:
+def _notice(job_name: str, job_id: str, attempt: int, max_attempts: int, stage: str, reason: str, sha: str, chars: int, exhausted: bool = False, retry_requested: bool = True, delivered: bool = False) -> str:
+    if delivered:
+        # Gate could not evaluate the output (missing key, missing question,
+        # provider failure). The decision was allow, so the output ships.
+        return (
+            f"JEV gate skipped this cron output: job={job_name} ({job_id}), "
+            f"stage={stage}, reason={reason}, artifact_sha={sha[:12]}, chars={chars}. "
+            "The output was delivered unchanged; it was not checked."
+        )
     state = "exhausted" if exhausted else "held"
     if exhausted:
         tail = "Retry budget exhausted; no replacement was sent."
@@ -460,6 +468,45 @@ def _send_home_alert(text: str, cfg: dict):
         return "sent" if proc.returncode == 0 else "failed"
     except Exception:
         return "failed"
+
+
+def _gate_alert_once(state_path: Path, job_id: str, reason: str, cfg: dict, text: str) -> str:
+    """Send the home alert only when the gate's state changes.
+
+    A permanently missing key must not produce one alert per run, so a repeat
+    of the same reason is suppressed until the gate evaluates the job again.
+    """
+    try:
+        state = load_state(state_path)
+    except GateError:
+        return _send_home_alert(text, cfg)
+    alerts = state.setdefault("alerts", {})
+    last = alerts.get(job_id) or {}
+    if last.get("reason") == reason:
+        return "suppressed"
+    if last and (_now() - float(last.get("at") or 0)) * 1000.0 < cfg["alert_cooldown_ms"]:
+        return "suppressed"
+    delivery = _send_home_alert(text, cfg)
+    if delivery == "sent":
+        alerts[job_id] = {"reason": reason, "at": _now()}
+        try:
+            save_state(state_path, state)
+        except OSError:
+            pass
+    return delivery
+
+
+def _clear_gate_alert(state_path: Path, job_id: str):
+    try:
+        state = load_state(state_path)
+    except GateError:
+        return
+    alerts = state.get("alerts")
+    if isinstance(alerts, dict) and alerts.pop(job_id, None) is not None:
+        try:
+            save_state(state_path, state)
+        except OSError:
+            pass
 
 
 def _spawn_retry_helper(execution, profile: str, config_path: Path):
@@ -497,6 +544,10 @@ def _evaluate(job_id: str, text: str, cfg: dict, check_fn=None) -> dict:
     reason = deterministic_hold(text, cfg)
     if reason:
         return {"decision": "hold", "stage": "deterministic", "reason": reason, "artifact_sha": artifact_sha, "artifact_chars": chars, "check_status": "not_run"}
+    if cfg["mode"] == "deterministic":
+        # Only the free, deterministic guard runs on this host. No provider
+        # key is required, so there is nothing to alert about.
+        return {"decision": "allow", "stage": "deterministic", "reason": "passed", "artifact_sha": artifact_sha, "artifact_chars": chars, "check_status": "not_run"}
     question = cfg["questions"].get(job_id)
     if not question:
         return {"decision": "allow", "stage": "none", "reason": "missing_question", "artifact_sha": artifact_sha, "artifact_chars": chars, "check_status": "not_run", "gate_alert": True}
@@ -568,7 +619,7 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
             alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
         elif decision.get("gate_alert"):
             alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
-            alert_delivery = _send_home_alert(_notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+            alert_delivery = _gate_alert_once(state_path, job_id, decision["reason"], cfg, _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], delivered=True))
         else:
             alert_type = alert_target = alert_delivery = None
         receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable", alert_type=alert_type, alert_target=alert_target, alert_delivery=alert_delivery)
@@ -693,7 +744,7 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
             alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
         elif decision.get("gate_alert"):
             alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
-            alert_delivery = _send_home_alert(_notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+            alert_delivery = _gate_alert_once(state_path, job_id, decision["reason"], cfg, _notice(job_name, job_id, 0, cfg["max_attempts"], decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], delivered=True))
         else:
             alert_type = alert_target = alert_delivery = None
         receipt = _receipt(cfg, execution, decision, attempt=0, max_attempts=cfg["max_attempts"], run_group_id="", stage=decision["stage"], lock_status="unavailable", alert_type=alert_type, alert_target=alert_target, alert_delivery=alert_delivery)
@@ -782,9 +833,10 @@ def handle_turn(text: str, execution, config_path=None, now=None, check_fn=None)
         alert_type, alert_target, alert_delivery = "job_notice", cfg["channels"].get(job_id), "replacement"
     elif decision.get("gate_alert"):
         alert_type, alert_target = "home", str(cfg.get("home_channel") or "")
-        alert_delivery = _send_home_alert(_notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], exhausted=True), cfg)
+        alert_delivery = _gate_alert_once(state_path, job_id, decision["reason"], cfg, _notice(job_name, job_id, attempt, max_attempts, decision["stage"], decision["reason"], decision["artifact_sha"], decision["artifact_chars"], delivered=True))
     else:
         alert_type = alert_target = alert_delivery = None
+        _clear_gate_alert(state_path, job_id)
     receipt = _receipt(
         cfg,
         execution,

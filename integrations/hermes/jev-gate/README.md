@@ -41,7 +41,7 @@ receipts: `~/.hermes/plugins/jev-gate-data/<profile>/` (0700; files 0600).
 
 | Key | Default | Meaning |
 | --- | --- | --- |
-| `mode` | `off` | `off`, `dry_run` (receipt only, original delivered), `hold` |
+| `mode` | `off` | `off`, `dry_run` (receipt only, original delivered), `deterministic` (free deterministic guard only, no provider call), `hold` |
 | `allowlist` | `[]` | job ids the gate may act on |
 | `questions` | `{}` | per-job check question; required for every allowlisted job |
 | `channels` | `{}` | per-job Discord channel id for the replacement notice |
@@ -54,6 +54,7 @@ receipts: `~/.hermes/plugins/jev-gate-data/<profile>/` (0700; files 0600).
 | `abort_patterns` | see example | first-line deterministic patterns |
 | `allow_force_fixture` | `false` | allow `force_fixture` only in self-test/canary |
 | `force_fixture` | `null` | canary-only fixture name under `fixtures/precision/bad/`; requires the guard |
+| `alert_cooldown_ms` | `3600000` | minimum gap between two home alerts with different reasons |
 
 Only enabled assistant-output jobs are gated; `no_agent` script jobs are
 excluded. `config.example.json` uses placeholder job ids (`job-id-1`..`job-id-3`)
@@ -74,6 +75,8 @@ upgraded host keeps its explicit `home_channel`. A fresh install must set
 - `unsure`, low confidence, no decision, timeout, HTTP error, missing key, or
   oversize -> allow. Missing key/timeout/HTTP error also sends a home alert.
 - `dry_run` records the decision and delivers the original.
+- `deterministic` runs only the first rule above: abort/empty/truncated output
+  is held and retried, and no provider key is read, so nothing is alerted.
 
 ## Hold, retry and alerts
 
@@ -81,6 +84,13 @@ On hold, the hook returns a metadata-only notice. That notice is the
 replacement text and is delivered to the job channel, so the original abort
 text is never delivered. The notice includes job, attempt, stage, reason,
 artifact sha prefix and character count — never artifact prose.
+
+When the decision is `allow` but the gate could not evaluate the output
+(missing key, missing question, provider error, timeout), the home alert says
+`JEV gate skipped` and states that the output was delivered unchanged. It never
+claims the output was dropped. One alert is sent per job until the reason
+changes; the record is cleared as soon as the gate evaluates that job again, so
+a persistent condition does not alert on every run.
 
 A detached helper waits up to 60 seconds for the current execution to become
 terminal in `~/.hermes/cron/executions.db` (or `hermes cron runs <job_id>`),

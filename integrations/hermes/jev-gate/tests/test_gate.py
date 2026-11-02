@@ -115,6 +115,8 @@ class GateTests(unittest.TestCase):
     def test_config_validation(self):
         self.write_config(mode="hold")
         self.assertEqual(gate.load_config(self.config)["mode"], "hold")
+        self.write_config(mode="deterministic")
+        self.assertEqual(gate.load_config(self.config)["mode"], "deterministic")
         self.write_config(mode="hold", allowlist=["missing"])
         with self.assertRaises(gate.GateError):
             gate.load_config(self.config)
@@ -170,9 +172,33 @@ class GateTests(unittest.TestCase):
         self.assertIsNone(result)
         self.assertEqual(len(self.alerts), 1)
         self.assertIn("unconfigured", self.alerts[0])
+        self.assertIn("JEV gate skipped", self.alerts[0])
+        self.assertIn("delivered unchanged", self.alerts[0])
+        self.assertNotIn("was not delivered", self.alerts[0])
         receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
         self.assertIn('"alert_type": "home"', receipts)
         self.assertIn('"alert_delivery": "sent"', receipts)
+
+    def test_persistent_gate_alert_is_sent_once_per_reason(self):
+        self.keyfile.unlink()
+        gate.handle_turn(GOOD, execution(), config_path=self.config)
+        gate.handle_turn(GOOD, execution(execution_id="exec-2"), config_path=self.config)
+        self.assertEqual(len(self.alerts), 1)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
+        self.assertIn('"alert_delivery": "suppressed"', receipts)
+
+    def test_deterministic_mode_holds_without_provider_or_alert(self):
+        self.write_config(mode="deterministic")
+        self.keyfile.unlink()
+        self.assertIsNone(gate.handle_turn(GOOD, execution(), config_path=self.config))
+        self.assertEqual(len(self.alerts), 0)
+        notice = gate.handle_turn(ABORT, execution(execution_id="exec-2"), config_path=self.config)
+        self.assertIsNotNone(notice)
+        self.assertIn("JEV gate held", notice)
+        self.assertEqual(len(self.alerts), 0)
+        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
+        self.assertIn('"reason": "passed"', receipts)
+        self.assertIn('"stage": "deterministic"', receipts)
 
     def test_default_config_has_no_home_channel(self):
         self.assertEqual(gate.DEFAULTS["home_channel"], "")
