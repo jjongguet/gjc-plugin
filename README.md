@@ -186,6 +186,10 @@ All plugin-owned result and state writes go to `~/.gjc-plugin/` (owned `0700` di
 
 [`supervisor/`](supervisor/README.md) is a repository-native CLI (not a plugin) that collects the local lane sessions and the mini host's checkouts, judges progress with deterministic rules, sends one Discord summary, and can nudge exactly one stalled session. Ten minutes is the default interval; the loop only runs inside a tmux session the operator starts, and there is no kill path.
 
+## Nightly code review
+
+[`nightly-review/`](nightly-review/README.md) is a repository-native CLI (not a plugin) that reviews the pull requests merged in the last day with several independent reviewer calls — one lens per process, two model families — and then keeps only the findings whose quoted code actually exists in the merged diff. Models propose, a deterministic gate decides, and nothing is written to an issue tracker: survivors land in a run directory as a report plus a receipt, and filing them is a separate, explicitly approved step. It installs no timer; the loop runs only in the terminal the operator started.
+
 ## Contributing and security
 
 Issues and pull requests are welcome. Pull-request code never runs automatically: the owner dispatches **Validate pull request (owner dispatch)** from `main` with the pull request number and the reviewed head SHA, and a trusted verifier posts a SHA-bound receipt when the checks pass. See [CONTRIBUTING.md](CONTRIBUTING.md#pull-requests) for the flow, [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, [docs/agent-rules.md](docs/agent-rules.md) for the repository rules, and [SECURITY.md](SECURITY.md) to report a vulnerability privately.

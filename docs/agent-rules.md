@@ -17,6 +17,7 @@ These are the working rules for agents and contributors changing this repository
 - `self-improve/` — the repository's self-improvement loop. The append-only [ledger](../self-improve/ledger.jsonl) records every decision and [rrsi.json](../self-improve/rrsi.json) configures the loop.
 - `wiki/`, `rea/`, `backplan/`, `aside-memory/` and `shared/` — the remaining plugins and the shared private-results module. Each plugin's `gajae-plugin.json` is its manifest of record.
 - `supervisor/` — repository-native session supervisor CLI (not a plugin, not deployed).
+- `nightly-review/` — repository-native post-merge review CLI with a deterministic quote gate (not a plugin, not deployed).
 - `integrations/` — host integration gates (e.g. the Hermes cron gate), manually verified.
 - `dashboard/` — maintainer-only local meta view (not a plugin, not deployed).
 - `scripts/` — repository check scripts, runners and smoke entry points.
