@@ -123,10 +123,15 @@ function isNearDuplicate(a, b) {
   return a.normQuote.includes(b.normQuote) || b.normQuote.includes(a.normQuote);
 }
 
+// Kept findings per run. A verified finding is evidence, so the ceiling is set by
+// what a reviewer can act on in one night rather than by model cost: the measured
+// sweep verified ~108 findings and a 15 ceiling threw away 93 of them.
+export const DEFAULT_MAX_FINDINGS = 40;
+
 // Apply verification, near-duplicate collapse and the per-run cap.
 // Returns kept findings plus, per drop reason, the discarded findings so the
 // receipt can show how much the models produced versus what survived.
-export function gateFindings(findings, files, { maxFindings = 15 } = {}) {
+export function gateFindings(findings, files, { maxFindings = DEFAULT_MAX_FINDINGS } = {}) {
   const kept = [];
   const dropped = [];
 

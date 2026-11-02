@@ -57,7 +57,7 @@ nightly-review/bin/nightly-review.mjs loop --repos infra --interval 86400
 Flags: `--repos` (required for `once`), `--since` (default yesterday), `--lenses`,
 `--out` (default `~/.gjc-plugin/nightly-review`), `--max-diff-bytes` (default
 40000), `--concurrency` (default 4), `--soft-bytes` (default 100663296),
-`--max-findings` (default 15), `--deadline-seconds` (default 3600), `--no-rules`,
+`--max-findings` (default 40), `--deadline-seconds` (default 3600), `--no-rules`,
 `--json`.
 
 Exit codes: `0` ok, `2` invalid arguments.
@@ -96,7 +96,10 @@ A finding survives only when all of these hold:
 5. No earlier finding shares the same `file` and `kind` with a containing or
    equal quote — nearer duplicates collapse across lenses.
 
-Then findings are sorted by confidence and capped at `--max-findings`. Every drop is
+Then findings are sorted by confidence and capped at `--max-findings` (default 40,
+`DEFAULT_MAX_FINDINGS` in `lib/gate.mjs`). The cap is a reviewer's reading budget, not
+a cost control: a measured sweep verified 108 findings, so a ceiling of 15 discarded
+93 of them. Every drop is
 counted by reason in the receipt, so the ratio of produced to surviving findings is
 visible per run and per lens.
 
