@@ -11,7 +11,7 @@ import { execFile as loopExecFile } from 'node:child_process';
 import { promisify as loopPromisify } from 'node:util';
 import { performance as loopClock } from 'node:perf_hooks';
 import { pluginResultsRoot, ensurePrivateResultDirectory, readPrivateResultFile } from '../../shared/lib/results';
-import { loadReceipt, loadReceiptInputs, currentReceiptFreshness, receiptStoreBase, RECEIPT_TEST_FILE, RECEIPT_HARNESS_SCAN_BYTES, receiptForeignTestScheme } from './receipts';
+import { loadReceipt, loadReceiptInputs, currentReceiptFreshness, receiptStoreBase, RECEIPT_HARNESS_SCAN_BYTES, receiptIsTestPath, receiptIsTypeScriptTestFile, receiptRunnerVersion, receiptTestExecutability, type ReceiptTestFileFacts } from './receipts';
 
 const loopExec = loopPromisify(loopExecFile);
 const loopDigest = (data: string | Uint8Array) => loopHash('sha256').update(data).digest('hex');
@@ -257,26 +257,30 @@ export async function captureBaseline(root: string, budgetMs = BEFORE_BUDGET_MS)
  return { toolCallId: '', head: headText, porcelainDigest: porcelain.digest, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), capturedAt: new Date().toISOString() };
 }
 
-// A changed test file whose own imports cannot resolve under `node --test` can never be covered by a
-// passed receipt, so demanding it would leave the gate open forever (JJO-1604). Only a bounded prefix is
-// read, contents never leave this call, and an unreadable file keeps the demand — a missing exemption
+// File facts the shared executability decision reads. Only a bounded prefix is read, contents never leave
+// this call, and an unreadable file keeps `source: null` so the demand survives — a missing exemption
 // must never look like a satisfied one.
-async function loopForeignTestScheme(root: string, name: string, deadline: number): Promise<string | null> {
- if (loopClock.now() >= deadline) return null;
+async function loopTestFileFacts(root: string, name: string, deadline: number): Promise<ReceiptTestFileFacts> {
+ if (loopClock.now() >= deadline) return { kind: 'regular', source: null };
  const target = loopPath.join(root, name);
  try {
-  if ((await loopFs.lstat(target)).isSymbolicLink()) return null;
+  const lstat = await loopFs.lstat(target);
+  if (lstat.isSymbolicLink()) return { kind: 'symlink' };
+  if (!lstat.isFile()) return { kind: 'not_regular' };
   const handle = await loopFs.open(target, loopConstants.O_RDONLY | loopConstants.O_NOFOLLOW);
   try {
-   if (!(await handle.stat()).isFile()) return null;
+   if (!(await handle.stat()).isFile()) return { kind: 'not_regular' };
    const buffer = Buffer.alloc(RECEIPT_HARNESS_SCAN_BYTES);
    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-   return receiptForeignTestScheme(buffer.subarray(0, bytesRead).toString('utf8'));
+   return { kind: 'regular', source: buffer.subarray(0, bytesRead).toString('utf8') };
   } finally { await handle.close(); }
- } catch { return null; }
+ } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? { kind: 'missing' } : { kind: 'regular', source: null }; }
 }
 
-export async function gitDeltaFacts(root: string, baselineHead: string | null, budgetMs = BEFORE_BUDGET_MS): Promise<LoopGitFacts> {
+export type LoopGitDeltaOptions = { budgetMs?: number; runnerVersion?: string | null };
+export async function gitDeltaFacts(root: string, baselineHead: string | null, options: number | LoopGitDeltaOptions = BEFORE_BUDGET_MS): Promise<LoopGitFacts> {
+ const budgetMs = typeof options === 'number' ? options : options.budgetMs ?? BEFORE_BUDGET_MS;
+ const providedVersion = typeof options === 'number' ? undefined : options.runnerVersion;
  const deadline = loopClock.now() + budgetMs;
  const head = await loopRunGit(root, ['rev-parse', 'HEAD'], deadline);
  const status = await loopRunGit(root, ['status', '--porcelain=v1', '-z'], deadline);
@@ -303,14 +307,22 @@ export async function gitDeltaFacts(root: string, baselineHead: string | null, b
   if (changedNames.length >= 50) { namesOverflow = true; break; }
   changedNames.push(name);
  }
- // Deleted files are changes but can never be covered by a receipt run; they are excluded from the coverage demand.
- // A test file that imports a harness Node's resolver cannot load can never be covered either, so it is named
- // separately instead of demanded: a demand the only executor cannot satisfy keeps the gate open forever (JJO-1604).
- const admittedTests = changedNames.filter(name => RECEIPT_TEST_FILE.test(name) && !deletedNames.has(name));
+ // The coverage rule asks only for test paths; source files are never a coverage demand even when their
+ // extension is one the run admission could execute. Deleted files are changes but cannot be covered.
+ const admittedTests = changedNames.filter(name => receiptIsTestPath(name) && !deletedNames.has(name));
+ // The one executability decision is read here and at run admission, so a file the runner cannot execute
+ // is reported as exempt instead of demanded — a demand the only executor cannot satisfy keeps the gate
+ // open forever (JJO-1604, JJO-1589). The runner version is probed once, and only when a TypeScript test
+ // is present: an unobserved version keeps the demand.
+ let runnerVersion = providedVersion;
+ if (runnerVersion === undefined && admittedTests.some(name => receiptIsTypeScriptTestFile(name))) {
+  runnerVersion = await receiptRunnerVersion(Math.max(1, Math.min(2000, deadline - loopClock.now())));
+ }
  const changedTestFiles: string[] = [];
  const exemptTestFiles: string[] = [];
  for (const name of admittedTests) {
-  if (await loopForeignTestScheme(root, name, deadline) === null) changedTestFiles.push(name);
+  const admission = receiptTestExecutability(name, await loopTestFileFacts(root, name, deadline), runnerVersion);
+  if (admission.executable) changedTestFiles.push(name);
   else exemptTestFiles.push(name);
  }
  return { available: true, head: headText, treeClean: porcelain.entries.length === 0 && porcelain.deleted.length === 0, dirtyFiles: porcelain.entries.slice(0, MAX_DIRTY_STORED), changedFiles: namesOverflow ? 50 : names.size, changedTestFiles, exemptTestFiles, commits, changedNames, namesOverflow };
@@ -580,7 +592,7 @@ export async function evaluateRepoGates(root: string, repoDigest: string, sessio
    openGates++;
    if (scanStop.truncated) budgetExceeded = true;
    const exempt = current.available ? current.exemptTestFiles.slice(0, 8).join(', ') : '';
-   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : scanStop.truncated ? 'receipt scan stopped at the evaluation budget; coverage could not be fully checked' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : exempt ? `no covering fresh passed receipt after gate; changed test files outside this runner's harness are not demanded (${exempt}) and need the repository's own runner` : 'no covering fresh passed receipt after gate' });
+   gaps.push({ gateId: gate.id, trigger: gate.trigger, kind, detail: !current.available ? 'repository facts unavailable; coverage cannot be verified' : scanStop.truncated ? 'receipt scan stopped at the evaluation budget; coverage could not be fully checked' : kind === 'changed_test_uncovered' ? `qualifying receipt does not cover changed test files (${changedTests.slice(0, 8).join(', ')})` : exempt ? `no covering fresh passed receipt after gate; changed test files this runner cannot execute are not demanded (${exempt}) and need the repository's own runner` : 'no covering fresh passed receipt after gate' });
    if (!gapKinds.includes(kind)) gapKinds.push(kind);
   }
  }

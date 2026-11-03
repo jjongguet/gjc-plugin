@@ -87,7 +87,7 @@ export default function verificationLoop(pi: { cwd: string; typebox: { Type: any
 				const requiredActions = unrecorded
 					? [...new Set(['Delegated work started outside a Git work tree is ungated; rerun it from inside the repository or report the missing gate explicitly in the final message.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
 					: effective.exemptTestFiles.length
-						? [...new Set(['Changed test files outside this runner\'s harness are not demanded by coverage; run them with the repository\'s own runner and report that result.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
+						? [...new Set(['Changed test files this runner cannot execute are not demanded by coverage; run them with the repository\'s own runner and report that result.', ...requiredActionsFor(effective.gapKinds)])].slice(0, 4)
 						: requiredActionsFor(effective.gapKinds);
 				return text({
 					status: effective.status, repositoryDigest: repoDigest, gaps: effective.gaps, gapKinds: effective.gapKinds, budgetExceeded: effective.budgetExceeded, exemptTestFiles: effective.exemptTestFiles,

@@ -3,7 +3,7 @@ import { lstatSync as vrNodeLstat, realpathSync as vrNodeRealpath, mkdtempSync a
 import { resolve as vrNodeResolve, relative as vrNodeRelative, isAbsolute as vrNodeAbsolute, join as vrNodeJoin, delimiter as vrNodeDelimiter, sep as vrNodeSep } from 'node:path';
 import { tmpdir as vrNodeTmpdir } from 'node:os';
 import { randomBytes as vrNodeRandom } from 'node:crypto';
-import { RECEIPT_TEST_FILE, RECEIPT_HARNESS_SCAN_BYTES, receiptIsTypeScriptTestFile, receiptForeignTestScheme, receiptSupportsTypeScriptTests } from './receipts';
+import { RECEIPT_RUNNABLE_FILE, RECEIPT_HARNESS_SCAN_BYTES, receiptTestExecutability } from './receipts';
 export type NodeExecution = {
   status: 'passed' | 'failed' | 'no_tests' | 'incomplete' | 'not_run' | 'unavailable';
   reason: string;
@@ -37,7 +37,7 @@ export function validateTestFiles(root: string, files: string[]): string[] {
   catch { return reject('invalid_root'); }
   const result: string[] = [];
   for (const file of files) {
-    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) reject('invalid_test_path');
+    if (typeof file !== 'string' || file.length > 4096 || !file || file.includes('\0') || vrNodeAbsolute(file) || file.includes('\\') || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_RUNNABLE_FILE.test(file)) reject('invalid_test_path');
     const target = vrNodeResolve(base, file);
     const rel = vrNodeRelative(base, target);
     if (!rel || rel.startsWith(`..${vrNodeSep}`) || vrNodeAbsolute(rel)) reject('path_escape');
@@ -53,9 +53,11 @@ export function validateTestFiles(root: string, files: string[]): string[] {
       if (error instanceof Error && ['symlink_test_path', 'invalid_test_file', 'path_escape'].includes(error.message)) throw error;
       reject('missing_test_file');
     }
-    // Admitted by path is not enough: a harness Node's resolver cannot load can never pass here, so the
-    // request is refused up front instead of failing every test in the file (JJO-1604).
-    if (receiptForeignTestScheme(vrNodeHarnessScan(target)) !== null) reject('unsupported_test_harness');
+    // Admitted by path is not enough: the shared executability decision refuses a harness Node's resolver
+    // cannot load up front instead of failing every test in the file (JJO-1604). The runner version is
+    // unknown here, so only content and path facts decide.
+    const harness = receiptTestExecutability(file, { kind: 'regular', source: vrNodeHarnessScan(target) }, null);
+    if (!harness.executable) reject(harness.reason);
     if (result.includes(target)) reject('duplicate_test_file');
     result.push(target);
   }
@@ -217,8 +219,12 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
   receipt.runnerVersion = version;
   if (Number(version.split('.')[0].slice(1)) < 22) return { ...receipt, status: 'unavailable', reason: 'unsupported_node_version' };
   // Admitting `.ts` is not enough: only Node >= 22.18 strips types without a flag, so an older runner
-  // rejects the request up front instead of failing every file with an unknown extension.
-  if (!receiptSupportsTypeScriptTests(version) && paths.some(file => receiptIsTypeScriptTestFile(file))) return { ...receipt, status: 'unavailable', reason: 'typescript_unsupported_node' };
+  // rejects the request up front with the same decision the coverage demand reads, instead of failing
+  // every file with an unknown extension.
+  for (const file of paths) {
+    const admission = receiptTestExecutability(file, { kind: 'regular', source: null }, version);
+    if (!admission.executable) return { ...receipt, status: 'unavailable', reason: admission.reason };
+  }
   let directory: string | null = null;
   try {
     directory = vrNodeMkdtemp(vrNodeJoin(vrNodeTmpdir(), 'verification-node-'));
