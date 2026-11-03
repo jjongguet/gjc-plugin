@@ -10,6 +10,7 @@ import {
  emptyLoopState, MAX_GATES, MAX_STATE_BYTES, type LoopGateEmission, type LoopState,
 } from '../lib/loop';
 import { createReceipt, fingerprintSource, freshnessFor, persistReceipt, receiptStoreBase, repositoryDigest, specFingerprint, type VerificationReceipt } from '../lib/receipts';
+import { validateTestFiles } from '../lib/runner';
 
 const owned: string[] = [];
 const originalHome = process.env.HOME;
@@ -306,6 +307,75 @@ test('dedup keys canonicalize across job and subagent terminals and pending laun
   expect(resolved.status).toBe('clean');
   expect(resolved.gapKinds).not.toContain('changed_test_uncovered');
   expect(resolved.exemptTestFiles).toEqual(['bun.test.ts']);
+ }, 30000);
+
+ test('only test paths are demanded, so a changed source file cannot keep the gate open', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const base = await captureBaseline(root);
+  await fs.mkdir(path.join(root, 'lib'), { recursive: true });
+  await fs.writeFile(path.join(root, 'lib', 'value.ts'), 'export const value = 1;\n');
+  await fs.writeFile(path.join(root, 'value.test.ts'), "import { test } from 'node:test';\ntest('owned', () => {});\n");
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'change source and test');
+  // The admission rule decides which extensions a run may execute; the coverage rule decides which
+  // changed paths are tests. Sharing one extension rule demanded every changed source file as coverage.
+  const facts = await gitDeltaFacts(root, base!.head, { runnerVersion: 'v24.15.0' });
+  expect(facts.changedNames).toEqual(['lib/value.ts', 'value.test.ts']);
+  expect(facts.changedTestFiles).toEqual(['value.test.ts']);
+  expect(facts.exemptTestFiles).toEqual([]);
+ }, 30000);
+
+ test('a TypeScript test the fixed runner cannot strip is exempt, not demanded', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const base = await captureBaseline(root);
+  await fs.writeFile(path.join(root, 'typed.test.ts'), "import { test } from 'node:test';\nconst n: number = 1;\ntest('owned', () => {});\n");
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'add typed test');
+  // Node strips types only from 22.18: the run admission refuses the file there, so the coverage
+  // demand must not ask for a run the only executor cannot produce (the same fact, one decision).
+  const refused = await gitDeltaFacts(root, base!.head, { runnerVersion: 'v22.17.0' });
+  expect(refused.changedTestFiles).toEqual([]);
+  expect(refused.exemptTestFiles).toEqual(['typed.test.ts']);
+  const admitted = await gitDeltaFacts(root, base!.head, { runnerVersion: 'v22.18.0' });
+  expect(admitted.changedTestFiles).toEqual(['typed.test.ts']);
+  expect(admitted.exemptTestFiles).toEqual([]);
+ }, 30000);
+
+ test('a changed symlink test file is exempt instead of demanded forever', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const base = await captureBaseline(root);
+  await fs.writeFile(path.join(root, 'plain.test.mjs'), 'export const value = 1;\n');
+  await fs.symlink('plain.test.mjs', path.join(root, 'link.test.mjs'));
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'add linked test');
+  // The run admission refuses symlinked test inputs, so demanding one would never resolve.
+  const facts = await gitDeltaFacts(root, base!.head, { runnerVersion: 'v24.15.0' });
+  expect(facts.changedTestFiles).toEqual(['plain.test.mjs']);
+  expect(facts.exemptTestFiles).toEqual(['link.test.mjs']);
+ }, 30000);
+
+ test('coverage demand and run admission reach the same conclusion for changed test inputs', async () => {
+  await makeHome();
+  const root = await makeRepo();
+  const base = await captureBaseline(root);
+  await fs.mkdir(path.join(root, 'lib'), { recursive: true });
+  await fs.writeFile(path.join(root, 'lib', 'value.ts'), 'export const value = 1;\n');
+  await fs.writeFile(path.join(root, 'node.test.ts'), "import { test } from 'node:test';\ntest('owned', () => {});\n");
+  await fs.writeFile(path.join(root, 'bun.test.ts'), "import { test } from 'bun:test';\ntest('owned', () => {});\n");
+  await fs.writeFile(path.join(root, 'plain.test.mjs'), 'export const value = 1;\n');
+  await fs.symlink('plain.test.mjs', path.join(root, 'link.test.mjs'));
+  git(root, 'add', '.');
+  git(root, 'commit', '-q', '-m', 'add mixed inputs');
+  const facts = await gitDeltaFacts(root, base!.head, { runnerVersion: 'v24.15.0' });
+  expect(facts.changedTestFiles).toEqual(['node.test.ts', 'plain.test.mjs']);
+  expect(facts.exemptTestFiles).toEqual(['bun.test.ts', 'link.test.mjs']);
+  // Every demanded file is admitted by the run tool, and every exempt file is refused with its reason.
+  for (const file of facts.changedTestFiles) expect(validateTestFiles(root, [file])).toEqual([path.join(root, file)]);
+  expect(() => validateTestFiles(root, ['bun.test.ts'])).toThrow('unsupported_test_harness');
+  expect(() => validateTestFiles(root, ['link.test.mjs'])).toThrow('symlink_test_path');
  }, 30000);
 
  test('changed test files must be covered and binding evidence blocks no-change resolution', async () => {

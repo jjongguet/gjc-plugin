@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync, rmSync, symlinkSync, mkdirSync, realpathSyn
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
 import { runNodeTests, validateTestFiles, type NodeExecution } from '../lib/runner';
-import { receiptIsTypeScriptTestFile, receiptSupportsTypeScriptTests } from '../lib/receipts';
+import { receiptIsTypeScriptTestFile, receiptSupportsTypeScriptTests, receiptTestExecutability } from '../lib/receipts';
 
 async function withRunnerFixture(sources: Record<string, string>, run: (root: string) => Promise<void> | void) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'verification-runner-test-')));
@@ -286,6 +286,38 @@ describe('native Node verification runner', () => {
       }
       expect(validateTestFiles(root, ['node.test.ts'])).toEqual([join(root, 'node.test.ts')]);
       expect((await runNodeTests(root, ['node.test.ts'])).status).toBe('passed');
+    });
+  });
+
+  test('one executability decision names why a test cannot run here', () => {
+    const regular = (source: string | null) => ({ kind: 'regular' as const, source });
+    expect(receiptTestExecutability('a.test.ts', regular("import { test } from 'node:test';"), 'v22.17.0')).toEqual({ executable: false, reason: 'typescript_unsupported_node' });
+    expect(receiptTestExecutability('a.test.ts', regular("import { test } from 'node:test';"), 'v22.18.0')).toEqual({ executable: true });
+    expect(receiptTestExecutability('a.spec.mts', regular(null), 'v22.17.0')).toEqual({ executable: false, reason: 'typescript_unsupported_node' });
+    expect(receiptTestExecutability('a.test.js', regular(null), 'v22.17.0')).toEqual({ executable: true });
+    expect(receiptTestExecutability('a.test.ts', regular("import { test } from 'bun:test';"), 'v24.15.0')).toEqual({ executable: false, reason: 'unsupported_test_harness' });
+    expect(receiptTestExecutability('a.test.js', { kind: 'symlink' }, 'v24.15.0')).toEqual({ executable: false, reason: 'symlink_test_path' });
+    expect(receiptTestExecutability('a.test.js', { kind: 'missing' }, 'v24.15.0')).toEqual({ executable: false, reason: 'missing_test_file' });
+    // An unobserved runner version keeps the file selectable: an unreadable environment must never be
+    // reported as if the run were impossible.
+    expect(receiptTestExecutability('a.test.ts', regular(null), null)).toEqual({ executable: true });
+  });
+
+  test('the run admission refuses a TypeScript test on a runner without type stripping', async () => {
+    await withRunnerFixture({ 'node.test.ts': "import { test } from 'node:test';\ntest('owned', () => {});\n" }, async root => {
+      const bin = realpathSync(mkdtempSync(join(tmpdir(), 'verification-runner-old-node-')));
+      const previous = process.env.PATH;
+      try {
+        writeFileSync(join(bin, 'node'), '#!/bin/sh\nif [ "$1" = "--version" ]; then echo v22.17.0; exit 0; fi\nexit 1\n', { mode: 0o755 });
+        process.env.PATH = `${bin}${delimiter}${previous ?? ''}`;
+        const refused = await runNodeTests(root, ['node.test.ts']);
+        expect(refused.status).toBe('unavailable');
+        expect(refused.reason).toBe('typescript_unsupported_node');
+        expect(refused.runnerVersion).toBe('v22.17.0');
+      } finally {
+        if (previous === undefined) delete process.env.PATH; else process.env.PATH = previous;
+        rmSync(bin, { recursive: true, force: true });
+      }
     });
   });
 

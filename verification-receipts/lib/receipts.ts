@@ -7,18 +7,20 @@ import { promisify as receiptPromisify } from 'node:util';
 import { pluginResultsRoot, ensurePrivateResultDirectory, readPrivateResultFile } from '../../shared/lib/results';
 
 const receiptExec = receiptPromisify(receiptExecFile);
-// Test files a receipt can actually execute: Node's own runner with a fixed reporter, no loaders and no
-// custom flags. TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts;
-// JSX/TSX needs a transform and stays out, so a file the runner cannot execute is never admitted or
-// demanded as coverage (JJO-1161 P2). The run admission and the changed-test coverage demand both read
-// this path rule and the harness fact below, so they can never disagree about which changed tests a
-// receipt must cover.
-export const RECEIPT_TEST_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
-// Admission and coverage demand read the same two facts: the path rule above, and whether Node's own
-// resolver can load the file. A scheme-qualified specifier outside node:/file:/data: — `bun:test` is
-// the common case — is admitted by extension but can never resolve under `node --test`, so such a file
-// can never produce a passed receipt. It is rejected at admission and left out of the coverage demand:
-// demanding a run this executor cannot satisfy would keep a gate open forever (JJO-1604).
+// Extensions a run may select: Node's own runner with a fixed reporter, no loaders and no custom flags.
+// TypeScript is in the list because Node >= 22.18 strips types natively for .ts/.mts/.cts; JSX/TSX needs
+// a transform and stays out. This is the run admission's path rule only — it says nothing about which
+// changed files are tests, so it is never used to decide the coverage demand (JJO-1589).
+export const RECEIPT_RUNNABLE_FILE = /\.(?:js|mjs|cjs|ts|mts|cts)$/;
+// Which changed paths count as test inputs for the coverage demand. Node and Bun both discover tests by
+// name (`*.test.*`, `*.spec.*`, `*_test.*`, `*-test.*`, `test.*`, `test-*.*`) and by `test/` or
+// `__tests__/` directories; a changed source file is never a coverage demand. Fixture and helper files
+// under other directories stay out, and the runner's executability decision below is applied on top.
+export const RECEIPT_TEST_PATH = /(?:^|\/)(?:[^/]+[._-](?:test|spec)|test-[^/]+|test)\.(?:js|mjs|cjs|ts|mts|cts)$|(?:^|\/)(?:__tests__|test)\//;
+export const receiptIsTestPath = (file: string): boolean => RECEIPT_TEST_PATH.test(file);
+// Whether Node's own resolver can load a file is the second admission fact. A scheme-qualified specifier
+// outside node:/file:/data: — `bun:test` is the common case — is admitted by extension but can never
+// resolve under `node --test`, so such a file can never produce a passed receipt (JJO-1604).
 const RECEIPT_FOREIGN_SCHEME = /(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\brequire\s*\(\s*)(['\"])([a-z][a-z0-9+.-]*):/gi;
 const RECEIPT_NODE_SCHEMES = new Set(['node', 'file', 'data']);
 // Imports live at the top, so the scan never reads more than a bounded prefix of a test file.
@@ -39,6 +41,42 @@ export const receiptSupportsTypeScriptTests = (version: string | null): boolean 
  const major = Number(match[1]);
  return major > 22 || (major === 22 && Number(match[2]) >= 18);
 };
+// One executability decision for the fixed runner, read by both policies that need it: the run admission
+// rejects a selected file with this reason, and the coverage demand exempts a changed test file for the
+// same reason instead of asking for a run the only executor cannot produce (JJO-1589).
+export type ReceiptTestFileFacts =
+ | { kind: 'symlink' }
+ | { kind: 'missing' }
+ | { kind: 'not_regular' }
+ | { kind: 'regular'; source: string | null };
+export type ReceiptTestRefusal = 'unsupported_test_harness' | 'typescript_unsupported_node' | 'symlink_test_path' | 'missing_test_file' | 'invalid_test_file';
+export type ReceiptTestExecutability = { executable: true } | { executable: false; reason: ReceiptTestRefusal };
+/** Whether the fixed runner can execute this file, and the one reason it cannot. */
+export function receiptTestExecutability(file: string, facts: ReceiptTestFileFacts, nodeVersion: string | null): ReceiptTestExecutability {
+ if (facts.kind === 'symlink') return { executable: false, reason: 'symlink_test_path' };
+ if (facts.kind === 'missing') return { executable: false, reason: 'missing_test_file' };
+ if (facts.kind !== 'regular') return { executable: false, reason: 'invalid_test_file' };
+ if (facts.source !== null && receiptForeignTestScheme(facts.source) !== null) return { executable: false, reason: 'unsupported_test_harness' };
+ // A version that was not observed leaves the file selectable: an unreadable environment must never be
+ // reported as if the run were impossible, and the run path refuses once it has the version.
+ if (nodeVersion !== null && receiptIsTypeScriptTestFile(file) && !receiptSupportsTypeScriptTests(nodeVersion)) return { executable: false, reason: 'typescript_unsupported_node' };
+ return { executable: true };
+}
+/** The `node --version` of the binary the run executor would use, or null when it cannot be observed. */
+export async function receiptRunnerVersion(timeoutMs = 2000): Promise<string | null> {
+ // Only absolute PATH entries, the same resolution the run executor uses.
+ for (const directory of (process.env.PATH ?? '').split(receiptPath.delimiter)) {
+  if (!directory || !receiptPath.isAbsolute(directory)) continue;
+  try {
+   const candidate = await receiptFs.realpath(receiptPath.join(directory, 'node'));
+   if (!(await receiptFs.stat(candidate)).isFile()) continue;
+   const { stdout } = await receiptExec(candidate, ['--version'], { env: receiptChildEnv(), timeout: timeoutMs, maxBuffer: 4096 });
+   const version = stdout.trim();
+   return /^v\d+\.\d+\.\d+$/.test(version) ? version : null;
+  } catch { /* Try the next explicit PATH directory. */ }
+ }
+ return null;
+}
 export const RECEIPT_EXCLUSIONS = ['.git', '.gjc', '.gjc-plugin', 'node_modules', '.next', 'dist', 'coverage', '.env*', '*credentials*', '*.pem', '*.key', '*secret*', '*cookie*', '*private*'];
 const receiptDigest = (data: string | Uint8Array) => receiptHash('sha256').update(data).digest('hex');
 const receiptHex = /^[a-f0-9]{64}$/;
@@ -107,7 +145,7 @@ function normalizedReceiptInputs(files: unknown): string[] | null {
  if (!receiptPlainData(files) || !Array.isArray(files) || files.length > 32) return null;
  const normalized: string[] = [];
  for (const file of files) {
-  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_TEST_FILE.test(file)) return null;
+  if (typeof file !== 'string' || !file || file.length > 4096 || /[\x00-\x1f\x7f\\]/.test(file) || receiptPath.posix.isAbsolute(file) || receiptPath.win32.isAbsolute(file) || file.split('/').some(p => p === '..' || p.startsWith('-')) || !RECEIPT_RUNNABLE_FILE.test(file)) return null;
   const name = receiptPath.posix.normalize(file);
   if (excludedReceiptPath(name) || normalized.includes(name)) return null;
   normalized.push(name);
@@ -262,6 +300,7 @@ export function staticReceiptGuidance(execution: Record<string, unknown>, freshn
   if (missingBinaries.length) { warnings.push('missing_binary'); recommendedNextActions.push(`Tests could not start ${missingBinaries.join(', ')}: the runner passes the host PATH without HOME. Install it on PATH or select tests that do not spawn it.`); }
   else if (Object.hasOwn(RECEIPT_INPUT_ACTIONS, reason)) recommendedNextActions.push(RECEIPT_INPUT_ACTIONS[reason]);
   else if (reason === 'unsupported_test_harness') recommendedNextActions.push('This runner executes only node:test through `node --test`; a file importing another harness (for example bun:test) cannot pass here. Run those tests with the repository\'s own runner and report that result.');
+ else if (reason === 'typescript_unsupported_node') recommendedNextActions.push('TypeScript tests need Node >= 22.18 on PATH for native type stripping; this runner cannot execute .ts/.mts/.cts here. Run those tests with the repository\'s own runner, or use a capable node, and report that result.');
   else if (RECEIPT_TEST_PATH_REASONS.includes(reason)) recommendedNextActions.push('Pass 1-32 existing repository-relative .js/.mjs/.cjs/.ts/.mts/.cts test files: no absolute paths, .., symlinks or duplicates.');
   else recommendedNextActions.push(context.tool === 'ui' ? 'Inspect the owned fixture and the failed or incomplete DOM assertion; use current visible selectors and literal expectations.' : 'Inspect the relevant failing or incomplete tests locally.');
  }
