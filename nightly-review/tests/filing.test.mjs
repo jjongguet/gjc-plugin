@@ -125,7 +125,7 @@ test('applyFiling creates issues, persists state and reuses the same ticket next
   const cluster = clusterFindings([finding()])[0];
   const calls = [];
   const client = {
-    projectFor: () => 'shortform_studio_yyaz',
+    projectFor: () => 'yyaz-studio',
     createIssue: async (args) => {
       calls.push({ tool: 'createIssue', args });
       return { id: 'JJO-2001', url: 'https://linear.app/x/JJO-2001' };
@@ -144,7 +144,7 @@ test('applyFiling creates issues, persists state and reuses the same ticket next
   });
 
   assert.equal(result.created.length, 1);
-  assert.equal(calls[0].args.project, 'shortform_studio_yyaz');
+  assert.equal(calls[0].args.project, 'yyaz-studio');
   assert.equal(calls[0].args.priority, 2);
   assert.match(calls[0].args.description, /if batch\.exists/);
   assert.deepEqual(state.clusters[cluster.key].issue, {
