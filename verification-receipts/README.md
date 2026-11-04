@@ -27,6 +27,8 @@ The gate is fail-open and bounded: the before-hook baseline capture shares a sin
 
 `silentPending` is an upper-bound proxy for launches without an observed terminal (it may include still-running or cancelled jobs), not a count of missed gates; `scanTruncated` marks bounded cross-session scans.
 
+Loop state lives at `~/.gjc-plugin/verification-receipts/loop/v1/<repoDigest>/<sessionDigest>.json`. A run scans every session file recorded for the repository, but it stamps resolutions only into the calling session's own file (`no_change` when the tree matches the gate baseline, `receipt` when a fresh passed receipt covers every test file changed since it). A gate whose owning session has ended and that no later receipt covers therefore keeps that repository reporting `gaps` indefinitely, and the repository's own sessions cannot close it. Operator recovery, only after confirming the owning session is not live: move that dead session's state file out of the scanned `loop/v1/` tree (for example `loop/archive-<date>/`) and re-run `verification_loop` from inside the repository. Keep the archived file — the gate's own `gate_emitted` journal record stays the primary evidence — and archive only ended sessions; a gate from a live session is that session's work to resolve.
+
 ## Adequacy context
 
 `verification_run` and `verification_status` automatically attempt a warning-only
