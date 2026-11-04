@@ -164,8 +164,9 @@ async function runSuite(root: string) {
 		assert.equal(core.isConfigured(cfg({ JEV_ADVISOR_PROVIDER: "off" })), false);
 		assert.equal(core.version2StateFile("/x/my.json"), "/x/my.v2.json");
 		assert.equal(core.version2StateFile("/x/custom"), "/x/custom.v2");
-		assert.equal(core.providerPromptLimit(cfg({ JEV_ADVISOR_PROVIDER: "ollaya" })), 1900);
-		assert.equal(core.providerPromptLimit(cfg()), 4000);
+		assert.equal(core.providerPromptLimit(cfg({ JEV_ADVISOR_PROVIDER: "ollaya" })), core.LOOPBACK_PROMPT_CHARS);
+		assert.equal(core.providerPromptLimit(cfg()), core.HOSTED_PROMPT_CHARS);
+		assert.ok(core.HOSTED_PROMPT_CHARS > core.LOOPBACK_PROMPT_CHARS);
 	});
 	await check("mixed tasks, malformed entries and bounded extraction", () => {
 		const b = batch(["Mechanical typo", "Design distributed transaction recovery"], ["fast", "strong"]);
@@ -176,6 +177,16 @@ async function runSuite(root: string) {
 		assert.equal(core.extractTasks({ assignment: "flat unsupported" }, 4000).tasks.length, 0);
 		const many = core.extractTasks(batch(Array.from({ length: 33 }, (_, i) => `task ${i}`)), 4000);
 		assert.equal(many.tasks.length, 32); assert.equal(many.omittedCount, 1);
+	});
+	await check("hosted prompt budget admits long assignments and still rejects at the boundary", () => {
+		const long = "x".repeat(8000);
+		assert.equal(core.extractTasks(batch([long]), core.HOSTED_PROMPT_CHARS).tasks[0].complete, true);
+		assert.equal(core.extractTasks(batch([long]), core.LOOPBACK_PROMPT_CHARS).tasks[0].complete, false);
+		const overhead = core.extractTasks(batch(["z"]), core.HOSTED_PROMPT_CHARS).tasks[0].prompt.length - 1;
+		const exact = core.extractTasks(batch(["z".repeat(core.HOSTED_PROMPT_CHARS - overhead)]), core.HOSTED_PROMPT_CHARS).tasks[0];
+		assert.equal(exact.prompt.length, core.HOSTED_PROMPT_CHARS); assert.equal(exact.complete, true);
+		const over = core.extractTasks(batch(["z".repeat(core.HOSTED_PROMPT_CHARS - overhead + 1)]), core.HOSTED_PROMPT_CHARS).tasks[0];
+		assert.equal(over.complete, false);
 	});
 	await check("semantic fingerprint excludes ids/tier/order but preserves full content", () => {
 		const a = batch(["  code\n  indentation matters\n"]); const b = structuredClone(a);
@@ -400,7 +411,7 @@ async function runSuite(root: string) {
 	await check("enforce unknown, oversize, low confidence and overprovisioned fail open", async () => {
 		for (const variant of ["missing", "oversize", "low", "over"]) {
 			env({ JEV_ADVISOR_MODE: "enforce", JEV_ADVISOR_MIN_CONFIDENCE: "0.9" }); responder = () => system(decision("balanced", variant === "low" ? 0.89 : 0.9));
-			const b: any = batch([variant === "oversize" ? "x".repeat(5000) : "work"], [variant === "over" ? "strong" : "fast"]);
+		const b: any = batch([variant === "oversize" ? "x".repeat(core.HOSTED_PROMPT_CHARS) : "work"], [variant === "over" ? "strong" : "fast"]);
 			if (variant === "missing") delete b.tasks[0].tier;
 			const widget: string[] = [];
 			const ctx = { ...context(), ui: { notify() {}, setWidget: (_: string, rows: string[]) => widget.push(rows.join("\n")) } };
@@ -409,7 +420,7 @@ async function runSuite(root: string) {
 			if (variant === "oversize") {
 				assert.equal(records()[0].advice.reason, "input_too_large");
 				assert.equal(fetchCalls, beforeFetch, "oversize makes no provider call");
-				assert.match(widget.join("\n"), /input_too_large: \d+ > 4000 chars/, widget.join("\n"));
+				assert.match(widget.join("\n"), new RegExp(`input_too_large: \\d+ > ${core.HOSTED_PROMPT_CHARS} chars`), widget.join("\n"));
 			}
 		}
 	});

@@ -1152,8 +1152,17 @@ export function isAllowedEndpoint(endpoint: string): boolean {
 	return isAllowedDecisionEndpoint(endpoint, { origins: ADVISOR_DECISION_ORIGINS });
 }
 
-export function providerPromptLimit(cfg: Pick<AdvisorConfig, "provider">): 1900 | 4000 {
-	return cfg.provider === "ollaya" ? 1900 : 4000;
+/**
+ * Admission budget for one composed task prompt, in characters. Ollaya runs on a
+ * local loopback constraint; hosted decisions accept multi-paragraph assignments,
+ * so the hosted budget covers them without slicing the prompt (it is an admission
+ * bound, not a claim about the model's context window).
+ */
+export const LOOPBACK_PROMPT_CHARS = 1900;
+export const HOSTED_PROMPT_CHARS = 12000;
+
+export function providerPromptLimit(cfg: Pick<AdvisorConfig, "provider">): number {
+	return cfg.provider === "ollaya" ? LOOPBACK_PROMPT_CHARS : HOSTED_PROMPT_CHARS;
 }
 
 function nonNegativeInteger(raw: string | undefined, fallback: number, cap: number): number {
@@ -1282,7 +1291,7 @@ export function fingerprint(text: string): string {
  * Normalize a supported task batch without aggregating children or truncating
  * provider input. Rejected and omitted entries remain explicit coverage data.
  */
-export function extractTasks(input: unknown, maxPromptChars: 1900 | 4000): Extraction {
+export function extractTasks(input: unknown, maxPromptChars: number): Extraction {
 	const rejected: Extraction["rejected"] = [];
 	if (!isRecord(input) || !Array.isArray(input.tasks)) {
 		return { tasks: [], rejected: [{ index: -1, reason: "unsupported_input" }], omittedCount: 0 };
@@ -1455,7 +1464,7 @@ export type CheckPreparation =
  * Image evidence is bounded deterministically: count, media type, base64 shape,
  * decoded bytes and Jev's published dimension range.
  */
-export function prepareCheck(question: unknown, artifact: unknown, maxPromptChars: 1900 | 4000, images?: unknown): CheckPreparation {
+export function prepareCheck(question: unknown, artifact: unknown, maxPromptChars: number, images?: unknown): CheckPreparation {
 	if (typeof question !== "string" || typeof artifact !== "string") return { status: "invalid_task" };
 	const normalizedQuestion = normalizeField(question);
 	const normalizedArtifact = normalizeField(artifact);

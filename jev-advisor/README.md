@@ -23,7 +23,7 @@ and confidence is not a probability of task success.
   operational outcomes under `~/.gjc-plugin/jev-advisor/journal/v1/`.
 - **`jev_check`:** explicitly request one bounded check of one artifact against
   one check question. The composed prompt (question plus artifact) is admitted
-  under the same 4,000/1,900-character bound as tier prompts and is rejected
+  under the same 12,000/1,900-character bound as tier prompts and is rejected
   whole, never sliced. A verdict must be `correct`, `incorrect` or `unsure`
   with a finite `[0,1]` confidence and optional three-label probabilities
   summing to one within `0.001`; anything else is an explicit no-decision.
@@ -70,7 +70,7 @@ verdict is advisory, never verification evidence.
 
 ## Complete inputs and provider responses
 
-Complete encoded prompts are bounded to **4,000 characters** for hosted Jev,
+Complete encoded prompts are bounded to **12,000 characters** for hosted Jev,
 TypeSafe Jev and chat, and **1,900** for Ollaya's local constraint. These are plugin
 admission budgets, not claims about maximum hosted model context. Inputs above
 the applicable bound are rejected without a request; shared context is never
