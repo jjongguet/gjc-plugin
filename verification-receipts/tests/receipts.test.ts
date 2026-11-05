@@ -343,3 +343,21 @@ test('staged write or fsync failures do not publish partial receipts or delete p
   expect(await fs.readdir(dir)).toEqual([r.id+'.json']);expect(await fs.readFile(file,'utf8')).toBe(original);
  }
 });
+
+test('homeForwarded is an optional execution key: legacy receipts stay valid, the flag must be true',async()=>{
+ const{root,base}=await setup();
+ const legacy=await make(root);
+ // The pre-change six-key shape keeps persisting and loading unchanged.
+ expect(await persistReceipt(legacy,base)).toMatchObject({persisted:true,count:1});
+ expect((await loadReceipt(root,legacy.id,base))?.execution).toEqual(legacy.execution);
+ // The flag is admitted only as `true`, and only when a caller admitted HOME.
+ const flagged={...legacy,id:crypto.randomUUID(),execution:{...legacy.execution,homeForwarded:true as const}};
+ expect(await persistReceipt(flagged,base)).toMatchObject({persisted:true,count:2});
+ expect((await loadReceipt(root,flagged.id,base))?.execution).toMatchObject({homeForwarded:true});
+ for(const bad of [{homeForwarded:false},{homeForwarded:'yes'},{homeForwarded:1},{homeForwarded:null}]){
+  const variant={...legacy,id:crypto.randomUUID(),execution:{...legacy.execution,...bad}};
+  expect((await persistReceipt(variant as any,base)).persisted).toBe(false);
+ }
+ // An unknown execution key is still rejected: the allow-list grew by exactly one name.
+ expect((await persistReceipt({...legacy,id:crypto.randomUUID(),execution:{...legacy.execution,homeForwarded:true,rawLog:'x'}} as any,base)).persisted).toBe(false);
+},30000);

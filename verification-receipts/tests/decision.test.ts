@@ -70,7 +70,7 @@ describe("adequacy Decisions contract", () => {
  });
  test('the public assessment and scenario schemas declare no host-rejectable keyword on caller text',()=>{
   // Recording stub: each node keeps its constructor so a literal union cannot pass as a string.
-  const T={Object:(properties:unknown,options:unknown={})=>({kind:'Object',properties,options}),String:(options:unknown={})=>({kind:'String',options}),Number:(options:unknown={})=>({kind:'Number',options}),Array:(items:unknown,options:unknown={})=>({kind:'Array',items,options}),Optional:(inner:unknown)=>({kind:'Optional',inner}),Union:(branches:unknown,options:unknown={})=>({kind:'Union',branches,options}),Literal:(value:unknown)=>({kind:'Literal',value})};
+  const T={Object:(properties:unknown,options:unknown={})=>({kind:'Object',properties,options}),String:(options:unknown={})=>({kind:'String',options}),Number:(options:unknown={})=>({kind:'Number',options}),Array:(items:unknown,options:unknown={})=>({kind:'Array',items,options}),Optional:(inner:unknown)=>({kind:'Optional',inner}),Union:(branches:unknown,options:unknown={})=>({kind:'Union',branches,options}),Literal:(value:unknown)=>({kind:'Literal',value}),Boolean:(options:unknown={})=>({kind:'Boolean',options})};
   const rejectable=['enum','const','pattern','maxLength','minLength','maxItems','minItems','additionalProperties'];
   const walk=(node:any,found:string[]=[]):string[]=>{
    if(!node||typeof node!=='object')return found;
@@ -90,9 +90,12 @@ describe("adequacy Decisions contract", () => {
    if(tool.name==='ui_regression_run')expect(walk(tool.parameters.properties.scenario)).toEqual([]);
   }
   // Top-level constraints are deliberately unchanged; removing one needs an explicit decision.
-  const topLevel=(factory:any)=>{const p=factory({cwd:process.cwd(),typebox:{Type:T}}).parameters;const kept:Record<string,unknown>={additionalProperties:p.options.additionalProperties};for(const [name,node] of Object.entries(p.properties) as [string,any][]){if(name==='assessment'||name==='scenario')continue;const inner=node.kind==='Optional'?node.inner:node;const options=Object.fromEntries(Object.entries(inner.options??{}).filter(([key])=>key!=='description'));if(Object.keys(options).length)kept[name]=options;}return kept;};
-  expect(topLevel(verificationRun)).toEqual({additionalProperties:false,files:{minItems:1,maxItems:32},repository:{minLength:1,maxLength:4096},timeoutMs:{minimum:1,maximum:120000}});
-  expect(topLevel(verificationStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
+  const topLevel=(factory:any)=>{const p=factory({cwd:process.cwd(),typebox:{Type:T}}).parameters;const kept:Record<string,unknown>=p.options.additionalProperties===undefined?{}:{additionalProperties:p.options.additionalProperties};for(const [name,node] of Object.entries(p.properties) as [string,any][]){if(name==='assessment'||name==='scenario')continue;const inner=node.kind==='Optional'?node.inner:node;const options=Object.fromEntries(Object.entries(inner.options??{}).filter(([key])=>key!=='description'));if(Object.keys(options).length)kept[name]=options;}return kept;};
+  // JJO-1107: the verification tools advertise no keyword the host can reject on, because a
+  // rejection returns the caller's whole argument object. The bounds live in-plugin and in the
+  // descriptions. Re-adding one must fail here.
+  expect(topLevel(verificationRun)).toEqual({});
+  expect(topLevel(verificationStatus)).toEqual({});
   expect(topLevel(uiRun)).toEqual({additionalProperties:false,account:{minLength:1,maxLength:64},timeoutMs:{minimum:1,maximum:90000},repository:{minLength:1,maxLength:4096}});
   expect(topLevel(uiStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
  });

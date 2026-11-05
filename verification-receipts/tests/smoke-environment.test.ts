@@ -73,6 +73,10 @@ test('rejectable constraints are found through nullable wrappers, literal unions
  expect(rejectableConstraints({type:'string',pattern:'^run$',maxLength:64},'id')).toEqual(['id.pattern','id.maxLength']);
  expect(rejectableConstraints({type:'array',maxItems:8,items:{type:'object',additionalProperties:false,properties:{note:{type:'string',maxLength:300}}}},'notes')).toEqual(['notes.maxItems','notes[].additionalProperties','notes[].note.maxLength']);
  expect(rejectableConstraints({type:'string',description:'Use run.'},'id')).toEqual([]);
+ // JJO-1107: the measured echo came from a top-level numeric bound, so the class must include it.
+ expect(rejectableConstraints({type:'object',properties:{timeoutMs:{anyOf:[{type:'number',minimum:1,maximum:120000},{type:'null'}]}}},'parameters')).toEqual(['parameters.timeoutMs.minimum','parameters.timeoutMs.maximum']);
+ expect(rejectableConstraints({type:'object',properties:{files:{type:'array',minItems:1,maxItems:32,items:{type:'string',maxLength:4096}}}},'parameters')).toEqual(['parameters.files.maxItems','parameters.files.minItems','parameters.files[].maxLength']);
+ expect(rejectableConstraints({type:'number',exclusiveMinimum:0,exclusiveMaximum:9,multipleOf:2},'n')).toEqual(['n.exclusiveMinimum','n.exclusiveMaximum','n.multipleOf']);
  expect(rejectableConstraints(undefined,'id')).toEqual([]);
 });
 
