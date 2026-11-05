@@ -1165,8 +1165,12 @@ export function validReceiptMetadata(value: unknown, repo: string): value is Ver
  if (![r.warnings,r.limitations].every(a => Array.isArray(a) && a.length <= 20 && a.every(s => typeof s === 'string' && s.length <= 300))) return false;
  const ex = r.execution;
  if (!ex || typeof ex !== 'object' || Array.isArray(ex) || !['passed','failed','no_tests','incomplete','not_run','unavailable'].includes(String(ex.status)) || typeof ex.reason !== 'string' || !/^[a-z_]+$/.test(ex.reason)) return false;
- const exKeys = ['status','reason','exitCode','signal','runnerVersion','counts',...(r.plugin === 'ui-regression' ? ['assertions','steps','cleanup','currentUiState','browserBuildBinding','scenarioDigest'] : [])];
- if (Object.keys(ex).length !== exKeys.length || Object.keys(ex).some(k => !exKeys.includes(k))) return false;
+ const exKeys = ['status','reason','exitCode','signal','runnerVersion','counts',...(r.plugin === 'ui-regression' ? ['assertions','steps','cleanup','currentUiState','browserBuildBinding','scenarioDigest'] : ['homeForwarded'])];
+ // homeForwarded is optional: a receipt written before the caller-declared HOME contract keeps its
+ // exact six-key shape, and the flag only ever appears when HOME was actually admitted.
+ if (Object.keys(ex).length > exKeys.length || Object.keys(ex).some(k => !exKeys.includes(k))) return false;
+ if (exKeys.filter(k => k !== 'homeForwarded').some(k => !Object.hasOwn(ex, k))) return false;
+ if (ex.homeForwarded !== undefined && ex.homeForwarded !== true) return false;
  if (!(ex.exitCode === null || (Number.isSafeInteger(ex.exitCode) && Number(ex.exitCode) >= 0 && Number(ex.exitCode) <= 255)) || !(ex.signal === null || (typeof ex.signal === 'string' && /^SIG[A-Z0-9]{1,12}$/.test(ex.signal))) || !(ex.runnerVersion === null || (typeof ex.runnerVersion === 'string' && /^v?\d+\.\d+\.\d+(?:\.\d+)?$/.test(ex.runnerVersion)))) return false;
  if (r.plugin === 'ui-regression') {
   if (ex.counts !== null || !['confirmed','unconfirmed'].includes(String(ex.cleanup)) || ex.currentUiState !== 'not_reobserved' || ex.browserBuildBinding !== 'unverified' || !receiptHex.test(String(ex.scenarioDigest)) || !Array.isArray(ex.assertions) || ex.assertions.length > 20) return false;
@@ -1476,7 +1480,7 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
  return {
   name:'verification_status',label:'Verification Status',
   description:'Read one immutable repository-scoped local verification receipt and recompute source freshness. Historical execution is never rerun. Automatically attempt Jev adequacy on every lookup, including stale or missing evidence, at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Optional assessment supplies non-sensitive context, not an opt-in switch. Only selected summaries/notes and bounded status/counts/freshness leave; no logs, diffs, source, test names, paths, keys or accounts. Missing context, failures and stale evidence cannot establish sufficient current verification. Warning-only; no automatic repair or blocking.',
-  parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'The repository the receipt was recorded for, as passed to verification_run; defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))},{additionalProperties:false}),
+  parameters:T.Object({receiptId:T.String(),repository:T.Optional(T.String({description:'The repository the receipt was recorded for, as passed to verification_run; an empty, NUL-containing or over-4096-character value is rejected in-plugin. Defaults to the repository containing the session directory.'})),assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))}),
   async execute(_toolCallId:string,params:{receiptId:string;repository?:string;assessment?:unknown}) {
    const text=async(v:Record<string,any>)=>({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','status',v))}]});
    try {
@@ -1488,7 +1492,9 @@ export default function verificationStatus(pi: {cwd:string;typebox:{Type:any}}) 
     return text({receipt,freshness,assessment,...staticReceiptGuidance(receipt.execution,freshness,assessment,receipt.warnings,{allowedCaseIds:['run']})});
    } catch (error) {
     const cause=error instanceof Error ? error.message : '';
-    const reason=(RECEIPT_REPOSITORY_REASONS as readonly string[]).includes(cause) ? cause : 'receipt_unavailable';
+    // Unknown or malformed arguments are the caller's input problem, not a missing receipt; both
+    // surface as reasons the journal already accepts.
+    const reason=(RECEIPT_REPOSITORY_REASONS as readonly string[]).includes(cause) ? cause : cause === 'invalid_input' ? 'invalid_or_unavailable_input' : 'receipt_unavailable';
     const execution={status:'unavailable',reason};
     const assessment=await assessAdequacy(undefined,{status:execution.status,counts:null,freshness:'unavailable'});
     const guidance=staticReceiptGuidance(execution,'unavailable',assessment);

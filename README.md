@@ -144,6 +144,11 @@ Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev
 | A metrics or journal read fails with `store_corrupt` after upgrading several plugins | An older `jev-advisor` read records written by a newer `verification-receipts`. Reinstall `jev-advisor` first, `verification-receipts` second, then the rest ([install order](CONTRIBUTING.md#install-order-and-replacement)). |
 | `ui_regression_run` fails before a page opens | The `aside` CLI is missing or not connected, or no explicit account was passed. `ui_regression_status` still works offline. |
 | `bun run test` fails on host smoke guards without a local `gjc` | Run `SELF_IMPROVE_SKIP_SMOKE=1 bun run test`; the four host smoke guards are then reported as skipped, not passed. |
+| `gjc plugin install` fails with only `✘ Failed to install GJC bundle (unsupported_surface)` | GJC 0.19.0 prints the error code and drops the parser message that names the offending field. The manifest declares something the bundle runtime cannot preserve: an extra hook field, a non-canonical capability, a `mcpServers` key it cannot carry, or a Claude Code `plugin.json` hook shape. Reduce the manifest to the canonical fields in [the 0.19.0 reproduction](docs/gjc-0.19-plugin-cli-reproduction.md#what-a-bundle-may-declare). |
+| `gjc plugin link` prints `✔ Linked <name>` but the plugin never loads | 0.19.0 `link` writes only a `node_modules` symlink and a lock entry, while both loaders read `~/.gjc/plugins/package.json` `dependencies` and the bundle `registry.json`, so nothing can load, `doctor` warns, and `list` omits it. Install the bundle instead: `gjc plugin install <path> --user`. |
+| `gjc plugin install --dry-run` actually installed the plugin, or later reports it as already installed | 0.19.0 does not honour `--dry-run` on the bundle-install path. Do not use it as a pre-flight in automation; uninstall and install again. |
+
+Local `gjc plugin` behaviour that looks like a plugin defect is reproduced, with commands and raw output, in [docs/gjc-0.19-plugin-cli-reproduction.md](docs/gjc-0.19-plugin-cli-reproduction.md).
 
 ## Develop and verify
 

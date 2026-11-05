@@ -136,7 +136,11 @@ try {
   // reaches the plugin, which rejects it as invalid_case_id without echoing either.
   ()=>({name:'verification_run',args:{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'policy',note:nativeCanary}]}}}),
   // The same tool remains usable in the same session with an eligible id.
-  ()=>({name:'verification_run',args:{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'run',note:'Local fixture case note.'}]}}})];
+  ()=>({name:'verification_run',args:{files:['pass.mjs'],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'run',note:'Local fixture case note.'}]}}}),
+  // JJO-1107: the values the host used to reject (and echo) now reach the plugin, which names the
+  // reason and returns no caller text. The canary rides in a field that executes neither branch.
+  ()=>({name:'verification_run',args:{files:['pass.mjs'],timeoutMs:999999,assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'run',note:nativeCanary}]}}}),
+  ()=>({name:'verification_run',args:{files:[],assessment:{changeSummary:'Local fixture change.',expectedBehavior:'Local fixture behavior.',caseNotes:[{id:'run',note:nativeCanary}]}}})];
  // Fixed, non-sensitive expectations for the ui-rejections surface (reasons only).
  const uiRejectionExpectations=[
   {probe:'sensitive_url',reason:'scenario_url_sensitive',assessment:null,forbidden:['127.0.0.1:9']},
@@ -274,6 +278,13 @@ for(const [plugin,outcome] of cases){
       const scenarioConstraints=name==='ui_regression_run'?rejectableConstraints(parameters?.properties?.scenario,'scenario'):[];
       // Record the advertised schema first so a mismatch still leaves an observation.
       discoveredSchemas.push({tool:name,assessment:contract.present,idType:contract.idType,descriptionLength:contract.idDescription.length,descriptionNamesIds:expectedIds.every(id=>contract.idDescription.includes(id)),descriptionNamesRejection:contract.idDescription.includes('invalid_case_id'),assessmentConstraints:contract.constraints,scenarioConstraints});
+      // A host-level rejection returns the caller's whole argument object (JJO-1107), so the
+      // verification tools may not advertise any keyword the host can reject on, top level included.
+      if(name.startsWith('verification_')){
+       const parameterConstraints=rejectableConstraints(parameters,'parameters');
+       discoveredSchemas[discoveredSchemas.length-1].parameterConstraints=parameterConstraints;
+       assert.deepEqual(parameterConstraints,[],`parameters_host_rejectable_keywords:${name}`);
+      }
       assert.ok(contract.present,`assessment_schema_missing:${name}`);
       assert.equal(contract.idType,'string',`case_note_id_not_plain_string:${name}`);
       assert.deepEqual(contract.constraints,[],`assessment_host_rejectable_keywords:${name}`);
@@ -411,6 +422,19 @@ for(const [plugin,outcome] of cases){
      evidence.push({probe:'case_id_membership',status:'invalid_case_id',canaryEcho,idEcho,journalCanaryEcho,journalIdEcho,journalPersisted:true,receiptStorageObserved:{persisted:result.persisted,reason:result.reason??null}});
     }
     if(step===13){assert.equal(result.receipt.execution.status,'passed');assert.deepEqual(result.assessment,{status:'unavailable',reason:'off'});assert.ok(result.journalStorage.persisted);evidence.push({probe:'valid_after_rejection',status:'passed',assessmentReason:result.assessment.reason,receiptStorageObserved:{persisted:result.persisted,reason:result.reason??null}});}
+    if(step===14){
+     // Formerly a host rejection that echoed every argument; now the plugin names the bound.
+     assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,'invalid_timeout');
+     const canaryEcho=text.includes(nativeCanary),valueEcho=text.includes('999999');
+     assert.ok(!canaryEcho,'over_bound_timeout_echoed_canary');assert.ok(!valueEcho,'over_bound_timeout_echoed_value');
+     evidence.push({probe:'over_bound_timeout',status:'rejected',reason:result.execution.reason,canaryEcho,valueEcho});
+    }
+    if(step===15){
+     assert.equal(result.execution.status,'not_run');assert.equal(result.execution.reason,'invalid_file_count');
+     const canaryEcho=text.includes(nativeCanary);
+     assert.ok(!canaryEcho,'empty_file_list_echoed_canary');
+     evidence.push({probe:'empty_file_list',status:'rejected',reason:result.execution.reason,canaryEcho});
+    }
     }
    }
    }

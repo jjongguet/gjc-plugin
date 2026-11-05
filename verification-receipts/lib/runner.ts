@@ -11,6 +11,8 @@ export type NodeExecution = {
   signal: string | null;
   runnerVersion: string | null;
   counts: null | { tests: number; suites: number; topLevel: number; passed: number; failed: number; skipped: number; todo: number; cancelled: number };
+  // Present only when the caller admitted the host HOME into the test environment (JJO-1122).
+  homeForwarded?: true;
 };
 // Commands a failing test could not start because they are absent from the runner PATH. Kept out of
 // the execution record, which must stay receipt-shaped, and out of every outbound payload.
@@ -131,15 +133,16 @@ function vrNodeOnPath(directories: string[], name: string): boolean {
 }
 
 type VrNodeProcessResult = { code: number | null; signal: string | null; output: string; issue: string | null };
-async function vrNodeProcess(executable: string, args: string[], cwd: string, searchPath: string, timeout: number, abort?: AbortSignal): Promise<VrNodeProcessResult> {
+async function vrNodeProcess(executable: string, args: string[], cwd: string, searchPath: string, timeout: number, abort?: AbortSignal, home?: string): Promise<VrNodeProcessResult> {
   if (abort?.aborted) return { code: null, signal: null, output: '', issue: 'cancelled' };
   return new Promise(resolve => {
     let output = '', bytes = 0, issue: string | null = null, settled = false;
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     let reapTimer: ReturnType<typeof setTimeout> | undefined;
-    // PATH lets tests start the same programs a normal shell finds; HOME, credentials and every
-    // other inherited variable stay out of the test process.
-    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // PATH lets tests start the same programs a normal shell finds. HOME reaches the test only when
+    // the caller explicitly admitted it (forwardHome); every other inherited variable, credentials
+    // included, stays out of the test process.
+    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath, ...(home === undefined ? {} : { HOME: home }) }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     // The first reason wins: cleanup trouble cannot mask the abort, timeout or
     // output cap that already made this run incomplete, and a run that is
     // incomplete never turns clean either way.
@@ -196,8 +199,17 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, se
   });
 }
 
-export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal, diagnostics?: NodeRunDiagnostics): Promise<NodeExecution> {
+// `home` is admitted only when the caller asked for it (forwardHome); an unset value keeps the
+// default child environment exactly as before.
+function vrNodeHome(home: string | undefined): string | undefined {
+  if (home === undefined) return undefined;
+  if (typeof home !== 'string' || !home || home.length > 4096 || home.includes('\0') || !vrNodeAbsolute(home)) return undefined;
+  return home;
+}
+
+export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal, diagnostics?: NodeRunDiagnostics, home?: string): Promise<NodeExecution> {
   const receipt: NodeExecution = { status: 'not_run', reason: 'not_run', exitCode: null, signal: null, runnerVersion: null, counts: null };
+  const forwardedHome = vrNodeHome(home);
   if (diagnostics) diagnostics.missingBinaries = [];
   let paths: string[];
   try { paths = validateTestFiles(root, files); }
@@ -213,7 +225,8 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
   if (!executable) return { ...receipt, status: 'unavailable', reason: 'node_unavailable' };
   const childPath = searchPath.join(vrNodeDelimiter);
   const base = vrNodeRealpath(root);
-  const probe = await vrNodeProcess(executable, ['--version'], base, childPath, Math.min(timeoutMs, 5000), signal);
+  if (forwardedHome !== undefined) receipt.homeForwarded = true;
+  const probe = await vrNodeProcess(executable, ['--version'], base, childPath, Math.min(timeoutMs, 5000), signal, forwardedHome);
   const version = probe.output.trim();
   if (probe.issue || probe.code !== 0 || !/^v\d+\.\d+\.\d+$/.test(version)) return { ...receipt, status: 'unavailable', reason: probe.issue ?? 'invalid_node_version' };
   receipt.runnerVersion = version;
@@ -231,7 +244,7 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
     const reporter = vrNodeJoin(directory, 'reporter.mjs');
     const nonce = vrNodeRandom(24).toString('hex');
     vrNodeWrite(reporter, `const NONCE = ${JSON.stringify(nonce)};\n${vrNodeReporterSource}`, { mode: 0o600, flag: 'wx' });
-    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, childPath, timeoutMs, signal);
+    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, childPath, timeoutMs, signal, forwardedHome);
     receipt.exitCode = execution.code; receipt.signal = execution.signal;
     receipt.status = 'incomplete'; receipt.reason = execution.issue ?? 'missing_summary';
     if (!execution.issue) {

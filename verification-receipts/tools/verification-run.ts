@@ -1165,8 +1165,12 @@ export function validReceiptMetadata(value: unknown, repo: string): value is Ver
  if (![r.warnings,r.limitations].every(a => Array.isArray(a) && a.length <= 20 && a.every(s => typeof s === 'string' && s.length <= 300))) return false;
  const ex = r.execution;
  if (!ex || typeof ex !== 'object' || Array.isArray(ex) || !['passed','failed','no_tests','incomplete','not_run','unavailable'].includes(String(ex.status)) || typeof ex.reason !== 'string' || !/^[a-z_]+$/.test(ex.reason)) return false;
- const exKeys = ['status','reason','exitCode','signal','runnerVersion','counts',...(r.plugin === 'ui-regression' ? ['assertions','steps','cleanup','currentUiState','browserBuildBinding','scenarioDigest'] : [])];
- if (Object.keys(ex).length !== exKeys.length || Object.keys(ex).some(k => !exKeys.includes(k))) return false;
+ const exKeys = ['status','reason','exitCode','signal','runnerVersion','counts',...(r.plugin === 'ui-regression' ? ['assertions','steps','cleanup','currentUiState','browserBuildBinding','scenarioDigest'] : ['homeForwarded'])];
+ // homeForwarded is optional: a receipt written before the caller-declared HOME contract keeps its
+ // exact six-key shape, and the flag only ever appears when HOME was actually admitted.
+ if (Object.keys(ex).length > exKeys.length || Object.keys(ex).some(k => !exKeys.includes(k))) return false;
+ if (exKeys.filter(k => k !== 'homeForwarded').some(k => !Object.hasOwn(ex, k))) return false;
+ if (ex.homeForwarded !== undefined && ex.homeForwarded !== true) return false;
  if (!(ex.exitCode === null || (Number.isSafeInteger(ex.exitCode) && Number(ex.exitCode) >= 0 && Number(ex.exitCode) <= 255)) || !(ex.signal === null || (typeof ex.signal === 'string' && /^SIG[A-Z0-9]{1,12}$/.test(ex.signal))) || !(ex.runnerVersion === null || (typeof ex.runnerVersion === 'string' && /^v?\d+\.\d+\.\d+(?:\.\d+)?$/.test(ex.runnerVersion)))) return false;
  if (r.plugin === 'ui-regression') {
   if (ex.counts !== null || !['confirmed','unconfirmed'].includes(String(ex.cleanup)) || ex.currentUiState !== 'not_reobserved' || ex.browserBuildBinding !== 'unverified' || !receiptHex.test(String(ex.scenarioDigest)) || !Array.isArray(ex.assertions) || ex.assertions.length > 20) return false;
@@ -1324,6 +1328,8 @@ export type NodeExecution = {
   signal: string | null;
   runnerVersion: string | null;
   counts: null | { tests: number; suites: number; topLevel: number; passed: number; failed: number; skipped: number; todo: number; cancelled: number };
+  // Present only when the caller admitted the host HOME into the test environment (JJO-1122).
+  homeForwarded?: true;
 };
 // Commands a failing test could not start because they are absent from the runner PATH. Kept out of
 // the execution record, which must stay receipt-shaped, and out of every outbound payload.
@@ -1444,15 +1450,16 @@ function vrNodeOnPath(directories: string[], name: string): boolean {
 }
 
 type VrNodeProcessResult = { code: number | null; signal: string | null; output: string; issue: string | null };
-async function vrNodeProcess(executable: string, args: string[], cwd: string, searchPath: string, timeout: number, abort?: AbortSignal): Promise<VrNodeProcessResult> {
+async function vrNodeProcess(executable: string, args: string[], cwd: string, searchPath: string, timeout: number, abort?: AbortSignal, home?: string): Promise<VrNodeProcessResult> {
   if (abort?.aborted) return { code: null, signal: null, output: '', issue: 'cancelled' };
   return new Promise(resolve => {
     let output = '', bytes = 0, issue: string | null = null, settled = false;
     let forceTimer: ReturnType<typeof setTimeout> | undefined;
     let reapTimer: ReturnType<typeof setTimeout> | undefined;
-    // PATH lets tests start the same programs a normal shell finds; HOME, credentials and every
-    // other inherited variable stay out of the test process.
-    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    // PATH lets tests start the same programs a normal shell finds. HOME reaches the test only when
+    // the caller explicitly admitted it (forwardHome); every other inherited variable, credentials
+    // included, stays out of the test process.
+    const child = vrNodeSpawn(executable, args, { cwd, env: { LANG: 'C', TZ: 'UTC', PATH: searchPath, ...(home === undefined ? {} : { HOME: home }) }, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
     // The first reason wins: cleanup trouble cannot mask the abort, timeout or
     // output cap that already made this run incomplete, and a run that is
     // incomplete never turns clean either way.
@@ -1509,8 +1516,17 @@ async function vrNodeProcess(executable: string, args: string[], cwd: string, se
   });
 }
 
-export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal, diagnostics?: NodeRunDiagnostics): Promise<NodeExecution> {
+// `home` is admitted only when the caller asked for it (forwardHome); an unset value keeps the
+// default child environment exactly as before.
+function vrNodeHome(home: string | undefined): string | undefined {
+  if (home === undefined) return undefined;
+  if (typeof home !== 'string' || !home || home.length > 4096 || home.includes('\0') || !vrNodeAbsolute(home)) return undefined;
+  return home;
+}
+
+export async function runNodeTests(root: string, files: string[], timeoutMs = 30000, signal?: AbortSignal, diagnostics?: NodeRunDiagnostics, home?: string): Promise<NodeExecution> {
   const receipt: NodeExecution = { status: 'not_run', reason: 'not_run', exitCode: null, signal: null, runnerVersion: null, counts: null };
+  const forwardedHome = vrNodeHome(home);
   if (diagnostics) diagnostics.missingBinaries = [];
   let paths: string[];
   try { paths = validateTestFiles(root, files); }
@@ -1526,7 +1542,8 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
   if (!executable) return { ...receipt, status: 'unavailable', reason: 'node_unavailable' };
   const childPath = searchPath.join(vrNodeDelimiter);
   const base = vrNodeRealpath(root);
-  const probe = await vrNodeProcess(executable, ['--version'], base, childPath, Math.min(timeoutMs, 5000), signal);
+  if (forwardedHome !== undefined) receipt.homeForwarded = true;
+  const probe = await vrNodeProcess(executable, ['--version'], base, childPath, Math.min(timeoutMs, 5000), signal, forwardedHome);
   const version = probe.output.trim();
   if (probe.issue || probe.code !== 0 || !/^v\d+\.\d+\.\d+$/.test(version)) return { ...receipt, status: 'unavailable', reason: probe.issue ?? 'invalid_node_version' };
   receipt.runnerVersion = version;
@@ -1544,7 +1561,7 @@ export async function runNodeTests(root: string, files: string[], timeoutMs = 30
     const reporter = vrNodeJoin(directory, 'reporter.mjs');
     const nonce = vrNodeRandom(24).toString('hex');
     vrNodeWrite(reporter, `const NONCE = ${JSON.stringify(nonce)};\n${vrNodeReporterSource}`, { mode: 0o600, flag: 'wx' });
-    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, childPath, timeoutMs, signal);
+    const execution = await vrNodeProcess(executable, ['--test', `--test-reporter=${reporter}`, '--', ...paths], base, childPath, timeoutMs, signal, forwardedHome);
     receipt.exitCode = execution.code; receipt.signal = execution.signal;
     receipt.status = 'incomplete'; receipt.reason = execution.issue ?? 'missing_summary';
     if (!execution.issue) {
@@ -1740,33 +1757,42 @@ export async function finalizeVerificationOutcome(plugin: 'verification-receipts
  return {...value,receiptStorage,journalStorage,receiptLoadable:Boolean(receipt && (operation === 'status' || receiptStorage.persisted)),warnings};
 }
 
+import { isAbsolute as pathIsAbsolute } from 'node:path';
 
 // Rejections that name their cause instead of the generic invalid_or_unavailable_input.
-const RUN_INPUT_REASONS: readonly string[] = [...RECEIPT_REPOSITORY_REASONS, ...RECEIPT_TEST_PATH_REASONS];
+const RUN_INPUT_REASONS: readonly string[] = [...RECEIPT_REPOSITORY_REASONS, ...RECEIPT_TEST_PATH_REASONS, 'invalid_timeout'];
 
 export default function verificationRun(pi: {cwd: string; typebox: {Type: any}}) {
  const T = pi.typebox.Type;
  return {
   name: 'verification_run', label: 'Verification Run',
-  description: 'Execute explicitly authorized non-sensitive JavaScript or TypeScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables); a program a failing test could not start from PATH is named as missing_binary. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
+  description: 'Execute explicitly authorized non-sensitive JavaScript or TypeScript node:test files with a fixed native reporter. This is not a sandbox: inspect test effects first. Tests see LANG, TZ and the host PATH only (no HOME or other inherited variables) unless forwardHome is set, which adds the host HOME and nothing else; a program a failing test could not start from PATH is named as missing_binary. Bounds are enforced here, not by the host schema: 1-32 repository-relative test files, each under 4096 characters, timeout 1-120000 ms. Actual execution/counts and source fingerprints are advisory evidence, not coverage proof. No arbitrary commands, result imports or repair loops. Automatically attempt Jev adequacy on every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known: selected non-sensitive changeSummary, expectedBehavior and caseNotes improve the automatic judgment; omission does not disable it. Only bounded host facts and validated supplied context leave; no raw logs/source/paths/keys. Missing context or unavailable assessment is not a pass.',
   parameters: T.Object({
-   files: T.Array(T.String(), {minItems:1,maxItems:32,description:'Explicit repository-relative .js/.mjs/.cjs/.ts/.mts/.cts node:test files; no globs, symlinks, custom flags or loaders. TypeScript needs Node >= 22.18 for native type stripping. A file importing another harness (for example bun:test) is rejected as unsupported_test_harness and is never demanded as coverage.'}),
-   repository: T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to run in, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
-   timeoutMs: T.Optional(T.Number({minimum:1,maximum:120000})),
+   files: T.Array(T.String(), {description:'Explicit repository-relative .js/.mjs/.cjs/.ts/.mts/.cts node:test files, 1-32 of them, each path under 4096 characters; no globs, symlinks, custom flags or loaders. TypeScript needs Node >= 22.18 for native type stripping. A file importing another harness (for example bun:test) is rejected as unsupported_test_harness and is never demanded as coverage.'}),
+   repository: T.Optional(T.String({description:'Root of the Git work tree to run in, absolute or relative to the session directory; an empty, NUL-containing or over-4096-character value is rejected in-plugin. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
+   timeoutMs: T.Optional(T.Number({description:'Test timeout in milliseconds, an integer from 1 to 120000 (default 30000); out-of-range values are rejected in-plugin as invalid_timeout.'})),
+   forwardHome: T.Optional(T.Boolean({description:'Admit the host HOME into the test process environment. Default false keeps it withheld. Set it only for a test you inspected that needs the real home directory (for example one that reads a user-scope path); the receipt records homeForwarded, and an unusable HOME rejects the call instead of running without it.'})),
    assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id. Use run, the only eligible id for this tool. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))
-  }, {additionalProperties:false}),
-  async execute(toolCallId: string, params: {files:string[];repository?:string;timeoutMs?:number;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
+  }),
+  async execute(toolCallId: string, params: {files:string[];repository?:string;timeoutMs?:number;forwardHome?:boolean;assessment?:unknown}, _update?:unknown, _ctx?:unknown, signal?:AbortSignal) {
    const started = performance.now();
    let execution: Record<string, any> = {status:'not_run',reason:'invalid_or_unavailable_input'};
    const text = async (value: Record<string, any>) => ({content:[{type:'text',text:JSON.stringify(await finalizeVerificationOutcome('verification-receipts','run',value))}]});
    try {
-    if (!params || Object.keys(params).some(k => !['files','repository','timeoutMs','assessment'].includes(k)) || (params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000))) throw new Error('invalid_input');
+    if (!params || Object.keys(params).some(k => !['files','repository','timeoutMs','forwardHome','assessment'].includes(k)) || (params.forwardHome !== undefined && typeof params.forwardHome !== 'boolean')) throw new Error('invalid_input');
+    // The host no longer rejects the bound, so the named reason has to come from here.
+    if (params.timeoutMs !== undefined && (!Number.isSafeInteger(params.timeoutMs) || params.timeoutMs < 1 || params.timeoutMs > 120000)) throw new Error('invalid_timeout');
+    const forwardHome = params.forwardHome === true;
+    const home = forwardHome ? process.env.HOME : undefined;
+    // An admitted-but-unusable HOME must not silently fall back to the withheld default: the caller
+    // asked for the real home directory and would read a false failure as a product defect.
+    if (forwardHome && (typeof home !== 'string' || !home || home.length > 4096 || home.includes('\0') || !pathIsAbsolute(home))) throw new Error('invalid_or_unavailable_input');
     const root = await resolveReceiptRepository(pi.cwd, params.repository);
     await validateTestFiles(root, params.files);
-    const specDigest = specFingerprint({runner:'node:test',files:params.files,timeoutMs:params.timeoutMs ?? 30000});
+    const specDigest = specFingerprint({runner:'node:test',files:params.files,timeoutMs:params.timeoutMs ?? 30000,forwardHome});
     const before = await fingerprintSource(root,specDigest,params.files);
     const diagnostics = {missingBinaries: [] as string[]};
-    execution = await runNodeTests(root,params.files,params.timeoutMs ?? 30000,signal,diagnostics);
+    execution = await runNodeTests(root,params.files,params.timeoutMs ?? 30000,signal,diagnostics,home);
     const after = await fingerprintSource(root,specDigest,params.files); const freshness = freshnessFor(before,after);
     const receipt = createReceipt({plugin:'verification-receipts',toolCallId,repositoryDigest:await repositoryDigest(root),durationMs:Math.round(performance.now()-started),specDigest,before,after,freshness,execution,warnings:diagnostics.missingBinaries.map(name => `missing_binary:${name}`),limitations:['Native counts are not assertion counts or coverage proof.','Excluded credential and cache paths are not freshness-covered.','Local test code is not sandboxed; timestamps are descriptive.']});
     const storage = await persistReceipt(receipt,undefined,params.files);

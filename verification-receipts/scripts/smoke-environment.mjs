@@ -53,8 +53,9 @@ function unwrapNullableSchema(node) {
 
 // Keywords a host can reject on before the plugin runs. Caller text must not
 // carry them: membership and bounds are decided in-plugin, so a rejection
-// cannot echo the caller's arguments.
-const REJECTABLE_KEYWORDS = ['enum', 'const', 'pattern', 'maxLength', 'minLength', 'maxItems', 'minItems', 'format'];
+// cannot echo the caller's arguments. Numeric bounds are listed because a
+// top-level `timeoutMs` maximum was the measured echo case (JJO-1107).
+const REJECTABLE_KEYWORDS = ['enum', 'const', 'pattern', 'format', 'maxLength', 'minLength', 'maxItems', 'minItems', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf'];
 
 // Walk one advertised subtree and list every host-rejectable constraint inside it
 // (literal unions, value constraints, additionalProperties:false), by JSON path.

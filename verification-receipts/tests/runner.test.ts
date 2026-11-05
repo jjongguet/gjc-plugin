@@ -326,3 +326,21 @@ describe('native Node verification runner', () => {
     expect([receiptIsTypeScriptTestFile('a.test.ts'), receiptIsTypeScriptTestFile('a.spec.mts'), receiptIsTypeScriptTestFile('a.test.cts'), receiptIsTypeScriptTestFile('a.test.tsx'), receiptIsTypeScriptTestFile('a.test.mjs')]).toEqual([true, true, true, false, false]);
   });
 });
+
+test('forwardHome admits only HOME, and the default keeps withholding it', async () => {
+  await withRunnerFixture({
+    'home.cjs': "const { test } = require('node:test'); const assert = require('node:assert/strict'); test('owned home', () => { assert.equal(process.env.HOME, '/tmp/vr-forwarded-home'); assert.equal(process.env.OPENROUTER_API_KEY, undefined); assert.equal(process.env.NODE_OPTIONS, undefined); });",
+  }, async root => {
+    const withheld = await runNodeTests(root, ['home.cjs']);
+    expect(withheld.status).toBe('failed');
+    expect(withheld.reason).toBe('native_failure');
+    expect(withheld.homeForwarded).toBeUndefined();
+    const forwarded = await runNodeTests(root, ['home.cjs'], 30000, undefined, undefined, '/tmp/vr-forwarded-home');
+    expect(forwarded.status).toBe('passed');
+    expect(forwarded.homeForwarded).toBe(true);
+    // A value the runner cannot admit is treated as withheld, never as a partial forward.
+    const rejected = await runNodeTests(root, ['home.cjs'], 30000, undefined, undefined, 'relative/home');
+    expect(rejected.status).toBe('failed');
+    expect(rejected.homeForwarded).toBeUndefined();
+  });
+});

@@ -133,3 +133,46 @@ test('a rejected case id persists a receipt envelope and journal without the id 
   for(const file of files){const body=await fs.readFile(file,'utf8');expect(body).not.toContain('policy');expect(body).not.toContain(canary);}
  }finally{if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
 },30000);
+
+test('forwardHome admits exactly the host HOME and names out-of-bound inputs in-plugin',async()=>{
+ const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'adapter-home-tests-'))),root=path.join(owned,'repo'),home=path.join(owned,'home');
+ await fs.mkdir(root);await fs.mkdir(home,{mode:0o700});
+ const oldHome=process.env.HOME,oldProvider=process.env.JEV_ADVISOR_PROVIDER;
+ process.env.HOME=home;process.env.JEV_ADVISOR_PROVIDER='off';
+ try {
+  execFileSync('git',['init','-q'],{cwd:root});
+  // A HOME-dependent suite: the shape that used to record a permanent native_failure.
+  await fs.writeFile(path.join(root,'home.mjs'),"import test from 'node:test';import assert from 'node:assert/strict';test('owned home',()=>{assert.equal(typeof process.env.HOME,'string');assert.ok(process.env.HOME.length>0);assert.equal(process.env.OPENROUTER_API_KEY,undefined);});");
+  execFileSync('git',['add','.'],{cwd:root});execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:root});
+  const run=generatedRun({cwd:root,typebox:{Type}});
+  const withheld=parse(await run.execute('home-default',{files:['home.mjs']}));
+  expect(withheld.receipt.execution.status).toBe('failed');
+  expect(withheld.receipt.execution.reason).toBe('native_failure');
+  expect(withheld.receipt.execution.homeForwarded).toBeUndefined();
+  const forwarded=parse(await run.execute('home-forwarded',{files:['home.mjs'],forwardHome:true}));
+  expect(forwarded.receipt.execution.status).toBe('passed');
+  expect(forwarded.receipt.execution.homeForwarded).toBe(true);
+  expect(forwarded.journalStorage.persisted).toBe(true);
+  expect(forwarded.persisted).toBe(true);
+  // The two runs are different specs, so a forwarded receipt never covers a withheld one.
+  const status=generatedStatus({cwd:root,typebox:{Type}});
+  expect(parse(await status.execute('home-status',{receiptId:forwarded.receipt.id})).freshness).toBe('fresh');
+  // Values the host used to reject (and echo) now arrive here and get a named, journal-safe reason.
+  const overBound=parse(await run.execute('over-bound',{files:['home.mjs'],timeoutMs:999999}));
+  expect(overBound.execution.status).toBe('not_run');
+  expect(overBound.execution.reason).toBe('invalid_timeout');
+  expect(overBound.journalStorage.persisted).toBe(true);
+  expect(JSON.stringify(overBound)).not.toContain('999999');
+  const emptyFiles=parse(await run.execute('empty-files',{files:[]}));
+  expect(emptyFiles.execution.status).toBe('not_run');
+  expect(emptyFiles.execution.reason).toBe('invalid_file_count');
+  expect(emptyFiles.journalStorage.persisted).toBe(true);
+  // Unknown arguments are the caller's input problem, never a missing receipt.
+  expect(parse(await status.execute('unknown-key',{receiptId:'missing',extra:'x'} as any)).execution.reason).toBe('invalid_or_unavailable_input');
+  // An admitted but unusable HOME must not silently run without it.
+  delete process.env.HOME;
+  const unusable=parse(await run.execute('home-unusable',{files:['home.mjs'],forwardHome:true}));
+  expect(unusable.execution.status).toBe('not_run');
+  expect(unusable.execution.reason).toBe('invalid_or_unavailable_input');
+ } finally {if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
+},60000);
