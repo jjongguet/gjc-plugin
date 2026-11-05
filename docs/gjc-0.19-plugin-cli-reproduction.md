@@ -194,8 +194,13 @@ on 0.19.0 while a Claude-Code-shaped or extended manifest does not.
 4. `plugin install`: when validation fails, leave no partial state (a failed install currently cannot
    be distinguished from a successful one by directory presence alone).
 5. Host validation error policy, reported separately from the CLI: a rejected tool call currently
-   returns the caller's whole argument object. See JJO-1107 for the plugin-side narrowing and the
-   remaining `type`/`required` path.
+   returns the caller's whole argument object, with both a value/bound violation and an absent
+   required member (measured: `verification_status` called with `{}` answered
+   `Validation failed for tool "verification_status": - receiptId: Invalid input …` followed by
+   `Received arguments: {}`). The plugin side is closed — no advertised parameter carries a
+   host-rejectable keyword or a non-empty `required` list (`scripts/tests/host-schema.test.mjs`
+   guards every adapter and manifest) — so the remaining path is a value of the wrong JSON type,
+   which `type` must still reject. Prefer returning the offending field name alone.
 
 ## Limits of this document
 

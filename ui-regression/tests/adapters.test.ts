@@ -173,3 +173,18 @@ test('scenario bounds absent from the public schema are rejected in-plugin befor
   expect(calls.length).toBe(0);
  }finally{if(oldPath===undefined)delete process.env.PATH;else process.env.PATH=oldPath;}
 });
+
+test('missing account, scenario and receiptId are named in-plugin instead of rejected by the host',async()=>{
+ const tool=uiRun({cwd:process.cwd(),typebox:{Type}}),status=uiStatus({cwd:process.cwd(),typebox:{Type}});
+ // A host rejection happens before the plugin runs and echoes the caller's other arguments, so
+ // every previously-required field is now decided here with the same named reason.
+ for(const [args,reason] of [[{},'invalid_or_unavailable_input'],[{scenario:{id:'x',expectedBehavior:'A behavior',steps:[{action:'goto',url:'http://127.0.0.1/'}]}},'invalid_or_unavailable_input'],[{account:42,scenario:{}},'invalid_or_unavailable_input'],[{account:'route'},'scenario_object']] as const){
+  const result=parse(await tool.execute('missing',args as any));
+  expect(result.execution).toEqual({status:'not_run',reason});
+  expect(result.receipt).toBeUndefined();
+ }
+ for(const args of [{},{receiptId:''},{receiptId:7}]){
+  const result=parse(await status.execute('missing-id',args as any));
+  expect(JSON.stringify(result)).toContain('invalid_or_unavailable_input');
+ }
+});

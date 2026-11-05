@@ -84,20 +84,23 @@ describe("adequacy Decisions contract", () => {
    const assessment=tool.parameters.properties.assessment.inner;
    expect(walk(assessment)).toEqual([]);
    const id=assessment.properties.caseNotes.inner.items.properties.id;
-   expect(id.kind).toBe('String');
-   expect(id.options.description).toContain('invalid_case_id');
-   for(const eligible of ids)expect(id.options.description).toContain(eligible);
+   // Every caller field is optional on the wire: a missing one is a host rejection that echoes
+   // the rest of the call, so presence is decided in-plugin with a named reason.
+   expect(id.kind).toBe('Optional');
+   expect(id.inner.kind).toBe('String');
+   expect(id.inner.options.description).toContain('invalid_case_id');
+   for(const eligible of ids)expect(id.inner.options.description).toContain(eligible);
    if(tool.name==='ui_regression_run')expect(walk(tool.parameters.properties.scenario)).toEqual([]);
   }
   // Top-level constraints are deliberately unchanged; removing one needs an explicit decision.
   const topLevel=(factory:any)=>{const p=factory({cwd:process.cwd(),typebox:{Type:T}}).parameters;const kept:Record<string,unknown>=p.options.additionalProperties===undefined?{}:{additionalProperties:p.options.additionalProperties};for(const [name,node] of Object.entries(p.properties) as [string,any][]){if(name==='assessment'||name==='scenario')continue;const inner=node.kind==='Optional'?node.inner:node;const options=Object.fromEntries(Object.entries(inner.options??{}).filter(([key])=>key!=='description'));if(Object.keys(options).length)kept[name]=options;}return kept;};
-  // JJO-1107: the verification tools advertise no keyword the host can reject on, because a
-  // rejection returns the caller's whole argument object. The bounds live in-plugin and in the
-  // descriptions. Re-adding one must fail here.
+  // JJO-1107: none of these tools advertise a keyword the host can reject on, because a
+  // rejection returns the caller's whole argument object. Every bound lives in-plugin and in the
+  // descriptions. Re-adding one must fail here and in scripts/tests/host-schema.test.mjs.
   expect(topLevel(verificationRun)).toEqual({});
   expect(topLevel(verificationStatus)).toEqual({});
-  expect(topLevel(uiRun)).toEqual({additionalProperties:false,account:{minLength:1,maxLength:64},timeoutMs:{minimum:1,maximum:90000},repository:{minLength:1,maxLength:4096}});
-  expect(topLevel(uiStatus)).toEqual({additionalProperties:false,repository:{minLength:1,maxLength:4096}});
+  expect(topLevel(uiRun)).toEqual({});
+  expect(topLevel(uiStatus)).toEqual({});
  });
  test('nonpassing stale and unavailable evidence is decided before any call',async()=>{
   for(const status of ['failed','no_tests','incomplete','not_run','unavailable']){const h=harness();const result=await assessAdequacy(context,{...facts,status},h.deps);expect(result.reason).toBe('insufficient_evidence');expect(result.status).toBe('unknown');expect(h.calls.length).toBe(0);}

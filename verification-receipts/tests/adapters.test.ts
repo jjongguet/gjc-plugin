@@ -176,3 +176,32 @@ test('forwardHome admits exactly the host HOME and names out-of-bound inputs in-
   expect(unusable.execution.reason).toBe('invalid_or_unavailable_input');
  } finally {if(oldHome===undefined)delete process.env.HOME;else process.env.HOME=oldHome;if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
 },60000);
+
+test('every dropped wire requirement is decided in-plugin with a named reason',async()=>{
+ const owned=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'adapter-required-'))),root=path.join(owned,'repo');
+ await fs.mkdir(root);
+ const oldProvider=process.env.JEV_ADVISOR_PROVIDER;process.env.JEV_ADVISOR_PROVIDER='off';
+ try {
+  execFileSync('git',['init','-q'],{cwd:root});
+  await fs.writeFile(path.join(root,'ok.mjs'),"import test from 'node:test';test('ok',()=>{});");
+  execFileSync('git',['add','.'],{cwd:root});execFileSync('git',['-c','user.name=fixture','-c','user.email=fixture@example.invalid','commit','-qm','fixture'],{cwd:root});
+  const run=generatedRun({cwd:root,typebox:{Type}}),status=generatedStatus({cwd:root,typebox:{Type}});
+  // files: missing and non-array are the same in-plugin count rejection.
+  for (const args of [{}, { files: undefined }, { files: 'ok.mjs' }, { files: [] }]) {
+   const out=parse(await run.execute('missing-files',args as any));
+   expect(out.execution.status).toBe('not_run');
+   expect(out.execution.reason).toBe('invalid_file_count');
+   expect(out.journalStorage.persisted).toBe(true);
+  }
+  // receiptId: missing, empty and non-string are input problems, never receipt_unavailable.
+  for (const args of [{}, { receiptId: '' }, { receiptId: 42 }]) {
+   const out=parse(await status.execute('missing-id',args as any));
+   expect(out.execution.reason).toBe('invalid_or_unavailable_input');
+  }
+  // assessment: a partial context is invalid_context in-plugin, not a host rejection.
+  const partial=parse(await run.execute('partial-context',{files:['ok.mjs'],assessment:{changeSummary:'only the summary'}} as any));
+  expect(JSON.stringify(partial.assessment)).toContain('invalid_context');
+  // The valid call still passes, so the rejections above are about the missing field only.
+  expect(parse(await run.execute('valid',{files:['ok.mjs']})).receipt.execution.status).toBe('passed');
+ } finally {if(oldProvider===undefined)delete process.env.JEV_ADVISOR_PROVIDER;else process.env.JEV_ADVISOR_PROVIDER=oldProvider;await fs.rm(owned,{recursive:true,force:true});}
+},60000);

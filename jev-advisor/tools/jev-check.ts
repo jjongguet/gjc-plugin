@@ -3912,8 +3912,8 @@ export default function jevCheck(pi: {
 		label: 'JEV Check',
 		description: 'Ask the decision model to check one artifact against one check question; returns a strictly validated correct/incorrect/unsure verdict with confidence (probabilities when provided), or an explicit no-decision reason. Optional images (PNG/JPEG paths, at most 4; 256-1568 px per side) are inspected locally and sent as image parts to the OpenRouter jev route only, so an image-grounded verdict is possible; bytes are never journaled. Journals a sanitized check outcome under ~/.gjc-plugin; never touches correlation state, never blocks, and a verdict is an advisory opinion — not verification evidence, correctness proof or acceptance of quality.',
 		parameters: pi.typebox.Type.Object({
-			question: pi.typebox.Type.String({ description: 'One complete check question: what must be verified about the artifact' }),
-			artifact: pi.typebox.Type.String({ description: 'The produced artifact or claim to check' }),
+			question: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'One complete check question: what must be verified about the artifact; a missing or empty value is rejected in-plugin (invalid_task).' })),
+			artifact: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'The produced artifact or claim to check; a missing or empty value is rejected in-plugin (invalid_task).' })),
 			images: pi.typebox.Type.Optional(pi.typebox.Type.Array(pi.typebox.Type.String({ description: 'PNG or JPEG file path (absolute, or relative to the session directory). At most 4 images; each 256-1568 px per side and at most 16 MiB.' }), { description: 'Images the verdict may be grounded on, in reading order. Rejected deterministically when a file is unreadable, animated, outside PNG/JPEG, or outside Jev image limits.' })),
 		}),
 		async execute(_toolCallId: string, params: { question?: unknown; artifact?: unknown; images?: unknown }) {

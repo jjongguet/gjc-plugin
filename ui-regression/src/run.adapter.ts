@@ -14,24 +14,24 @@ export default function uiRegressionRun(pi:{cwd:string;typebox:{Type:any}}) {
   name:'ui_regression_run',label:'UI Regression Run',
   description:'Execute one explicitly authorized non-sensitive loopback scenario through ONE Aside REPL invocation pinned to the local session host (--host local): the scenario origin is strictly loopback, so the browser must run on this machine and a cloud session host can never reach the fixture. Inspect handlers first: loopback is not a sandbox. Open/close only the owned new tab in the local Aside Browser and never attach to existing tabs; fresh snapshots and unique visible current CSS locators, literal exact/substring assertions; no screenshots, user tabs, result imports or arbitrary JS. Account is explicit ephemeral routing, never in receipts. Automatically attempt Jev adequacy every invocation at https://openrouter.ai/api/alpha/decisions (typesafe/jev-1.14). Supply assessment context when known; omission does not disable the call. Only validated selected summaries/notes and bounded host facts leave, not scenario text, account, inputs, selectors or snapshots. Warning-only; no repair loops or blocking. Missing context is not adequate verification. Historical browser evidence is not current/deployed UI evidence.',
   parameters:T.Object({
-   account:T.String({minLength:1,maxLength:64,description:'Explicit Aside account routing only; not persisted or included in evidence.'}),
-   scenario:T.Object({
-    id:T.String({description:'Scenario id: letters, digits, _ or -, at most 64 characters.'}),
-    expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters.'}),
-    steps:T.Array(T.Object({
-     action:T.String({description:'One of goto, click, fill, assert. The first step must be goto.'}),
+   account:T.Optional(T.String({description:'Explicit Aside account routing only; not persisted or included in evidence; a missing or malformed value is rejected in-plugin as invalid_or_unavailable_input.'})),
+   scenario:T.Optional(T.Object({
+    id:T.Optional(T.String({description:'Scenario id: letters, digits, _ or -, at most 64 characters; a missing or malformed value is rejected in-plugin (scenario_id).'})),
+    expectedBehavior:T.Optional(T.String({description:'Non-sensitive expected behavior, 1-2000 characters.'})),
+    steps:T.Optional(T.Array(T.Object({
+     action:T.Optional(T.String({description:'One of goto, click, fill, assert; a missing or unknown value is rejected in-plugin (scenario_action). The first step must be goto.'})),
      url:T.Optional(T.String({description:'goto only: explicit loopback URL (localhost, 127.0.0.1 or [::1]) without credentials, query, fragment or sensitive paths.'})),
      selector:T.Optional(T.String({description:'click, fill and assert: unique visible CSS selector, at most 256 characters.'})),
      value:T.Optional(T.String({description:'fill only: non-sensitive value, at most 1000 characters.'})),
      kind:T.Optional(T.String({description:'assert only: visible or text.'})),
      match:T.Optional(T.String({description:'assert kind text only: exact or substring.'})),
      expected:T.Optional(T.String({description:'assert kind text only: literal expected text, at most 2000 characters.'}))
-    }),{description:'1-20 steps with at least one assert. Fields not used by the step action must be omitted.'})
-   },{description:'Rejected in-plugin with a specific scenario_* reason, before any browser launch, when malformed, sensitive or not loopback.'}),
-   timeoutMs:T.Optional(T.Number({minimum:1,maximum:90000,description:'Total timeout default 60,000 ms, maximum 90,000 ms, below Aside 120 seconds.'})),
-   repository:T.Optional(T.String({minLength:1,maxLength:4096,description:'Root of the Git work tree to record against, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
-   assessment:T.Optional(T.Object({changeSummary:T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'}),expectedBehavior:T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'}),caseNotes:T.Optional(T.Array(T.Object({id:T.String({description:'Case note id step-N, the zero-based scenario step index (step-0 to step-19). Only observed assertions of this run are eligible; planned or unreached steps are not. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'}),note:T.String({description:'Non-sensitive case note, 1-300 characters.'})}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))
-  },{additionalProperties:false}),
+    }),{description:'1-20 steps with at least one assert. Fields not used by the step action must be omitted.'}))
+   },{description:'Rejected in-plugin with a specific scenario_* reason, before any browser launch, when malformed, sensitive or not loopback.'})),
+   timeoutMs:T.Optional(T.Number({description:'Total timeout default 60,000 ms, maximum 90,000 ms, below Aside 120 seconds.'})),
+   repository:T.Optional(T.String({description:'Root of the Git work tree to record against, absolute or relative to the session directory. Needed when the session directory is not inside a repository; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory.'})),
+   assessment:T.Optional(T.Object({changeSummary:T.Optional(T.String({description:'Non-sensitive summary of the change, 1-2000 characters; no secrets, URLs, paths, logs or source.'})),expectedBehavior:T.Optional(T.String({description:'Non-sensitive expected behavior, 1-2000 characters; same restrictions as changeSummary.'})),caseNotes:T.Optional(T.Array(T.Object({id:T.Optional(T.String({description:'Case note id step-N, the zero-based scenario step index (step-0 to step-19). Only observed assertions of this run are eligible; planned or unreached steps are not. Ids must be unique. Any other id is rejected in-plugin as invalid_case_id and the result lists the allowed ids.'})),note:T.Optional(T.String({description:'Non-sensitive case note, 1-300 characters.'}))}),{description:'At most 8 case notes with unique ids.'}))},{description:'Optional non-sensitive context. Malformed or sensitive context is rejected in-plugin as invalid_context without echoing it.'}))
+  }),
   async execute(toolCallId:string,params:{account:string;scenario:unknown;timeoutMs?:number;repository?:string;assessment?:unknown},_update?:unknown,_ctx?:unknown,signal?:AbortSignal) {
    const started=performance.now();
    let execution: Record<string, any> = {status:'not_run',reason:'invalid_or_unavailable_input'};
