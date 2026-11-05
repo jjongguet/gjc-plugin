@@ -49,8 +49,12 @@
       "description": "Recompute the private post-delegation verification ledger for the current repository: resolve or report every open delegation gate from local facts and receipts. clean is a mechanical recheck, not proof of correctness or coverage; unreadable state is reported as blocked. Bounded (\u226415s), no network.",
       "schema": {
         "type": "object",
-        "properties": {},
-        "additionalProperties": false
+        "properties": {
+          "repository": {
+            "type": "string",
+            "description": "Root of the Git work tree to evaluate, absolute or relative to the session directory; it must be the session repository or lie inside the session directory. Defaults to the repository containing the session directory."
+          }
+        }
       }
     }
   ]

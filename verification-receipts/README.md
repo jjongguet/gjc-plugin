@@ -56,9 +56,12 @@ Top-level parameters carry no rejectable keyword either (`files`,
 path bound, the 1-120000 ms timeout and the unknown-key check are all decided in-plugin and return
 `invalid_file_count`, `invalid_test_path`, `invalid_timeout` or `invalid_or_unavailable_input`. That
 closes the measured echo path, where a host rejection of `timeoutMs` returned the caller's whole
-argument object. Two host-policy paths remain and are reported upstream, not handled here: a value of
-the wrong JSON type, and a missing required argument (including a missing `assessment.changeSummary`
-or `assessment.expectedBehavior`).
+argument object. Every caller field is also optional on the wire, so omitting `files`, `receiptId` or
+an `assessment` member reaches this plugin instead of the host: `files` and `receiptId` return
+`invalid_file_count` and `invalid_or_unavailable_input`, and an incomplete `assessment` is reported as
+`invalid_context` by the adequacy step. One host-policy path remains and is reported upstream, not
+handled here: a value of the wrong JSON type, which the `type` keyword still rejects before the plugin
+runs.
 
 Safe template:
 

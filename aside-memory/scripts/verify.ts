@@ -304,6 +304,12 @@ if (args[3] === "path") {
 		try { assert.equal((await invoke("empty")).status, "empty"); } finally { delete process.env.FAKE_ROOT_MODE; }
 	});
 	await check("diagnostic stages cover validation parse minimize and done", async () => {
+		// A missing query used to be a host rejection that echoed the rest of the call; it is now
+		// the same in-plugin validation error as an empty one.
+		for (const missing of [{}, { account: "u42" }, { query: 17 }]) {
+			const absent = await asideMemory(missing as any, { env: {} });
+			assert.equal(absent.status, "error"); assert.equal(absent.reason, "invalid_input");
+		}
 		const validation = await asideMemory({ query: "  " }, { env: {} });
 		assert.equal(validation.reason, "invalid_input"); assert.equal(validation.diagnosticStage, "validation");
 		const parse = await invoke("malformed");
@@ -391,8 +397,14 @@ if (args[3] === "path") {
 		assert.deepEqual(Object.keys(manifest).sort(), ["kind", "name", "tools", "version"]);
 		assert.equal(manifest.version, "0.0.2"); assert.equal(manifest.kind, "gajae-code-plugin");
 		assert.deepEqual(manifest.tools.map((tool: any) => tool.name), ["aside_memory"]); assert.equal(generated.name, "aside_memory");
-		assert.deepEqual(manifest.tools[0].schema, generated.parameters);
-		assert.equal((generated.parameters as any).additionalProperties, false);
+		// TypeBox always emits `required` (an empty list when every field is optional) and the
+		// manifest mirrors the advertisement; an empty list rejects nothing, so compare without it.
+		const advertised = (schema: unknown) => JSON.parse(JSON.stringify(schema, (key, value) => (key === "required" && Array.isArray(value) && value.length === 0 ? undefined : value)));
+		assert.deepEqual(advertised(manifest.tools[0].schema), advertised(generated.parameters));
+		// A caller-side keyword would be judged by the host before the plugin runs, so the
+		// manifest must not carry one (scripts/tests/host-schema.test.mjs is the repo-wide tripwire).
+		assert.equal((generated.parameters as any).additionalProperties, undefined);
+		assert.deepEqual((generated.parameters as any).required, []);
 		assert.deepEqual(Object.keys((generated.parameters as any).properties).sort(), ["account", "max_results", "query"]);
 		assert.ok(JSON.parse(readFileSync(path.join(plugin, "../gjc-plugin.json"), "utf8")).plugins.includes("aside-memory/gajae-plugin.json"));
 		const scripts = JSON.parse(readFileSync(path.join(plugin, "../package.json"), "utf8")).scripts;

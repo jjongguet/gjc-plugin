@@ -58,13 +58,17 @@ function unwrapNullableSchema(node) {
 const REJECTABLE_KEYWORDS = ['enum', 'const', 'pattern', 'format', 'maxLength', 'minLength', 'maxItems', 'minItems', 'minimum', 'maximum', 'exclusiveMinimum', 'exclusiveMaximum', 'multipleOf'];
 
 // Walk one advertised subtree and list every host-rejectable constraint inside it
-// (literal unions, value constraints, additionalProperties:false), by JSON path.
+// (literal unions, value constraints, an absent required member, additionalProperties:false),
+// by JSON path.
 export function rejectableConstraints(schema, at = '$') {
  const node = unwrapNullableSchema(schema);
  if (!node) return [];
  const found = [];
  for (const keyword of REJECTABLE_KEYWORDS) if (Object.hasOwn(node, keyword)) found.push(`${at}.${keyword}`);
  if (node.additionalProperties === false) found.push(`${at}.additionalProperties`);
+ // An absent required member is a host rejection too. TypeBox emits an empty list, which
+ // cannot reject anything, so only a non-empty list is a finding.
+ if (Array.isArray(node.required) && node.required.length) found.push(`${at}.required`);
  const branches = Array.isArray(node.anyOf) ? node.anyOf : Array.isArray(node.oneOf) ? node.oneOf : null;
  if (branches) found.push(`${at}.anyOf`);
  for (const [name, child] of Object.entries(node.properties ?? {})) found.push(...rejectableConstraints(child, `${at}.${name}`));

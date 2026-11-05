@@ -836,11 +836,11 @@ export default function wikiPropose(pi: {
 		label: "Wiki Propose",
 		description: "Capture one owner-approved source and submit draft wiki pages as a pending proposal; returns the exact content digest. This tool never approves or publishes — publication happens on the configured writer via wiki.py — after a per-digest human approval, or under the owner standing approval recorded in the wiki's REVIEW.md. Owner-approved personal/public inputs only; employer sources are refused.",
 		parameters: pi.typebox.Type.Object({
-			id: pi.typebox.Type.String({ description: "Stable lowercase source id (letters, digits, hyphens), e.g. 'jev-advisor-efficacy-20261008'" }),
-			title: pi.typebox.Type.String({ description: "Human-readable source title" }),
-			origin: pi.typebox.Type.String({ description: 'Source origin: "personal" or "public"' }),
-			source_text: pi.typebox.Type.String({ description: "Complete source text to capture (the approved original)" }),
-			changes_json: pi.typebox.Type.String({ description: "JSON object mapping canonical page paths (concepts|entities|references|synthesis|journal/<slug>.md) to complete UTF-8 page text; at least one page must cite [[_raw/<id>/original]]" }),
+			id: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: "Stable lowercase source id (letters, digits, hyphens), e.g. 'jev-advisor-efficacy-20261008'" })),
+			title: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: "Human-readable source title" })),
+			origin: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'Source origin: "personal" or "public"' })),
+			source_text: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: "Complete source text to capture (the approved original)" })),
+			changes_json: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: "JSON object mapping canonical page paths (concepts|entities|references|synthesis|journal/<slug>.md) to complete UTF-8 page text; at least one page must cite [[_raw/<id>/original]]" })),
 		}),
 		async execute(_toolCallId: string, params: { id?: string; title?: string; origin?: string; source_text?: string; changes_json?: string }) {
 			const id = (params?.id ?? "").trim();

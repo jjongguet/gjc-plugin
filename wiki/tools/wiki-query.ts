@@ -831,7 +831,7 @@ export default function wikiQuery(pi: {
 		label: "Wiki Query",
 		description: "Read-only search over the guarded personal wiki: canonical pages only (pending proposals stay invisible), results cite wiki paths and original sources, and not-found is reported explicitly. Wiki text is curated personal knowledge, not verified truth.",
 		parameters: pi.typebox.Type.Object({
-			query: pi.typebox.Type.String({ description: "Search terms for canonical wiki pages, e.g. 'sunkcost validation'" }),
+			query: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: "Search terms for canonical wiki pages, e.g. 'sunkcost validation'; a missing or empty value is rejected in-plugin." })),
 		}),
 		async execute(_toolCallId: string, params: { query?: string }) {
 			const query = (params?.query ?? "").trim();
