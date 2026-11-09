@@ -170,8 +170,11 @@ markdown (observed 2026-11-09: `-` bullets became `*`, and `JJO-1980` inside the
 readable `<!-- nightly-review:<key> -->` comment became a link), so create and
 batch readback check the single hex operation marker, title, nightly label,
 parent and project rather than byte-equal descriptions. New issues also carry
-`<!-- nightly-review-key:<sha256(key)> -->`; dedupe matches either marker, so
-legacy issues with only the readable marker still match. A partially successful comment/status operation is
+`<!-- nightly-review-key:<sha256(key)> -->`. Dedupe matches the hex marker, the
+readable marker, or the readable marker after undoing Linear's identifier links
+(`[JJO-12](https://linear.app/...)` back to `JJO-12`), so legacy issues with only
+the readable marker still match; any other rewrite of a legacy marker is matched
+only through the ledger's confirmed id. A partially successful comment/status operation is
 preserved for inspection, not flooded with repeated comments.
 
 The default transport is `bin/linear-transport.py`. Reads (`get_issue`,

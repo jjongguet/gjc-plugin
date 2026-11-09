@@ -137,11 +137,22 @@ test('identifier autolinking inside the readable marker neither breaks confirmat
   }
 });
 
-async function commentSetup({ lost = false } = {}) {
+test('a legacy issue whose readable marker Linear autolinked is still found after ledger loss', async () => {
+  const f = await setup();
+  f.supervision.actions.push({ issueId: linkedKey, type: 'create', project: 'p' });
+  f.issues.push({ id: 'legacy', title: '[nightly] legacy', description: autolink(`body\n<!-- nightly-review:${linkedKey} -->`), project: 'p', parentId: 'parent', updatedAt: new Date(now).toISOString(), createdAt: old, statusType: 'backlog', labels: [] });
+  assert.ok(!f.issues[1].description.includes(`<!-- nightly-review:${linkedKey} -->`));
+  const result = await publishFindings({ ...f, findings: [linkedFinding], runId: 'run-1' });
+  assert.equal(result.result.created.length, 0);
+  assert.equal(result.result.skipped[0].reason, 'terminal_or_protected');
+  assert.equal(f.count(), 0);
+});
+
+async function commentSetup({ lost = false, ledger = true } = {}) {
   const f = await setup();
   const comments = [];
   f.issues.push({ id: 'existing', title: '[nightly] r', description: `<!-- nightly-review:${key} -->`, project: 'p', parentId: 'parent', updatedAt: old, createdAt: old, statusType: 'backlog', labels: ['nightly'] });
-  await immutableJson(path.join(f.dir, 'filed.json'), { version: 1, clusters: { [key]: { issue: { id: 'existing' }, evidence: ['old-evidence'], filedAt: old } } });
+  if (ledger) await immutableJson(path.join(f.dir, 'filed.json'), { version: 1, clusters: { [key]: { issue: { id: 'existing' }, evidence: ['old-evidence'], filedAt: old } } });
   f.supervision.actions.push({ issueId: key, type: 'comment', project: 'p' });
   let writes = 0;
   f.client.listComments = async ({ issueId }) => ({ comments: structuredClone(comments.filter((c) => c.issueId === issueId)), hasNextPage: false });
@@ -173,6 +184,25 @@ test('a lost evidence comment is adopted only on its bound confirmed issue', asy
     } else {
       assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
       assert.deepEqual(saved.evidence, ['old-evidence'], tamper);
+    }
+  }
+});
+
+test('without a ledger identity a lost comment is adopted only on the single marked issue and only from a complete inventory', async () => {
+  for (const tamper of ['none', 'incomplete-inventory', 'second-marked-issue']) {
+    const f = await commentSetup({ lost: true, ledger: false });
+    const options = { ...f, findings: [finding], runId: 'run-1' };
+    assert.equal((await publishFindings(options)).result.errors.length, 1);
+    if (tamper === 'incomplete-inventory') f.client.listIssues = async () => ({ issues: structuredClone(f.issues), hasNextPage: true, cursor: 'repeat' });
+    if (tamper === 'second-marked-issue') f.issues.push({ ...f.issues.find((i) => i.id === 'existing'), id: 'twin' });
+    const second = await publishFindings(options);
+    assert.equal(f.commentWrites(), 1, tamper);
+    if (tamper === 'none') {
+      assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+      assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, 'existing');
+    } else {
+      assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
+      await assert.rejects(readFile(path.join(f.dir, 'filed.json'), 'utf8'), /ENOENT/, tamper);
     }
   }
 });

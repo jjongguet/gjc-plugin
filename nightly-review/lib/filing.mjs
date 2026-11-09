@@ -59,7 +59,12 @@ export function clusterFindings(findings) {
 // only the readable one, so matching accepts either.
 export const clusterMarker = (key) => `<!-- nightly-review:${key} -->`;
 export const clusterKeyMarker = (key) => `<!-- nightly-review-key:${createHash('sha256').update(key).digest('hex')} -->`;
-export const hasClusterMarker = (text, key) => (text ?? '').includes(clusterMarker(key)) || (text ?? '').includes(clusterKeyMarker(key));
+// Undo only Linear's identifier autolink form `[JJO-12](https://linear.app/...)`.
+const unlinkIdentifiers = (text) => text.replace(/\[([A-Za-z][A-Za-z0-9]*-\d+)\]\(https:\/\/linear\.app\/[^)\s]*\)/g, '$1');
+export const hasClusterMarker = (text, key) => {
+  const body = text ?? '';
+  return body.includes(clusterKeyMarker(key)) || body.includes(clusterMarker(key)) || unlinkIdentifiers(body).includes(clusterMarker(key));
+};
 
 export function issueTitle(cluster) {
   return `[nightly] ${cluster.repo} ${cluster.file} — ${cluster.kind}`;
