@@ -162,6 +162,17 @@ adopt a uniquely marked, exactly matching remote result; filing stops while an
 unresolved operation remains. A partially successful comment/status operation is
 preserved for inspection, not flooded with repeated comments.
 
+The default transport is `bin/linear-transport.py`. Reads (`get_issue`,
+`list_issues`, `list_comments`, `list_issue_labels`) use one Linear GraphQL request
+each and keep the policy CLI output shape; writes (`save_issue`, `save_comment`)
+are delegated unchanged to the policy `linear-trace.py --publish`. Measured
+2026-11-09: one MCP tool call cost 7-13 of the shared 2,500/hour requests, so a
+complete 96-issue project scan through MCP (about 1,500 requests, 2-3 scans per
+filing) hit 429 before any write. The same scan now costs about two requests per
+issue. The credential is parsed in-process from the owner-only single-link
+`~/.gjc/agent/mcp.json`, sent only to `https://api.linear.app/graphql`, and never
+printed or passed as an argument.
+
 On Linear429, stop API calls and use the policy `linear-aside.py`/Aside path in the
 same supervised session, under the same exact-action and protection constraints.
 The CLI reports the required handoff; the active agent executes and verifies it.

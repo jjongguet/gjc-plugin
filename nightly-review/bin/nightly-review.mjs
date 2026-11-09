@@ -63,7 +63,7 @@ Options
   --file-findings  with once: run the file step after the receipt is written
   --publish      actually write to Linear (default: print the plan and write nothing)
   --max-issues   issue clusters filed per run (default 8)
-  --linear-cli   linear-trace.py path (default ${DEFAULT_LINEAR_CLI})
+  --linear-cli   transport CLI path (default ${DEFAULT_LINEAR_CLI}: GraphQL reads, policy linear-trace.py writes)
 
 Exit codes: 0 ok, 1 some Linear writes failed, 2 invalid arguments.
 `;
