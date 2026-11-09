@@ -73,8 +73,11 @@ export async function fetchFileAtRef({ repo, ref, filePath, timeout = 60_000 }) 
       { timeout },
     );
     return raw.trim() ? raw : null;
-  } catch {
-    return null;
+  } catch (error) {
+    // Missing rules are optional; transport, authentication and other read
+    // failures must not be recorded as successful evidence collection.
+    if (/\bHTTP 404\b/.test(String(error.stderr ?? ''))) return null;
+    throw error;
   }
 }
 
@@ -126,21 +129,28 @@ export async function collectRepo({
   maxDiffBytes,
   withRules = true,
   log = () => {},
+  listPrs = listMergedPrs,
+  readDiff = fetchDiff,
+  readRules = collectRules,
 }) {
-  const prs = await listMergedPrs({ repo, since });
+  const prs = await listPrs({ repo, since, limit: 100 });
+  // Coverage is determined before empty diffs are filtered out. A full listing
+  // cannot establish that no further merged PRs exist.
+  const listed = prs.length;
+  const complete = listed < 100;
   const dir = path.join(runDir, 'input', repo);
   await mkdir(dir, { recursive: true });
 
   const collected = [];
   for (const pr of prs) {
-    const { diff, truncated } = await fetchDiff({ repo, number: pr.number, maxDiffBytes });
+    const { diff, truncated } = await readDiff({ repo, number: pr.number, maxDiffBytes });
     if (!diff.trim()) {
       log(`${repo}#${pr.number}: empty diff, skipped`);
       continue;
     }
     const files = (pr.files ?? []).map((file) => file.path);
     const rules = withRules
-      ? await collectRules({ repo, ref: pr.mergeCommit?.oid ?? pr.headRefOid, files }).catch(() => [])
+      ? await readRules({ repo, ref: pr.mergeCommit?.oid ?? pr.headRefOid, files })
       : [];
     const entry = {
       repo,
@@ -168,5 +178,5 @@ export async function collectRepo({
     );
   }
 
-  return collected;
+  return { prs: collected, complete, listed, reason: complete ? null : 'collection_cap' };
 }

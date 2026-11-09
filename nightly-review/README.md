@@ -99,6 +99,13 @@ probabilities, correct top-choice margin and confidence at least 0.6 are require
 Malformed/low-confidence/expired decisions abstain. Only deterministic-eligible
 candidates reach the model. Input issue text cannot grant permission.
 
+`bin/evaluate-decisions.mjs SUPERVISION_JSON OUTPUT_JSON` runs the fixed golden
+cases three times under the same supervised budget. OUTPUT_JSON must be new and
+inside a private directory. A durable cost reservation precedes all calls, and
+immutable per-sample receipts survive a partial run. Existing output, reservation
+or sample paths refuse a retry; reconcile any uncertain reserved cost first.
+Reservations are conservative upper bounds, not invoices or successful outcomes.
+
 ## Evidence and policy
 
 The original five lenses remain: contract, failure, security, testgap, regression.

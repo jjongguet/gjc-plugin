@@ -1,15 +1,67 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, realpath, mkdir, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { decideCandidate, validateDecision } from '../lib/decisions.mjs';
 
 const NOW = Date.parse('2026-11-09T01:30:00Z');
 const candidate = { eligible: true, mode: 'supervised', action: 'mark_complete', evidence: { currentVerification: 'passed' } };
-const supervision = { active: true, expiresAt: '2026-11-09T02:30:00Z' };
+const supervision = { active: true, supervisor: 'test-supervisor', expiresAt: '2026-11-09T02:30:00Z' };
 const budget = { capUsd: 1, spentUsd: 0, reservedUsd: 0, nextUpperUsd: 0.01 };
 const env = { OPENGATEWAY_API_KEY: 'gateway-test-only', OPENROUTER_DECISION_API_KEY: 'router-test-only' };
 const answer = (choice = 'consistent', probabilities = { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, confidence = 0.75) => ({ choice, probabilities, confidence });
 const response = (decision = answer()) => ({ ok: true, json: async () => ({ answers: { decision } }) });
+test('evaluation CLI reaches the supervised key boundary without credentials instead of silently refusing every sample scope', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-evaluation-')));
+  const auth = path.join(dir, 'supervision.json');
+  const output = path.join(dir, 'evaluation.json');
+  await writeFile(auth, JSON.stringify({ active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } }));
+  const result = spawnSync(process.execPath, ['nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH } });
+  assert.equal(result.status, 0, result.stderr);
+  const receipt = JSON.parse(await readFile(output, 'utf8'));
+  assert.equal(receipt.results.length, 48);
+  assert.equal(receipt.costUpperUsd, 0);
+  assert.equal(receipt.summary.finalCorrect, 42);
+  assert.equal((await readdir(`${output}.samples`)).length, 48);
+  assert.equal(JSON.parse(await readFile(`${output}.reservation.json`, 'utf8')).totalReservedUpperUsd, 0.387072);
+  for (const row of receipt.results) {
+    assert.ok(row.audit.some((entry) => entry.reason === 'key_missing'));
+    assert.ok(row.audit.every((entry) => entry.reason !== 'scope'));
+  }
+});
+test('invalid or previously reserved evaluation destinations reject before any paid transport', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-eval-preflight-')));
+  const auth = path.join(dir, 'supervision.json');
+  await writeFile(auth, JSON.stringify({ active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } }));
+  const trace = path.join(dir, 'transport.log');
+  const preload = path.join(dir, 'transport.mjs');
+  await writeFile(preload, `import { appendFileSync } from 'node:fs';\nglobalThis.fetch = async () => { appendFileSync(${JSON.stringify(trace)}, 'called\\n'); throw new Error('test-only transport'); };\n`);
+  for (const mode of ['permissions', 'existing', 'reservation']) {
+    const parent = path.join(dir, mode); await mkdir(parent, { mode: mode === 'permissions' ? 0o755 : 0o700 });
+    const output = path.join(parent, 'evaluation.json');
+    if (mode !== 'permissions') await writeFile(mode === 'existing' ? output : `${output}.reservation.json`, 'preserved');
+    const result = spawnSync(process.execPath, ['--import', preload, 'nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, OPENGATEWAY_API_KEY: 'fake-test-only', OPENROUTER_DECISION_API_KEY: 'fake-test-only' } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /private|already exists/);
+    assert.equal(existsSync(trace), false);
+    if (mode !== 'permissions') assert.equal(await readFile(mode === 'existing' ? output : `${output}.reservation.json`, 'utf8'), 'preserved');
+  }
+});
+test('malformed evaluator authorization rejects before reservation and transport', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-eval-auth-')));
+  const auth = path.join(dir, 'supervision.json'); const output = path.join(dir, 'evaluation.json');
+  const valid = { active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } };
+  for (const changed of [{ supervisor: '   ' }, { supervisor: {} }, { expiresAt: 'invalid' }, { budget: { ...valid.budget, capUsd: null } }, { budget: { ...valid.budget, spentUsd: -1 } }, { budget: { ...valid.budget, reservedUsd: -1 } }]) {
+    await writeFile(auth, JSON.stringify({ ...valid, ...changed }));
+    const result = spawnSync(process.execPath, ['nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /supervision|budget/);
+    assert.equal(existsSync(output), false); assert.equal(existsSync(`${output}.reservation.json`), false);
+  }
+});
 function setup(responses = [response()]) {
   const calls = [];
   const fetchImpl = async (url, options) => {
@@ -64,11 +116,13 @@ test('invalid scope, supervision and budget never fetch', async () => {
     { candidate: { ...candidate, eligible: false } },
     { candidate: { ...candidate, eligible: 'true' } },
     { candidate: { ...candidate, mode: 'scheduled' } },
+    ...[undefined, null, '', 'silent', 'unknown'].map((mode) => ({ candidate: { ...candidate, mode } })),
     { candidate: { ...candidate, scheduled: true } },
     { supervision: undefined }, { supervision: { ...supervision, active: false } },
-    { supervision: { active: true, expiresAt: new Date(NOW).toISOString() } },
-    { supervision: { active: true, expiresAt: 'tomorrow' } },
-    { supervision: { active: true, expiresAt: '2027-02-30T01:30:00Z' } },
+    ...[undefined, null, '', '  \n', 1, {}].map((supervisor) => ({ supervision: { ...supervision, supervisor } })),
+    ...[new Date(NOW).toISOString(), new Date(NOW - 1).toISOString(),
+      new Date(NOW + 3_600_001).toISOString(), 'tomorrow', '2027-02-30T01:30:00Z',
+      '2026-11-09T02:30:00', Infinity, null].map((expiresAt) => ({ supervision: { ...supervision, expiresAt } })),
     { now: () => NaN }, { budget: undefined },
     ...['capUsd', 'spentUsd', 'reservedUsd', 'nextUpperUsd'].flatMap((key) => [NaN, Infinity, -1, undefined].map((value) => ({ budget: { ...budget, [key]: value } }))),
     { budget: { ...budget, capUsd: 5.01 } },
@@ -86,15 +140,49 @@ test('invalid scope, supervision and budget never fetch', async () => {
   }
 });
 
-test('validator rejects malformed, missing, NaN, mismatched margins and non-top choices', () => {
-  for (const value of [undefined, null, [], {}, answer('other'), answer('consistent', undefined, NaN),
+test('validator rejects malformed, missing, nonfinite, out-of-range and non-top choices', () => {
+  for (const value of [undefined, null, [], {}, answer('other'),
+    ...[undefined, null, '0.9', NaN, Infinity, -0.1, 1.1].map((confidence) => ({ ...answer(), confidence })),
     answer('consistent', { consistent: 0.85, inconsistent: 0.1 }, 0.75),
     answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: NaN }, 0.75),
     answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.2 }, 0.75),
     answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.05, extra: 0 }, 0.75),
-    answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, 0.9),
+    answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.0497 }, 0.9),
+    answer('consistent', { consistent: 1.1, inconsistent: 0, abstain: 0 }, 0.9),
     answer('inconsistent'), answer('consistent', { consistent: -0.1, inconsistent: 0.9, abstain: 0.2 }, 1),
   ]) assert.equal(validateDecision(value).valid, false);
+});
+
+test('provider confidence is independent of the top probability gap and both must pass', () => {
+  const independent = validateDecision(answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, 0.9));
+  assert.equal(independent.valid, true);
+  assert.equal(independent.confidence, 0.9);
+  assert.equal(independent.margin, 0.75);
+  assert.equal(independent.adopted, true);
+  for (const decision of [
+    answer('consistent', { consistent: 0.5, inconsistent: 0.3, abstain: 0.2 }, 0.9),
+    answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, 0.5999),
+    answer('consistent', { consistent: 0.5197, inconsistent: 0.2091, abstain: 0.2712 }, 0.2796),
+  ]) {
+    const result = validateDecision(decision);
+    assert.equal(result.valid, true);
+    assert.equal(result.adopted, false);
+    assert.equal(result.reason, 'low_confidence');
+    assert.equal(result.confidence, decision.confidence);
+  }
+});
+
+test('four-decimal probability rounding accepts a .9999 total without inventing confidence', () => {
+  const probabilities = { consistent: 0.85, inconsistent: 0.1, abstain: 0.0499 };
+  for (const confidence of [0.2796, 0.9]) {
+    const result = validateDecision(answer('consistent', probabilities, confidence));
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.probabilities, probabilities);
+    assert.equal(result.margin, 0.75);
+    assert.equal(result.confidence, confidence);
+    assert.equal(result.adopted, confidence >= 0.6);
+  }
+  assert.equal(validateDecision({ choice: 'consistent', probabilities }).valid, false);
 });
 
 test('threshold is inclusive, below threshold abstains, explicit abstain is never adopted', () => {
@@ -103,14 +191,18 @@ test('threshold is inclusive, below threshold abstains, explicit abstain is neve
   assert.equal(validateDecision(answer('abstain', { consistent: 0.05, inconsistent: 0.05, abstain: 0.9 }, 0.85)).adopted, false);
 });
 
-test('two typed abstentions and two low-confidence answers both stop after escalation', async () => {
+test('typed abstentions and low provider confidence or margin stop after one escalation', async () => {
   for (const decision of [answer('abstain', { consistent: 0.05, inconsistent: 0.05, abstain: 0.9 }, 0.85),
-    answer('consistent', { consistent: 0.5, inconsistent: 0.3, abstain: 0.2 }, 0.2)]) {
+    answer('consistent', { consistent: 0.5, inconsistent: 0.3, abstain: 0.2 }, 0.9),
+    answer('consistent', { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, 0.5999),
+    answer('consistent', { consistent: 0.5197, inconsistent: 0.2091, abstain: 0.2712 }, 0.2796)]) {
     const { calls, options } = setup([response(decision), response(decision)]);
     const result = await decideCandidate(options);
     assert.equal(calls.length, 2);
     assert.equal(result.choice, 'abstain');
     assert.equal(result.adopted, false);
+    assert.equal(result.audit[0].confidence, decision.confidence);
+    assert.deepEqual(result.audit[0].probabilities, decision.probabilities);
   }
 });
 
@@ -154,6 +246,8 @@ test('missing escalation key never borrows gateway key', async () => {
 test('supervision, scope and budget are rechecked before escalation', async () => {
   for (const mutate of [
     (options) => { options.supervision.active = false; },
+    (options) => { options.supervision.supervisor = ' '; },
+    (options) => { options.supervision.expiresAt = new Date(NOW + 3_600_001).toISOString(); },
     (options) => { options.now = () => NOW; options.supervision.expiresAt = new Date(NOW).toISOString(); },
     (options) => { options.candidate.scheduled = true; },
     (options) => { options.budget.spentUsd = 1; },
@@ -163,6 +257,29 @@ test('supervision, scope and budget are rechecked before escalation', async () =
     const result = await decideCandidate(options);
     assert.equal(calls.length, 1);
     assert.equal(result.adopted, false);
+  }
+});
+
+test('named short-lived supervision is rechecked before adopting either route', async () => {
+  for (const route of [0, 1]) {
+    for (const mutate of [
+      (scope) => { scope.supervisor = ''; },
+      (scope) => { scope.expiresAt = 'invalid'; },
+      (scope) => { scope.expiresAt = new Date(NOW + 3_600_001).toISOString(); },
+    ]) {
+      const { calls, options } = setup();
+      options.fetchImpl = async (...args) => {
+        calls.push(args);
+        if (calls.length - 1 !== route) return response(null);
+        mutate(options.supervision);
+        return response();
+      };
+      const result = await decideCandidate(options);
+      assert.equal(calls.length, route + 1);
+      assert.equal(result.adopted, false);
+      assert.equal(result.audit.at(-1).reason, 'supervision');
+      assert.ok(result.costUpperUsd > 0);
+    }
   }
 });
 

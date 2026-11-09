@@ -27,8 +27,22 @@
       "properties": {"id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "phase": {"enum": ["planned", "attempted", "confirmed", "unknown", "local_committed"]}, "at": {"type": "string", "format": "date-time"}}
     },
     "receipt": {
-      "type": "object", "required": ["version", "command", "startedAt", "finishedAt", "status", "counters"],
-      "properties": {"version": {"const": 1}, "command": {"enum": ["prepare", "evaluate-local", "reconcile"]}, "status": {"enum": ["prepared", "incomplete", "duplicate", "planned", "confirmed", "deferred", "failed"]}, "counters": {"type": "object"}}
+      "type": "object", "required": ["version", "command", "status", "counters"],
+      "properties": {"version": {"const": 1}, "command": {"enum": ["prepare", "evaluate-local"]}, "status": {"enum": ["prepared", "incomplete", "duplicate", "planned"]}, "counters": {"type": "object"}},
+      "allOf": [{"if": {"properties": {"status": {"enum": ["prepared", "incomplete"]}}}, "then": {"required": ["startedAt", "finishedAt", "queueHash", "coverage"]}}]
+    },
+    "supervision": {
+      "type": "object", "required": ["active", "supervisor", "expiresAt"],
+      "properties": {
+        "active": {"const": true}, "supervisor": {"type": "string", "minLength": 1}, "expiresAt": {"type": "string", "format": "date-time"},
+        "operationalExclusion": {"const": true},
+        "actions": {"type": "array", "items": {"type": "object", "required": ["issueId", "type", "project"], "properties": {"issueId": {"type": "string"}, "type": {"enum": ["create", "comment", "create-batch", "expire", "parent", "done", "invalid", "correct", "move", "duplicate"]}, "project": {"type": "string"}, "proposalHash": {"type": "string", "pattern": "^[a-f0-9]{64}$"}}}},
+        "budget": {"type": "object", "required": ["capUsd", "spentUsd", "reservedUsd"], "properties": {"capUsd": {"type": "number", "minimum": 0, "maximum": 5}, "spentUsd": {"type": "number", "minimum": 0}, "reservedUsd": {"type": "number", "minimum": 0}, "nextUpperUsd": {"type": "number", "exclusiveMinimum": 0}}}
+      },
+      "description": "Runtime requires expiry >now and at most one hour ahead. Writes require operationalExclusion and exact actions; reconciliation scopes additionally require the canonical proposalHash. Paid review additionally validates current provider modelBounds and full workload cost."
+    },
+    "reconcileResult": {
+      "type": "object", "required": ["runDir", "result"], "properties": {"runDir": {"type": "string"}, "result": {"type": "array", "items": {"type": "object"}}}
     }
   },
   "description": "CLI: prepare --mode scheduled|shadow --config PATH --out PATH [--json]; evaluate-local --run PATH; reconcile --snapshot PATH [--scan] [--publish --supervision PATH]. Exit 0 complete/no-op, 1 incomplete/deferred/unknown, 2 invalid or refused. Scheduled prepare imports no paid or Linear mutation implementation. A manual invocation is not a calendar-tick receipt. Ledger v1 identities are preserved; ownership is a separate generation manifest."

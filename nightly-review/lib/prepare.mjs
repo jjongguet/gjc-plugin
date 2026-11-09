@@ -43,14 +43,19 @@ export async function prepare({ configPath, out, mode, collect = collectRepo, cl
     const coverage = [];
     for (const repo of config.repos) {
       try {
-        const prs = await collect({ repo, since, runDir, maxDiffBytes: 40000, withRules: true });
+        const result = await collect({ repo, since, runDir, maxDiffBytes: 40000, withRules: true });
+        if (!result || !Array.isArray(result.prs) || typeof result.complete !== 'boolean' ||
+            !Number.isSafeInteger(result.listed) || result.listed < result.prs.length ||
+            (result.complete ? result.listed >= 100 || result.reason !== null : typeof result.reason !== 'string' || !result.reason)) {
+          throw new Error('invalid collection coverage');
+        }
+        const { prs, complete, listed, reason } = result;
         const identities = new Set();
         for (const pr of prs) {
           const identity = `${repo}#${pr.number}:${pr.headRefOid}`;
           if (!identities.has(identity)) { identities.add(identity); queue.push(pr); }
         }
-        // Collector's list cap is 100. A full page cannot prove enumeration complete.
-        coverage.push({ repo, count: prs.length, complete: prs.length < 100, reason: prs.length >= 100 ? 'collection_cap' : null });
+        coverage.push({ repo, count: prs.length, listed, complete, reason });
       } catch (error) {
         coverage.push({ repo, complete: false, reason: error.code === 'ENOENT' ? 'missing_binary' : 'collection_failed' });
       }
