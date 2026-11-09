@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile, mkdtemp, writeFile, realpath } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, realpath, mkdir, readdir } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,9 +25,29 @@ test('evaluation CLI reaches the supervised key boundary without credentials ins
   assert.equal(receipt.results.length, 48);
   assert.equal(receipt.costUpperUsd, 0);
   assert.equal(receipt.summary.finalCorrect, 42);
+  assert.equal((await readdir(`${output}.samples`)).length, 48);
+  assert.equal(JSON.parse(await readFile(`${output}.reservation.json`, 'utf8')).totalReservedUpperUsd, 0.387072);
   for (const row of receipt.results) {
     assert.ok(row.audit.some((entry) => entry.reason === 'key_missing'));
     assert.ok(row.audit.every((entry) => entry.reason !== 'scope'));
+  }
+});
+test('invalid or previously reserved evaluation destinations reject before any paid transport', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-eval-preflight-')));
+  const auth = path.join(dir, 'supervision.json');
+  await writeFile(auth, JSON.stringify({ active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } }));
+  const trace = path.join(dir, 'transport.log');
+  const preload = path.join(dir, 'transport.mjs');
+  await writeFile(preload, `import { appendFileSync } from 'node:fs';\nglobalThis.fetch = async () => { appendFileSync(${JSON.stringify(trace)}, 'called\\n'); throw new Error('test-only transport'); };\n`);
+  for (const mode of ['permissions', 'existing', 'reservation']) {
+    const parent = path.join(dir, mode); await mkdir(parent, { mode: mode === 'permissions' ? 0o755 : 0o700 });
+    const output = path.join(parent, 'evaluation.json');
+    if (mode !== 'permissions') await writeFile(mode === 'existing' ? output : `${output}.reservation.json`, 'preserved');
+    const result = spawnSync(process.execPath, ['--import', preload, 'nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, OPENGATEWAY_API_KEY: 'fake-test-only', OPENROUTER_DECISION_API_KEY: 'fake-test-only' } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /private|already exists/);
+    assert.equal(existsSync(trace), false);
+    if (mode !== 'permissions') assert.equal(await readFile(mode === 'existing' ? output : `${output}.reservation.json`, 'utf8'), 'preserved');
   }
 });
 function setup(responses = [response()]) {

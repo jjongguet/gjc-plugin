@@ -11,17 +11,16 @@ const isTerminal = (i) => ['completed', 'canceled'].includes(i.statusType);
 const isActiveBatch = (i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isTerminal(i) && !i.archivedAt;
 export const filingIncomplete = (result) => result.errors.length > 0 || result.skipped.some((s) => !['up_to_date', 'adopted_confirmed_operation'].includes(s.reason));
 
-async function createBatch({ client, project, snapshot, dir, owner, supervision, clock, nightly }) {
+async function createBatch({ client, project, dir, owner, supervision, clock, nightly }) {
   const issueId = `batch:${project}`;
   validateSupervision(supervision, { at: clock(), issueId, action: 'create-batch', project });
-  const id = digest(jsonBytes({ issueId, generation: owner.generation }));
-  const marker = `<!-- nightly-operation:${id} -->`;
-  const state = await operationState(dir, id);
-  const adopted = snapshot.issues.filter((i) => isActiveBatch(i) && i.description?.includes(marker));
-  if (adopted.length === 1) return adopted[0];
-  if (adopted.length > 1 || state.attempted) throw new Error('unknown batch creation quarantined');
   const latest = await scanProject({ client, project, now: clock });
   if (!latest.complete || latest.issues.some(isActiveBatch)) throw new Error('batch inventory changed');
+  const retired = latest.issues.filter((i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isActiveBatch(i)).map((i) => i.id).sort();
+  const id = digest(jsonBytes({ issueId, generation: owner.generation, ...(retired.length ? { retired } : {}) }));
+  const marker = `<!-- nightly-operation:${id} -->`;
+  const state = await operationState(dir, id);
+  if (state.attempted) throw new Error('unknown batch creation quarantined');
   await assertOwner(dir, { generation: owner.generation });
   if (!state.planned) await journalEvent(dir, { id, phase: 'planned', issueId });
   await journalEvent(dir, { id, phase: 'attempted', issueId });
@@ -120,7 +119,7 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
         const parents = snapshot.issues.filter(isActiveBatch);
         if (parents.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_batch' }); continue; }
         // The separate scope entry makes this extra mutation visible to the supervisor.
-        parent = parents[0] ?? await createBatch({ client, project, snapshot, dir, owner, supervision, clock, nightly: nightly[0] });
+        parent = parents[0] ?? await createBatch({ client, project, dir, owner, supervision, clock, nightly: nightly[0] });
       }
       if (!operation.planned) await journalEvent(dir, { id, phase: 'planned', key: cluster.key, type, before: existing ?? null });
       // Re-enumerate immediately before create; the scoped supervisor coordinates

@@ -3,7 +3,7 @@
 // reserved, including the runner's one possible size retry; deadline is not money.
 const finite = (n) => Number.isFinite(n) && n >= 0;
 export function reviewBudget({ supervision, lenses, calls, now = Date.now() }) {
-  if (supervision?.active !== true || !supervision.supervisor || !(Date.parse(supervision.expiresAt) > now) || Date.parse(supervision.expiresAt) - now > 3600000) throw new Error('review requires an active short-lived supervisor');
+  if (supervision?.active !== true || typeof supervision.supervisor !== 'string' || !supervision.supervisor.trim() || !(Date.parse(supervision.expiresAt) > now) || Date.parse(supervision.expiresAt) - now > 3600000) throw new Error('review requires an active short-lived supervisor');
   const budget = supervision.budget;
   if (!budget || !['capUsd', 'spentUsd', 'reservedUsd'].every((k) => finite(budget[k])) || budget.capUsd > 5) throw new Error('invalid task budget');
   let upperUsd = 0;

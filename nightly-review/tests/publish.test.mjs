@@ -80,6 +80,9 @@ test('supervised review reserves both possible attempts and refuses expired/over
   assert.throws(() => reviewBudget({ supervision, lenses: [lens], calls: 100, now }), /budget/);
   assert.throws(() => reviewBudget({ supervision: { ...supervision, expiresAt: old }, lenses: [lens], calls: 1, now }), /supervisor/);
   assert.throws(() => reviewBudget({ supervision: { ...supervision, modelBounds: {} }, lenses: [lens], calls: 1, now }), /cost bound/);
+  for (const supervisor of ['', '   ', {}, [], 1]) {
+    assert.throws(() => reviewBudget({ supervision: { ...supervision, supervisor }, lenses: [lens], calls: 1, now }), /supervisor/);
+  }
 });
 
 test('a missing confirmed legacy identity is deferred without replacement even after a project move', async () => {
@@ -98,6 +101,23 @@ test('a missing confirmed legacy identity is deferred without replacement even a
     assert.equal(result.result.skipped[0].reason, 'confirmed_identity_missing');
     assert.equal(f.count(), 0);
     assert.deepEqual(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')), ledger);
+  }
+});
+
+test('confirmed batch history permits a separately scoped replacement after retirement without deleting prior journals', async () => {
+  for (const retirement of ['archived', 'completed']) {
+    const f = await setup({ batch: false });
+    assert.equal((await publishFindings({ ...f, findings: [finding], runId: 'first', clock: () => now })).result.created.length, 1);
+    const initial = digest(jsonBytes({ issueId: 'batch:p', generation: 1 }));
+    const before = await readFile(path.join(f.dir, 'operations', `${initial}-confirmed.json`), 'utf8');
+    if (retirement === 'archived') f.issues[0].archivedAt = old;
+    else f.issues[0].statusType = 'completed';
+    f.supervision.actions.push({ issueId: 'r::b.mjs::contract', type: 'create', project: 'p' });
+    const result = await publishFindings({ ...f, findings: [{ ...finding, file: 'b.mjs' }], runId: 'replacement', clock: () => now });
+    assert.equal(result.result.created.length, 1);
+    assert.equal(f.count(), 4);
+    assert.notEqual(f.issues.at(-1).parentId, f.issues[0].id);
+    assert.equal(await readFile(path.join(f.dir, 'operations', `${initial}-confirmed.json`), 'utf8'), before);
   }
 });
 

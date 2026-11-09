@@ -18,7 +18,8 @@ const candidate = { issueId: issue.id, type: 'correct', exactDelta: { correction
 test('supervised once creates private run evidence under normal umask without invoking review for an empty collection', async () => {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-once-')));
   const bin = path.join(dir, 'bin'); await mkdir(bin);
-  await writeFile(path.join(bin, 'gh'), `#!${process.execPath}\nconsole.log('[]');\n`, { mode: 0o700 });
+  const trace = path.join(dir, 'collection.log');
+  await writeFile(path.join(bin, 'gh'), `#!${process.execPath}\nrequire('node:fs').appendFileSync(${JSON.stringify(trace)}, 'read\\n'); console.log('[]');\n`, { mode: 0o700 });
   const auth = path.join(dir, 'supervision.json');
   const instant = new Date().toISOString();
   const modelBounds = Object.fromEntries(LENSES.map((lens) => [lens.model, { verified: true, source: 'https://example.com/test-only', observedAt: instant, maxContextTokens: 32000, maxOutputTokens: 1000, inputUsdPerMillion: 1, outputUsdPerMillion: 1 }]));
@@ -29,6 +30,16 @@ test('supervised once creates private run evidence under normal umask without in
   const [run] = await readdir(out);
   assert.equal((await stat(path.join(out, run))).mode & 0o777, 0o700);
   assert.equal(JSON.parse(await readFile(path.join(out, run, 'budget.json'), 'utf8')).calls, 0);
+  const collected = await readFile(trace, 'utf8');
+  const valid = JSON.parse(await readFile(auth, 'utf8'));
+  for (const supervisor of ['   ', {}]) {
+    await writeFile(auth, JSON.stringify({ ...valid, supervisor }));
+    const refused = spawnSync(process.execPath, ['nightly-review/bin/nightly-review.mjs', 'once', '--repos', 'gjc-plugin', '--supervision', auth, '--out', out, '--json'], { encoding: 'utf8', timeout: 10000, env: { PATH: `${bin}:${process.env.PATH}` } });
+    assert.notEqual(refused.status, 0);
+    assert.match(refused.stderr, /supervisor/);
+    assert.equal(await readFile(trace, 'utf8'), collected);
+    assert.deepEqual(await readdir(out), [run]);
+  }
 });
 function scope(value = candidate) {
   const action = semanticAction({ snapshot, candidate: value, at: now });
