@@ -24,6 +24,7 @@ import {
   summarizeFiling,
 } from '../lib/filing.mjs';
 import { DEFAULT_LINEAR_CLI, createLinearClient, loadProjectMap } from '../lib/linear.mjs';
+import { prepare, evaluateLocal } from '../lib/prepare.mjs';
 
 const DEFAULT_STATE_DIR = path.join(process.env.HOME ?? '.', '.gjc-plugin', 'nightly-review');
 const DEFAULT_FILED_STATE = 'filed.json';
@@ -31,6 +32,8 @@ const DEFAULT_FILED_STATE = 'filed.json';
 function usage() {
   return `usage: nightly-review <command> [options]
 
+  prepare --mode scheduled|shadow --config PATH --out DIR [--json]
+  evaluate-local --run DIR [--json]
   once   --repos a,b [--since YYYY-MM-DD] [--lenses id,id] [--out DIR]
          [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--deadline-seconds N]
          [--file-findings] [--publish] [--max-issues N] [--json]
@@ -80,6 +83,12 @@ function parseArgs(argv) {
       return value;
     };
     switch (key) {
+      case 'mode':
+      case 'config':
+      case 'supervision':
+      case 'snapshot':
+        options[key] = takeValue();
+        break;
       case 'repos':
         options.repos = takeValue().split(',').map((v) => v.trim()).filter(Boolean);
         break;
@@ -585,6 +594,19 @@ async function main() {
     return 0;
   }
   switch (options.command) {
+    case 'prepare': {
+      const allowed = new Set(['command', 'lenses', 'repos', 'mode', 'config', 'out', 'json']);
+      if (Object.keys(options).some((key) => !allowed.has(key)) || options.repos.length || options.lenses.length || !options.config || !options.out) throw new Error('prepare accepts only --mode --config --out --json');
+      const receipt = await prepare({ configPath: path.resolve(options.config), out: path.resolve(options.out), mode: options.mode });
+      process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+      return receipt.status === 'incomplete' ? 1 : 0;
+    }
+    case 'evaluate-local': {
+      if (!options.run) throw new Error('--run required');
+      const receipt = await evaluateLocal(path.resolve(options.run));
+      process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+      return 0;
+    }
     case 'once':
       return executeOnce(options);
     case 'recheck':
@@ -592,15 +614,7 @@ async function main() {
     case 'file':
       return executeFile(options);
     case 'loop': {
-      const interval = options.interval ?? 86_400;
-      if (interval < 60) throw new Error('--interval must be at least 60 seconds');
-      process.stderr.write(`loop: every ${interval}s; stop with Ctrl-C\n`);
-      for (;;) {
-        await executeOnce(options).catch((error) =>
-          process.stderr.write(`once failed: ${String(error?.message ?? error)}\n`),
-        );
-        await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-      }
+      throw new Error('repeating paid review is forbidden; schedule prepare instead');
     }
     default:
       process.stderr.write(`unknown command: ${options.command}\n\n${usage()}`);

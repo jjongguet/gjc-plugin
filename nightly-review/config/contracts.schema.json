@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/jjongguet/gjc-plugin/nightly-review/contracts",
+  "title": "Nightly review operational contracts",
+  "$defs": {
+    "schedule": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "ownerHost", "timezone", "repos", "hour", "minute"],
+      "properties": {
+        "version": {"const": 1}, "ownerHost": {"type": "string", "minLength": 1},
+        "timezone": {"type": "string", "minLength": 1},
+        "repos": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[A-Za-z0-9_-]+$"}},
+        "hour": {"const": 5}, "minute": {"const": 0}
+      }
+    },
+    "owner": {
+      "type": "object", "additionalProperties": false,
+      "required": ["version", "host", "generation", "enabled"],
+      "properties": {"version": {"const": 1}, "host": {"type": "string"}, "generation": {"type": "integer", "minimum": 1}, "enabled": {"type": "boolean"}}
+    },
+    "ledger": {
+      "type": "object", "required": ["version", "clusters"],
+      "properties": {"version": {"const": 1}, "clusters": {"type": "object", "additionalProperties": {"type": "object", "required": ["issue", "evidence"], "properties": {"issue": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string", "minLength": 1}}}, "evidence": {"type": "array", "items": {"type": "string"}}}}}}
+    },
+    "operation": {
+      "type": "object", "required": ["id", "phase", "at"],
+      "properties": {"id": {"type": "string", "pattern": "^[a-f0-9]{64}$"}, "phase": {"enum": ["planned", "attempted", "confirmed", "unknown", "local_committed"]}, "at": {"type": "string", "format": "date-time"}}
+    },
+    "receipt": {
+      "type": "object", "required": ["version", "command", "startedAt", "finishedAt", "status", "counters"],
+      "properties": {"version": {"const": 1}, "command": {"enum": ["prepare", "evaluate-local", "reconcile"]}, "status": {"enum": ["prepared", "incomplete", "duplicate", "planned", "confirmed", "deferred", "failed"]}, "counters": {"type": "object"}}
+    }
+  },
+  "description": "CLI: prepare --mode scheduled|shadow --config PATH --out PATH [--json]; evaluate-local --run PATH; reconcile --snapshot PATH [--scan] [--publish --supervision PATH]. Exit 0 complete/no-op, 1 incomplete/deferred/unknown, 2 invalid or refused. Scheduled prepare imports no paid or Linear mutation implementation. A manual invocation is not a calendar-tick receipt. Ledger v1 identities are preserved; ownership is a separate generation manifest."
+}
