@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, writeFile, readFile, mkdir, readdir } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile, readFile, mkdir, readdir, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { reviewCandidates } from '../lib/reconcile-cli.mjs';
 import { semanticAction, proposalHash } from '../lib/reconciliation.mjs';
 import { immutableJson, digest } from '../lib/state.mjs';
+import { LENSES } from '../lib/lenses.mjs';
 const now = Date.now(); const DAY = 86400000;
 const old = new Date(now - 3 * DAY).toISOString();
 const issue = { id: 'child', project: 'gjc-plugin', title: '[nightly] test', description: 'original evidence', createdAt: new Date(now - 15 * DAY).toISOString(), updatedAt: old, status: 'Backlog', statusType: 'backlog', labels: ['nightly'], parentId: 'parent', comments: { items: [], complete: true, reason: null } };
@@ -14,6 +15,21 @@ const parent = { ...issue, id: 'parent', title: '[nightly 배치] gjc-plugin', p
 const snapshot = { complete: true, project: 'gjc-plugin', issues: [issue, parent] };
 const authority = { remote: 'https://github.com/jjongguet/gjc-plugin', branch: 'main', head: 'a'.repeat(40), verifiedHead: 'a'.repeat(40), observedAt: new Date(now).toISOString(), notReverted: true, behaviorVerified: true, evidenceDigest: 'b'.repeat(64), behaviorCommand: 'node --test observed.mjs' };
 const candidate = { issueId: issue.id, type: 'correct', exactDelta: { correction: 'Current verified evidence replaces no original text.' }, authority, evidence: 'current receipt', sourceLinks: ['https://github.com/jjongguet/gjc-plugin/pull/45'] };
+test('supervised once creates private run evidence under normal umask without invoking review for an empty collection', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-once-')));
+  const bin = path.join(dir, 'bin'); await mkdir(bin);
+  await writeFile(path.join(bin, 'gh'), `#!${process.execPath}\nconsole.log('[]');\n`, { mode: 0o700 });
+  const auth = path.join(dir, 'supervision.json');
+  const instant = new Date().toISOString();
+  const modelBounds = Object.fromEntries(LENSES.map((lens) => [lens.model, { verified: true, source: 'https://example.com/test-only', observedAt: instant, maxContextTokens: 32000, maxOutputTokens: 1000, inputUsdPerMillion: 1, outputUsdPerMillion: 1 }]));
+  await writeFile(auth, JSON.stringify({ active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 0, reservedUsd: 0 }, modelBounds }));
+  const out = path.join(dir, 'state');
+  const result = spawnSync(process.execPath, ['nightly-review/bin/nightly-review.mjs', 'once', '--repos', 'gjc-plugin', '--supervision', auth, '--out', out, '--json'], { encoding: 'utf8', timeout: 10000, env: { PATH: `${bin}:${process.env.PATH}` } });
+  assert.equal(result.status, 0, result.stderr);
+  const [run] = await readdir(out);
+  assert.equal((await stat(path.join(out, run))).mode & 0o777, 0o700);
+  assert.equal(JSON.parse(await readFile(path.join(out, run, 'budget.json'), 'utf8')).calls, 0);
+});
 function scope(value = candidate) {
   const action = semanticAction({ snapshot, candidate: value, at: now });
   return { active: true, supervisor: 'test-agent', operationalExclusion: true, expiresAt: new Date(now + 600000).toISOString(), budget: { capUsd: 5, spentUsd: 0, reservedUsd: 0, nextUpperUsd: 0.01 }, actions: [{ issueId: action.issueId, type: action.type, project: action.project, proposalHash: proposalHash(action) }] };

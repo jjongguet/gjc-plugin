@@ -26,7 +26,7 @@ import { DEFAULT_LINEAR_CLI, createLinearClient, loadProjectMap } from '../lib/l
 import { prepare, evaluateLocal } from '../lib/prepare.mjs';
 import { publishFindings, filingIncomplete } from '../lib/publish.mjs';
 import { reviewBudget } from '../lib/supervision.mjs';
-import { immutableJson, digest } from '../lib/state.mjs';
+import { immutableJson, digest, privateDirectory } from '../lib/state.mjs';
 
 const DEFAULT_STATE_DIR = path.join(process.env.HOME ?? '.', '.gjc-plugin', 'nightly-review');
 const DEFAULT_FILED_STATE = 'filed.json';
@@ -270,7 +270,7 @@ async function executeOnce(options) {
   const lenses = selectLenses(options.lenses);
   reviewBudget({ supervision, lenses, calls: 0 });
   const runDir = path.join(stateDir, runIdFrom());
-  await mkdir(runDir, { recursive: true });
+  await privateDirectory(runDir);
 
   // Progress always goes to stderr, including under --json: a timer run has no
   // other way to distinguish slow work from a hang. --json controls stdout only.

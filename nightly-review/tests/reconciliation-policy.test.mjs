@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { boundedPages, planReconciliation, protectionReason, currentAuthorityReason, snapshotHash, applyReconciliation, semanticAction, proposalHash } from '../lib/reconciliation.mjs';
@@ -62,10 +62,17 @@ test('historical merge, reverted fix and stale authority never authorize Done', 
   assert.equal(planReconciliation({ snapshot: snapshot(base), candidates: [{ ...candidate, decision: { adopted: false } }], at })[0].reason, 'semantic_abstention');
 });
 
-async function setup({ lostResponse = false, edit = false, lostUpdate = false } = {}) {
+test('the unique batch is never proposed as its own child', () => {
+  const actions = planReconciliation({ snapshot: snapshot(issue({ parentId: null })), at });
+  assert.equal(actions.find((a) => a.issueId === 'JJO-1').delta.parentId, batch.id);
+  assert.equal(actions.some((a) => a.issueId === batch.id), false);
+});
+
+async function setup({ lostResponse = false, edit = false, lostUpdate = false, initialComments = [] } = {}) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-writer-')));
   await immutableJson(path.join(dir, 'owner.json'), { version: 1, host: os.hostname(), generation: 1, enabled: true });
-  const current = issue(); const comments = []; let mutations = 0;
+  const comments = structuredClone(initialComments);
+  const current = issue(initialComments.length ? { parentId: null, comments: { items: structuredClone(comments), complete: true, reason: null } } : {}); let mutations = 0;
   const client = {
     listIssues: async () => ({ issues: [{ id: current.id }, { id: batch.id }], hasNextPage: false }),
     getIssue: async (id) => { const value = structuredClone(id === current.id ? current : batch); delete value.comments; return value; },
@@ -73,7 +80,11 @@ async function setup({ lostResponse = false, edit = false, lostUpdate = false } 
     createComment: async ({ body }) => { mutations++; comments.push({ id: 'comment', body, createdAt: new Date(at).toISOString() }); if (edit) current.description = 'concurrent edit'; if (lostResponse) throw new Error('timeout after server success'); },
     updateIssue: async ({ id, state, ...delta }) => { mutations++; if (state) { current.status = state; current.statusType = 'canceled'; } Object.assign(current, delta); if (lostUpdate) throw new Error('response lost after update'); },
   };
-  const action = planReconciliation({ snapshot: snapshot(current), at })[0];
+  let action = planReconciliation({ snapshot: snapshot(current), at })[0];
+  if (initialComments.length) {
+    action = semanticAction({ snapshot: snapshot(current), at, candidate: { issueId: current.id, type: 'correct', evidence: 'verified correction', sourceLinks: ['https://github.com/jjongguet/r/pull/1'], exactDelta: { correction: 'Append current verified evidence' }, authority: authority() } });
+    action.decision = { adopted: true, proposalHash: proposalHash(action) };
+  }
   const supervision = { active: true, operationalExclusion: true, supervisor: 'active-test-agent', expiresAt: new Date(at + 600000).toISOString(), actions: [{ issueId: 'JJO-1', type: action.type, project: 'p', proposalHash: proposalHash(action) }] };
   return { dir, client, current, comments, action, supervision, count: () => mutations };
 }
@@ -134,4 +145,98 @@ test('semantic decisions bind exact correction and duplicate target, not a locat
   assert.equal(semanticAction({ snapshot: snap, candidate: { ...candidate, type: 'duplicate', duplicateId: batch.id, sameCauseVerified: true }, at }).type, 'deferred');
   const triaged = snapshot(issue({ labels: [], triagedAt: iso(2 * DAY) }));
   assert.equal(planReconciliation({ snapshot: triaged, candidates: [candidate], at })[0].reason, 'active_owner_or_triaged');
+});
+
+test('evidence posting detects edits and deletions of every pre-existing comment', async () => {
+  for (const change of ['edit', 'delete']) {
+    const f = await setup({ initialComments: [{ id: 'human', body: 'original human evidence', createdAt: iso(3 * DAY) }] });
+    assert.equal(f.action.type, 'correct');
+    const post = f.client.createComment;
+    f.client.createComment = async (args) => {
+      await post(args);
+      if (change === 'edit') f.comments[0].body = 'external corrected evidence';
+      else f.comments.splice(0, 1);
+    };
+    const result = await applyReconciliation({ ...f, actions: [f.action], verifyAuthority: async () => true, clock: () => at });
+    assert.equal(result[0].phase, 'unknown');
+    assert.equal(f.count(), 1);
+    assert.equal(f.current.parentId, null);
+    assert.equal(f.comments.some((c) => c.body === 'original human evidence'), false);
+    if (change === 'edit') assert.equal(f.comments[0].body, 'external corrected evidence');
+  }
+});
+
+const rotateOwner = (dir) => writeFile(path.join(dir, 'owner.json'), JSON.stringify({ version: 1, host: os.hostname(), generation: 2, enabled: true }));
+
+test('reconciliation rechecks expiry and original owner after inventory and evidence posting', async () => {
+  for (const boundary of ['scan', 'comment']) {
+    for (const invalidation of ['expiry', 'owner', 'scope']) {
+      const f = await setup(); let time = at;
+      f.supervision.expiresAt = new Date(at + 60000).toISOString();
+      const method = boundary === 'scan' ? 'listIssues' : 'createComment';
+      const original = f.client[method];
+      f.client[method] = async (...args) => {
+        const result = await original(...args);
+        if (invalidation === 'expiry') time = at + 60000;
+        else if (invalidation === 'owner') await rotateOwner(f.dir);
+        else f.supervision.actions = [];
+        return result;
+      };
+      const result = await applyReconciliation({ ...f, actions: [f.action], clock: () => time });
+      assert.equal(result[0].phase, 'unknown');
+      assert.equal(f.count(), boundary === 'scan' ? 0 : 1);
+      assert.equal(f.current.status, 'Backlog');
+    }
+  }
+});
+
+test('authority verification cannot outlive authority freshness, scope, or original owner', async () => {
+  for (const call of [1, 2]) {
+    for (const invalidation of ['authority', 'expiry', 'owner', 'scope']) {
+      const f = await setup(); let time = at; let calls = 0;
+      const candidate = { issueId: f.current.id, type: 'done', evidence: 'current proof', sourceLinks: ['https://github.com/jjongguet/r/pull/1'], remainingWork: false, exactDelta: {}, authority: authority() };
+      const action = semanticAction({ snapshot: snapshot(f.current), candidate, at });
+      assert.equal(action.type, 'done');
+      action.decision = { adopted: true, proposalHash: proposalHash(action) };
+      f.supervision.actions = [{ issueId: action.issueId, type: action.type, project: 'p', proposalHash: proposalHash(action) }];
+      const verifyAuthority = async () => {
+        if (++calls === call) {
+          if (invalidation === 'authority') time = at + 300000;
+          else if (invalidation === 'expiry') time = at + 600000;
+          else if (invalidation === 'owner') await rotateOwner(f.dir);
+          else f.supervision.actions = [];
+        }
+        return true;
+      };
+      const results = await applyReconciliation({ ...f, actions: [action], verifyAuthority, clock: () => time });
+      assert.equal(f.count(), call - 1);
+      assert.equal(f.current.status, 'Backlog');
+      assert.equal(results[0].phase, call === 1 && ['authority', 'expiry'].includes(invalidation) ? 'deferred' : 'unknown');
+    }
+  }
+});
+
+test('duplicate target reread cannot bypass scope expiry or owner rotation before update', async () => {
+  for (const invalidation of ['expiry', 'owner', 'scope']) {
+    const f = await setup(); let time = at; let targetReads = 0;
+    const candidate = { issueId: f.current.id, type: 'duplicate', evidence: 'same verified cause', sourceLinks: ['https://github.com/jjongguet/r/pull/1'], exactDelta: {}, authority: authority(), duplicateId: batch.id, sameCauseVerified: true, rootCauseEvidence: 'shared faulty contract' };
+    const action = semanticAction({ snapshot: snapshot(f.current), candidate, at });
+    assert.equal(action.type, 'duplicate');
+    action.decision = { adopted: true, proposalHash: proposalHash(action) };
+    f.supervision.actions = [{ issueId: action.issueId, type: action.type, project: 'p', proposalHash: proposalHash(action) }];
+    const get = f.client.getIssue;
+    f.client.getIssue = async (id) => {
+      const result = await get(id);
+      if (id === batch.id && ++targetReads === 2) {
+        if (invalidation === 'expiry') time = at + 600000;
+        else if (invalidation === 'owner') await rotateOwner(f.dir);
+        else f.supervision.actions = [];
+      }
+      return result;
+    };
+    const result = await applyReconciliation({ ...f, actions: [action], verifyAuthority: async () => true, clock: () => time });
+    assert.equal(result[0].phase, 'unknown');
+    assert.equal(f.count(), 1);
+    assert.equal(f.current.status, 'Backlog');
+  }
 });

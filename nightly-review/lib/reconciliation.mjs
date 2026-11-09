@@ -121,7 +121,7 @@ export function planReconciliation({ snapshot, candidates = [], at = Date.now(),
       if (action.type === 'deferred') { actions.push(action); continue; }
       if (candidate.decision?.adopted !== true || candidate.decision.choice !== 'consistent' || candidate.decision.confidence < 0.6 || candidate.decision.proposalHash !== proposalHash(action)) actions.push({ ...base(issue), type: 'deferred', reason: 'semantic_abstention' });
       else actions.push({ ...action, decision: candidate.decision });
-    } else if (nightly && backlog && issue.comments.items.length === 0 && !parent && batches.length === 1) {
+    } else if (nightly && backlog && issue.comments.items.length === 0 && !parent && batches.length === 1 && issue.id !== batches[0].id) {
       actions.push({ ...base(issue), type: 'parent', delta: { parentId: batches[0].id }, reason: 'unique_nightly_batch' });
     }
   }
@@ -200,16 +200,20 @@ export async function applyReconciliation({ actions, client, dir, supervision, v
       await journalEvent(dir, { id, phase: 'attempted', issueId: action.issueId });
       try {
         const body = `${action.evidence ?? action.reason}\n${(action.sourceLinks ?? []).join('\n')}\nPolicy: ${POLICY}\n${marker}`;
+        await assertOwner(dir, { generation: owner.generation });
+        validateSupervision(supervision, { at: clock(), issueId: action.issueId, action: action.type, project: action.project, proposalHash: proposalHash(action) });
+        if (action.authority && currentAuthorityReason(action.authority, clock())) throw new Error('authority changed before evidence');
         await client.createComment({ issueId: action.issueId, body });
         const afterComment = await freshIssue(client, action.issueId);
         const newComments = afterComment.comments.items.filter((c) => !current.comments.items.some((before) => before.id === c.id));
         // updatedAt may change because of our comment; all other content must stay.
-        const normalized = { ...afterComment, updatedAt: current.updatedAt, comments: current.comments };
-        if (!afterComment.comments.complete || newComments.length !== 1 || !newComments[0].body?.includes(marker) || snapshotHash(normalized) !== action.expectedHash) throw new Error('concurrent content after evidence comment');
-        validateSupervision(supervision, { at: clock(), issueId: action.issueId, action: action.type, project: action.project, proposalHash: proposalHash(action) });
-        await assertOwner(dir, { generation: owner.generation });
+        const normalized = { ...afterComment, updatedAt: current.updatedAt, comments: { ...afterComment.comments, items: afterComment.comments.items.filter((c) => c.id !== newComments[0]?.id) } };
+        if (!afterComment.comments.complete || newComments.length !== 1 || newComments[0].body !== body || snapshotHash(normalized) !== action.expectedHash) throw new Error('concurrent content after evidence comment');
         if (action.authority && !await verifyAuthority(action.authority)) throw new Error('authority changed before mutation');
         if (action.target && snapshotHash(await freshIssue(client, action.target.issue.id)) !== action.target.expectedHash) throw new Error('duplicate target changed before mutation');
+        await assertOwner(dir, { generation: owner.generation });
+        validateSupervision(supervision, { at: clock(), issueId: action.issueId, action: action.type, project: action.project, proposalHash: proposalHash(action) });
+        if (action.authority && currentAuthorityReason(action.authority, clock())) throw new Error('authority changed before mutation');
         await client.updateIssue({ id: action.issueId, ...action.delta });
         const after = await freshIssue(client, action.issueId);
         if (!after.comments.complete || !matchesDelta(after, action.delta) || after.comments.items.filter((c) => c.body?.includes(marker)).length !== 1 || (action.delta.description === undefined && after.description !== current.description)) throw new Error('readback mismatch');
