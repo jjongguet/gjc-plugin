@@ -1,0 +1,128 @@
+name: Generate reviewed advisor artifacts
+
+# Artifact recovery only; normal CI drift gates remain unchanged.
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Reviewed same-repository source commit (40 lowercase hex characters)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  generate:
+    if: >-
+      github.event_name == 'workflow_dispatch' &&
+      github.repository == 'jjongguet/gjc-plugin' &&
+      github.ref == 'refs/heads/main' &&
+      github.workflow_ref == 'jjongguet/gjc-plugin/.github/workflows/generate-advisor.yml@refs/heads/main' &&
+      github.actor == 'jjongguet' && github.triggering_actor == 'jjongguet'
+    runs-on: arc-ci-arm64
+    timeout-minutes: 10
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+    steps:
+      - name: Validate reviewed source identifier
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          repository: jjongguet/gjc-plugin
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact SHA and canonical branch reachability
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git cat-file -t "$SOURCE_SHA")" = commit
+          test "$(git remote get-url origin)" = https://github.com/jjongguet/gjc-plugin
+          git fetch --prune --no-tags origin '+refs/heads/*:refs/remotes/origin/*'
+          found=false
+          while IFS= read -r branch; do
+            if git merge-base --is-ancestor "$SOURCE_SHA" "$branch"; then
+              found=true
+              break
+            fi
+          done < <(git for-each-ref --format='%(refname)' refs/remotes/origin/)
+          test "$found" = true
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.4.0"
+          no-cache: true
+      - name: Generate advisor surfaces on ARC
+        run: |
+          set -euo pipefail
+          test "$(bun --version)" = 1.4.0
+          bun jev-advisor/scripts/build.mjs
+      - name: Bind allowlisted outputs to reviewed inputs
+        env:
+          BUNDLE_DIR: ${{ runner.temp }}/advisor-generated
+        run: |
+          set -euo pipefail
+          bun run - <<'JS'
+          import { execFileSync } from 'node:child_process';
+          import { createHash } from 'node:crypto';
+          import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+          import path from 'node:path';
+          if (Bun.version !== '1.4.0') throw new Error('Unexpected Bun version');
+          const hash = bytes => createHash('sha256').update(bytes).digest('hex');
+          const regular = async file => {
+            if (!(await lstat(file)).isFile() || await realpath(file) !== path.resolve(file)) throw new Error(`Not a regular non-symlink file: ${file}`);
+            return readFile(file);
+          };
+          const buildInputs = [];
+          for (const file of [
+            'shared/lib/results.ts', 'shared/lib/decision-contract.ts',
+            'jev-advisor/lib/decision.ts', 'jev-advisor/lib/alignment.ts', 'jev-advisor/lib/alignment-journal.ts',
+            'jev-advisor/src/hook.adapter.ts', 'jev-advisor/src/tool.adapter.ts', 'jev-advisor/src/check.adapter.ts',
+            'jev-advisor/src/result.adapter.ts', 'jev-advisor/src/metrics.adapter.ts', 'jev-advisor/src/alignment.adapter.ts',
+            'jev-advisor/src/alignment-observe.adapter.ts', 'jev-advisor/src/alignment-shutdown.adapter.ts',
+            'jev-advisor/scripts/build.mjs',
+          ]) {
+            const sha256 = hash(execFileSync('git', ['show', `${process.env.SOURCE_SHA}:${file}`]));
+            if (hash(await regular(file)) !== sha256) throw new Error(`Input changed: ${file}`);
+            buildInputs.push({ path: file, sha256 });
+          }
+          const bundle = process.env.BUNDLE_DIR;
+          await mkdir(bundle);
+          const outputs = [];
+          for (const file of [
+            'jev-advisor/hooks/jev-advisor.ts', 'jev-advisor/tools/jev-advise.ts', 'jev-advisor/tools/jev-check.ts',
+            'jev-advisor/hooks/jev-advisor-result.ts', 'jev-advisor/tools/plugin-metrics.ts',
+            'jev-advisor/hooks/jev-advisor-alignment.ts', 'jev-advisor/hooks/jev-advisor-alignment-observe.ts',
+            'jev-advisor/hooks/jev-advisor-alignment-shutdown.ts',
+          ]) {
+            const bytes = await regular(file);
+            if (!bytes.toString('utf8').startsWith('// GENERATED FILE — do not edit by hand.\n')) throw new Error(`Invalid generated header: ${file}`);
+            const target = path.join(bundle, file);
+            await mkdir(path.dirname(target), { recursive: true });
+            await writeFile(target, bytes);
+            outputs.push({ path: file, sha256: hash(bytes) });
+          }
+          await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({
+            schemaVersion: 1, repository: 'jjongguet/gjc-plugin', sourceSha: process.env.SOURCE_SHA,
+            builder: 'jev-advisor/scripts/build.mjs', bunVersion: Bun.version, buildInputs, outputs,
+          }, null, 2) + '\n');
+          JS
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        env:
+          BUNDLE_DIR: ${{ runner.temp }}/advisor-generated
+        with:
+          name: advisor-generated-${{ inputs.source_sha }}
+          if-no-files-found: error
+          retention-days: 3
+          path: |
+            ${{ env.BUNDLE_DIR }}/manifest.json
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/tools/jev-advise.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/tools/jev-check.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-result.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/tools/plugin-metrics.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-observe.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-shutdown.ts
