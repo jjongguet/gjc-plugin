@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "ownerHost": "jjong-macminiui-Macmini.local",
+  "timezone": "Asia/Seoul",
+  "hour": 5,
+  "minute": 0,
+  "repos": ["infra", "yyaz-studio", "lookbook", "shortform_studio_shorts", "yyaz-web", "gjc-plugin", "whoos", "dev-utility", "civitaired", "content-lanes", "shared", "personal-wiki"]
+}

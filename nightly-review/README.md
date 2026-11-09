@@ -1,195 +1,216 @@
-# nightly-review — post-merge review with independent lenses and a deterministic gate
+# nightly-review
 
-Reviews the pull requests merged in the last day with several independent reviewer
-calls, then keeps only the findings whose quoted code actually exists in the merged
-diff. Models propose; a deterministic gate decides.
+Post-merge review with five independent lenses and a deterministic quote gate.
+Models propose findings; a matching diff quote is evidence, **not proof of a bug**.
 
-The reason the gate exists: a finding a model cannot quote is a guess, and a guess
-that becomes a ticket costs more attention than it saves. Survivors land in a run
-directory as a report plus a receipt; the `file` step then opens one Linear issue per
-`repo::file::kind` so the work starts from the evidence instead of from a summary,
-and reuses that issue when the same file produces new evidence.
+## Execution boundary
 
-## Pipeline
+The daily **05:00** job performs zero-cost preparation only. It collects merged PRs
+with read-only `gh` commands, writes an immutable queue and receipt, and stops.
+It does not invoke GJC, models, decisions, Linear, browser automation, or dispatch
+another agent. Complete unattended paid review is not supported or authorized.
 
-| Stage | What it does | Model calls |
-| --- | --- | --- |
-| collect | `gh pr list --state merged --search "merged:>=DATE"`, `gh pr diff`, and the repository's own `AGENTS.md` at the reviewed commit (`input/<repo>/pr-<n>.json`) | none |
-| lenses | one headless GJC process per (PR × lens), no tools, no MCP, no rules, scratch cwd | one per cell |
-| gate | quote/path/line verification, near-duplicate collapse, per-run cap | none |
-| report | `report.md` plus `receipt.json` in the run directory | none |
-| file | one Linear issue per (repo, file, kind), reused instead of duplicated; plan only without `--publish` | none |
+Paid `once`, typed semantic decisions and Linear writes are separate, supervised
+one-shots. A deadline is a workload limit, not a monetary budget. Repeating paid
+`loop` is refused. An active supervisor must establish task-wide accumulated,
+reserved and next-execution worst-case costs before a call. Unknown billing is
+not zero; never issue a new authorization that forgets earlier attempts.
 
-A nightly job is unattended and paid, so the paid phase carries a hard ceiling:
-`--deadline-seconds` (default 3600) stops *starting* new lens calls once it is
-reached. Calls already in flight are finishable (they are already paid for), and the
-receipt records `deadline.reached`, `skippedCalls` and `plannedCalls` so a truncated
-sweep is visible rather than looking like a quiet night. The deadline starts after
-collection, which makes no model calls. Progress is written to stderr even under
-`--json` (`--json` controls stdout only), because a timer run has no other way to
-distinguish slow work from a hang.
+## Commands and contracts
 
-Each lens call runs in its own process with its own temporary working directory, so
-no reviewer sees another reviewer's conclusion and no project context is injected —
-the diff and the repository's rules are the only evidence. Concurrency is capped so
-the provider is not rate-limited into empty results that would look like "nothing
-found".
-
-## Repository rules
-
-Every repository in this workspace carries its review conventions in `AGENTS.md`, and
-the repository's own Codex reviewer reads them. This tool does the same: `collect`
-fetches `AGENTS.md` at the reviewed commit — the root file first, then the
-`AGENTS.md` nearest each changed file — and every lens prompt receives them under
-`REPOSITORY RULES` with two constraints: a change that violates a written rule is a
-finding, and a rule that is not written does not exist, so a reviewer may not invent
-repository conventions. The shared budget is 12000 bytes across all rule documents;
-each document records whether it was truncated, and `--no-rules` can be added per run
-to compare with and without.
-
-## Entry points
+Run with the installed absolute Node executable. CLI, JSON and exit contracts are
+in `config/contracts.schema.json`.
 
 ```sh
-nightly-review/bin/nightly-review.mjs once --repos infra,yyaz-web --since 2026-11-02
-nightly-review/bin/nightly-review.mjs once --repos infra --lenses contract,failure --json
-nightly-review/bin/nightly-review.mjs recheck --run <run-dir>     # re-gate, no model calls
-nightly-review/bin/nightly-review.mjs file --run <run-dir>        # plan only; add --publish to write
-nightly-review/bin/nightly-review.mjs loop --repos infra --interval 86400
+node nightly-review/bin/nightly-review.mjs prepare --mode shadow \
+  --config /absolute/schedule.json --out /absolute/shadow --json
+node nightly-review/bin/nightly-review.mjs prepare --mode scheduled \
+  --config /absolute/schedule.json --out /absolute/state --json
+node nightly-review/bin/nightly-review.mjs evaluate-local --run /absolute/prepared/run
+node nightly-review/bin/nightly-review.mjs once --repos infra,yyaz-web \
+  --supervision /absolute/supervision.json --out /absolute/state --json
+node nightly-review/bin/nightly-review.mjs recheck --run /absolute/review/run
+node nightly-review/bin/nightly-review.mjs file --run /absolute/review/run
+node nightly-review/bin/nightly-review.mjs file --run /absolute/review/run \
+  --publish --supervision /absolute/supervision.json --out /absolute/state
+node nightly-review/bin/nightly-review.mjs reconcile --snapshot /absolute/input.json
+node nightly-review/bin/nightly-review.mjs reconcile --snapshot /absolute/input.json \
+  --scan --out /absolute/state
+node nightly-review/bin/nightly-review.mjs reconcile --snapshot /absolute/input.json \
+  --scan --publish --supervision /absolute/supervision.json --out /absolute/state
 ```
 
-Flags: `--repos` (required for `once`), `--since` (default yesterday), `--lenses`,
-`--out` (default `~/.gjc-plugin/nightly-review`), `--max-diff-bytes` (default
-40000), `--concurrency` (default 4), `--soft-bytes` (default 100663296),
-`--max-findings` (default 40), `--deadline-seconds` (default 3600), `--no-rules`,
-`--file-findings` (with `once`), `--publish`, `--max-issues` (default 8),
-`--linear-cli` (default `~/.gjc/agent/policy/bin/linear-trace.py`), `--json`.
+Exit `0`: completed or duplicate no-op; `1`: incomplete collection, deferred or
+unknown actions, failed model calls/writes; `2`: invalid arguments or refusal.
+`file` without `--publish` and offline `reconcile` need no credential/network.
+`recheck` and `file` append derivative revisions; original receipt/report bytes
+are not rewritten.
 
-Exit codes: `0` ok, `1` some Linear writes failed, `2` invalid arguments.
+Schedule config is an exact object with `version:1`, `ownerHost` (exact
+`os.hostname()`), `timezone` (exact current Intl zone), `hour:5`, `minute:0`, and
+unique **bare** repository names already mapped in `config/projects.json`.
+Neither the scheduler nor prepare changes the host timezone. A scheduled owner
+also needs a private `owner.json` in the selected state directory:
 
-`loop` runs only inside the terminal you started. There is no launchd or cron
-installation in this repository: a timer is a separate decision with its own budget
-ceiling, and this tool does not make it.
+```json
+{"version":1,"host":"verified-host.local","generation":1,"enabled":true}
+```
 
-## Lenses
+A shadow run needs no writer owner. It uses an isolated output directory and
+never promotes itself. Successful collection advances a watermark with one-day
+overlap; incomplete coverage never advances the last-success marker. A day/config
+key prevents duplicate successful ticks. A full 100-PR list is conservatively
+incomplete; it is not represented as an empty/complete review.
 
-| id | model family | looks for |
-| --- | --- | --- |
-| `contract` | deepseek | renamed or removed symbols still referenced, signature drift, OpenAPI or schema mismatch, migration columns vs readers |
-| `failure` | deepseek | unhandled errors, empty/null/zero/single-element cases, bounds, partial writes, unbounded retries, error paths that report success |
-| `security` | glm | untrusted input reaching a shell/query/path/template, missing authorization or RLS on a new path, secrets in logs, permissive defaults |
-| `testgap` | deepseek | behavior changes with no test, assertions that assert nothing, mocks that replace the thing under test, skipped assertions |
-| `regression` | glm | untouched files that depend on what changed, generated or vendored files out of sync, docs and manifests describing the old shape |
+## Supervision and cost
 
-Two model families are mixed on purpose. Reviewers of the same model share blind
-spots, which is exactly what an ensemble is supposed to break. A lens changes what
-is asked, not just the sampling — a second identical prompt only buys correlated
-noise.
+Authorization is a private, short-lived JSON file issued by the **active** agent,
+not a credential and not an unattended timer input. It contains `active:true`, a
+nonempty `supervisor`, `expiresAt` (at most one hour ahead),
+`operationalExclusion:true`, and exact `actions` entries:
 
-## Gate
+```json
+{"issueId":"repo::file::kind","type":"create","project":"mapped project"}
+```
 
-A finding survives only when all of these hold:
+Commenting uses `type:comment`; creating the unique parent requires its own entry
+`{issueId:"batch:<project>",type:"create-batch",project:"<project>"}`.
+Reconciliation entries use actual issue IDs and `expire`, `done`, `invalid`,
+`correct`, `move`, `duplicate`, or `parent`. Permission for one does not approve
+another. Never use a working or protected issue as a test fixture.
 
-1. `file` appears in the diff as an added file (`+++ b/...`, `/dev/null` excluded).
-2. `quote` appears in that file's added lines after whitespace normalization.
-3. `quote` is specific enough: at least 12 characters after normalization and at
-   least 6 alphanumeric characters, so `return` and `}` cannot pass.
-4. `line` is corrected to the added line that actually contains `quote`. A wrong
-   citation is not grounds to discard a real quote, but a wrong line in a ticket
-   sends the reader to the wrong place, so the corrected line and
-   `lineCorrected: true` are what the report and receipt carry.
-5. No earlier finding shares the same `file` and `kind` with a containing or
-   equal quote — nearer duplicates collapse across lenses.
+`budget` is `{capUsd,spentUsd,reservedUsd,nextUpperUsd}` (finite nonnegative,
+`capUsd <= 5`). Decisions reserve both possible requests using a conservative
+UTF-8-byte token bound plus framing. `once` additionally requires `modelBounds`
+keyed by each exact lens model ID. Each verified provider bound contains
+`verified:true`, current `source` HTTPS URL and `observedAt` (within one hour),
+`maxContextTokens`, `maxOutputTokens`, `inputUsdPerMillion`,
+`outputUsdPerMillion`. The supervisor must actually verify these provider bounds;
+a self-written `verified` flag is not evidence. The runtime reserves the full
+worst-case context/output cost, including one possible stream-size retry, for the
+whole planned workload before the first model call. No verified upper bound means
+no paid review. Progress/deadline flags cannot bypass this check.
 
-Then findings are sorted by confidence and capped at `--max-findings` (default 40,
-`DEFAULT_MAX_FINDINGS` in `lib/gate.mjs`). The cap is a reviewer's reading budget, not
-a cost control: a measured sweep verified 108 findings, so a ceiling of 15 discarded
-93 of them. Every drop is
-counted by reason in the receipt, so the ratio of produced to surviving findings is
-visible per run and per lens.
+Decisions are pinned to `sionic-ai/jev-omni` on OpenGateway, with at most one
+`typesafe/jev-1.14` escalation on OpenRouter. Keys are separately routed through
+`OPENGATEWAY_API_KEY` and `OPENROUTER_DECISION_API_KEY`; never copy them in transfer
+manifests. Three object criteria (`consistent`, `inconsistent`, `abstain`), finite
+probabilities, correct top-choice margin and confidence at least 0.6 are required.
+Malformed/low-confidence/expired decisions abstain. Only deterministic-eligible
+candidates reach the model. Input issue text cannot grant permission.
 
-## Receipt
+## Evidence and policy
 
-`receipt.json` in the run directory:
+The original five lenses remain: contract, failure, security, testgap, regression.
+Each runs headless with no tools/MCP/rules/session in a scratch directory, with the
+reviewed repository rules included in its prompt. The gate verifies added file,
+normalized exact quote, specific quote length, corrected added-line number,
+near-duplicate quotes and a visible per-run cap. Reviewer confidence orders the
+queue, not defect truth. Default findings40, concurrency4, diff40000 bytes and
+paid-phase deadline3600 seconds remain configurable for supervised review.
 
-- `prs[]` — repo, number, title, url, mergedAt, additions, deletions, `truncated`,
-  `rules[]` (path, bytes, truncated)
-- `calls[]` — repo, pr, lens, model, `ok`, `error`, `latencyMs`, `streamBytes`,
-  `streamTrimmed`, `findings`, `usage`, `cost`
-- `usage` — summed `inputTokens`, `outputTokens`, `cachedInputTokens`
-- `deadline` — `seconds`, `reached`, `skippedCalls`, `plannedCalls`
-- `gate` — `submitted`, `kept`, `dropped`, `byReason`
-- `dropped[]` — reason, `prKey`, file, lens, quote prefix, so a run cap is
-  attributable to the pull request it cut rather than to the whole night
-- `findings[]` — survivors as quoted above
-- `linear` — what the file step did: `filed`, `published`, `commented`,
-  `skipped[]` (key + reason, including `over_issue_cap`, `issue_completed`,
-  `no_project`) and `issues[]` with the created identifiers. Without
-  `--file-findings` it stays `filed: 0` with the note that filing is a separate step.
-- `recheckedAt` — set by `recheck`, which re-gates stored raw results offline
+Preparation writes `queue.json` and `receipt.json` with coverage, hashes, host,
+owner generation, zero-call counters and explicit deferred review. `evaluate-local`
+checks the queue digest without generating findings. Collection records PR merge
+SHA where available; a missing merge SHA is unknown, not replaced with a claim
+about current integration code.
 
-## Operational notes
+Reconciliation input is `{project,snapshot,candidates}`. The bounded scan includes
+ledger-external issues and comments: pages100, project1000 issues, comments50/page
+and100/issue, ten-minute project deadline; filing caps run inventory at5000 and
+issue clusters at20. Incomplete inventory forbids project writes. Missing comment
+coverage, future/unknown timestamps, assigned/live/triaged owners and edits within
+or exactly24h are protected. Exact file:line is not proof of the same root cause.
+Terminal issues are not automatically reopened.
 
-`gjc -p --mode json` is a snapshot stream, not a delta stream: every token update
-re-sends the accumulated message, so one 18 KB prompt produced a 176 MB stream in
-the first real run. Buffering that with `execFile` fails on `maxBuffer`, so
-`lib/runner.mjs` reads the child's stdout incrementally and parses only the
-`message_end` and `agent_end` lines it needs. Past `--soft-bytes` with the answer
-already captured, the child is killed and the receipt records
-`streamTrimmed: true` with no usage for that call, because the usage event had not
-arrived yet.
+A semantic lifecycle candidate includes current `authority` (`remote`, `branch`,
+`head`, `observedAt`, `verifiedHead`, `notReverted`, `behaviorVerified`,
+`evidenceDigest`, `behaviorCommand`, `behaviorReceipt`, `file`, `quote`). Publish
+rechecks the actual remote branch SHA, current code quote, and the digest of a
+behavior receipt bound to that HEAD/command/time/exit0. Historical merges or a
+reverted/stale fix cannot authorize Done. Offline/imported model decisions are
+discarded. The supervisor remains responsible for evidence adequacy and live
+owner exclusion; a hash detects change but does not prove truth.
 
-Because the stream grows with the square of the answer length, the diff cap matters
-more than the prompt budget: `--max-diff-bytes` defaults to 40000, and a PR above it
-is reviewed on its first 40000 bytes with `truncated: true` in the receipt. A call
-that still exceeds `--max-bytes` is retried once in `--mode text`, which prints the
-answer only; that attempt keeps the findings and records `retriedForSize: true` with
-no usage. A large diff therefore costs coverage, never a silent empty review.
+Only nightly Backlog, untriaged, uncommented children of the unique project batch
+may expire **strictly after14days**. Exactly14days, unknown dates, active/triaged
+work or incomplete comments remain untouched. Expiry records
+`정책 만료: 14일 초과 미트리아지; 결함 수정/오탐 판정 아님` and Canceled, never Done or
+fixed/invalid. Corrections append to the original description. Deletion/archive
+are never implemented.
 
-A call whose assistant message is not a JSON object with a `findings` array is
-recorded as failed with its stderr tail, never as "no findings". A run that fails
-every call reports failed calls, not a clean sheet.
+## State, retries and conflicts
 
-## Filing
+Legacy `filed.json` version1 cluster IDs/evidence hashes remain intact; ownership
+is a separate generation manifest. An exclusive local lock, expected-byte-hash
+check, fsync/rename state commit and immutable write-ahead operation journal guard
+one writer. Local CAS is not remote CAS or cross-host fencing.
 
-The report is evidence, not a ticket. `file` turns the gated survivors of one run
-into work that can actually be picked up:
+The supervisor establishes operational exclusion, refreshes issue/comments and
+current code just before each exact change, preserves concurrent content, then
+reads back the result. Native remote CAS is not required for this scoped path.
+It does not claim atomic pre-reads or exactly-once remote execution. Unknown
+success/timeout/crash is quarantined, not blindly retried. Reconciliation can
+adopt a uniquely marked, exactly matching remote result; filing stops while an
+unresolved operation remains. A partially successful comment/status operation is
+preserved for inspection, not flooded with repeated comments.
 
-- **One issue per `repo::file::kind`.** A fix lands on a file, so a second finding in
-the same file becomes more evidence on the open ticket instead of a second ticket.
-- **Reuse before create.** `filed.json` in the state directory (`--out`, default
-  `~/.gjc-plugin/nightly-review`) maps each cluster to its issue and the evidence
-  hashes already filed. A re-run is a no-op; new evidence on an open issue is
-  appended as a comment; a completed or canceled issue is left alone and reported.
-- **Nothing is invented.** A repository with no line in `config/projects.json` is
-  skipped as `no_project` — the tool never creates a Linear project. Priority comes
-  from the finding's confidence (≥0.85 High, ≥0.7 Medium, else Low).
-- **The cap is visible.** `--max-issues` (default 8) bounds one night's queue and
-  each cluster past it is reported as `over_issue_cap`.
-- **Plan by default.** Without `--publish` nothing is sent: the dry run prints
-  create/comment/skip per cluster and needs neither the credential nor the network.
+On Linear429, stop API calls and use the policy `linear-aside.py`/Aside path in the
+same supervised session, under the same exact-action and protection constraints.
+The CLI reports the required handoff; the active agent executes and verifies it.
+Scheduled prepare never invokes that mutation fallback.
 
-Writes go through `linear-trace.py call save_issue|save_comment --publish`, so the
-allowlist and the 429 → Aside rule stay in the policy layer. A failed write leaves
-that cluster unfiled and the run exits `1`, rather than reporting a clean sweep.
+## Scheduler, cutover and rollback
 
-## What this does not do
+```sh
+node nightly-review/bin/nightly-scheduler.mjs preview --config /absolute/schedule.json
+node nightly-review/bin/nightly-scheduler.mjs install --config /absolute/schedule.json \
+  --out /absolute/state --publish --json
+node nightly-review/bin/nightly-scheduler.mjs status --json
+node nightly-review/bin/nightly-scheduler.mjs uninstall --json
+```
 
-- No automatic fixes, no pull requests, no status changes on the issues it files.
-- No Linear project creation and no re-labeling of existing issues.
-- No claim that a filed finding is a real defect: the issue asks for that judgment.
-- No repository mutation and no repair attempt: findings are evidence for a later
-  decision, not an action.
-- No timer, no launchd/cron installation, no background service.
-- No claim that a review with these lenses finds every defect, or that a kept
-  finding is correct. The gate proves the code was quoted from the merged diff; it
-  does not prove the reviewer's reasoning about it.
+The Git template installs only in the existing user `gui/<uid>` domain, using
+absolute canonical Node/entry/config/HOME/log paths. No sudo, daemon, KeepAlive,
+RunAtLoad, paid loop, login workaround or GJC auto-session. A receipt binds installed
+plist/config/entry/node hashes; status also queries actual launchd state. Modified
+or unowned plists cannot be overwritten/removed. Uninstall bootouts only the owned
+verified job and retains its disabled installation receipt.
 
-## Tests
+1. Validate an isolated mini shadow CLI normal and failure run; leave source
+   schedule/state unchanged during shadow.
+2. Back up source plist/ledger and hashes; disable the old schedule and verify
+   in-flight processes have naturally completed. Do not kill paid calls blindly.
+3. With both schedules off, stage only allowlisted ledger/operation files using
+   `stageTransfer`; preserve full SHA256, bytes, IDs/evidence and private modes.
+   Destination conflicts, symlink escapes and unresolved operations stop promotion.
+   Do not copy HOME, credentials or session databases.
+4. Verify final source/destination bytes, issue IDs/counts and generation, then
+   enable only the mini zero-cost owner. Preserve the old plist disabled.
+5. Verify actual argv, receipt/config/source hashes and source-off/in-flight0.
+   Manual kickstart is **not** proof of the next real05:00 calendar tick. Correlate
+   `startedAt`/local time with launchd observation at the real tick; no exact wake,
+   power-off execution or post-reboot-login guarantee is made.
+
+Rollback stops the mini first, resolves unknown remote outcomes and preserves its
+latest confirmed ledger/journal. Both off is safer than ambiguous dual ownership.
+Never restore a stale ledger over newer IDs, delete remote issues, blindly reverse
+human edits, or automatically reactivate the old paid MacBook job. Restore only a
+policy-compliant zero-cost owner after verifying quiescence and a new generation.
+
+## Verification
 
 ```sh
 node --test nightly-review/tests/*.test.mjs
 ```
 
-The suite covers diff indexing, every gate rejection reason, duplicate collapse, the
-cap, the stream filter (including a line split across chunks and an oversized
-partial line), and the refusal to read prose as an empty result.
+Tests use temporary state and injected transports. They cover protected24h and
+expiry14day boundaries, current-vs-historical authority, incomplete pagination,
+unknown responses, conflicts, immutable sources, lock/generation/hash/symlink
+failures, scheduler ownership and typed wire/budget gates. Golden cases are fixed
+references, not a claim of measured model quality. Any prompt change requires
+supervised repeated baseline/new raw-model and final-policy evaluation; report
+costs, failures and abstentions separately. Tests/CI are partial evidence: complete
+host acceptance also requires installed CLI, actual launchd environment,
+read-after-write Linear verification, cutover/rollback observations and a separately
+identified real calendar tick.

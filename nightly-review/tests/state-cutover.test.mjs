@@ -82,5 +82,5 @@ test('partial collection is incomplete, missing owner and disallowed flags fail 
   const receipt = await prepare({ configPath, out: dir, mode: 'shadow', collect: async () => { throw new Error('network'); } });
   assert.equal(receipt.status, 'incomplete'); assert.equal(receipt.costUsd, 0);
   const result = spawnSync(process.execPath, ['nightly-review/bin/nightly-review.mjs', 'prepare', '--mode', 'scheduled', '--config', configPath, '--out', dir, '--publish'], { encoding: 'utf8', env: { PATH: process.env.PATH, TZ: process.env.TZ ?? 'Asia/Seoul' } });
-  assert.equal(result.status, 2); assert.match(result.stderr, /accepts only/);
+  assert.equal(result.status, 2); assert.match(result.stderr, /does not accept/);
 });

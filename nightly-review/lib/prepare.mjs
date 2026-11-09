@@ -1,9 +1,8 @@
 // Deliberately imports neither runner, decisions nor the Linear adapter.
-import { readFile, readdir, mkdir } from 'node:fs/promises';
+import { readFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { collectRepo } from './collect.mjs';
-import { loadProjectMap } from './linear.mjs';
 import { assertOwner, withLock, immutableJson, atomicWrite, readOptional, digest, jsonBytes } from './state.mjs';
 
 export function validateSchedule(config, projectMap) {
@@ -21,7 +20,8 @@ function localDay(date, timezone) {
 export async function prepare({ configPath, out, mode, collect = collectRepo, clock = () => new Date(), host = os.hostname(), projectMap }) {
   if (!['scheduled', 'shadow'].includes(mode)) throw new Error('prepare mode must be scheduled or shadow');
   const rawConfig = await readFile(configPath, 'utf8');
-  const config = validateSchedule(JSON.parse(rawConfig), projectMap ?? await loadProjectMap());
+  const mapping = projectMap ?? JSON.parse(await readFile(new URL('../config/projects.json', import.meta.url), 'utf8')).repos;
+  const config = validateSchedule(JSON.parse(rawConfig), mapping);
   if (config.ownerHost !== host || Intl.DateTimeFormat().resolvedOptions().timeZone !== config.timezone) throw new Error('schedule host/timezone mismatch');
   return withLock(out, async () => {
     const owner = mode === 'scheduled' ? await assertOwner(out, { host }) : null;

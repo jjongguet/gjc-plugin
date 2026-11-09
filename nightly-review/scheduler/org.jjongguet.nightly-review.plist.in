@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>org.jjongguet.nightly-review</string>
+  <key>ProgramArguments</key>
+  <array>
+{{ARGV}}
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>5</integer><key>Minute</key><integer>0</integer></dict>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key><string>{{HOME}}</string>
+    <key>PATH</key><string>{{PATH}}</string>
+  </dict>
+  <key>StandardOutPath</key><string>{{STDOUT}}</string>
+  <key>StandardErrorPath</key><string>{{STDERR}}</string>
+</dict>
+</plist>
