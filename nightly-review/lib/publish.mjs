@@ -1,12 +1,14 @@
 // Filing uses complete project inventory rather than treating the local ledger as
 // proof of remote absence. Operations with an unknown result are never retried.
 import path from 'node:path';
+import { readdir } from 'node:fs/promises';
 import { clusterFindings, planFiling, evidenceHash, issueTitle, renderIssueBody, renderEvidenceComment, priorityFor } from './filing.mjs';
 import { scanProject, protectionReason, snapshotHash, validateSupervision, boundedPages } from './reconciliation.mjs';
 import { withLock, assertOwner, readOptional, validateLedger, atomicWrite, jsonBytes, digest, journalEvent, operationState, unresolvedOperations } from './state.mjs';
 
 const markerFor = (key) => `<!-- nightly-review:${key} -->`;
 const isTerminal = (i) => ['completed', 'canceled'].includes(i.statusType);
+export const filingIncomplete = (result) => result.errors.length > 0 || result.skipped.some((s) => !['up_to_date', 'adopted_confirmed_operation'].includes(s.reason));
 
 async function createBatch({ client, project, snapshot, dir, owner, supervision, clock, nightly }) {
   const issueId = `batch:${project}`;
@@ -26,7 +28,7 @@ async function createBatch({ client, project, snapshot, dir, owner, supervision,
     const description = `Untriaged nightly findings. Findings are evidence, not verified defects.\n${marker}`;
     const created = await client.createIssue({ title: `[nightly 배치] ${project}`, description, project, priority: 4, labels: [nightly.id] });
     const after = await client.getIssue(created.id);
-    if (after.description !== description || !/^\[nightly 배치\]/.test(after.title ?? '')) throw new Error('batch readback mismatch');
+    if (after.description !== description || !/^\[nightly 배치\]/.test(after.title ?? '') || ![after.projectId, after.project, after.project?.name].includes(project) || !(after.labels ?? []).some((l) => (l.name ?? l) === 'nightly')) throw new Error('batch readback mismatch');
     await journalEvent(dir, { id, phase: 'confirmed', issueId: after.id });
     return after;
   } catch (error) {
@@ -46,6 +48,25 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
     const next = structuredClone(state);
     let expectedHash = original === null ? null : digest(original);
     const result = { created: [], commented: [], skipped: [], errors: [] };
+    let journals;
+    try { journals = await readdir(path.join(dir, 'operations')); } catch (error) { if (error.code !== 'ENOENT') throw error; journals = []; }
+    const operationIds = new Set();
+    for (const name of journals) {
+      const match = /^([a-f0-9]{64})-(planned|attempted|confirmed|unknown|local_committed)\.json$/.exec(name);
+      if (!match) throw new Error('invalid operation journal filename');
+      operationIds.add(match[1]);
+    }
+    for (const id of operationIds) {
+      const operation = await operationState(dir, id);
+      const entry = operation.confirmed?.entry;
+      const key = operation.planned?.key;
+      if (!entry || !key || operation.local_committed) continue;
+      const prior = next.clusters[key];
+      if (prior && prior.issue.id !== entry.issue.id) throw new Error('confirmed ledger identity conflict');
+      next.clusters[key] = { ...entry, evidence: [...new Set([...(prior?.evidence ?? []), ...entry.evidence])] };
+      await atomicWrite(statePath, jsonBytes(next), { expectedHash }); expectedHash = digest(jsonBytes(next));
+      await journalEvent(dir, { id, phase: 'local_committed', recovered: true });
+    }
     const snapshots = new Map(); let total = 0;
     const labels = await client.listLabels();
     const list = Array.isArray(labels) ? labels : labels.labels;
@@ -103,7 +124,7 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       if (existing) {
         const latest = currentSnapshot.issues.find((i) => i.id === existing.id);
         if (!latest || snapshotHash(latest) !== snapshotHash(existing) || protectionReason(latest, clock())) { result.skipped.push({ key: cluster.key, reason: 'concurrent_or_protected' }); continue; }
-      } else if (!currentSnapshot.issues.some((i) => i.id === parent.id && !isTerminal(i) && (i.projectId ?? i.project) === (parent.projectId ?? parent.project))) {
+      } else if (currentSnapshot.issues.filter((i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isTerminal(i) && !i.archivedAt).length !== 1 || !currentSnapshot.issues.some((i) => i.id === parent.id && !isTerminal(i) && (i.projectId ?? i.project) === (parent.projectId ?? parent.project))) {
         result.skipped.push({ key: cluster.key, reason: 'batch_changed' }); continue;
       }
       validateSupervision(supervision, { at: clock(), issueId: cluster.key, action: type, project });

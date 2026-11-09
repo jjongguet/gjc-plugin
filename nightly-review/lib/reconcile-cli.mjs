@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createLinearClient, loadProjectMap } from './linear.mjs';
-import { scanProject, planReconciliation, applyReconciliation, protectionReason, currentAuthorityReason } from './reconciliation.mjs';
+import { scanProject, planReconciliation, applyReconciliation, currentAuthorityReason, semanticAction, proposalHash, validateSupervision } from './reconciliation.mjs';
 import { decideCandidate } from './decisions.mjs';
 import { immutableJson, digest } from './state.mjs';
 const exec = promisify(execFile);
@@ -23,14 +23,27 @@ async function verifyAuthority(authority) {
   return receipt.head === authority.head && receipt.exitCode === 0 && receipt.command === authority.behaviorCommand && receipt.observedAt === authority.observedAt;
 }
 
+export async function reviewCandidates({ snapshot, candidates, supervision, allowedProjects, verify = verifyAuthority, decide = decideCandidate, clock = Date.now }) {
+  for (const candidate of candidates) {
+    delete candidate.decision;
+    const action = semanticAction({ snapshot, candidate, allowedProjects, at: clock() });
+    if (action.type === 'deferred') { candidate.decision = { adopted: false, choice: 'abstain', confidence: 0, reason: action.reason }; continue; }
+    const hash = proposalHash(action);
+    validateSupervision(supervision, { at: clock(), issueId: action.issueId, action: action.type, project: action.project, proposalHash: hash });
+    if (!await verify(action.authority)) { candidate.decision = { adopted: false, choice: 'abstain', confidence: 0, reason: 'current_authority_unverified' }; continue; }
+    const decision = await decide({ candidate: { eligible: true, mode: 'supervised', action: action.type, evidence: { proposal: action, remainingWork: candidate.remainingWork, sameCauseVerified: candidate.sameCauseVerified } }, supervision, budget: supervision.budget });
+    if (supervision.budget) supervision.budget.spentUsd += decision.costUpperUsd;
+    validateSupervision(supervision, { at: clock(), issueId: action.issueId, action: action.type, project: action.project, proposalHash: hash });
+    candidate.decision = { ...decision, proposalHash: hash };
+  }
+  return candidates;
+}
+
 export async function executeReconcile(options) {
   if (!options.snapshot) throw new Error('reconcile requires --snapshot PATH');
   const input = JSON.parse(await readFile(options.snapshot, 'utf8'));
   const projectMap = await loadProjectMap();
   if (!Object.values(projectMap).includes(input.project)) throw new Error('project not allowlisted');
-  const client = createLinearClient({ projectMap, publish: options.publish === true, ...(options.linearCli ? { cli: options.linearCli } : {}) });
-  const snapshot = options.scan ? await scanProject({ client, project: input.project }) : input.snapshot;
-  if (!snapshot || snapshot.project !== input.project) throw new Error('snapshot project mismatch');
   const out = options.out;
   if ((options.scan || options.publish) && !out) throw new Error('--out required for immutable reconciliation evidence');
   const candidates = structuredClone(input.candidates ?? []);
@@ -38,21 +51,20 @@ export async function executeReconcile(options) {
   if (options.publish) {
     if (!options.supervision) throw new Error('reconcile publish requires --supervision PATH');
     supervision = JSON.parse(await readFile(options.supervision, 'utf8'));
-    for (const candidate of candidates) {
-      // Discard model decisions embedded in external input. Only this supervised
-      // run's typed adapter may supply the semantic gate.
-      delete candidate.decision;
-      const issue = snapshot.issues.find((i) => i.id === candidate.issueId);
-      const eligible = snapshot.complete && issue && !protectionReason(issue) && !currentAuthorityReason(candidate.authority) && await verifyAuthority(candidate.authority);
-      candidate.decision = await decideCandidate({ candidate: { eligible: !!eligible, mode: 'supervised', action: candidate.type, evidence: { issue, authority: candidate.authority, evidence: candidate.evidence, sourceLinks: candidate.sourceLinks } }, supervision, budget: supervision.budget });
-      supervision.budget.spentUsd += candidate.decision.costUpperUsd;
-    }
+  }
+  const client = createLinearClient({ projectMap, publish: options.publish === true, ...(options.linearCli ? { cli: options.linearCli } : {}) });
+  const snapshot = options.scan || options.publish ? await scanProject({ client, project: input.project }) : input.snapshot;
+  if (!snapshot || snapshot.project !== input.project) throw new Error('snapshot project mismatch');
+  if (options.publish) {
+    await reviewCandidates({ snapshot, candidates, supervision, allowedProjects: Object.values(projectMap) });
   } else {
     // An offline proposal never trusts an imported model label as permission.
     for (const candidate of candidates) candidate.decision = { adopted: false, choice: 'abstain', confidence: 0 };
   }
-  const actions = planReconciliation({ snapshot, candidates, maxActions: options.maxIssues ?? 20 });
-  const run = { version: 1, command: 'reconcile', status: 'planned', snapshot, candidates, actions, sourceHash: digest(await readFile(options.snapshot)), at: new Date().toISOString() };
+  const proposals = candidates.map((candidate) => semanticAction({ snapshot, candidate, allowedProjects: Object.values(projectMap) }));
+  const actions = planReconciliation({ snapshot, candidates, maxActions: options.maxIssues ?? 20, allowedProjects: Object.values(projectMap) });
+  const requestedScopes = [...proposals, ...actions].filter((a) => a.type !== 'deferred').map((a) => ({ issueId: a.issueId, type: a.type, project: a.project, proposalHash: proposalHash(a) }));
+  const run = { version: 1, command: 'reconcile', status: 'planned', snapshot, candidates, proposals, requestedScopes, actions, sourceHash: digest(await readFile(options.snapshot)), at: new Date().toISOString() };
   const runDir = out ? path.join(out, 'reconciliations', `${Date.now()}`) : null;
   if (runDir) await immutableJson(path.join(runDir, 'plan.json'), run);
   if (options.publish) {

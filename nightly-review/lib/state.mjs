@@ -12,9 +12,43 @@ export async function readOptional(file) {
 }
 
 export async function privateDirectory(dir) {
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  if ((await lstat(dir)).isSymbolicLink()) throw new Error('symlink state directory refused');
-  if (path.resolve(dir) !== await realpath(dir)) throw new Error('symlink state ancestor refused');
+  const target = path.resolve(dir);
+  const missing = [];
+  let ancestor = target;
+  while (true) {
+    try { await lstat(ancestor); break; }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+    missing.push(ancestor);
+    ancestor = path.dirname(ancestor);
+  }
+  if (ancestor !== await realpath(ancestor)) throw new Error('symlink state ancestor refused');
+  // Also finish entry durability if an earlier mkdir succeeded but its sync failed.
+  if (missing.length) {
+    await syncDirectory(ancestor);
+    await syncDirectory(path.dirname(ancestor));
+  }
+  for (const directory of missing.reverse()) {
+    try { await mkdir(directory, { mode: 0o700 }); }
+    catch (error) { if (error.code !== 'EEXIST') throw error; }
+    await checkPrivateDirectory(directory);
+    await syncDirectory(directory);
+    await syncDirectory(path.dirname(directory));
+  }
+  await checkPrivateDirectory(target);
+  await syncDirectory(target);
+  await syncDirectory(path.dirname(target));
+}
+
+async function checkPrivateDirectory(dir) {
+  const stat = await lstat(dir);
+  if (stat.isSymbolicLink()) throw new Error('symlink state directory refused');
+  if (dir !== await realpath(dir)) throw new Error('symlink state ancestor refused');
+  if (!stat.isDirectory() || stat.uid !== process.getuid() || (stat.mode & 0o077) !== 0) throw new Error('state directory must be private and owned by current UID');
+}
+
+async function syncDirectory(dir) {
+  const directory = await open(dir, 'r');
+  try { await directory.sync(); } finally { await directory.close(); }
 }
 
 export async function atomicWrite(file, bytes, { expectedHash } = {}) {
@@ -35,8 +69,7 @@ export async function atomicWrite(file, bytes, { expectedHash } = {}) {
       throw new Error('state conflict before rename');
     }
     await rename(temporary, file);
-    const directory = await open(path.dirname(file), 'r');
-    try { await directory.sync(); } finally { await directory.close(); }
+    await syncDirectory(path.dirname(file));
   } catch (error) { await unlink(temporary).catch(() => {}); throw error; }
 }
 
@@ -45,6 +78,7 @@ export async function immutableJson(file, value) {
   const fd = await open(file, 'wx', 0o600);
   try { await fd.writeFile(jsonBytes(value)); await fd.sync(); }
   finally { await fd.close(); }
+  await syncDirectory(path.dirname(file));
   return digest(jsonBytes(value));
 }
 
@@ -100,29 +134,66 @@ export async function operationState(dir, id) {
 // Stage is newly created and cannot overwrite a destination. Promotion is a separate
 // quiescent operation by the supervisor after both schedules have been disabled.
 export async function stageTransfer({ source, destination, files = ['filed.json'] }) {
-  if (!files.length || files.some((f) => f !== 'filed.json' && !/^operations\/[a-f0-9]{64}-(planned|attempted|confirmed|unknown|local_committed)\.json$/.test(f))) throw new Error('transfer path not allowlisted');
-  await mkdir(destination, { mode: 0o700 });
-  const root = await realpath(source);
-  const manifest = [];
+  if (!Array.isArray(files) || !files.length || files.some((f) => f !== 'filed.json' && (typeof f !== 'string' || !/^operations\/[a-f0-9]{64}-(planned|attempted|confirmed|unknown|local_committed)\.json$/.test(f)))) throw new Error('transfer path not allowlisted');
+  return withLock(source, async () => {
+    const root = path.resolve(source);
+    const inventory = await transferInventory(root);
+    if (files.some((file) => !inventory.some((entry) => entry.path === file))) throw new Error('transfer source file missing');
+    const manifest = inventory.map(({ raw, ...entry }) => entry);
+    const sourceInventoryHash = digest(jsonBytes(manifest));
+    const revalidate = async () => {
+      const current = (await transferInventory(root)).map(({ raw, ...entry }) => entry);
+      if (digest(jsonBytes(current)) !== sourceInventoryHash) throw new Error('transfer source inventory changed');
+    };
+    await revalidate();
+    await privateDirectory(path.dirname(path.resolve(destination)));
+    await mkdir(destination, { mode: 0o700 });
+    await syncDirectory(path.dirname(path.resolve(destination)));
+    for (const { path: file, raw, sha256 } of inventory) {
+      const target = path.join(destination, file);
+      await privateDirectory(path.dirname(target));
+      const fd = await open(target, 'wx', 0o600);
+      try { await fd.writeFile(raw); await fd.sync(); } finally { await fd.close(); }
+      await syncDirectory(path.dirname(target));
+      if (sha256 !== digest(await readFile(target))) throw new Error('transfer hash mismatch');
+    }
+    await revalidate();
+    await immutableJson(path.join(destination, 'transfer.json'), { version: 1, complete: true, enabled: false, manifest, sourceInventoryHash });
+    return manifest;
+  });
+}
+
+async function transferInventory(root) {
+  let names = [];
+  const journal = path.join(root, 'operations');
+  try {
+    await checkPrivateDirectory(journal);
+    names = await readdir(journal);
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  const files = ['filed.json', ...names.sort().map((name) => `operations/${name}`)];
+  const inventory = [];
+  const operations = new Map();
   for (const file of files) {
+    const match = /^operations\/([a-f0-9]{64})-(planned|attempted|confirmed|unknown|local_committed)\.json$/.exec(file);
+    if (file !== 'filed.json' && !match) throw new Error('invalid operation journal inventory');
     const origin = path.join(root, file);
-    if ((await lstat(origin)).isSymbolicLink() || await realpath(origin) !== origin) throw new Error('transfer symlink refused');
+    const stat = await lstat(origin);
+    if (stat.isSymbolicLink() || await realpath(origin) !== origin) throw new Error('transfer symlink refused');
+    if (!stat.isFile()) throw new Error('transfer source must be a regular file');
     const raw = await readFile(origin);
     const parsed = JSON.parse(raw);
     if (file === 'filed.json') validateLedger(parsed);
-    else if (parsed.phase === 'unknown' || parsed.phase === 'attempted') {
-      const states = await operationState(root, parsed.id);
-      if (!states.confirmed && !states.local_committed) throw new Error('unresolved remote operation');
+    else {
+      if (parsed?.id !== match[1] || parsed.phase !== match[2]) throw new Error('invalid operation journal identity');
+      const phases = operations.get(parsed.id) ?? new Set();
+      phases.add(parsed.phase); operations.set(parsed.id, phases);
     }
-    await privateDirectory(path.dirname(path.join(destination, file)));
-    const fd = await open(path.join(destination, file), 'wx', 0o600);
-    try { await fd.writeFile(raw); await fd.sync(); } finally { await fd.close(); }
-    const copied = await readFile(path.join(destination, file));
-    if (digest(raw) !== digest(copied)) throw new Error('transfer hash mismatch');
-    manifest.push({ path: file, bytes: raw.length, sha256: digest(raw) });
+    inventory.push({ path: file, bytes: raw.length, sha256: digest(raw), raw });
   }
-  await immutableJson(path.join(destination, 'transfer.json'), { version: 1, manifest });
-  return manifest;
+  for (const phases of operations.values()) {
+    if ((phases.has('attempted') || phases.has('unknown')) && !phases.has('confirmed') && !phases.has('local_committed')) throw new Error('unresolved remote operation');
+  }
+  return inventory;
 }
 
 export async function unresolvedOperations(dir) {

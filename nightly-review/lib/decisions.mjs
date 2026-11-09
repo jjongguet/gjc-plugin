@@ -7,7 +7,8 @@ const ROUTES = [
 // Conservative higher list input price from the fixed routes, not a temporary
 // provider discount. The active supervisor rechecks pricing before live runs.
 const MAX_PRICE_PER_MILLION = 0.126;
-const EPSILON = 1e-6;
+// Three probabilities rounded to four decimals can differ from one by 0.00015.
+const PROBABILITY_SUM_TOLERANCE = 0.0002;
 const CRITERIA = {
   consistent: 'Current verified evidence supports the proposed action and its exact root cause, completion criteria and current authority.',
   inconsistent: 'Current verified evidence contradicts the proposed action, completion criteria, root cause or current authority.',
@@ -32,11 +33,11 @@ export function validateDecision(decision) {
       && Number.isFinite(probabilities[label]) && probabilities[label] >= 0 && probabilities[label] <= 1)) return invalid('probabilities');
   const ranked = LABELS.map((label) => ({ label, probability: probabilities[label] }))
     .sort((a, b) => b.probability - a.probability);
-  if (Math.abs(ranked.reduce((sum, entry) => sum + entry.probability, 0) - 1) > EPSILON) return invalid('probability_total');
+  if (Math.abs(ranked.reduce((sum, entry) => sum + entry.probability, 0) - 1) > PROBABILITY_SUM_TOLERANCE + Number.EPSILON) return invalid('probability_total');
   const margin = ranked[0].probability - ranked[1].probability;
-  if (choice !== ranked[0].label || Math.abs(confidence - margin) > EPSILON) return invalid('confidence_margin');
+  if (choice !== ranked[0].label) return invalid('non_top_choice');
   return {
-    valid: true, choice, confidence,
+    valid: true, choice, confidence, margin,
     probabilities: Object.fromEntries(LABELS.map((label) => [label, probabilities[label]])),
     adopted: choice !== 'abstain' && margin + Number.EPSILON >= 0.6 && confidence + Number.EPSILON >= 0.6,
     reason: choice === 'abstain' ? 'provider_abstained' : margin + Number.EPSILON >= 0.6 && confidence + Number.EPSILON >= 0.6 ? 'accepted' : 'low_confidence',
@@ -44,15 +45,16 @@ export function validateDecision(decision) {
 }
 
 function authorized(candidate, supervision, budget, now, requiredUpperUsd) {
-  if (!candidate || candidate.eligible !== true || candidate.mode === 'scheduled' || candidate.scheduled === true) return 'scope';
+  if (!candidate || candidate.eligible !== true || candidate.mode !== 'supervised' || candidate.scheduled === true) return 'scope';
   const expiry = supervision?.expiresAt;
   const instant = typeof now === 'function' ? now() : now;
   const timestamp = instant instanceof Date ? instant.getTime() : instant;
-  if (supervision?.active !== true || typeof expiry !== 'string'
+  if (supervision?.active !== true || typeof supervision.supervisor !== 'string' || !supervision.supervisor.trim() || typeof expiry !== 'string'
     || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(expiry)
     || !Number.isFinite(Date.parse(expiry))
     || new Date(Date.parse(`${expiry.slice(0, 19)}Z`)).toISOString().slice(0, 19) !== expiry.slice(0, 19)
-    || !Number.isFinite(timestamp) || Date.parse(expiry) <= timestamp) return 'supervision';
+    || !Number.isFinite(timestamp) || Date.parse(expiry) <= timestamp
+    || Date.parse(expiry) - timestamp > 3_600_000) return 'supervision';
   if (!budget || !['capUsd', 'spentUsd', 'reservedUsd', 'nextUpperUsd'].every((key) => Number.isFinite(budget[key]) && budget[key] >= 0)
     || budget.capUsd > 5 || budget.spentUsd + budget.reservedUsd + budget.nextUpperUsd > budget.capUsd
     || budget.nextUpperUsd < requiredUpperUsd) return 'budget';
@@ -118,7 +120,7 @@ export async function decideCandidate({ candidate, supervision, budget, fetchImp
       const decision = await request(route, bodies[index], key, fetchImpl);
       audit.push({
         model: route.model, reason: decision.reason,
-        ...(decision.valid ? { choice: decision.choice, confidence: decision.confidence, probabilities: decision.probabilities } : {}),
+        ...(decision.valid ? { choice: decision.choice, confidence: decision.confidence, margin: decision.margin, probabilities: decision.probabilities } : {}),
       });
       const expired = authorized(candidate, supervision, budget, now, requiredUpperUsd);
       if (expired) return abstain([...audit, { reason: expired }], costUpperUsd);

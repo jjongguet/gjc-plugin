@@ -69,17 +69,18 @@ export function createLinearClient({
       return projectMap[repo] ?? null;
     },
     async getIssue(id) {
-      const out = await call('get_issue', { id });
-      return out.issue ?? out;
+      const out = await call('get_issue', { id, includeRelations: true, fields: ['id', 'uuid', 'title', 'description', 'priority', 'url', 'createdAt', 'updatedAt', 'archivedAt', 'triagedAt', 'status', 'statusType', 'labels', 'assignee', 'assigneeId', 'delegate', 'delegateId', 'project', 'projectId', 'parentId', 'relations'] });
+      const issue = out.issue ?? out;
+      return { ...issue, id: issue.uuid ?? issue.id, identifier: issue.identifier ?? issue.id };
     },
     async listIssues({ project, cursor, limit = 100 }) {
-      return call('list_issues', { project, limit, ...(cursor ? { cursor } : {}) });
+      return call('list_issues', { project, limit, includeArchived: true, ...(cursor ? { cursor } : {}) });
     },
     async listComments({ issueId, cursor, limit = 50 }) {
       return call('list_comments', { issueId, limit, ...(cursor ? { cursor } : {}) });
     },
     async listLabels() {
-      return call('list_issue_labels', { team: 'Jjongguet', limit: 100 });
+      return call('list_issue_labels', { team: 'Jjongguet', name: 'nightly', limit: 100 });
     },
     async updateIssue({ id, ...changes }) {
       if (!publish) throw new Error('write client not enabled');

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, realpath } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { boundedPages, planReconciliation, protectionReason, currentAuthorityReason, snapshotHash, applyReconciliation } from '../lib/reconciliation.mjs';
+import { boundedPages, planReconciliation, protectionReason, currentAuthorityReason, snapshotHash, applyReconciliation, semanticAction, proposalHash } from '../lib/reconciliation.mjs';
 import { immutableJson } from '../lib/state.mjs';
 
 const at = Date.parse('2026-11-09T02:00:00Z');
@@ -32,6 +32,8 @@ test('24h and missing/future/comment coverage protection boundaries', () => {
   assert.equal(protectionReason(issue({ comments: { complete: false, items: [] } }), at), 'incomplete_comments');
   assert.equal(protectionReason(issue({ comments: { complete: true, items: [{ createdAt: iso(DAY), body: '실행 연결 | JJO-1' }] } }), at), 'recent_execution');
   assert.equal(protectionReason(issue({ assignee: 'human' }), at), 'active_owner_or_triaged');
+  assert.equal(protectionReason(issue({ triaged: true }), at), 'active_owner_or_triaged');
+  assert.equal(protectionReason(issue({ triagedAt: iso(2 * DAY) }), at), 'active_owner_or_triaged');
 });
 
 test('expiry is only >14d nightly untriaged backlog with unique batch, never Done', () => {
@@ -51,6 +53,7 @@ test('expiry is only >14d nightly untriaged backlog with unique batch, never Don
 test('historical merge, reverted fix and stale authority never authorize Done', () => {
   const base = issue({ labels: [] });
   const candidate = { issueId: base.id, type: 'done', decision: { adopted: true, choice: 'consistent', confidence: 0.9 }, evidence: 'current verification', sourceLinks: ['https://github.com/jjongguet/r/pull/1'], remainingWork: false, exactDelta: {}, authority: authority() };
+  candidate.decision.proposalHash = proposalHash(semanticAction({ snapshot: snapshot(base), candidate, at }));
   assert.equal(planReconciliation({ snapshot: snapshot(base), candidates: [candidate], at })[0].type, 'done');
   for (const auth of [undefined, { ...authority(), notReverted: false }, { ...authority(), observedAt: iso(300001) }, { ...authority(), verifiedHead: 'c'.repeat(40) }, { ...authority(), behaviorVerified: false }]) {
     assert.equal(planReconciliation({ snapshot: snapshot(base), candidates: [{ ...candidate, authority: auth }], at })[0].type, 'deferred');
@@ -59,18 +62,19 @@ test('historical merge, reverted fix and stale authority never authorize Done', 
   assert.equal(planReconciliation({ snapshot: snapshot(base), candidates: [{ ...candidate, decision: { adopted: false } }], at })[0].reason, 'semantic_abstention');
 });
 
-async function setup({ lostResponse = false, edit = false } = {}) {
+async function setup({ lostResponse = false, edit = false, lostUpdate = false } = {}) {
   const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-writer-')));
   await immutableJson(path.join(dir, 'owner.json'), { version: 1, host: os.hostname(), generation: 1, enabled: true });
   const current = issue(); const comments = []; let mutations = 0;
   const client = {
-    getIssue: async () => { const value = structuredClone(current); delete value.comments; return value; },
-    listComments: async () => ({ comments: structuredClone(comments), hasNextPage: false }),
+    listIssues: async () => ({ issues: [{ id: current.id }, { id: batch.id }], hasNextPage: false }),
+    getIssue: async (id) => { const value = structuredClone(id === current.id ? current : batch); delete value.comments; return value; },
+    listComments: async ({ issueId }) => ({ comments: issueId === current.id ? structuredClone(comments) : [], hasNextPage: false }),
     createComment: async ({ body }) => { mutations++; comments.push({ id: 'comment', body, createdAt: new Date(at).toISOString() }); if (edit) current.description = 'concurrent edit'; if (lostResponse) throw new Error('timeout after server success'); },
-    updateIssue: async ({ id, state, ...delta }) => { mutations++; if (state) { current.status = state; current.statusType = 'canceled'; } Object.assign(current, delta); },
+    updateIssue: async ({ id, state, ...delta }) => { mutations++; if (state) { current.status = state; current.statusType = 'canceled'; } Object.assign(current, delta); if (lostUpdate) throw new Error('response lost after update'); },
   };
   const action = planReconciliation({ snapshot: snapshot(current), at })[0];
-  const supervision = { active: true, operationalExclusion: true, supervisor: 'active-test-agent', expiresAt: new Date(at + 600000).toISOString(), actions: [{ issueId: 'JJO-1', type: action.type, project: 'p' }] };
+  const supervision = { active: true, operationalExclusion: true, supervisor: 'active-test-agent', expiresAt: new Date(at + 600000).toISOString(), actions: [{ issueId: 'JJO-1', type: action.type, project: 'p', proposalHash: proposalHash(action) }] };
   return { dir, client, current, comments, action, supervision, count: () => mutations };
 }
 
@@ -100,4 +104,34 @@ test('missing operational exclusion or changed pre-read blocks all mutations', a
   f.current.description = 'new human text';
   const results = await applyReconciliation({ actions: [f.action], client: f.client, dir: f.dir, supervision: f.supervision, clock: () => at });
   assert.equal(results[0].reason, 'concurrent_or_protected'); assert.equal(f.count(), 0);
+});
+
+test('a new plan hash cannot bypass an unresolved original operation', async () => {
+  const f = await setup({ lostResponse: true });
+  const first = { actions: [f.action], client: f.client, dir: f.dir, supervision: f.supervision, clock: () => at };
+  assert.equal((await applyReconciliation(first))[0].phase, 'unknown');
+  const replanned = { ...f.action, expectedHash: 'f'.repeat(64) };
+  const scope = { ...f.supervision, actions: [{ issueId: replanned.issueId, type: replanned.type, project: 'p', proposalHash: proposalHash(replanned) }] };
+  assert.equal((await applyReconciliation({ ...first, actions: [replanned], supervision: scope }))[0].reason, 'unknown_result_quarantine');
+  assert.equal(f.count(), 1);
+});
+
+test('lost successful update is adopted from its original marker without another mutation', async () => {
+  const f = await setup({ lostUpdate: true });
+  const options = { actions: [f.action], client: f.client, dir: f.dir, supervision: f.supervision, clock: () => at };
+  assert.equal((await applyReconciliation(options))[0].phase, 'unknown'); assert.equal(f.count(), 2);
+  assert.equal((await applyReconciliation({ ...options, actions: [] }))[0].adopted, true); assert.equal(f.count(), 2);
+});
+
+test('semantic decisions bind exact correction and duplicate target, not a location or asserted target flag', () => {
+  const base = issue({ labels: [] }); const snap = snapshot(base);
+  const candidate = { issueId: base.id, type: 'correct', evidence: 'current proof', sourceLinks: ['https://github.com/jjongguet/r/pull/1'], exactDelta: { correction: 'Verified current correction A' }, authority: authority() };
+  const action = semanticAction({ snapshot: snap, candidate, at });
+  candidate.decision = { adopted: true, choice: 'consistent', confidence: 0.9, proposalHash: proposalHash(action) };
+  assert.equal(planReconciliation({ snapshot: snap, candidates: [candidate], at })[0].type, 'correct');
+  assert.equal(planReconciliation({ snapshot: snap, candidates: [{ ...candidate, exactDelta: { correction: 'Different correction B' } }], at })[0].reason, 'semantic_abstention');
+  assert.equal(semanticAction({ snapshot: snap, candidate: { ...candidate, type: 'move', targetAllowed: true, exactDelta: { project: 'unapproved-project' } }, at }).type, 'deferred');
+  assert.equal(semanticAction({ snapshot: snap, candidate: { ...candidate, type: 'duplicate', duplicateId: batch.id, sameCauseVerified: true }, at }).type, 'deferred');
+  const triaged = snapshot(issue({ labels: [], triagedAt: iso(2 * DAY) }));
+  assert.equal(planReconciliation({ snapshot: triaged, candidates: [candidate], at })[0].reason, 'active_owner_or_triaged');
 });

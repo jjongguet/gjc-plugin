@@ -24,7 +24,7 @@ import {
 } from '../lib/filing.mjs';
 import { DEFAULT_LINEAR_CLI, createLinearClient, loadProjectMap } from '../lib/linear.mjs';
 import { prepare, evaluateLocal } from '../lib/prepare.mjs';
-import { publishFindings } from '../lib/publish.mjs';
+import { publishFindings, filingIncomplete } from '../lib/publish.mjs';
 import { reviewBudget } from '../lib/supervision.mjs';
 import { immutableJson, digest } from '../lib/state.mjs';
 
@@ -294,7 +294,8 @@ async function executeOnce(options) {
         withRules: !options.noRules,
         log,
       });
-      prs.push(...collected);
+      prs.push(...collected.prs);
+      if (!collected.complete) { collectionErrors.push(repo); log(`${repo}: incomplete raw PR enumeration: ${collected.reason}`); }
     } catch (error) {
       collectionErrors.push(repo);
       log(`${repo}: collection failed: ${String(error?.message ?? error).slice(0, 200)}`);
@@ -419,7 +420,7 @@ async function executeOnce(options) {
     receipt.linear = filing.receiptBlock;
     // An unattended run must not look clean when a Linear write failed: the exit
     // code is the only signal launchd keeps.
-    filingFailed = (filing.result?.errors?.length ?? 0) > 0;
+    filingFailed = filing.result ? filingIncomplete(filing.result) : false;
   }
 
   await writeFile(path.join(runDir, 'receipt.json'), `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
@@ -541,7 +542,8 @@ async function fileFindings({ runDir, findings, stateDir, options, log }) {
     result,
     receiptBlock: {
       filed: result.created.length,
-      published: true,
+      published: result.created.length + result.commented.length > 0,
+      complete: !filingIncomplete(result),
       commented: result.commented.length,
       skipped: result.skipped,
       errors: result.errors,
@@ -581,7 +583,7 @@ async function executeFile(options) {
     const planned = filing.plan.filter((action) => action.type === 'create').length;
     process.stdout.write(`plan only: ${planned} issue(s) would be created\n`);
   }
-  return filing.result?.errors?.length ? 1 : 0;
+  return filing.result && filingIncomplete(filing.result) ? 1 : 0;
 }
 
 async function executeRecheck(options) {
