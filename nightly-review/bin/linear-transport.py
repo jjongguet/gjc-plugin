@@ -14,8 +14,8 @@ parsed in-process and sent only to the fixed Linear GraphQL endpoint. It is neve
 printed, logged or passed as an argument. Errors are reduced to fixed messages.
 """
 import json
+import os
 import stat
-import subprocess
 import sys
 import urllib.error
 import urllib.request
@@ -62,7 +62,8 @@ def graphql(query, variables, key, opener=None):
         with (opener or urllib.request.build_opener(NoRedirect())).open(req, timeout=30) as response:
             raw = response.read(8_000_001)
     except urllib.error.HTTPError as exc:
-        if exc.code == 429:
+        # Linear also reports RATELIMITED with HTTP 400; the body is parsed, never echoed.
+        if exc.code == 429 or rate_limited(exc):
             raise RuntimeError(QUOTA_HINT) from None
         raise RuntimeError(f"Linear GraphQL HTTP {exc.code}; no automatic retry") from None
     except (urllib.error.URLError, TimeoutError):
@@ -70,12 +71,25 @@ def graphql(query, variables, key, opener=None):
     if len(raw) > 8_000_000:
         raise RuntimeError("Linear GraphQL response too large; refusing partial evidence")
     data = json.loads(raw)
-    errors = data.get("errors") or []
-    if any((e.get("extensions") or {}).get("code") == "RATELIMITED" for e in errors if isinstance(e, dict)):
+    if not isinstance(data, dict):
+        raise RuntimeError("Linear GraphQL response malformed; no automatic retry")
+    if has_rate_limit(data):
         raise RuntimeError(QUOTA_HINT)
-    if errors or not isinstance(data.get("data"), dict):
+    if data.get("errors") or not isinstance(data.get("data"), dict):
         raise RuntimeError("Linear GraphQL query error; no automatic retry")
     return data["data"]
+
+
+def has_rate_limit(data):
+    errors = data.get("errors") if isinstance(data, dict) else None
+    return isinstance(errors, list) and any(isinstance(e, dict) and isinstance(e.get("extensions"), dict) and e["extensions"].get("code") == "RATELIMITED" for e in errors)
+
+
+def rate_limited(exc):
+    try:
+        return has_rate_limit(json.loads(exc.read(65_536)))
+    except (ValueError, OSError, AttributeError):
+        return False
 
 
 def complete(connection, what):
@@ -126,9 +140,14 @@ def read(tool, args, query):
         return map_issue(data["issue"])
     if tool == "list_issues":
         limit, cursor = page_args(args, 100)
-        data = query("""query($n: Int!, $after: String, $project: String!) {
-          issues(first: $n, after: $after, includeArchived: true, filter: { project: { name: { eq: $project } } }) {
-            nodes { id identifier } pageInfo { hasNextPage endCursor } } }""", {"n": limit, "after": cursor, "project": str(args["project"])})
+        # Names are not unique: resolve to exactly one project id, then list by id.
+        projects = query("""query($name: String!) { projects(first: 2, includeArchived: true, filter: { name: { eq: $name } }) {
+          nodes { id } } }""", {"name": str(args["project"])})["projects"]["nodes"]
+        if len(projects) != 1:
+            raise RuntimeError("project name must resolve to exactly one Linear project")
+        data = query("""query($n: Int!, $after: String, $project: ID!) {
+          issues(first: $n, after: $after, includeArchived: true, filter: { project: { id: { eq: $project } } }) {
+            nodes { id identifier } pageInfo { hasNextPage endCursor } } }""", {"n": limit, "after": cursor, "project": projects[0]["id"]})
         page = data["issues"]
         return {"issues": [{"id": n["id"], "identifier": n["identifier"]} for n in page["nodes"]],
                 "hasNextPage": page["pageInfo"]["hasNextPage"], "cursor": page["pageInfo"]["endCursor"]}
@@ -152,18 +171,21 @@ def read(tool, args, query):
 
 
 def main(argv):
-    if len(argv) < 4 or argv[0] != "call" or "--arguments" not in argv:
+    if argv[:1] != ["call"] or len(argv) not in (4, 5) or argv[2] != "--arguments" or argv[4:] not in ([], ["--publish"]):
         print("usage: linear-transport.py call <tool> --arguments JSON [--publish]", file=sys.stderr)
         return 2
     tool = argv[1]
     if tool in WRITES:
         # Writes keep the audited policy path, including its write gate and quota rule.
-        return subprocess.run([sys.executable, str(POLICY_CLI), *argv], check=False).returncode
+        # exec replaces this process, so a caller timeout signals the writer itself.
+        os.execv(sys.executable, [sys.executable, str(POLICY_CLI), *argv])
     if tool not in READS or "--publish" in argv:
         print("linear-transport: unsupported tool", file=sys.stderr)
         return 2
     try:
-        args = json.loads(argv[argv.index("--arguments") + 1])
+        args = json.loads(argv[3])
+        if not isinstance(args, dict):
+            raise ValueError("arguments must be a JSON object")
         key = credential()
         result = read(tool, args, lambda q, v: graphql(q, v, key))
     except (ValueError, RuntimeError, KeyError, TypeError, OSError, json.JSONDecodeError) as exc:

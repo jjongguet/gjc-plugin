@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 export const DEFAULT_LINEAR_CLI = path.join(HERE, '..', 'bin', 'linear-transport.py');
+const WRITE_TOOLS = new Set(['save_issue', 'save_comment']);
 
 export const DEFAULT_PROJECT_MAP_PATH = path.join(HERE, '..', 'config', 'projects.json');
 
@@ -56,7 +57,8 @@ export function createLinearClient({
 } = {}) {
   const call = async (tool, args) => {
     const argv = [cli, 'call', tool, '--arguments', JSON.stringify(args)];
-    if (publish) argv.push('--publish');
+    // The transport refuses --publish on reads; only writes carry the gate.
+    if (publish && WRITE_TOOLS.has(tool)) argv.push('--publish');
     return run(python, argv, exec);
   };
 

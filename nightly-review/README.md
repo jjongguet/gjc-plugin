@@ -167,9 +167,14 @@ The default transport is `bin/linear-transport.py`. Reads (`get_issue`,
 each and keep the policy CLI output shape; writes (`save_issue`, `save_comment`)
 are delegated unchanged to the policy `linear-trace.py --publish`. Measured
 2026-11-09: one MCP tool call cost 7-13 of the shared 2,500/hour requests, so a
-complete 96-issue project scan through MCP (about 1,500 requests, 2-3 scans per
-filing) hit 429 before any write. The same scan now costs about two requests per
-issue. The credential is parsed in-process from the owner-only single-link
+complete 96-issue project scan through MCP (about 1,500 requests) hit 429 before
+any write. The same scan now costs about two requests per issue (about 190 for
+96 issues). Filing rescans the project before every cluster and once more for a
+missing batch, so a run costs roughly (clusters + 1) scans plus 7-13 per MCP
+write: 8 clusters on that project is about 1,700 requests and the 20-cluster cap
+exceeds the hourly quota. Keep supervised `--max-issues` small on large projects;
+a 429 fails closed and continues through Aside as below. Project names resolve to
+exactly one project id before listing. The credential is parsed in-process from the owner-only single-link
 `~/.gjc/agent/mcp.json`, sent only to `https://api.linear.app/graphql`, and never
 printed or passed as an argument.
 
