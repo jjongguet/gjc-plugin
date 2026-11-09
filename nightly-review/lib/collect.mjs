@@ -18,6 +18,7 @@ const PR_FIELDS = [
   'deletions',
   'files',
   'headRefOid',
+  'mergeCommit',
 ].join(',');
 
 export const PR_FIELDS_QUERY = PR_FIELDS;
@@ -139,7 +140,7 @@ export async function collectRepo({
     }
     const files = (pr.files ?? []).map((file) => file.path);
     const rules = withRules
-      ? await collectRules({ repo, ref: pr.headRefOid, files }).catch(() => [])
+      ? await collectRules({ repo, ref: pr.mergeCommit?.oid ?? pr.headRefOid, files }).catch(() => [])
       : [];
     const entry = {
       repo,
@@ -150,6 +151,7 @@ export async function collectRepo({
       additions: pr.additions,
       deletions: pr.deletions,
       headRefOid: pr.headRefOid,
+      mergedSha: pr.mergeCommit?.oid ?? null,
       truncated,
       rules,
       files,

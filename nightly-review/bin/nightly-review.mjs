@@ -18,12 +18,15 @@ import { runAll, runLens } from '../lib/runner.mjs';
 import { makeDeadline } from '../lib/deadline.mjs';
 import {
   DEFAULT_MAX_ISSUES,
-  applyFiling,
   clusterFindings,
   planFiling,
   summarizeFiling,
 } from '../lib/filing.mjs';
 import { DEFAULT_LINEAR_CLI, createLinearClient, loadProjectMap } from '../lib/linear.mjs';
+import { prepare, evaluateLocal } from '../lib/prepare.mjs';
+import { publishFindings } from '../lib/publish.mjs';
+import { reviewBudget } from '../lib/supervision.mjs';
+import { immutableJson, digest } from '../lib/state.mjs';
 
 const DEFAULT_STATE_DIR = path.join(process.env.HOME ?? '.', '.gjc-plugin', 'nightly-review');
 const DEFAULT_FILED_STATE = 'filed.json';
@@ -31,6 +34,8 @@ const DEFAULT_FILED_STATE = 'filed.json';
 function usage() {
   return `usage: nightly-review <command> [options]
 
+  prepare --mode scheduled|shadow --config PATH --out DIR [--json]
+  evaluate-local --run DIR [--json]
   once   --repos a,b [--since YYYY-MM-DD] [--lenses id,id] [--out DIR]
          [--max-diff-bytes N] [--concurrency N] [--max-findings N] [--deadline-seconds N]
          [--file-findings] [--publish] [--max-issues N] [--json]
@@ -69,10 +74,13 @@ function parseArgs(argv) {
   const command = head && !head.startsWith('--') ? head : undefined;
   const tokens = command ? rest : [head, ...rest].filter(Boolean);
   const options = { command, lenses: [], repos: [] };
+  const seen = new Set();
   for (let i = 0; i < tokens.length; i += 1) {
     const token = tokens[i];
     if (!token.startsWith('--')) throw new Error(`unexpected argument: ${token}`);
     const key = token.slice(2);
+    if (seen.has(key)) throw new Error(`duplicate option: --${key}`);
+    seen.add(key);
     const takeValue = () => {
       const value = tokens[i + 1];
       if (value === undefined || value.startsWith('--')) throw new Error(`--${key} needs a value`);
@@ -80,6 +88,12 @@ function parseArgs(argv) {
       return value;
     };
     switch (key) {
+      case 'mode':
+      case 'config':
+      case 'supervision':
+      case 'snapshot':
+        options[key] = takeValue();
+        break;
       case 'repos':
         options.repos = takeValue().split(',').map((v) => v.trim()).filter(Boolean);
         break;
@@ -116,6 +130,9 @@ function parseArgs(argv) {
       case 'publish':
         options.publish = true;
         break;
+      case 'scan':
+        options.scan = true;
+        break;
       case 'file-findings':
         options.fileFindings = true;
         break;
@@ -138,6 +155,22 @@ function parseArgs(argv) {
         throw new Error(`unknown option: --${key}`);
     }
   }
+  const allowed = {
+    prepare: ['mode', 'config', 'out', 'json'],
+    'evaluate-local': ['run', 'json'],
+    file: ['run', 'out', 'publish', 'max-issues', 'linear-cli', 'supervision', 'json'],
+    recheck: ['run', 'max-findings', 'json'],
+    reconcile: ['snapshot', 'scan', 'out', 'publish', 'max-issues', 'linear-cli', 'supervision', 'json'],
+    once: ['repos', 'since', 'lenses', 'out', 'max-diff-bytes', 'concurrency', 'soft-bytes', 'max-findings', 'deadline-seconds', 'no-rules', 'file-findings', 'publish', 'max-issues', 'linear-cli', 'supervision', 'json'],
+    loop: [],
+  };
+  if (command && allowed[command] && !options.help) {
+    for (const key of seen) if (!allowed[command].includes(key)) throw new Error(`${command} does not accept --${key}`);
+  }
+  for (const key of ['maxDiffBytes', 'concurrency', 'softBytes', 'maxFindings', 'deadlineSeconds', 'maxIssues']) {
+    if (options[key] !== undefined && (!Number.isSafeInteger(options[key]) || options[key] < 1)) throw new Error(`${key} must be a positive integer`);
+  }
+  if (options.publish && command === 'once' && !options.fileFindings) throw new Error('--publish with once requires --file-findings');
   return options;
 }
 
@@ -222,6 +255,8 @@ function renderReport({ runDir, since, repos, prs, gate, calls, usage }) {
 }
 
 async function executeOnce(options) {
+  if (!options.supervision) throw new Error('once requires --supervision PATH with active supervisor and verified provider cost bounds');
+  const supervision = JSON.parse(await readFile(options.supervision, 'utf8'));
   if (!options.repos || options.repos.length === 0) {
     throw new Error('--repos is required (e.g. --repos infra,yyaz-web)');
   }
@@ -233,6 +268,7 @@ async function executeOnce(options) {
   const deadlineSeconds = options.deadlineSeconds ?? 3600;
   const stateDir = options.out ?? DEFAULT_STATE_DIR;
   const lenses = selectLenses(options.lenses);
+  reviewBudget({ supervision, lenses, calls: 0 });
   const runDir = path.join(stateDir, runIdFrom());
   await mkdir(runDir, { recursive: true });
 
@@ -247,6 +283,7 @@ async function executeOnce(options) {
 
   const startedAt = new Date().toISOString();
   const prs = [];
+  const collectionErrors = [];
   for (const repo of options.repos) {
     try {
       const collected = await collectRepo({
@@ -259,18 +296,25 @@ async function executeOnce(options) {
       });
       prs.push(...collected);
     } catch (error) {
+      collectionErrors.push(repo);
       log(`${repo}: collection failed: ${String(error?.message ?? error).slice(0, 200)}`);
     }
   }
   log(`collected ${prs.length} PR(s)`);
+  const budget = reviewBudget({ supervision, lenses, calls: prs.length });
+  await immutableJson(path.join(runDir, 'budget.json'), budget);
 
   const tasks = [];
   for (const pr of prs) {
     for (const lens of lenses) {
+      const prompt = buildPrompt({ repo: pr.repo, pr, lens });
+      if (Buffer.byteLength(prompt, 'utf8') > supervision.modelBounds[lens.model].maxContextTokens) throw new Error('prompt exceeds verified conservative context bound');
       tasks.push({
         meta: { repo: pr.repo, pr: pr.number, lens: lens.id },
-        execute: () =>
-          runLens({ prompt: buildPrompt({ repo: pr.repo, pr, lens }), lens, softBytes }),
+        execute: () => {
+          reviewBudget({ supervision, lenses, calls: prs.length });
+          return runLens({ prompt, lens, softBytes });
+        },
       });
     }
   }
@@ -282,6 +326,7 @@ async function executeOnce(options) {
   // The deadline covers the paid phase only: collection is free and needs to
   // finish before the clock starts, or a slow GitHub would eat the budget.
   const deadline = makeDeadline(deadlineSeconds);
+  const rawWrites = [];
   const { results: calls, skipped } = await runAll({
     tasks,
     concurrency,
@@ -290,13 +335,14 @@ async function executeOnce(options) {
       log(
         `${result.repo}#${result.pr} ${result.lens}: ${result.ok ? `${result.findings.length} findings` : result.error}`,
       );
-      void writeFile(
+      rawWrites.push(writeFile(
         path.join(rawDir, `${result.repo}-${result.pr}-${result.lens}.json`),
         `${JSON.stringify(result, null, 2)}\n`,
         'utf8',
-      );
+      ));
     },
   });
+  await Promise.all(rawWrites);
 
   const { kept, dropped, stats } = gateAcross({ prs, calls, maxFindings });
   const usage = sumUsage(calls);
@@ -312,6 +358,8 @@ async function executeOnce(options) {
     version: 1,
     runDir,
     startedAt,
+    budget,
+    collectionErrors,
     finishedAt,
     since,
     repos: options.repos,
@@ -389,7 +437,7 @@ async function executeOnce(options) {
         `report: ${path.join(runDir, 'report.md')}\nrecheck: nightly-review recheck --run ${runDir}\n`,
     );
   }
-  return filingFailed ? 1 : 0;
+  return filingFailed || collectionErrors.length || calls.some((c) => !c.ok) || skipped ? 1 : 0;
 }
 
 function gateAcross({ prs, calls, maxFindings }) {
@@ -473,14 +521,14 @@ async function fileFindings({ runDir, findings, stateDir, options, log }) {
   }
 
   const projectMap = await loadProjectMap();
+  if (!options.supervision) throw new Error('publish requires --supervision PATH');
+  const supervision = JSON.parse(await readFile(options.supervision, 'utf8'));
   const client = createLinearClient({
     cli: options.linearCli ?? DEFAULT_LINEAR_CLI,
     projectMap,
     publish: true,
   });
-  const { state: nextState, result } = await applyFiling({ actions, client, state, runId });
-  await mkdir(stateDir, { recursive: true });
-  await writeFile(statePath, `${JSON.stringify(nextState, null, 2)}\n`, 'utf8');
+  const { result } = await publishFindings({ findings, client, dir: stateDir, runId, supervision, maxIssues });
 
   log(`file: ${summarizeFiling(result)}`);
   for (const created of result.created) {
@@ -522,8 +570,8 @@ async function executeFile(options) {
     log,
   });
   if (options.publish) {
-    receipt.linear = filing.receiptBlock;
-    await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
+    const revision = { version: 1, sourceHash: digest(await readFile(receiptPath)), createdAt: new Date().toISOString(), linear: filing.receiptBlock };
+    await immutableJson(path.join(runDir, 'revisions', `file-${Date.now()}.json`), revision);
   }
   if (options.json) {
     process.stdout.write(`${JSON.stringify(filing.receiptBlock, null, 2)}\n`);
@@ -562,13 +610,15 @@ async function executeRecheck(options) {
   const { kept, dropped, stats } = gateAcross({ prs, calls, maxFindings });
   const receiptPath = path.join(runDir, 'receipt.json');
   const receipt = JSON.parse(await readFile(receiptPath, 'utf8'));
+  const sourceHash = digest(await readFile(receiptPath));
   receipt.gate = stats;
   receipt.dropped = dropped.slice(0, 200);
   receipt.findings = kept;
   receipt.recheckedAt = new Date().toISOString();
-  await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`, 'utf8');
+  const revisionDir = path.join(runDir, 'revisions', `recheck-${Date.now()}`);
+  await immutableJson(path.join(revisionDir, 'receipt.json'), { ...receipt, sourceHash });
   await writeFile(
-    path.join(runDir, 'report.md'),
+    path.join(revisionDir, 'report.md'),
     `${renderReport({ runDir, since: receipt.since, repos: receipt.repos, prs, gate: { kept, dropped, stats }, calls, usage: receipt.usage })}\n`,
     'utf8',
   );
@@ -585,22 +635,31 @@ async function main() {
     return 0;
   }
   switch (options.command) {
+    case 'prepare': {
+      const allowed = new Set(['command', 'lenses', 'repos', 'mode', 'config', 'out', 'json']);
+      if (Object.keys(options).some((key) => !allowed.has(key)) || options.repos.length || options.lenses.length || !options.config || !options.out) throw new Error('prepare accepts only --mode --config --out --json');
+      const receipt = await prepare({ configPath: path.resolve(options.config), out: path.resolve(options.out), mode: options.mode });
+      process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+      return receipt.status === 'incomplete' ? 1 : 0;
+    }
+    case 'evaluate-local': {
+      if (!options.run) throw new Error('--run required');
+      const receipt = await evaluateLocal(path.resolve(options.run));
+      process.stdout.write(`${JSON.stringify(receipt, null, 2)}\n`);
+      return 0;
+    }
     case 'once':
       return executeOnce(options);
     case 'recheck':
       return executeRecheck(options);
     case 'file':
       return executeFile(options);
+    case 'reconcile': {
+      const { executeReconcile } = await import('../lib/reconcile-cli.mjs');
+      return executeReconcile(options);
+    }
     case 'loop': {
-      const interval = options.interval ?? 86_400;
-      if (interval < 60) throw new Error('--interval must be at least 60 seconds');
-      process.stderr.write(`loop: every ${interval}s; stop with Ctrl-C\n`);
-      for (;;) {
-        await executeOnce(options).catch((error) =>
-          process.stderr.write(`once failed: ${String(error?.message ?? error)}\n`),
-        );
-        await new Promise((resolve) => setTimeout(resolve, interval * 1000));
-      }
+      throw new Error('repeating paid review is forbidden; schedule prepare instead');
     }
     default:
       process.stderr.write(`unknown command: ${options.command}\n\n${usage()}`);

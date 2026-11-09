@@ -144,66 +144,6 @@ export function planFiling({ clusters, state, maxIssues = DEFAULT_MAX_ISSUES }) 
   return actions;
 }
 
-// Apply a plan. The client is injected so tests never touch Linear:
-//   { getIssue(id), createIssue({title, description, project, priority}), createComment({issueId, body}) }
-export async function applyFiling({ actions, client, state, runId, now = () => new Date().toISOString() }) {
-  const next = { version: 1, clusters: { ...(state?.clusters ?? {}) } };
-  const result = { created: [], commented: [], skipped: [], errors: [] };
-
-  for (const action of actions) {
-    const { cluster } = action;
-    try {
-      if (action.type === 'skip') {
-        result.skipped.push({ key: cluster.key, reason: action.reason });
-        continue;
-      }
-      if (action.type === 'comment') {
-        const issue = await client.getIssue(action.issue.id);
-        const statusType = String(issue?.statusType ?? '');
-        if (statusType === 'completed' || statusType === 'canceled') {
-          result.skipped.push({ key: cluster.key, reason: `issue_${statusType}` });
-          continue;
-        }
-        await client.createComment({
-          issueId: action.issue.id,
-          body: renderEvidenceComment({ cluster, findings: action.findings, runId }),
-        });
-        const entry = next.clusters[cluster.key];
-        entry.evidence = [
-          ...new Set([...(entry.evidence ?? []), ...action.findings.map(evidenceHash)]),
-        ];
-        entry.lastRun = runId;
-        entry.lastCommentedAt = now();
-        result.commented.push({ key: cluster.key, issue: action.issue });
-        continue;
-      }
-
-      const project = client.projectFor(cluster.repo);
-      if (!project) {
-        result.skipped.push({ key: cluster.key, reason: 'no_project' });
-        continue;
-      }
-      const issue = await client.createIssue({
-        title: issueTitle(cluster),
-        description: renderIssueBody({ cluster, runId }),
-        project,
-        priority: priorityFor(cluster.confidence),
-      });
-      next.clusters[cluster.key] = {
-        issue: { id: issue.id, identifier: issue.identifier ?? null, url: issue.url ?? null },
-        filedAt: now(),
-        lastRun: runId,
-        evidence: cluster.findings.map(evidenceHash),
-      };
-      result.created.push({ key: cluster.key, issue: next.clusters[cluster.key].issue });
-    } catch (error) {
-      result.errors.push({ key: cluster.key, error: String(error?.message ?? error) });
-    }
-  }
-
-  return { state: next, result };
-}
-
 export function summarizeFiling(result) {
   return (
     `filed ${result.created.length}, commented ${result.commented.length}, ` +

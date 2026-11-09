@@ -72,18 +72,35 @@ export function createLinearClient({
       const out = await call('get_issue', { id });
       return out.issue ?? out;
     },
-    async createIssue({ title, description, project, priority }) {
+    async listIssues({ project, cursor, limit = 100 }) {
+      return call('list_issues', { project, limit, ...(cursor ? { cursor } : {}) });
+    },
+    async listComments({ issueId, cursor, limit = 50 }) {
+      return call('list_comments', { issueId, limit, ...(cursor ? { cursor } : {}) });
+    },
+    async listLabels() {
+      return call('list_issue_labels', { team: 'Jjongguet', limit: 100 });
+    },
+    async updateIssue({ id, ...changes }) {
+      if (!publish) throw new Error('write client not enabled');
+      return call('save_issue', { id, ...changes });
+    },
+    async createIssue({ title, description, project, priority, labels, parentId }) {
+      if (!publish) throw new Error('write client not enabled');
       const out = await call('save_issue', {
         title,
         description,
         team: 'Jjongguet',
         project,
         priority,
+        ...(labels ? { labels } : {}),
+        ...(parentId ? { parentId } : {}),
       });
       const issue = out.issue ?? out;
       return { id: issue.id, url: issue.url ?? null };
     },
     async createComment({ issueId, body }) {
+      if (!publish) throw new Error('write client not enabled');
       const out = await call('save_comment', { issueId, body });
       return out.comment ?? out;
     },
