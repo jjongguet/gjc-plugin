@@ -1,10 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, realpath, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, realpath, readFile, writeFile, unlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { publishFindings } from '../lib/publish.mjs';
-import { immutableJson, digest, jsonBytes } from '../lib/state.mjs';
+import { immutableJson, digest, jsonBytes, journalEvent } from '../lib/state.mjs';
+import { evidenceHash } from '../lib/filing.mjs';
 import { reviewBudget } from '../lib/supervision.mjs';
 const now = Date.now();
 const old = new Date(now - 3 * 86400000).toISOString();
@@ -72,14 +73,160 @@ test('incomplete inventory and protected ledger-external matches never mutate', 
   }
 });
 
-test('create timeout preserves unknown operation and a second run never blindly retries', async () => {
+test('create timeout preserves unknown operation; rerun adopts it from the unique marker without a second write', async () => {
   const f = await setup({ lost: true });
   const options = { ...f, findings: [finding], runId: 'run-1' };
   assert.equal((await publishFindings(options)).result.errors.length, 1); assert.equal(f.count(), 1);
-  // Existing server-side evidence is discovered; changing type to comment still
-  // must not create a second issue. Short-lived protection also blocks the write.
+  // Short-lived protection on the remote issue does not matter: adoption writes nothing remotely.
   f.issues[1].updatedAt = new Date(now).toISOString();
-  assert.equal((await publishFindings(options)).result.created.length, 0); assert.equal(f.count(), 1);
+  const second = await publishFindings(options);
+  assert.equal(second.result.created.length, 0); assert.equal(f.count(), 1);
+  assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+  assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, f.issues[1].id);
+  assert.equal((await publishFindings(options)).result.skipped[0].reason, 'up_to_date'); assert.equal(f.count(), 1);
+});
+
+test('an unknown create without its exact remote marker stays quarantined and blocks every new write', async () => {
+  for (const tamper of ['missing', 'duplicated', 'other-title', 'other-findings', 'archived', 'parent-not-batch', 'incomplete-inventory', 'generation-changed']) {
+    const f = await setup({ lost: true });
+    const options = { ...f, findings: [finding], runId: 'run-1' };
+    await publishFindings(options); assert.equal(f.count(), 1);
+    if (tamper === 'missing') f.issues.pop();
+    else if (tamper === 'duplicated') f.issues.push({ ...f.issues[1], id: 'copy' });
+    else if (tamper === 'other-title') f.issues[1].title = 'edited by someone';
+    else if (tamper === 'archived') f.issues[1].archivedAt = old;
+    else if (tamper === 'parent-not-batch') f.issues[0].title = 'ordinary issue';
+    else if (tamper === 'incomplete-inventory') f.client.listIssues = async () => ({ issues: structuredClone(f.issues), hasNextPage: true, cursor: 'repeat' });
+    else if (tamper === 'generation-changed') await writeFile(path.join(f.dir, 'owner.json'), JSON.stringify({ version: 1, host: os.hostname(), generation: 2, enabled: true }));
+    const findings = tamper === 'other-findings' ? [{ ...finding, file: 'b.mjs' }] : [finding];
+    if (tamper === 'other-findings') f.supervision.actions.push({ issueId: 'r::b.mjs::contract', type: 'create', project: 'p' });
+    const second = await publishFindings({ ...options, findings });
+    assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
+    assert.equal(f.count(), 1, tamper);
+    await assert.rejects(readFile(path.join(f.dir, 'filed.json'), 'utf8'), /ENOENT/, tamper);
+  }
+});
+
+const autolink = (text) => text.replace(/JJO-(\d+)/g, '[JJO-$1](https://linear.app/x/issue/JJO-$1)');
+const linkedFinding = { ...finding, kind: 'contract-JJO-7' };
+const linkedKey = 'r::a.mjs::contract-JJO-7';
+
+test('identifier autolinking inside the readable marker neither breaks confirmation, adoption nor dedupe', async () => {
+  for (const lost of [false, true]) {
+    const f = await setup({ lost });
+    f.supervision.actions.push({ issueId: linkedKey, type: 'create', project: 'p' });
+    const create = f.client.createIssue;
+    f.client.createIssue = async (args) => create({ ...args, description: autolink(args.description) });
+    const options = { ...f, findings: [linkedFinding], runId: 'run-1' };
+    const first = await publishFindings(options);
+    assert.ok(!f.issues[1].description.includes(`<!-- nightly-review:${linkedKey} -->`), 'fixture really mangles the readable marker');
+    if (lost) {
+      assert.equal(first.result.errors.length, 1);
+      const second = await publishFindings(options);
+      assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+    } else assert.equal(first.result.created.length, 1);
+    assert.equal(f.count(), 1);
+    // With the ledger lost, the hex key marker still identifies the existing issue:
+    // no second issue is created (the recent issue is protected instead).
+    await unlink(path.join(f.dir, 'filed.json'));
+    f.issues[1].updatedAt = new Date(now).toISOString();
+    const again = await publishFindings({ ...options, runId: 'run-2' });
+    assert.equal(again.result.created.length, 0);
+    assert.equal(f.issues.filter((i) => i.title === f.issues[1].title).length, 1);
+    assert.equal(f.count(), 1);
+  }
+});
+
+test('a legacy issue whose readable marker Linear autolinked is still found after ledger loss', async () => {
+  const f = await setup();
+  f.supervision.actions.push({ issueId: linkedKey, type: 'create', project: 'p' });
+  f.issues.push({ id: 'legacy', title: '[nightly] legacy', description: autolink(`body\n<!-- nightly-review:${linkedKey} -->`), project: 'p', parentId: 'parent', updatedAt: new Date(now).toISOString(), createdAt: old, statusType: 'backlog', labels: [] });
+  assert.ok(!f.issues[1].description.includes(`<!-- nightly-review:${linkedKey} -->`));
+  const result = await publishFindings({ ...f, findings: [linkedFinding], runId: 'run-1' });
+  assert.equal(result.result.created.length, 0);
+  assert.equal(result.result.skipped[0].reason, 'terminal_or_protected');
+  assert.equal(f.count(), 0);
+});
+
+async function commentSetup({ lost = false, ledger = true } = {}) {
+  const f = await setup();
+  const comments = [];
+  f.issues.push({ id: 'existing', title: '[nightly] r', description: `<!-- nightly-review:${key} -->`, project: 'p', parentId: 'parent', updatedAt: old, createdAt: old, statusType: 'backlog', labels: ['nightly'] });
+  if (ledger) await immutableJson(path.join(f.dir, 'filed.json'), { version: 1, clusters: { [key]: { issue: { id: 'existing' }, evidence: ['old-evidence'], filedAt: old } } });
+  f.supervision.actions.push({ issueId: key, type: 'comment', project: 'p' });
+  let writes = 0;
+  f.client.listComments = async ({ issueId }) => ({ comments: structuredClone(comments.filter((c) => c.issueId === issueId)), hasNextPage: false });
+  f.client.createComment = async ({ issueId, body }) => { writes++; comments.push({ id: `c-${comments.length}`, issueId, body, createdAt: old }); if (lost) throw new Error('timeout after remote success'); };
+  return { ...f, comments, commentWrites: () => writes };
+}
+
+test('a lost evidence comment is adopted only on its bound confirmed issue', async () => {
+  for (const tamper of ['none', 'confirmed-missing', 'copied-elsewhere']) {
+    const f = await commentSetup({ lost: true });
+    const options = { ...f, findings: [finding], runId: 'run-1' };
+    assert.equal((await publishFindings(options)).result.errors.length, 1);
+    assert.equal(f.commentWrites(), 1);
+    if (tamper === 'confirmed-missing') {
+      const moved = f.issues.findIndex((i) => i.id === 'existing');
+      f.issues.push({ ...f.issues[moved], id: 'other' });
+      f.comments[0].issueId = 'other';
+      f.issues.splice(moved, 1);
+    } else if (tamper === 'copied-elsewhere') {
+      f.issues.push({ ...f.issues.find((i) => i.id === 'existing'), id: 'other', description: 'unrelated' });
+      f.comments.push({ ...f.comments[0], id: 'copy', issueId: 'other' });
+    }
+    const second = await publishFindings(options);
+    assert.equal(f.commentWrites(), 1, tamper);
+    const saved = JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key];
+    if (tamper === 'none') {
+      assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+      assert.equal(saved.issue.id, 'existing'); assert.equal(saved.evidence.length, 2);
+    } else {
+      assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
+      assert.deepEqual(saved.evidence, ['old-evidence'], tamper);
+    }
+  }
+});
+
+test('without a ledger identity a lost comment is adopted only on the single marked issue and only from a complete inventory', async () => {
+  for (const tamper of ['none', 'incomplete-inventory', 'second-marked-issue']) {
+    const f = await commentSetup({ lost: true, ledger: false });
+    const options = { ...f, findings: [finding], runId: 'run-1' };
+    assert.equal((await publishFindings(options)).result.errors.length, 1);
+    if (tamper === 'incomplete-inventory') f.client.listIssues = async () => ({ issues: structuredClone(f.issues), hasNextPage: true, cursor: 'repeat' });
+    if (tamper === 'second-marked-issue') f.issues.push({ ...f.issues.find((i) => i.id === 'existing'), id: 'twin' });
+    const second = await publishFindings(options);
+    assert.equal(f.commentWrites(), 1, tamper);
+    if (tamper === 'none') {
+      assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+      assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, 'existing');
+    } else {
+      assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
+      await assert.rejects(readFile(path.join(f.dir, 'filed.json'), 'utf8'), /ENOENT/, tamper);
+    }
+  }
+});
+
+test('a crash after the adoption journal but before the ledger commit converges without a remote write', async () => {
+  const f = await setup({ lost: true });
+  const options = { ...f, findings: [finding], runId: 'run-1' };
+  await publishFindings(options);
+  const id = digest(jsonBytes({ key, evidence: [evidenceHash(finding)], generation: 1, type: 'create' }));
+  await journalEvent(f.dir, { id, phase: 'confirmed', entry: { issue: { id: f.issues[1].id, identifier: null, url: null }, evidence: [evidenceHash(finding)], filedAt: old, lastRun: 'run-1' }, adopted: true });
+  const second = await publishFindings(options);
+  assert.equal(second.result.errors.length, 0);
+  assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, f.issues[1].id);
+  assert.equal(f.count(), 1);
+});
+
+test('a created issue whose markdown Linear normalized is confirmed by markers, not byte equality', async () => {
+  const f = await setup();
+  const create = f.client.createIssue;
+  f.client.createIssue = async (args) => create({ ...args, description: args.description.replaceAll('\n- ', '\n* ').replaceAll('`', '\\`') });
+  const result = await publishFindings({ ...f, findings: [finding], runId: 'run-1' });
+  assert.equal(result.result.created.length, 1); assert.equal(result.result.errors.length, 0);
+  assert.notEqual(f.issues[1].description.includes('\n- '), true);
+  assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, 'new-1');
 });
 
 test('supervised review reserves both possible attempts and refuses expired/over-cap/unknown pricing', () => {

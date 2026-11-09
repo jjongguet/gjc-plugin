@@ -53,6 +53,19 @@ export function clusterFindings(findings) {
   return ordered;
 }
 
+// Linear autolinks issue identifiers in stored markdown, including inside HTML
+// comments, so the readable `nightly-review:<key>` marker is not stable for keys
+// containing one (observed 2026-11-09). The hex marker is; legacy issues carry
+// only the readable one, so matching accepts either.
+export const clusterMarker = (key) => `<!-- nightly-review:${key} -->`;
+export const clusterKeyMarker = (key) => `<!-- nightly-review-key:${createHash('sha256').update(key).digest('hex')} -->`;
+// Undo only Linear's identifier autolink form `[JJO-12](https://linear.app/...)`.
+const unlinkIdentifiers = (text) => text.replace(/\[([A-Za-z][A-Za-z0-9]*-\d+)\]\(https:\/\/linear\.app\/[^)\s]*\)/g, '$1');
+export const hasClusterMarker = (text, key) => {
+  const body = text ?? '';
+  return body.includes(clusterKeyMarker(key)) || body.includes(clusterMarker(key)) || unlinkIdentifiers(body).includes(clusterMarker(key));
+};
+
 export function issueTitle(cluster) {
   return `[nightly] ${cluster.repo} ${cluster.file} — ${cluster.kind}`;
 }
@@ -101,7 +114,8 @@ export function renderIssueBody({ cluster, runId }) {
   lines.push('');
   lines.push(`- nightly-review key: \`${cluster.key}\``);
   lines.push(`- run: \`${runId}\` (local-only; \`nightly-review recheck --run <dir>\`로 재게이트)`);
-  lines.push(`<!-- nightly-review:${cluster.key} -->`);
+  lines.push(clusterMarker(cluster.key));
+  lines.push(clusterKeyMarker(cluster.key));
   return lines.join('\n');
 }
 

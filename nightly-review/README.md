@@ -158,8 +158,23 @@ current code just before each exact change, preserves concurrent content, then
 reads back the result. Native remote CAS is not required for this scoped path.
 It does not claim atomic pre-reads or exactly-once remote execution. Unknown
 success/timeout/crash is quarantined, not blindly retried. Reconciliation can
-adopt a uniquely marked, exactly matching remote result; filing stops while an
-unresolved operation remains. A partially successful comment/status operation is
+adopt a uniquely marked, exactly matching remote result. Filing adopts an
+attempted create/comment only when the current run recomputes the same operation
+id (cluster, evidence, owner generation, type) and a complete inventory holds
+exactly one matching operation marker; adoption writes nothing remotely. Any
+other unresolved operation blocks every new filing write; an unknown batch
+creation is never adopted automatically. A comment is adopted only on the
+ledger's confirmed issue (or, without one, the single cluster-marked issue) and
+only if its marker comment is unique in the inventory. Linear normalizes stored
+markdown (observed 2026-11-09: `-` bullets became `*`, and `JJO-1980` inside the
+readable `<!-- nightly-review:<key> -->` comment became a link), so create and
+batch readback check the single hex operation marker, title, nightly label,
+parent and project rather than byte-equal descriptions. New issues also carry
+`<!-- nightly-review-key:<sha256(key)> -->`. Dedupe matches the hex marker, the
+readable marker, or the readable marker after undoing Linear's identifier links
+(`[JJO-12](https://linear.app/...)` back to `JJO-12`), so legacy issues with only
+the readable marker still match; any other rewrite of a legacy marker is matched
+only through the ledger's confirmed id. A partially successful comment/status operation is
 preserved for inspection, not flooded with repeated comments.
 
 The default transport is `bin/linear-transport.py`. Reads (`get_issue`,
