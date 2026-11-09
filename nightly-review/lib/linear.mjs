@@ -1,8 +1,11 @@
 // Linear transport for the filing step.
 //
-// Writes go through the policy CLI (`linear-trace.py call <tool> --publish`) so the
-// credential, the allowlist and the 429 → Aside rule stay in one place. This module
-// only builds arguments and parses results; it never reads the key itself.
+// The default CLI is bin/linear-transport.py: reads use one or two GraphQL requests
+// (a complete inventory through per-process MCP sessions exceeded the shared
+// 2,500/hour quota), and writes are delegated unchanged to the policy CLI
+// (`linear-trace.py call <tool> --publish`), which owns write auditing and the
+// 429 → Aside rule. This module only builds arguments and parses results; it
+// never reads the key itself.
 
 import { execFile } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
@@ -12,14 +15,8 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-export const DEFAULT_LINEAR_CLI = path.join(
-  process.env.HOME ?? '.',
-  '.gjc',
-  'agent',
-  'policy',
-  'bin',
-  'linear-trace.py',
-);
+export const DEFAULT_LINEAR_CLI = path.join(HERE, '..', 'bin', 'linear-transport.py');
+const WRITE_TOOLS = new Set(['save_issue', 'save_comment']);
 
 export const DEFAULT_PROJECT_MAP_PATH = path.join(HERE, '..', 'config', 'projects.json');
 
@@ -60,7 +57,8 @@ export function createLinearClient({
 } = {}) {
   const call = async (tool, args) => {
     const argv = [cli, 'call', tool, '--arguments', JSON.stringify(args)];
-    if (publish) argv.push('--publish');
+    // The transport refuses --publish on reads; only writes carry the gate.
+    if (publish && WRITE_TOOLS.has(tool)) argv.push('--publish');
     return run(python, argv, exec);
   };
 
