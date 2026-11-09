@@ -163,8 +163,10 @@ unresolved operation remains. A partially successful comment/status operation is
 preserved for inspection, not flooded with repeated comments.
 
 The default transport is `bin/linear-transport.py`. Reads (`get_issue`,
-`list_issues`, `list_comments`, `list_issue_labels`) use one Linear GraphQL request
-each and keep the policy CLI output shape; writes (`save_issue`, `save_comment`)
+`list_comments`, `list_issue_labels`) use one Linear GraphQL request each and
+`list_issues` two (project-id resolution plus the page); all keep the policy CLI
+output shape. A workspace label and a team label both named `nightly` are
+ambiguous and refuse filing; writes (`save_issue`, `save_comment`)
 are delegated unchanged to the policy `linear-trace.py --publish`. Measured
 2026-11-09: one MCP tool call cost 7-13 of the shared 2,500/hour requests, so a
 complete 96-issue project scan through MCP (about 1,500 requests) hit 429 before

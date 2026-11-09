@@ -1,6 +1,6 @@
 // Linear transport for the filing step.
 //
-// The default CLI is bin/linear-transport.py: reads use one GraphQL request each
+// The default CLI is bin/linear-transport.py: reads use one or two GraphQL requests
 // (a complete inventory through per-process MCP sessions exceeded the shared
 // 2,500/hour quota), and writes are delegated unchanged to the policy CLI
 // (`linear-trace.py call <tool> --publish`), which owns write auditing and the

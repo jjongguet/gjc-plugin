@@ -64,6 +64,13 @@ test('credential parsing refuses shared, hard-linked or non-API-key configs and 
   await write('Bearer lin_api_test'); assert.equal(check(), 'accepted');
   await write('Bearer lin_api_test', 0o640); assert.equal(check(), 'refused');
   await write('Bearer other'); assert.equal(check(), 'refused');
+  for (const malformed of ['Bearer lin_api_abc\n', 'Bearer lin_api_abc\r\nX: y', 'Bearer lin_api_', 42]) { await write(malformed); assert.equal(check(), 'refused', JSON.stringify(malformed)); }
+  const echoed = python(`class O:\n def open(s,req,timeout): raise ValueError('Invalid header value lin_api_secret')\ntry: m.graphql('q',{},'lin_api_secret',O())\nexcept RuntimeError as e: print(json.dumps(str(e)))`);
+  assert.doesNotMatch(echoed.stdout, /lin_api_secret/);
+  const redirect = python(`import urllib.request\nh=m.NoRedirect()\ntry: h.redirect_request(urllib.request.Request('https://api.linear.app/graphql'),None,302,'Found',{},'https://evil.example/');print('followed')\nexcept RuntimeError: print('refused')`);
+  assert.equal(redirect.stdout, 'refused');
+  const big = python(`try:\n m.read('list_issues',{'project':'p','limit':101},lambda q,v:None);print('accepted')\nexcept ValueError: print('refused')`);
+  assert.equal(big.stdout, 'refused');
   await write('Bearer lin_api_test'); await link(config, path.join(dir, 'second')); assert.equal(check(), 'refused');
   for (const argv of [['call', 'get_issue', '--arguments', '{}', '--publish'], ['call', 'delete_issue', '--arguments', '{}'], ['call', 'get_issue'], ['call', 'get_issue', 'x', '--arguments'], ['call', 'get_issue', '--arguments', '{}', '--extra']]) {
     assert.equal(spawnSync('python3', [TRANSPORT, ...argv], { encoding: 'utf8', timeout: 10000 }).status, 2, argv.join(' '));
@@ -79,6 +86,11 @@ test('writes exec the policy CLI with identical argv, stdout and exit code', asy
   const result = spawnSync('python3', [TRANSPORT, ...argv], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, HOME: home, PYTHONDONTWRITEBYTECODE: '1' } });
   assert.equal(result.status, 7);
   assert.deepEqual(JSON.parse(result.stdout), argv);
+  const unpublished = argv.slice(0, 4);
+  const passthrough = spawnSync('python3', [TRANSPORT, ...unpublished], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, HOME: home, PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.deepEqual(JSON.parse(passthrough.stdout), unpublished, 'the transport never adds --publish; the policy CLI owns the gate');
+  const missing = spawnSync('python3', [TRANSPORT, ...argv], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, HOME: path.join(home, 'absent'), PYTHONDONTWRITEBYTECODE: '1' } });
+  assert.equal(missing.status, 1); assert.equal(missing.stderr.trim(), 'linear-transport: policy write CLI unavailable');
 });
 
 test('a publishing client sends --publish only with write tools', async () => {

@@ -15,6 +15,7 @@ printed, logged or passed as an argument. Errors are reduced to fixed messages.
 """
 import json
 import os
+import re
 import stat
 import sys
 import urllib.error
@@ -49,8 +50,10 @@ def credential(config=None):
     c = json.loads(p.read_text())["mcpServers"]["linear"]
     if c.get("url") != MCP_ENDPOINT or c.get("type") != "http":
         raise ValueError("Expected the official Linear configuration")
-    auth = c.get("headers", {}).get("Authorization", "")
-    if not auth.startswith("Bearer lin_api_"):
+    auth = (c.get("headers") or {}).get("Authorization")
+    # A strict charset keeps a malformed value out of http.client, whose header
+    # validation error would otherwise quote the key.
+    if not isinstance(auth, str) or not re.fullmatch(r"Bearer lin_api_[A-Za-z0-9]+", auth):
         raise ValueError("Expected a configured Linear API-key bearer credential")
     return auth[len("Bearer "):]
 
@@ -68,6 +71,9 @@ def graphql(query, variables, key, opener=None):
         raise RuntimeError(f"Linear GraphQL HTTP {exc.code}; no automatic retry") from None
     except (urllib.error.URLError, TimeoutError):
         raise RuntimeError("Linear GraphQL connection failed; no automatic retry") from None
+    except ValueError:
+        # Header/URL validation messages can quote request values; never echo them.
+        raise RuntimeError("Linear GraphQL request rejected locally; no automatic retry") from None
     if len(raw) > 8_000_000:
         raise RuntimeError("Linear GraphQL response too large; refusing partial evidence")
     data = json.loads(raw)
@@ -178,7 +184,13 @@ def main(argv):
     if tool in WRITES:
         # Writes keep the audited policy path, including its write gate and quota rule.
         # exec replaces this process, so a caller timeout signals the writer itself.
-        os.execv(sys.executable, [sys.executable, str(POLICY_CLI), *argv])
+        try:
+            if not POLICY_CLI.is_file():
+                raise FileNotFoundError(POLICY_CLI)
+            os.execv(sys.executable, [sys.executable, str(POLICY_CLI), *argv])
+        except OSError:
+            print("linear-transport: policy write CLI unavailable", file=sys.stderr)
+            return 1
     if tool not in READS or "--publish" in argv:
         print("linear-transport: unsupported tool", file=sys.stderr)
         return 2
@@ -188,7 +200,7 @@ def main(argv):
             raise ValueError("arguments must be a JSON object")
         key = credential()
         result = read(tool, args, lambda q, v: graphql(q, v, key))
-    except (ValueError, RuntimeError, KeyError, TypeError, OSError, json.JSONDecodeError) as exc:
+    except (ValueError, RuntimeError, KeyError, TypeError, AttributeError, OSError, json.JSONDecodeError) as exc:
         print("linear-transport: " + (str(exc) if isinstance(exc, (ValueError, RuntimeError)) else "invalid input or configuration"), file=sys.stderr)
         return 1
     print(json.dumps(result, ensure_ascii=False))
