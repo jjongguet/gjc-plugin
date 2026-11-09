@@ -126,3 +126,5 @@ jobs:
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-observe.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-shutdown.ts
+      - name: Verify generated advisor behavior on ARC
+        run: bun jev-advisor/scripts/verify.ts
