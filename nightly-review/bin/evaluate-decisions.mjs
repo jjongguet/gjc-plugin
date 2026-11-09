@@ -12,9 +12,11 @@ const supervision = JSON.parse(await readFile(supervisionPath, 'utf8'));
 const fixtureBytes = await readFile(new URL('../tests/fixtures/reconciliation-golden.json', import.meta.url));
 const golden = JSON.parse(fixtureBytes);
 const modelBytes = await readFile(new URL('../lib/decisions.mjs', import.meta.url));
-if (supervision.active !== true || !supervision.supervisor || Date.parse(supervision.expiresAt) <= Date.now() || Date.parse(supervision.expiresAt) - Date.now() > 3600000) throw new Error('active short-lived supervisor required');
+const authorizedAt = Date.now();
+const expiresAt = Date.parse(supervision.expiresAt);
+if (supervision.active !== true || typeof supervision.supervisor !== 'string' || !supervision.supervisor.trim() || !Number.isFinite(expiresAt) || expiresAt <= authorizedAt || expiresAt - authorizedAt > 3600000) throw new Error('active short-lived supervision required');
 const budget = structuredClone(supervision.budget);
-if (!budget || budget.capUsd > 5 || !Number.isFinite(budget.spentUsd) || !Number.isFinite(budget.reservedUsd) || !Number.isFinite(budget.nextUpperUsd)) throw new Error('task budget required');
+if (!budget || !['capUsd', 'spentUsd', 'reservedUsd', 'nextUpperUsd'].every((k) => Number.isFinite(budget[k]) && budget[k] >= 0) || budget.capUsd > 5 || budget.nextUpperUsd <= 0) throw new Error('task budget required');
 // Reserve worst-case 2*32k tokens at the higher fixed-list price for all cases,
 // including errors, before starting. This does not assume discounts or abstention.
 const totalUpperUsd = golden.cases.length * 3 * 2 * 32000 * 0.126 / 1000000;

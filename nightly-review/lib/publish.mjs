@@ -89,7 +89,9 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       const snapshot = snapshots.get(project);
       if (!snapshot.complete) { result.skipped.push({ key: cluster.key, reason: 'incomplete_inventory' }); continue; }
       const confirmedId = next.clusters[cluster.key]?.issue.id;
-      const confirmedIssue = confirmedId ? snapshot.issues.find((i) => [i.id, i.uuid, i.identifier].includes(confirmedId)) : null;
+      const confirmedMatches = confirmedId ? snapshot.issues.filter((i) => [i.id, i.uuid, i.identifier].includes(confirmedId)) : [];
+      if (confirmedMatches.length > 1) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_ambiguous' }); continue; }
+      const confirmedIssue = confirmedMatches[0] ?? null;
       if (confirmedId && !confirmedIssue) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_missing' }); continue; }
       const matches = snapshot.issues.filter((i) => (i.description ?? '').includes(markerFor(cluster.key)));
       if (matches.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_existing_issue' }); continue; }
@@ -155,7 +157,7 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
           const names = (remote.labels ?? []).map((l) => typeof l === 'string' ? l : l.name);
           if (remote.description !== description || !names.includes('nightly') || (remote.parentId ?? remote.parent?.id) !== parent.id || (remote.projectId ?? remote.project) !== (parent.projectId ?? parent.project)) throw new Error('create readback mismatch');
         }
-        const entry = { ...(next.clusters[cluster.key] ?? {}), issue: { id: remote.uuid ?? remote.id, identifier: remote.identifier ?? null, url: remote.url ?? null }, evidence: [...new Set([...(next.clusters[cluster.key]?.evidence ?? []), ...fresh.map(evidenceHash)])], filedAt: next.clusters[cluster.key]?.filedAt ?? new Date(clock()).toISOString(), lastRun: runId };
+        const entry = { ...(next.clusters[cluster.key] ?? {}), issue: { id: confirmedId ?? remote.uuid ?? remote.id, identifier: remote.identifier ?? null, url: remote.url ?? next.clusters[cluster.key]?.issue.url ?? null }, evidence: [...new Set([...(next.clusters[cluster.key]?.evidence ?? []), ...fresh.map(evidenceHash)])], filedAt: next.clusters[cluster.key]?.filedAt ?? new Date(clock()).toISOString(), lastRun: runId };
         await journalEvent(dir, { id, phase: 'confirmed', entry });
         next.clusters[cluster.key] = entry;
         await atomicWrite(statePath, jsonBytes(next), { expectedHash }); expectedHash = digest(jsonBytes(next));

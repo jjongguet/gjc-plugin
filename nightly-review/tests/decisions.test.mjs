@@ -50,6 +50,18 @@ test('invalid or previously reserved evaluation destinations reject before any p
     if (mode !== 'permissions') assert.equal(await readFile(mode === 'existing' ? output : `${output}.reservation.json`, 'utf8'), 'preserved');
   }
 });
+test('malformed evaluator authorization rejects before reservation and transport', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-eval-auth-')));
+  const auth = path.join(dir, 'supervision.json'); const output = path.join(dir, 'evaluation.json');
+  const valid = { active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } };
+  for (const changed of [{ supervisor: '   ' }, { supervisor: {} }, { expiresAt: 'invalid' }, { budget: { ...valid.budget, capUsd: null } }, { budget: { ...valid.budget, spentUsd: -1 } }, { budget: { ...valid.budget, reservedUsd: -1 } }]) {
+    await writeFile(auth, JSON.stringify({ ...valid, ...changed }));
+    const result = spawnSync(process.execPath, ['nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH } });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /supervision|budget/);
+    assert.equal(existsSync(output), false); assert.equal(existsSync(`${output}.reservation.json`), false);
+  }
+});
 function setup(responses = [response()]) {
   const calls = [];
   const fetchImpl = async (url, options) => {

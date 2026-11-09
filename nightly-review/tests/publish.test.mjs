@@ -104,6 +104,46 @@ test('a missing confirmed legacy identity is deferred without replacement even a
   }
 });
 
+test('literal legacy IDs survive canonical remote updates, interrupted confirmation recovery and ambiguous aliases', async () => {
+  for (const mode of ['normal', 'interrupted', 'ambiguous']) {
+    const f = await setup();
+    const ledger = { version: 1, clusters: { [key]: { issue: { id: 'JJO-1958' }, evidence: ['old-evidence'], filedAt: old } } };
+    await immutableJson(path.join(f.dir, 'filed.json'), ledger);
+    const canonical = { ...f.issues[0], id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', uuid: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', identifier: 'JJO-1958', title: '[nightly] real wrapper shape', description: `<!-- nightly-review:${key} -->` };
+    f.issues.push(canonical);
+    if (mode === 'ambiguous') f.issues.push({ ...canonical, id: 'another-uuid', uuid: 'another-uuid', description: 'conflicting alias metadata' });
+    f.supervision.actions.push({ issueId: key, type: 'comment', project: 'p' });
+    const comments = []; const post = f.client.createComment;
+    f.client.createComment = async (args) => { await post(args); comments.push({ id: 'new-comment', body: args.body, createdAt: new Date(now).toISOString() }); };
+    f.client.listComments = async ({ issueId }) => ({ comments: issueId === canonical.id ? structuredClone(comments) : [], hasNextPage: false });
+    if (mode === 'interrupted') {
+      const comment = f.client.createComment;
+      f.client.createComment = async (...args) => {
+        const result = await comment(...args);
+        await writeFile(path.join(f.dir, 'filed.json'), JSON.stringify({ ...ledger, externalMetadata: 'preserved' }));
+        return result;
+      };
+    }
+    const first = await publishFindings({ ...f, findings: [finding], runId: 'legacy-update', clock: () => now });
+    if (mode === 'ambiguous') {
+      assert.equal(first.result.skipped[0].reason, 'confirmed_identity_ambiguous'); assert.equal(f.count(), 0);
+      assert.deepEqual(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')), ledger); continue;
+    }
+    assert.equal(f.count(), 1);
+    if (mode === 'interrupted') {
+      assert.equal(first.result.errors.length, 1);
+      const recovered = await publishFindings({ ...f, findings: [finding], runId: 'recovery', clock: () => now });
+      assert.equal(recovered.result.errors.length, 0);
+      assert.equal(f.count(), 1);
+    } else assert.equal(first.result.commented.length, 1);
+    const saved = JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8'));
+    assert.equal(saved.clusters[key].issue.id, 'JJO-1958');
+    assert.equal(saved.clusters[key].evidence.includes('old-evidence'), true);
+    assert.equal(saved.clusters[key].evidence.length, 2);
+    if (mode === 'interrupted') assert.equal(saved.externalMetadata, 'preserved');
+  }
+});
+
 test('confirmed batch history permits a separately scoped replacement after retirement without deleting prior journals', async () => {
   for (const retirement of ['archived', 'completed']) {
     const f = await setup({ batch: false });
