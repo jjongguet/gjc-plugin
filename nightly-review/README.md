@@ -162,10 +162,16 @@ adopt a uniquely marked, exactly matching remote result. Filing adopts an
 attempted create/comment only when the current run recomputes the same operation
 id (cluster, evidence, owner generation, type) and a complete inventory holds
 exactly one matching operation marker; adoption writes nothing remotely. Any
-other unresolved operation blocks every new filing write. Linear normalizes
-stored markdown (observed 2026-11-09: `-` bullets became `*`), so create
-readback checks the single operation marker, cluster marker, title, nightly
-label, parent and project rather than byte-equal descriptions. A partially successful comment/status operation is
+other unresolved operation blocks every new filing write; an unknown batch
+creation is never adopted automatically. A comment is adopted only on the
+ledger's confirmed issue (or, without one, the single cluster-marked issue) and
+only if its marker comment is unique in the inventory. Linear normalizes stored
+markdown (observed 2026-11-09: `-` bullets became `*`, and `JJO-1980` inside the
+readable `<!-- nightly-review:<key> -->` comment became a link), so create and
+batch readback check the single hex operation marker, title, nightly label,
+parent and project rather than byte-equal descriptions. New issues also carry
+`<!-- nightly-review-key:<sha256(key)> -->`; dedupe matches either marker, so
+legacy issues with only the readable marker still match. A partially successful comment/status operation is
 preserved for inspection, not flooded with repeated comments.
 
 The default transport is `bin/linear-transport.py`. Reads (`get_issue`,

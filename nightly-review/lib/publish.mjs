@@ -2,11 +2,10 @@
 // proof of remote absence. Operations with an unknown result are never retried.
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
-import { clusterFindings, planFiling, evidenceHash, issueTitle, renderIssueBody, renderEvidenceComment, priorityFor } from './filing.mjs';
+import { clusterFindings, planFiling, evidenceHash, issueTitle, renderIssueBody, renderEvidenceComment, priorityFor, hasClusterMarker } from './filing.mjs';
 import { scanProject, protectionReason, snapshotHash, validateSupervision, boundedPages } from './reconciliation.mjs';
 import { withLock, assertOwner, readOptional, validateLedger, atomicWrite, jsonBytes, digest, journalEvent, operationState, unresolvedOperations } from './state.mjs';
 
-const markerFor = (key) => `<!-- nightly-review:${key} -->`;
 const isTerminal = (i) => ['completed', 'canceled'].includes(i.statusType);
 const isActiveBatch = (i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isTerminal(i) && !i.archivedAt;
 const occurrences = (text, marker) => (text ?? '').split(marker).length - 1;
@@ -14,11 +13,12 @@ const labelNames = (issue) => (issue.labels ?? []).map((l) => typeof l === 'stri
 const projectOf = (issue) => issue.projectId ?? issue.project;
 const operationId = ({ key, evidence, generation, type }) => digest(jsonBytes({ key, evidence: [...evidence].sort(), generation, type }));
 
-// Linear normalizes stored markdown (e.g. `-` bullets become `*`), so a created
-// body cannot be compared byte-for-byte. Ownership is the exact single operation
-// marker plus the cluster marker, title, nightly label, parent and project.
+// Linear normalizes stored markdown (`-` bullets become `*`, identifiers become
+// links), so a created body cannot be compared byte-for-byte. Ownership is the
+// exact single operation marker (a hex hash over cluster, evidence, generation and
+// type, which Linear does not rewrite) plus title, nightly label, parent and project.
 function ownsCreatedIssue(remote, { cluster, opMarker, parent }) {
-  return occurrences(remote.description, opMarker) === 1 && occurrences(remote.description, markerFor(cluster.key)) === 1 &&
+  return occurrences(remote.description, opMarker) === 1 &&
     remote.title === issueTitle(cluster) && labelNames(remote).includes('nightly') && !remote.archivedAt &&
     (remote.parentId ?? remote.parent?.id) === parent.id && projectOf(remote) === projectOf(parent);
 }
@@ -52,8 +52,14 @@ async function adoptUnknownOperations({ unresolved, clusters, next, client, dir,
         const parent = owned.length === 1 ? snapshot.issues.find((i) => i.id === (owned[0].parentId ?? owned[0].parent?.id)) : null;
         if (owned.length === 1 && parent && /^\[nightly 배치\]/.test(parent.title ?? '') && ownsCreatedIssue(owned[0], { cluster, opMarker, parent })) remote = owned[0];
       } else {
-        const targets = snapshot.issues.filter((i) => [i.id, i.uuid, i.identifier].includes(confirmedId) || occurrences(i.description, markerFor(cluster.key)) === 1);
-        if (targets.length === 1 && targets[0].comments.items.filter((c) => occurrences(c.body, opMarker) > 0).length === 1) remote = targets[0];
+        // A confirmed ledger identity binds the target; only without one does the
+        // single cluster-marked issue qualify. The marked comment must be unique
+        // across the whole inventory and sit on that target.
+        const targets = confirmedId
+          ? snapshot.issues.filter((i) => [i.id, i.uuid, i.identifier].includes(confirmedId))
+          : snapshot.issues.filter((i) => hasClusterMarker(i.description, cluster.key));
+        const marked = snapshot.issues.filter((i) => i.comments.items.some((c) => occurrences(c.body, opMarker) > 0));
+        if (targets.length === 1 && marked.length === 1 && marked[0].id === targets[0].id && targets[0].comments.items.filter((c) => occurrences(c.body, opMarker) > 0).length === 1) remote = targets[0];
       }
       if (!remote) continue;
       await assertOwner(dir, { generation: owner.generation });
@@ -90,7 +96,7 @@ async function createBatch({ client, project, dir, owner, supervision, clock, ni
     validateSupervision(supervision, { at: clock(), issueId, action: 'create-batch', project });
     const created = await client.createIssue({ title: `[nightly 배치] ${project}`, description, project, priority: 4, labels: [nightly.id] });
     const after = await client.getIssue(created.id);
-    if (after.description !== description || !isActiveBatch(after) || ![after.projectId, after.project, after.project?.name].includes(project) || !(after.labels ?? []).some((l) => (l.name ?? l) === 'nightly')) throw new Error('batch readback mismatch');
+    if (occurrences(after.description, marker) !== 1 || !isActiveBatch(after) || ![after.projectId, after.project, after.project?.name].includes(project) || !(after.labels ?? []).some((l) => (l.name ?? l) === 'nightly')) throw new Error('batch readback mismatch');
     await journalEvent(dir, { id, phase: 'confirmed', issueId: after.id });
     return after;
   } catch (error) {
@@ -159,7 +165,7 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       if (confirmedMatches.length > 1) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_ambiguous' }); continue; }
       const confirmedIssue = confirmedMatches[0] ?? null;
       if (confirmedId && !confirmedIssue) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_missing' }); continue; }
-      const matches = snapshot.issues.filter((i) => (i.description ?? '').includes(markerFor(cluster.key)));
+      const matches = snapshot.issues.filter((i) => hasClusterMarker(i.description, cluster.key));
       if (matches.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_existing_issue' }); continue; }
       if (confirmedIssue && matches.some((i) => i.id !== confirmedIssue.id)) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_conflict' }); continue; }
       const existing = confirmedIssue ?? matches[0] ?? null;
@@ -194,7 +200,7 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       // other writers. This is not a claim of server-side CAS/exactly-once.
       const currentSnapshot = await scanProject({ client, project, maxIssues: 1000, now: clock });
       if (!currentSnapshot.complete) { result.skipped.push({ key: cluster.key, reason: 'prewrite_inventory_incomplete' }); continue; }
-      if (!existing && currentSnapshot.issues.some((i) => (i.description ?? '').includes(markerFor(cluster.key)))) { result.skipped.push({ key: cluster.key, reason: 'concurrent_create' }); continue; }
+      if (!existing && currentSnapshot.issues.some((i) => hasClusterMarker(i.description, cluster.key))) { result.skipped.push({ key: cluster.key, reason: 'concurrent_create' }); continue; }
       if (existing) {
         const latest = currentSnapshot.issues.find((i) => i.id === existing.id);
         if (!latest || snapshotHash(latest) !== snapshotHash(existing) || protectionReason(latest, clock())) { result.skipped.push({ key: cluster.key, reason: 'concurrent_or_protected' }); continue; }
