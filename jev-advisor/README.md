@@ -8,9 +8,13 @@ and confidence is not a probability of task success.
 
 ## Behavior
 
-- **Before `task`:** ask separately for each eligible child. Normalize at most
-  32 entries; dispatch at most four sequential requests within an eight-second
-  batch budget. Later or invalid entries receive explicit no-decision reasons.
+- **Before `task`:** normalize at most 32 entries and admit at most the first
+  four newly eligible children within an eight-second batch budget. Within that
+  invocation only, identical complete provider prompts reuse a validated
+  successful decision. Each child still consumes an admission slot and keeps
+  its own identity, requested-tier enforcement, token and receipt. Later or
+  invalid entries receive explicit no-decision reasons. Deadline and observed
+  caller cancellation are checked before reuse; failures never seed reuse.
   Each prompt contains that child's role, description, assignment and shared
   context, without requested tiers, invocation IDs or previous results.
 - **After `task`:** observe a launch receipt, not a completed delegation.
@@ -358,7 +362,8 @@ tools/plugin-metrics.ts      Generated read-only metrics surface
 
 Installed surfaces are self-contained because the installer copies only
 manifest-declared files. Edit core/adapters, never generated outputs by hand.
-The surfaces share disk transactions, not an in-memory evidence cache.
+The surfaces share disk transactions, not a cross-invocation evidence cache.
+Reused judgments correlate; they are not independent stochastic samples.
 
 ```sh
 bun scripts/build.mjs
@@ -371,10 +376,39 @@ in-memory fetch only: no real provider, local-model server or user memory.
 It exercises actual generated adapters, strict parsing, mixed/oversized tasks,
 throttle/enforce boundaries, terminal identity/replays/conflicts, concurrent
 writes, legacy preservation, unavailable stores and report denominators. It
-compares all four generated files byte-for-byte against the unchanged builder
+compares all eight generated files byte-for-byte against the unchanged builder
 run in a temporary fixture, including a deliberately stale candidate.
 
-These checks establish local package behavior, not installed-host dispatch,
+Run generation and the default suite on ARC, not on a local Mac. The owner-only
+`generate-advisor.yml` workflow, dispatched from trusted main with a reviewed
+same-repository source SHA, exports eight allowlisted surfaces and an input/output
+SHA-256 manifest without changing normal CI drift gates. Verify the run, source
+identity, allowlist and every digest before recovering its outputs.
+
+The following opt-ins branch before the builder and may run locally, from the
+plugin directory, after coherent ARC artifacts have been recovered:
+
+```sh
+bun scripts/verify.ts --perf --baseline /absolute/unchanged/jev-advisor --out /absolute/new-perf.json
+bun scripts/verify.ts --runtime --plugin /absolute/candidate/jev-advisor --out /absolute/new-runtime.json
+```
+
+The paired benchmark uses five warmups and 30 alternating-order samples per
+workload with memory on/off, fixed synthetic 40ms transport and no remote calls.
+It records handler-return median/p95, provider await and non-provider remainder,
+request counts and wire-body digests. Duplicate prompts must reduce requests
+four-to-one and median latency by at least 20%; singleton/all-distinct median
+and p95 regression may not exceed the larger of 5ms or 10%. Only one declared
+60-sample noise repeat is allowed. These results do not establish duplicate
+prevalence, real-provider latency, quality, dollar or token savings.
+
+The runtime opt-in installs into disposable isolated user homes and starts new
+real GJC processes against synthetic loopback endpoints. It verifies duplicate,
+fifth-slot and provider-failure cases through the actual task before-hook,
+including independent records and fresh journals. Strong advice blocks fast
+requests before child launch: this proves hook dispatch, not delegated work.
+
+The default suite establishes local package behavior, not installed-host dispatch,
 real-provider conformance or actual task efficacy. The manifest declares legacy
 before-task and after-task/after-subagent hooks. Public host source exposes scoped
 session identity and structured terminal snapshots; unavailable runtime fields

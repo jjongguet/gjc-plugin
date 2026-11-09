@@ -97,27 +97,30 @@ export default function register(api: {
 					lastReservedAt = admittedAt;
 					const deadline = invocationStartedAt + INVOCATION_BUDGET_MS;
 					const budgetSignal = AbortSignal.timeout(Math.max(1, deadline - admittedAt));
-					let requests = 0;
+					const decisions = new Map<string, Extract<Advice, { status: "decision" }>>();
+					let admittedSlots = 0;
 					for (const task of needsAdvice) {
 						let advice: Advice;
 						const remaining = deadline - performance.now();
-						if (requests >= MAX_PROVIDER_REQUESTS_PER_INVOCATION) {
+						if (admittedSlots >= MAX_PROVIDER_REQUESTS_PER_INVOCATION) {
 						advice = noDecision("batch_limit");
 						} else if (remaining <= 0 || budgetSignal.aborted) {
 						advice = noDecision("budget_exceeded");
 					} else {
-						requests++;
+						// Reuse advice, not admission slots or child identities.
+						admittedSlots++;
 						const ctxSignal = isHookRecord(ctx) && isAbortSignal(ctx.signal) ? ctx.signal : undefined;
 						const signal = ctxSignal && typeof AbortSignal.any === "function"
 							? AbortSignal.any([ctxSignal, budgetSignal])
 							: budgetSignal;
-						advice = await askDecisionModel(
+						advice = ctxSignal?.aborted ? noDecision("aborted") : decisions.get(task.prompt) ?? await askDecisionModel(
 							cfg,
 							task,
 							(input, init) => fetch(input, init),
 							signal,
 							Math.min(cfg.timeoutMs, remaining),
 						);
+						if (advice.status === "decision") decisions.set(task.prompt, advice);
 					}
 					adviceByIndex.set(task.index, advice);
 					const writeFailure = await persistAdvice(cfg, sessionId, callId, task, preparations.get(task.index), advice);
