@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFile } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, realpath } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
 import { decideCandidate, validateDecision } from '../lib/decisions.mjs';
 
 const NOW = Date.parse('2026-11-09T01:30:00Z');
@@ -10,6 +13,22 @@ const budget = { capUsd: 1, spentUsd: 0, reservedUsd: 0, nextUpperUsd: 0.01 };
 const env = { OPENGATEWAY_API_KEY: 'gateway-test-only', OPENROUTER_DECISION_API_KEY: 'router-test-only' };
 const answer = (choice = 'consistent', probabilities = { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, confidence = 0.75) => ({ choice, probabilities, confidence });
 const response = (decision = answer()) => ({ ok: true, json: async () => ({ answers: { decision } }) });
+test('evaluation CLI reaches the supervised key boundary without credentials instead of silently refusing every sample scope', async () => {
+  const dir = await realpath(await mkdtemp(path.join(os.tmpdir(), 'nightly-evaluation-')));
+  const auth = path.join(dir, 'supervision.json');
+  const output = path.join(dir, 'evaluation.json');
+  await writeFile(auth, JSON.stringify({ active: true, supervisor: 'test-agent', expiresAt: new Date(Date.now() + 300000).toISOString(), budget: { capUsd: 5, spentUsd: 3.1340032, reservedUsd: 0, nextUpperUsd: 0.01 } }));
+  const result = spawnSync(process.execPath, ['nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH } });
+  assert.equal(result.status, 0, result.stderr);
+  const receipt = JSON.parse(await readFile(output, 'utf8'));
+  assert.equal(receipt.results.length, 48);
+  assert.equal(receipt.costUpperUsd, 0);
+  assert.equal(receipt.summary.finalCorrect, 42);
+  for (const row of receipt.results) {
+    assert.ok(row.audit.some((entry) => entry.reason === 'key_missing'));
+    assert.ok(row.audit.every((entry) => entry.reason !== 'scope'));
+  }
+});
 function setup(responses = [response()]) {
   const calls = [];
   const fetchImpl = async (url, options) => {

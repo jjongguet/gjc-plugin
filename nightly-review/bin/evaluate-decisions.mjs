@@ -31,7 +31,7 @@ for (let repetition = 0; repetition < 3; repetition++) {
   for (const entry of golden.cases) {
     // Raw semantic evaluation intentionally measures also unsafe proposals, but
     // has no writer; the separate final-policy gate keeps them ineligible.
-    const raw = await decideCandidate({ candidate: { eligible: true, mode: 'supervised-evaluation', action: entry.action, evidence: entry.evidence }, supervision, budget });
+    const raw = await decideCandidate({ candidate: { eligible: true, mode: 'supervised', action: entry.action, evidence: entry.evidence }, supervision, budget });
     budget.spentUsd += raw.costUpperUsd;
     const baselineAllows = eligible(entry);
     const finalAllows = baselineAllows && raw.adopted && raw.choice === 'consistent';
