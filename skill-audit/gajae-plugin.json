@@ -1,0 +1,17 @@
+{
+	"kind": "gajae-code-plugin",
+	"name": "skill-audit",
+	"version": "0.0.1",
+	"tools": [
+		{
+			"name": "skill_audit",
+			"path": "tools/skill-audit.ts",
+			"description": "Read-only installed-vs-used audit of the GJC skill catalog: per-skill used_count, last_used and install source from retained session transcripts, plus unused, duplicate and stale candidates with their basis. Skill tool calls and /skill: invocations count as use; catalog exposure and skill_discovery do not. Missing transcript coverage reports unknown, never zero uses, and a corrupt line degrades the report instead of hiding it. It does not prove skill quality or effect, never installs or deletes skills, changes no configuration and writes nothing.",
+			"schema": {
+				"type": "object",
+				"properties": {},
+				"additionalProperties": false
+			}
+		}
+	]
+}

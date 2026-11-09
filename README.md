@@ -50,8 +50,9 @@ To check the same install → call → uninstall path without a model or key, ru
 | [`ui-regression`](ui-regression/) | Run one bounded browser scenario against a page you serve on loopback | The asserted DOM text and visibility in that run | Deployed UI state, visual quality, or flows you did not assert | The `aside` browser CLI with a connected profile and an explicit account |
 | [`wiki`](wiki/) | Search a guarded personal wiki and file pending proposals | Canonical page matches, with citations | That a page is true; it never approves or publishes | A personal-wiki checkout with `scripts/wiki.py` (`WIKI_ROOT`) |
 | [`aside-memory`](aside-memory/) | Search Aside memory read-only for an explicit account | Bounded, quoted historical context | That a memory is current or authoritative | The `aside` CLI and an explicit numeric account |
+| [`skill-audit`](skill-audit/) | Audit which installed skills are actually used, with unused and duplicate candidates | Which skills the retained transcripts show loading, and when | Skill quality, effect, or the whole history (only retained transcripts) | None: offline, keyless, read-only |
 
-`backplan`, `verification-receipts`, `rrsi` and `rea` work for anyone with `gjc`. `jev-advisor` needs a decision-model key for its advice. `ui-regression`, `wiki` and `aside-memory` wrap the maintainer's personal tools; install them only if you run the same tools.
+`backplan`, `verification-receipts`, `rrsi`, `rea` and `skill-audit` work for anyone with `gjc`. `jev-advisor` needs a decision-model key for its advice. `ui-regression`, `wiki` and `aside-memory` wrap the maintainer's personal tools; install them only if you run the same tools.
 
 Measured attributes (tiers, counts, durations, journals) are descriptive observations, not quality, routing or causal proof.
 
@@ -92,6 +93,7 @@ flowchart TB
     vr["verification-receipts"]
     rr["rrsi"]
     rea["rea"]
+    sa["skill-audit"]
   end
   subgraph external["Need extra setup"]
     direction LR

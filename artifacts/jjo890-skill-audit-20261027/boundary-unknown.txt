@@ -1,0 +1,4 @@
+skill-audit: 1 installed · 0 used · 0 unused · 1 unknown · 0 duplicate/stale candidate(s)
+usage: unknown — 0 transcript(s) under ~/.gjc/agent/sessions, 0 skill call(s), 0 /skill: mention(s), 0 corrupt line(s), 0 unreadable file(s)
+unused candidates: withheld — no transcript coverage, so zero uses cannot be claimed
+report status: unknown (see limitations)
