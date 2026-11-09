@@ -72,14 +72,44 @@ test('incomplete inventory and protected ledger-external matches never mutate', 
   }
 });
 
-test('create timeout preserves unknown operation and a second run never blindly retries', async () => {
+test('create timeout preserves unknown operation; rerun adopts it from the unique marker without a second write', async () => {
   const f = await setup({ lost: true });
   const options = { ...f, findings: [finding], runId: 'run-1' };
   assert.equal((await publishFindings(options)).result.errors.length, 1); assert.equal(f.count(), 1);
-  // Existing server-side evidence is discovered; changing type to comment still
-  // must not create a second issue. Short-lived protection also blocks the write.
+  // Short-lived protection on the remote issue does not matter: adoption writes nothing remotely.
   f.issues[1].updatedAt = new Date(now).toISOString();
-  assert.equal((await publishFindings(options)).result.created.length, 0); assert.equal(f.count(), 1);
+  const second = await publishFindings(options);
+  assert.equal(second.result.created.length, 0); assert.equal(f.count(), 1);
+  assert.ok(second.result.skipped.some((s) => s.reason === 'adopted_confirmed_operation'));
+  assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, f.issues[1].id);
+  assert.equal((await publishFindings(options)).result.skipped[0].reason, 'up_to_date'); assert.equal(f.count(), 1);
+});
+
+test('an unknown create without its exact remote marker stays quarantined and blocks every new write', async () => {
+  for (const tamper of ['missing', 'duplicated', 'other-title', 'other-findings']) {
+    const f = await setup({ lost: true });
+    const options = { ...f, findings: [finding], runId: 'run-1' };
+    await publishFindings(options); assert.equal(f.count(), 1);
+    if (tamper === 'missing') f.issues.pop();
+    else if (tamper === 'duplicated') f.issues.push({ ...f.issues[1], id: 'copy' });
+    else if (tamper === 'other-title') f.issues[1].title = 'edited by someone';
+    const findings = tamper === 'other-findings' ? [{ ...finding, file: 'b.mjs' }] : [finding];
+    if (tamper === 'other-findings') f.supervision.actions.push({ issueId: 'r::b.mjs::contract', type: 'create', project: 'p' });
+    const second = await publishFindings({ ...options, findings });
+    assert.equal(second.result.errors[0].reason, 'unknown_remote_result_quarantine', tamper);
+    assert.equal(f.count(), 1, tamper);
+    await assert.rejects(readFile(path.join(f.dir, 'filed.json'), 'utf8'), /ENOENT/, tamper);
+  }
+});
+
+test('a created issue whose markdown Linear normalized is confirmed by markers, not byte equality', async () => {
+  const f = await setup();
+  const create = f.client.createIssue;
+  f.client.createIssue = async (args) => create({ ...args, description: args.description.replaceAll('\n- ', '\n* ').replaceAll('`', '\\`') });
+  const result = await publishFindings({ ...f, findings: [finding], runId: 'run-1' });
+  assert.equal(result.result.created.length, 1); assert.equal(result.result.errors.length, 0);
+  assert.notEqual(f.issues[1].description.includes('\n- '), true);
+  assert.equal(JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8')).clusters[key].issue.id, 'new-1');
 });
 
 test('supervised review reserves both possible attempts and refuses expired/over-cap/unknown pricing', () => {
