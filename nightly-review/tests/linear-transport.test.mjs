@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, writeFile, chmod, link, mkdir } from 'node:fs/promises';
+import { mkdtemp, writeFile, chmod, link, mkdir, symlink } from 'node:fs/promises';
 import { createLinearClient } from '../lib/linear.mjs';
 import os from 'node:os';
 import path from 'node:path';
@@ -33,9 +33,12 @@ test('truncated label or relation pages, ambiguous duplicates and missing issues
 });
 
 test('list pages keep explicit termination metadata and labels keep only team or workspace labels', () => {
-  const stub = (projects) => `def q(text,v):\n if 'projects(' in text: return {'projects':{'nodes':${projects}}}\n assert v['project']=='p-1', v\n return {'issues':{'nodes':[{'id':'u1','identifier':'JJO-1'}],'pageInfo':{'hasNextPage':True,'endCursor':'c1'}}}\n`;
+  const stub = (projects) => `def q(text,v):\n if 'projects(' in text: return {'projects':{'nodes':${projects}}}\n assert v['project']=='p-1', v\n assert 'includeArchived: true' in text and 'id: { eq: $project }' in text, text\n return {'issues':{'nodes':[{'id':'u1','identifier':'JJO-1'}],'pageInfo':{'hasNextPage':v['after'] is None,'endCursor':'c1' if v['after'] is None else None}}}\n`;
   const page = python(`${stub("[{'id':'p-1'}]")}print(json.dumps(m.read('list_issues',{'project':'gjc-plugin','limit':2},q)))`);
+  assert.equal(page.status, 0, page.stderr);
   assert.deepEqual(JSON.parse(page.stdout), { issues: [{ id: 'u1', identifier: 'JJO-1' }], hasNextPage: true, cursor: 'c1' });
+  const next = python(`${stub("[{'id':'p-1'}]")}print(json.dumps(m.read('list_issues',{'project':'gjc-plugin','limit':2,'cursor':'c1'},q)))`);
+  assert.equal(JSON.parse(next.stdout).hasNextPage, false, 'the cursor is forwarded as the next page');
   for (const projects of ['[]', "[{'id':'p-1'},{'id':'p-2'}]"]) {
     const ambiguous = python(`${stub(projects)}try:\n m.read('list_issues',{'project':'same-name'},q);print('accepted')\nexcept RuntimeError: print('refused')`);
     assert.equal(ambiguous.stdout, 'refused', projects);
@@ -69,9 +72,16 @@ test('credential parsing refuses shared, hard-linked or non-API-key configs and 
   assert.doesNotMatch(echoed.stdout, /lin_api_secret/);
   const redirect = python(`import urllib.request\nh=m.NoRedirect()\ntry: h.redirect_request(urllib.request.Request('https://api.linear.app/graphql'),None,302,'Found',{},'https://evil.example/');print('followed')\nexcept RuntimeError: print('refused')`);
   assert.equal(redirect.stdout, 'refused');
+  const handlers = python(`seen=[]\ndef build(*h):\n seen.extend(h)\n class O:\n  def open(s,req,timeout): raise m.urllib.error.URLError('stop')\n return O()\nm.urllib.request.build_opener=build\ntry: m.graphql('q',{},'k')\nexcept RuntimeError: pass\nprint(json.dumps([type(x).__name__ for x in seen]))`);
+  assert.deepEqual(JSON.parse(handlers.stdout), ['NoRedirect'], 'the default opener refuses redirects');
+  const partial = python(`import http.client\nclass R:\n def __enter__(s): return s\n def __exit__(s,*a): return False\n def read(s,n): raise http.client.IncompleteRead(b'x',5)\nclass O:\n def open(s,req,timeout): return R()\ntry: m.graphql('q',{},'k',O())\nexcept RuntimeError as e: print(json.dumps(str(e)))`);
+  assert.match(JSON.parse(partial.stdout), /connection failed/);
   const big = python(`try:\n m.read('list_issues',{'project':'p','limit':101},lambda q,v:None);print('accepted')\nexcept ValueError: print('refused')`);
   assert.equal(big.stdout, 'refused');
   await write('Bearer lin_api_test'); await link(config, path.join(dir, 'second')); assert.equal(check(), 'refused');
+  const target = path.join(dir, 'target.json'); await writeFile(target, JSON.stringify({ mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp', headers: { Authorization: 'Bearer lin_api_test' } } } })); await chmod(target, 0o600);
+  const linked = path.join(dir, 'linked.json'); await symlink(target, linked);
+  assert.equal(python(`try:\n m.credential(${JSON.stringify(linked)});print('accepted')\nexcept ValueError: print('refused')`).stdout, 'refused', 'symlinked config');
   for (const argv of [['call', 'get_issue', '--arguments', '{}', '--publish'], ['call', 'delete_issue', '--arguments', '{}'], ['call', 'get_issue'], ['call', 'get_issue', 'x', '--arguments'], ['call', 'get_issue', '--arguments', '{}', '--extra']]) {
     assert.equal(spawnSync('python3', [TRANSPORT, ...argv], { encoding: 'utf8', timeout: 10000 }).status, 2, argv.join(' '));
   }

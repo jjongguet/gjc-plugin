@@ -171,11 +171,15 @@ are delegated unchanged to the policy `linear-trace.py --publish`. Measured
 2026-11-09: one MCP tool call cost 7-13 of the shared 2,500/hour requests, so a
 complete 96-issue project scan through MCP (about 1,500 requests) hit 429 before
 any write. The same scan now costs about two requests per issue (about 190 for
-96 issues). Filing rescans the project before every cluster and once more for a
-missing batch, so a run costs roughly (clusters + 1) scans plus 7-13 per MCP
-write: 8 clusters on that project is about 1,700 requests and the 20-cluster cap
-exceeds the hourly quota. Keep supervised `--max-issues` small on large projects;
-a 429 fails closed and continues through Aside as below. Project names resolve to
+96 issues). Filing scans on a cache miss, rescans before every write and clears
+the cache after each success, so a run costs about two scans per filed cluster
+(plus one for a missing batch) and 7-13 per MCP write: 8 clusters on a 96-issue
+project is about 3,200 requests, over the hourly quota. Reconciliation rescans
+once per action, so 20 actions there is about 4,000. Use `--max-issues` 5 or
+less and few reconcile actions per supervised run on large projects; a 429 fails
+closed and continues through Aside as below. The transport needs `python3`
+(override with `NIGHTLY_LINEAR_PYTHON`; `--linear-cli`/`NIGHTLY_LINEAR_CLI`
+replace the transport). Project names resolve to
 exactly one project id before listing. The credential is parsed in-process from the owner-only single-link
 `~/.gjc/agent/mcp.json`, sent only to `https://api.linear.app/graphql`, and never
 printed or passed as an argument.

@@ -47,6 +47,15 @@ test('complete inventory filing labels, parents, readbacks and preserves identit
   assert.equal((await publishFindings(options)).result.skipped[0].reason, 'up_to_date'); assert.equal(f.count(), 1);
 });
 
+test('an ambiguous or unterminated nightly label inventory refuses filing before any write', async () => {
+  for (const labels of [{ labels: [{ id: 'a', name: 'nightly' }, { id: 'b', name: 'nightly' }], hasNextPage: false }, { labels: [{ id: 'a', name: 'nightly' }], hasNextPage: true }]) {
+    const f = await setup();
+    f.client.listLabels = async () => labels;
+    await assert.rejects(publishFindings({ ...f, findings: [finding], runId: 'run-1' }), /label inventory/);
+    assert.equal(f.count(), 0);
+  }
+});
+
 test('missing batch is a separately scoped operation and creates one parent only', async () => {
   const f = await setup({ batch: false });
   const first = await publishFindings({ ...f, findings: [finding], runId: 'run-1' });

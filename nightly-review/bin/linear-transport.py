@@ -13,6 +13,7 @@ Credentials: the same owner-only, single-link ~/.gjc/agent/mcp.json bearer key i
 parsed in-process and sent only to the fixed Linear GraphQL endpoint. It is never
 printed, logged or passed as an argument. Errors are reduced to fixed messages.
 """
+import http.client
 import json
 import os
 import re
@@ -34,7 +35,7 @@ QUOTA_HINT = ("Linear 요청 한도 소진(429) — 차단이 아니다. 같은 
 ISSUE_FIELDS = """id identifier title description priority priorityLabel url createdAt updatedAt archivedAt triagedAt
   state { name type } labels(first: 50) { nodes { id name } pageInfo { hasNextPage } }
   assignee { id name } delegate { id name } project { id name } parent { id }
-  relations(first: 50) { nodes { type relatedIssue { id identifier } } pageInfo { hasNextPage } }"""
+  relations(first: 250) { nodes { type relatedIssue { id identifier } } pageInfo { hasNextPage } }"""
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -69,7 +70,7 @@ def graphql(query, variables, key, opener=None):
         if exc.code == 429 or rate_limited(exc):
             raise RuntimeError(QUOTA_HINT) from None
         raise RuntimeError(f"Linear GraphQL HTTP {exc.code}; no automatic retry") from None
-    except (urllib.error.URLError, TimeoutError):
+    except (urllib.error.URLError, TimeoutError, http.client.HTTPException):
         raise RuntimeError("Linear GraphQL connection failed; no automatic retry") from None
     except ValueError:
         # Header/URL validation messages can quote request values; never echo them.
