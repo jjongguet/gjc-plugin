@@ -162,7 +162,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
   if (!values.has("--out")) throw new Error("usage: run-pilot.mjs --out NEW_DIRECTORY [--live --approve-live 1 --budget JSON --pricing JSON --native-proof JSON --shared-delivery JSON]");
   const live = flags.has("--live");
   const json = (flag) => values.has(flag) ? loadJson(values.get(flag)) : null;
-  const report = await runPilot({ outputDir: values.get("--out"), mode: live ? "live" : "dry", approveLive: values.has("--approve-live") ? Number(values.get("--approve-live")) : null, budget: json("--budget"), pricing: json("--pricing"), nativeProof: json("--native-proof"), sharedDelivery: json("--shared-delivery"), apiKey: live ? process.env.OPENROUTER_API_KEY : null });
+  const report = await runPilot({ outputDir: values.get("--out"), mode: live ? "live" : "dry", approveLive: values.has("--approve-live") ? Number(values.get("--approve-live")) : null, budget: json("--budget"), pricing: json("--pricing"), nativeProof: json("--native-proof"), sharedDelivery: json("--shared-delivery"), apiKey: live ? process.env.OPENGATEWAY_API_KEY : null });
   console.log(JSON.stringify({ mode: report.mode, efficacy: report.efficacy, stopped: report.stopped, attempts: report.attemptsDenominator, cells: report.cellsDenominator, cost: report.cost, cohort: report.cohort }, null, 2));
   process.exitCode = report.stopped ? 1 : 0;
 }

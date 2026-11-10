@@ -140,8 +140,12 @@ node self-improve/m1/run-pilot.mjs --live --approve-live 1 \
   --shared-delivery /private/path/mini-delivery.json
 ```
 
-`OPENROUTER_API_KEY` must already be available to the parent; it is never passed
-to the native child. The four evidence documents are not interchangeable:
+`OPENGATEWAY_API_KEY` must already be available to the parent; it is never passed
+to the native child. The approved upstream is OpenGateway chat completions
+(`https://apis.opengateway.ai/v1/chat/completions`) pinned to
+`deepseek/deepseek-v4.1-flash-eco`; the response must echo that model id, and a
+`provider` field is accepted only when it is `sionic-ai`. The four evidence
+documents are not interchangeable:
 
 - **Budget:** `capUsd:1`, `taskCapUsd:5`, `maxCalls:21`; reconciled
   `priorSpentUsd`, `priorReservedUsd`, `priorUnresolvedUsd`, `cleanupUsd`,
@@ -150,9 +154,12 @@ to the native child. The four evidence documents are not interchangeable:
   `priorPilotSpentUsd`, `priorPilotReservedUsd`, `priorPilotUnresolvedUsd`).
   This fresh-run executor rejects an already-started pilot rather than reset
   its caps. Unknown amounts must not be entered as zero.
-- **Pricing:** observation time, exact model/provider and endpoint source,
-  conservative `inputPrice` and `outputPrice` in USD/token. An observation older
-  than 24 hours is refused. Native UI cost estimates are not accounting.
+- **Pricing:** observation time, the `https://apis.opengateway.ai/v1/models`
+  catalog source, exact model (`deepseek/deepseek-v4.1-flash-eco`) and provider
+  (`sionic-ai`), and the approved per-token `inputPrice` (`0.00000003`) and
+  `outputPrice` (`0.00000012`). An observation older than 24 hours, a different
+  source or identity, or a changed price is refused rather than defaulted.
+  Native UI cost estimates are not accounting.
 - **Native proof:** a successful current-source `probe-native.mjs` result,
   including real rule inclusion/exclusion and positive/negative kernel probes.
 - **MINI delivery:** verified first shared delivery, main SHA/tag, installed

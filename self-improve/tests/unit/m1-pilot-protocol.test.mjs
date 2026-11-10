@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import os from "node:os";
 import path from "node:path";
-import { checkLiveEvidence, pilotInputs, selectPublic, sourceDigest, cellReceipt } from "../../m1/pilot-protocol.mjs";
+import { APPROVED_PRICING, checkLiveEvidence, pilotInputs, PRICING_SOURCE, selectPublic, sourceDigest, cellReceipt } from "../../m1/pilot-protocol.mjs";
+import { MODEL, PROVIDER } from "../../m1/recording-proxy.mjs";
 import { runPilot } from "../../m1/run-pilot.mjs";
 import { buildLoadingReceipt } from "../../lib/loading-receipt.mjs";
 
@@ -13,7 +14,7 @@ const hex = "a".repeat(64);
 function admissionFixture() {
   return {
     budget: { capUsd: 1, taskCapUsd: 5, maxCalls: 21, priorSpentUsd: 0, priorReservedUsd: 0, priorUnresolvedUsd: 0, cleanupUsd: 0, priorPilotCalls: 0, priorPilotSpentUsd: 0, priorPilotReservedUsd: 0, priorPilotUnresolvedUsd: 0, accountingStatus: "reconciled", accountingEvidenceDigest: hex },
-    pricing: { observedAt: "2026-10-28T00:00:00Z", source: "https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints", model: "openai/gpt-4.1-mini", provider: "OpenAI", inputPrice: 0.0000004, outputPrice: 0.0000016 },
+    pricing: { observedAt: "2026-10-28T00:00:00Z", source: PRICING_SOURCE, model: MODEL, provider: PROVIDER, inputPrice: APPROVED_PRICING.inputPrice, outputPrice: APPROVED_PRICING.outputPrice },
     nativeProof: { passed: true, sourceDigest: hex, results: ["B0", "B1", "B2"].map((arm) => ({ arm, isolation: { status: "pass" }, native: { code: 0 }, requests: [{ status: "ok", rulePresent: arm === "B2" }] })) },
     sharedDelivery: { status: "verified", mainSha: "a".repeat(40), tag: "v1.2.3", installedSurfaceDigest: hex, freshUserSession: { id: "fixture-only", projectionDigest: hex, coverageStatus: "verified" } },
     currentSourceDigest: hex,
@@ -42,13 +43,28 @@ test("public selection chooses the first schema-valid candidate, not the oracle-
 test("admission includes all twenty-one calls and prior reserved task costs", () => {
   const f = admissionFixture();
   const admitted = checkLiveEvidence(f);
-  assert.ok(Math.abs(admitted.ceilingUsd - 0.03528) < 1e-12);
+  assert.ok(Math.abs(admitted.ceilingUsd - 0.002646) < 1e-12);
   assert.throws(() => checkLiveEvidence({ ...f, budget: { ...f.budget, priorReservedUsd: 5 } }), /aggregate_budget_exceeded/);
   assert.throws(() => checkLiveEvidence({ ...f, budget: { ...f.budget, priorSpentUsd: null } }), /prior_cost_unknown/);
   assert.throws(() => checkLiveEvidence({ ...f, budget: { ...f.budget, priorUnresolvedUsd: 0.01 } }), /prior_cost_unreconciled/);
   assert.throws(() => checkLiveEvidence({ ...f, budget: { ...f.budget, priorPilotCalls: 1 } }), /pilot_prior_execution_or_unknown/);
   assert.throws(() => checkLiveEvidence({ ...f, pricing: { ...f.pricing, inputPrice: 0 } }), /pricing_unverified/);
   assert.throws(() => checkLiveEvidence({ ...f, now: f.now + 86400000 }), /pricing_unverified/);
+});
+
+test("the retired OpenRouter/OpenAI pricing pin and any price drift are refused", () => {
+  const f = admissionFixture();
+  assert.equal(PRICING_SOURCE, "https://apis.opengateway.ai/v1/models");
+  const retired = { observedAt: "2026-10-28T00:00:00Z", source: "https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints", model: "openai/gpt-4.1-mini", provider: "OpenAI", inputPrice: 0.0000004, outputPrice: 0.0000016 };
+  assert.throws(() => checkLiveEvidence({ ...f, pricing: retired }), /pricing_unverified/);
+  for (const drift of [{ source: "https://openrouter.ai/api/v1/models" }, { model: "openai/gpt-4.1-mini" }, { provider: "OpenAI" }, { inputPrice: 0.000000031 }, { outputPrice: 0.000000121 }]) assert.throws(() => checkLiveEvidence({ ...f, pricing: { ...f.pricing, ...drift } }), /pricing_unverified/, JSON.stringify(drift));
+});
+
+test("the example budget pins the approved model with converted per-1k prices", () => {
+  const budgetDoc = JSON.parse(readFileSync(new URL("../../m1/budget.example.json", import.meta.url), "utf8"));
+  assert.equal(budgetDoc.modelPin, MODEL);
+  assert.ok(Math.abs(budgetDoc.pricePer1kInputUsd - APPROVED_PRICING.inputPrice * 1000) < 1e-15);
+  assert.ok(Math.abs(budgetDoc.pricePer1kOutputUsd - APPROVED_PRICING.outputPrice * 1000) < 1e-15);
 });
 
 test("stale native proof and incomplete first shared delivery cannot authorize paid execution", () => {
@@ -66,7 +82,7 @@ test("unapproved live execution is refused before creating artifacts or invoking
     await assert.rejects(runPilot({ outputDir, mode: "live", apiKey: "fake-test-only" }), /live_not_authorized/);
     assert.equal(existsSync(outputDir), false);
     const cli = spawnSync(process.execPath, [fileURLToPath(new URL("../../m1/run-pilot.mjs", import.meta.url)), "--live", "--out", outputDir], {
-      env: { PATH: process.env.PATH, GIT_DIR: path.join(root, "missing-git"), OPENROUTER_API_KEY: "fake-test-only" },
+      env: { PATH: process.env.PATH, GIT_DIR: path.join(root, "missing-git"), OPENGATEWAY_API_KEY: "fake-test-only" },
       encoding: "utf8",
       timeout: 5000,
     });
