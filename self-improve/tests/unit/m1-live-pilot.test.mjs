@@ -62,16 +62,25 @@ test("the native models.yml pins the approved model and per-million catalog cost
   assert.equal(/gpt-4\.1-mini|openrouter|openai\//i.test(yaml), false, "the retired pin is gone");
 });
 
-test("reservation is written before dispatch and unknown charges stay reserved", () => {
+test("reservation is written before dispatch and an unpriced charge is computed, never zero", () => {
   const events = [];
   const ledger = budget((e) => events.push(e));
   ledger.reserve("one");
   assert.equal(events[0].kind, "reserved");
   assert.equal(ledger.snapshot().calls, 1);
   assert.ok(ledger.snapshot().reservedUsd > 0);
-  assert.throws(() => ledger.settle("one", {}), /usage_missing/);
-  assert.ok(ledger.snapshot().reservedUsd > 0);
-  assert.throws(() => ledger.reserve("two"), /unknown_usage/);
+  const computed = ledger.settle("one", { prompt_tokens: 1000, completion_tokens: 100 });
+  assert.equal(computed.basis, "computed_tokens");
+  assert.equal(computed.measured, false);
+  assert.ok(Math.abs(computed.usd - (1000 * 0.0000004 + 100 * 0.0000016)) < 1e-15);
+  assert.equal(ledger.snapshot().measuredUsd, 0);
+  assert.ok(Math.abs(ledger.snapshot().computedUsd - computed.usd) < 1e-15);
+  assert.equal(ledger.snapshot().blocked, false);
+  ledger.reserve("two");
+  const bound = ledger.settle("two", {});
+  assert.equal(bound.basis, "computed_bound");
+  assert.ok(Math.abs(bound.usd - (3000 * 0.0000004 + 300 * 0.0000016)) < 1e-15);
+  assert.equal(ledger.snapshot().blocked, false);
 });
 
 test("task prior spend and call ceilings cannot be reset per attempt", () => {
@@ -155,7 +164,7 @@ test("mock live transport pins route/model/cap, strips child credentials and rec
     assert.equal(response.status, 200);
     await response.text();
     assert.equal(calls, 1);
-    assert.deepEqual(proxy.rows[0].usage, { usd: 0.0001, input: 100, output: 10 });
+    assert.deepEqual(proxy.rows[0].usage, { usd: 0.0001, input: 100, output: 10, basis: "measured", measured: true });
     assert.equal(proxy.rows[0].provider, PROVIDER);
     assert.equal(proxy.rows[0].model, MODEL);
     assert.equal(ledger.snapshot().reservedUsd, 0);
@@ -195,18 +204,21 @@ test("transport errors retain reservations and forbid a new slot", async () => {
   } finally { await proxy.close(); }
 });
 
-test("a response without a provider cost keeps the provider request id for billing", async () => {
+test("a response without a billed cost is priced from its tokens and keeps the provider request id", async () => {
   const ledger = budget();
   const proxy = await startRecordingProxy({ mode: "live", ruleText, apiKey: "fake-parent-key", ledger, fetchImpl: async () => Response.json({ id: "gen-billing-recovery", object: "chat.completion", model: MODEL, usage: { prompt_tokens: 2000, completion_tokens: 120 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] }) });
   try {
     const response = await send(proxy, proxy.armSlot("billing", "B0"), body());
-    assert.equal(response.status, 400);
-    assert.match(await response.text(), /usage_missing/);
-    assert.equal(proxy.rows[0].error, "usage_missing");
+    assert.equal(response.status, 200);
+    await response.text();
     assert.equal(proxy.rows[0].providerRequestId, "gen-billing-recovery");
     assert.deepEqual(proxy.rows[0].usageFields, ["completion_tokens", "prompt_tokens"]);
-    assert.equal(ledger.snapshot().spentUsd, 0);
-    assert.ok(ledger.snapshot().reservedUsd > 0);
+    assert.equal(proxy.rows[0].usage.basis, "computed_tokens");
+    assert.ok(Math.abs(proxy.rows[0].usage.usd - (2000 * 0.0000004 + 120 * 0.0000016)) < 1e-15);
+    assert.equal(ledger.snapshot().measuredUsd, 0);
+    assert.ok(ledger.snapshot().computedUsd > 0);
+    assert.equal(ledger.snapshot().reservedUsd, 0);
+    assert.equal(ledger.snapshot().blocked, false);
   } finally { await proxy.close(); }
 });
 

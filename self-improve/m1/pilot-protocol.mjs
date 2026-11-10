@@ -78,8 +78,12 @@ export function cellReceipt({ cell, attempts, inputs, loading, isolation, source
   const outcome = executionError ? "error" : complete ? judged?.passed ? "passed" : "failed" : attempts.some((attempt) => attempt.status === "error") ? "error" : "skipped";
   const receiptDigest = digest(attempts);
   const oracleEvidence = judged?.evidenceDigest ?? digest({ oracleDigest: digest(inputs.oracle), selected: null });
-  const measured = mode === "live" && attempts.every((attempt) => attempt.usage && Number.isFinite(attempt.usage.usd));
-  const cost = { measured, wallMs, inputTokens: attempts.reduce((n, a) => n + (a.usage?.input ?? 0), 0), outputTokens: attempts.reduce((n, a) => n + (a.usage?.output ?? 0), 0), usd: measured ? attempts.reduce((n, a) => n + a.usage.usd, 0) : null };
+  const priced = mode === "live" && attempts.every((attempt) => attempt.usage && Number.isFinite(attempt.usage.usd));
+  // A price derived from provider-reported tokens at the approved rates is not a provider-billed
+  // charge; the receipt states which basis produced the figure instead of letting it pass as metered.
+  const providerMetered = priced && attempts.every((attempt) => attempt.usage.measured === true);
+  const costBasis = !priced ? null : providerMetered ? "measured" : attempts.some((attempt) => attempt.usage.basis === "computed_bound") ? "computed_bound" : "computed_tokens";
+  const cost = { measured: priced, providerMetered, basis: costBasis, wallMs, inputTokens: attempts.reduce((n, a) => n + (a.usage?.input ?? 0), 0), outputTokens: attempts.reduce((n, a) => n + (a.usage?.output ?? 0), 0), usd: priced ? attempts.reduce((n, a) => n + a.usage.usd, 0) : null };
   const record = {
     schema: "gjc.quality_trial.v2", trialId: `${cell.arm}-r${cell.repeat}`, taskId: cell.taskId, taskVersion: "1", split: "development", arm: cell.arm, repeat: cell.repeat, goalRevision: "1",
     producer: { id: "jjo945-frozen-protocol", kind: "consensus-reviewed-harness" },

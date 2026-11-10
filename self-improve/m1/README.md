@@ -149,8 +149,13 @@ documents are not interchangeable:
 
 Every call asks the gateway for a priced usage record (`usage.include`), and the
 provider request id and the returned usage field names are written to the
-attempt row before settlement. A charge that cannot be priced at the proxy
-still keeps the identifiers needed to recover its cost from provider billing.
+attempt row before settlement. If the response omits a billed cost, the charge
+is priced from its reported token counts at the approved rates
+(`basis: computed_tokens`, `measured: false`); if even the token counts are
+absent, the full reserved bound is charged (`basis: computed_bound`). A charge
+is never recorded as zero. The ledger snapshot and the cell receipt keep
+`measuredUsd`/`computedUsd` and `providerMetered` separate, so a computed figure
+is never reported as a provider bill.
 
 - **Budget:** `capUsd:1`, `taskCapUsd:5`, `maxCalls:21`; reconciled
   `priorSpentUsd`, `priorReservedUsd`, `priorUnresolvedUsd`, `cleanupUsd`,

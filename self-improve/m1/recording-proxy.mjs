@@ -56,10 +56,12 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
   const reservation = 3000 * inputPrice + 300 * outputPrice;
   let calls = 0;
   let spent = 0;
+  let measuredSpent = 0;
+  let computedSpent = 0;
   let blocked = priorUnresolvedUsd > 0;
   const pending = new Map();
   const seen = new Set();
-  const snapshot = () => ({ calls, spentUsd: spent, reservedUsd: [...pending.values()].reduce((a, b) => a + b, 0), priorSpentUsd, priorReservedUsd, priorUnresolvedUsd, blocked });
+  const snapshot = () => ({ calls, spentUsd: spent, measuredUsd: measuredSpent, computedUsd: computedSpent, reservedUsd: [...pending.values()].reduce((a, b) => a + b, 0), priorSpentUsd, priorReservedUsd, priorUnresolvedUsd, blocked });
   return {
     snapshot,
     reserve(id) {
@@ -78,19 +80,25 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
     },
     settle(id, usage) {
       if (!pending.has(id)) fail("unknown_request");
-      const valid = usage && Number.isFinite(usage.cost) && usage.cost >= 0 && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens >= 0 && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0;
-      if (!valid) {
-        blocked = true;
-        onEvent({ kind: "unresolved", id, reason: "usage_missing", state: snapshot() });
-        fail("usage_missing");
-      }
-      spent += usage.cost;
-      const boundBroken = usage.cost > pending.get(id) + 1e-12 || usage.prompt_tokens > 3000 || usage.completion_tokens > 300;
+      // Owner decision 2026-11-10: a gateway response without a billed cost is priced from
+      // the provider-reported token counts at the approved rates, and recorded as computed.
+      // When even the token counts are absent the full reserved bound is charged instead of
+      // leaving the call unmeasured; a charge is never silently zero.
+      const tokens = usage && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens >= 0 && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0;
+      const billed = usage && Number.isFinite(usage.cost) && usage.cost >= 0;
+      const input = tokens ? usage.prompt_tokens : 3000;
+      const output = tokens ? usage.completion_tokens : 300;
+      const usd = billed ? usage.cost : input * inputPrice + output * outputPrice;
+      const basis = billed ? "measured" : tokens ? "computed_tokens" : "computed_bound";
+      spent += usd;
+      if (basis === "measured") measuredSpent += usd; else computedSpent += usd;
+      const boundBroken = (billed && usage.cost > pending.get(id) + 1e-12) || input > 3000 || output > 300;
       pending.delete(id);
       blocked ||= boundBroken;
-      onEvent({ kind: "settled", id, usage: { usd: usage.cost, input: usage.prompt_tokens, output: usage.completion_tokens }, state: snapshot() });
+      const settlement = { usd, input, output, basis, measured: basis === "measured" };
+      onEvent({ kind: "settled", id, usage: settlement, state: snapshot() });
       if (boundBroken) fail("provider_bound_exceeded");
-      return { usd: usage.cost, input: usage.prompt_tokens, output: usage.completion_tokens };
+      return settlement;
     },
     unresolved(id) {
       if (!pending.has(id)) return;
