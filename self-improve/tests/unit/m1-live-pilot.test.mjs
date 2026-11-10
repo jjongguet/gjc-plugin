@@ -145,6 +145,7 @@ test("mock live transport pins route/model/cap, strips child credentials and rec
     const request = JSON.parse(options.body);
     assert.equal(request.model, MODEL);
     assert.equal(request.max_tokens, 300);
+    assert.deepEqual(request.usage, { include: true }, "the gateway is asked for a priced usage record");
     assert.equal(request.provider, undefined, "no OpenRouter-only provider routing is sent");
     assert.equal(ledger.snapshot().calls, 1, "reservation exists before fetch");
     return Response.json({ id: "gen-test-only", model: MODEL, provider: PROVIDER, usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] });
@@ -191,6 +192,21 @@ test("transport errors retain reservations and forbid a new slot", async () => {
     assert.equal(ledger.snapshot().blocked, true);
     assert.ok(ledger.snapshot().reservedUsd > 0);
     assert.throws(() => proxy.armSlot("retry", "B0"), /proxy_stopped/);
+  } finally { await proxy.close(); }
+});
+
+test("a response without a provider cost keeps the provider request id for billing", async () => {
+  const ledger = budget();
+  const proxy = await startRecordingProxy({ mode: "live", ruleText, apiKey: "fake-parent-key", ledger, fetchImpl: async () => Response.json({ id: "gen-billing-recovery", object: "chat.completion", model: MODEL, usage: { prompt_tokens: 2000, completion_tokens: 120 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] }) });
+  try {
+    const response = await send(proxy, proxy.armSlot("billing", "B0"), body());
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /usage_missing/);
+    assert.equal(proxy.rows[0].error, "usage_missing");
+    assert.equal(proxy.rows[0].providerRequestId, "gen-billing-recovery");
+    assert.deepEqual(proxy.rows[0].usageFields, ["completion_tokens", "prompt_tokens"]);
+    assert.equal(ledger.snapshot().spentUsd, 0);
+    assert.ok(ledger.snapshot().reservedUsd > 0);
   } finally { await proxy.close(); }
 });
 

@@ -182,7 +182,7 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
         const response = await fetchImpl(UPSTREAM, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false }),
+          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false, usage: { include: true } }),
         });
         if (!response.ok) fail("upstream_http_error");
         const responseChunks = [];
@@ -193,11 +193,14 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
           responseChunks.push(chunk);
         }
         const data = JSON.parse(Buffer.concat(responseChunks).toString("utf8"));
+        // Billing evidence is recorded before settlement: an unmeasurable charge must still
+        // leave the provider request id and the usage fields it actually returned.
+        row.providerRequestId = typeof data.id === "string" ? data.id : null;
+        row.usageFields = data.usage && typeof data.usage === "object" ? Object.keys(data.usage).sort() : [];
         row.usage = ledger.settle(boundSlot.id, data.usage);
         reserved = false;
         const identity = upstreamIdentity(data);
         if (!identity.ok) fail("upstream_identity_mismatch");
-        row.providerRequestId = data.id;
         row.provider = identity.provider;
         row.model = data.model;
         const choice = data.choices?.[0];

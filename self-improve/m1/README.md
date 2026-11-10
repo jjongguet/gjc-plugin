@@ -147,6 +147,11 @@ to the native child. The approved upstream is OpenGateway chat completions
 `provider` field is accepted only when it is `sionic-ai`. The four evidence
 documents are not interchangeable:
 
+Every call asks the gateway for a priced usage record (`usage.include`), and the
+provider request id and the returned usage field names are written to the
+attempt row before settlement. A charge that cannot be priced at the proxy
+still keeps the identifiers needed to recover its cost from provider billing.
+
 - **Budget:** `capUsd:1`, `taskCapUsd:5`, `maxCalls:21`; reconciled
   `priorSpentUsd`, `priorReservedUsd`, `priorUnresolvedUsd`, `cleanupUsd`,
   `accountingStatus` and `accountingEvidenceDigest`. Prior pilot calls, spend,
