@@ -155,6 +155,7 @@ test("mock live transport pins route/model/cap, strips child credentials and rec
     assert.equal(request.model, MODEL);
     assert.equal(request.max_tokens, 300);
     assert.deepEqual(request.usage, { include: true }, "the gateway is asked for a priced usage record");
+    assert.equal(request.reasoning_effort, "none", "reasoning tokens must not consume the 300-token cell budget");
     assert.equal(request.provider, undefined, "no OpenRouter-only provider routing is sent");
     assert.equal(ledger.snapshot().calls, 1, "reservation exists before fetch");
     return Response.json({ id: "gen-test-only", model: MODEL, provider: PROVIDER, usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] });

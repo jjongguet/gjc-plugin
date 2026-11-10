@@ -190,7 +190,7 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
         const response = await fetchImpl(UPSTREAM, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false, usage: { include: true } }),
+          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false, reasoning_effort: "none", usage: { include: true } }),
         });
         if (!response.ok) fail("upstream_http_error");
         const responseChunks = [];
