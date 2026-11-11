@@ -1,0 +1,202 @@
+{
+  "version": 1,
+  "corpus": "corpus",
+  "cases": [
+    {
+      "id": "sup-01",
+      "claim": "Linear 429 responses are quota exhaustion; switch to the fallback lane immediately.",
+      "expected": "supported",
+      "drift": "retry-vs-exhaustion"
+    },
+    {
+      "id": "sup-02",
+      "claim": "The default SSH alias resolves through Tailscale and works from anywhere.",
+      "expected": "supported",
+      "drift": "ssh-alias-inversion"
+    },
+    {
+      "id": "sup-03",
+      "claim": "The <name>-lan alias is only the home LAN emergency fallback.",
+      "expected": "supported",
+      "drift": "ssh-alias-inversion"
+    },
+    {
+      "id": "sup-04",
+      "claim": "Release tags are created only from main after the full gate passes.",
+      "expected": "supported",
+      "drift": "renamed-rule"
+    },
+    {
+      "id": "sup-05",
+      "claim": "verification_run forwards the host PATH to node:test and withholds HOME by default.",
+      "expected": "supported",
+      "drift": "path-forwarding"
+    },
+    {
+      "id": "sup-06",
+      "claim": "spawn-based tests can find executables through the forwarded PATH.",
+      "expected": "supported",
+      "drift": "path-forwarding"
+    },
+    {
+      "id": "sup-07",
+      "claim": "Plugin results live under ~/.gjc-plugin with 0700 directories and 0600 files.",
+      "expected": "supported"
+    },
+    {
+      "id": "sup-08",
+      "claim": "Generated tools and hooks are build outputs; never edit them by hand.",
+      "expected": "supported"
+    },
+    {
+      "id": "sup-09",
+      "claim": "Plugin suites pass offline without provider credentials.",
+      "expected": "supported"
+    },
+    {
+      "id": "sup-10",
+      "claim": "The repository bumps plugin versions only at tagged releases.",
+      "expected": "supported"
+    },
+    {
+      "id": "sup-11",
+      "claim": "wiki_propose submits a pending proposal and never publishes it.",
+      "expected": "supported"
+    },
+    {
+      "id": "sup-12",
+      "claim": "Publication requires a separate approval; the plugin cannot approve its own proposal.",
+      "expected": "supported"
+    },
+    {
+      "id": "con-01",
+      "claim": "Linear 429 responses are a transient retry condition; retry them with backoff.",
+      "expected": "contradicted",
+      "drift": "retry-vs-exhaustion"
+    },
+    {
+      "id": "con-02",
+      "claim": "Run a retry loop on a Linear 429 until it succeeds.",
+      "expected": "contradicted",
+      "drift": "retry-vs-exhaustion"
+    },
+    {
+      "id": "con-03",
+      "claim": "The default SSH alias means the home LAN and only works at home.",
+      "expected": "contradicted",
+      "drift": "ssh-alias-inversion"
+    },
+    {
+      "id": "con-04",
+      "claim": "The <name>-lan alias is the primary remote path.",
+      "expected": "contradicted",
+      "drift": "ssh-alias-inversion"
+    },
+    {
+      "id": "con-05",
+      "claim": "Release tags may be created from a topic branch after local tests pass.",
+      "expected": "contradicted",
+      "drift": "renamed-rule"
+    },
+    {
+      "id": "con-06",
+      "claim": "verification_run hides the host PATH from node:test.",
+      "expected": "contradicted",
+      "drift": "path-forwarding"
+    },
+    {
+      "id": "con-07",
+      "claim": "The full HOME environment is passed to tests by default.",
+      "expected": "contradicted",
+      "drift": "home-withheld"
+    },
+    {
+      "id": "con-08",
+      "claim": "Plugin result files may be group-readable (0640).",
+      "expected": "contradicted"
+    },
+    {
+      "id": "con-09",
+      "claim": "Generated tools and hooks are hand-edited source files.",
+      "expected": "contradicted"
+    },
+    {
+      "id": "con-10",
+      "claim": "Plugin test suites require live provider credentials.",
+      "expected": "contradicted"
+    },
+    {
+      "id": "con-11",
+      "claim": "wiki_propose publishes a proposal page immediately after submission.",
+      "expected": "contradicted"
+    },
+    {
+      "id": "con-12",
+      "claim": "Memory overrides repository state when the two conflict.",
+      "expected": "contradicted"
+    },
+    {
+      "id": "unv-01",
+      "claim": "Project Bluefin uses a 14-node staging cluster.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-02",
+      "claim": "The owner's favorite weekday is Tuesday.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-03",
+      "claim": "Backup drill checksum 83302ffc belongs to the operations database.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-04",
+      "claim": "The internal mirror mirror-7 is hosted in Frankfurt.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-05",
+      "claim": "The legacy rule://wo[REDACTED] reference is still valid.",
+      "expected": "unverifiable",
+      "drift": "masked-rule-ref"
+    },
+    {
+      "id": "unv-06",
+      "claim": "rule://ci-release defines the release process.",
+      "expected": "unverifiable",
+      "drift": "renamed-rule"
+    },
+    {
+      "id": "unv-07",
+      "claim": "The 2025-01-15 snapshot of bluefin is still current.",
+      "expected": "unverifiable",
+      "drift": "expired-snapshot"
+    },
+    {
+      "id": "unv-08",
+      "claim": "Artifact 9f2c41ab was signed on the offline root.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-09",
+      "claim": "The qa-7 host is reachable over Tailscale.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-10",
+      "claim": "The plugin metrics dashboard shows daily active users.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-11",
+      "claim": "The wiki index has 412 entries.",
+      "expected": "unverifiable"
+    },
+    {
+      "id": "unv-12",
+      "claim": "The next release will be v0.1.0.",
+      "expected": "unverifiable"
+    }
+  ]
+}

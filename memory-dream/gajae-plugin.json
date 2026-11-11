@@ -1,0 +1,19 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "memory-dream",
+  "version": "0.0.1",
+  "tools": [
+    {
+      "name": "memory_dream",
+      "path": "tools/memory-dream.ts",
+      "description": "Read-only dreaming pass over GJC's project memory: claim decomposition, injection-budget and dead-reference checks, bounded canonical/transcript evidence, optional advisory Jev consistency checks, and one private JSON+MD report under ~/.gjc-plugin/memory-dream. Never edits, deletes or enqueues GJC memory or session files; a report is not proof that a note is true."
+    }
+  ],
+  "hooks": [
+    {
+      "name": "memory-dream-session-start",
+      "event": "session_start",
+      "path": "hooks/memory-dream-session-start.ts"
+    }
+  ]
+}
