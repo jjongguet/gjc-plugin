@@ -408,7 +408,7 @@ if (args[3] === "path") {
 		assert.deepEqual(Object.keys((generated.parameters as any).properties).sort(), ["account", "max_results", "query"]);
 		assert.ok(JSON.parse(readFileSync(path.join(plugin, "../gjc-plugin.json"), "utf8")).plugins.includes("aside-memory/gajae-plugin.json"));
 		const scripts = JSON.parse(readFileSync(path.join(plugin, "../package.json"), "utf8")).scripts;
-		assert.match(scripts.build, /build:aside-memory$/);
+		assert.match(scripts.build, /(^|&& )bun run build:aside-memory( &&|$)/);
 		// The root test entry runs every `test:*` script concurrently (scripts/run-checks.mjs), so this plugin's suite joins it through its own step.
 		assert.equal(scripts["test:aside-memory"], "bun aside-memory/scripts/verify.ts");
 		assert.match(scripts.test, /node scripts\/run-checks\.mjs$/);

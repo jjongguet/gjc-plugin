@@ -1,0 +1,53 @@
+#!/usr/bin/env node
+/**
+ * Build the egm plugin surface from lib/readiness.ts + src/readiness.adapter.ts.
+ *
+ *   node scripts/build.mjs --check   →  non-mutating drift check (exit 1 on drift)
+ *   node scripts/build.mjs           →  tools/ at the plugin root
+ *
+ * ALWAYS keyless: the generated surface is committed for one-command
+ * distribution. The readiness report reads local files only and writes
+ * nothing, so the bundle carries no credential or storage channel.
+ */
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
+const surfaces = [{ core: "lib/readiness.ts", adapter: "src/readiness.adapter.ts", out: "tools/egm-readiness.ts" }];
+
+const banner = [
+	"// GENERATED FILE — do not edit by hand.",
+	"// Core: lib/readiness.ts + adapter: {ADAPTER}",
+	"// Rebuild with: bun scripts/build.mjs",
+	"",
+].join("\n");
+
+const keysBlock = "\n// Keyless build. No credentials are read; the readiness report reads local files only and writes nothing.\n";
+
+const check = process.argv.includes("--check");
+const stripLocalImports = text => text.replace(/^import .* from ["']\..*["'];?\r?\n/gm, "");
+let drift = false;
+for (const surface of surfaces) {
+	const core = stripLocalImports(await readFile(path.join(pluginRoot, surface.core), "utf8"));
+	const adapter = stripLocalImports(await readFile(path.join(pluginRoot, surface.adapter), "utf8"));
+	const header = banner.replace("{ADAPTER}", surface.adapter);
+	const file = path.join(pluginRoot, surface.out);
+	const text = `${header}\n${core.trimEnd()}\n${keysBlock}\n${adapter.trimStart()}`;
+	if (check) {
+		const existing = await readFile(file, "utf8").catch(() => null);
+		if (existing !== text) {
+			drift = true;
+			process.stderr.write(`generated_out_of_sync:${surface.out}\n`);
+		}
+		continue;
+	}
+	await mkdir(path.dirname(file), { recursive: true });
+	await writeFile(file, text, "utf8");
+	console.log(`built ${surface.out} (keyless)`);
+}
+if (check) {
+	if (drift) process.exit(1);
+	console.log(`generated surfaces are in sync: ${surfaces.map(surface => surface.out).join(", ")}`);
+}

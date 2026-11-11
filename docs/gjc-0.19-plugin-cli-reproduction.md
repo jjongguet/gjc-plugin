@@ -179,8 +179,8 @@ exercised by the reproductions above.
 - Each `mcpServers[name]` may only use the keys the bundle runtime preserves; any other key is
   `unsupported_surface`.
 
-This repository's eight plugin manifests already use only canonical fields, which is why they install
-on 0.19.0 while a Claude-Code-shaped or extended manifest does not.
+The eight plugin manifests this repository shipped at this measurement already use only canonical
+fields, which is why they install on 0.19.0 while a Claude-Code-shaped or extended manifest does not.
 
 ## Upstream requests
 

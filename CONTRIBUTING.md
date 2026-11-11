@@ -50,11 +50,12 @@ node verification-receipts/scripts/smoke-host.mjs --metrics
 node verification-receipts/scripts/smoke-host.mjs --installed
 node verification-receipts/scripts/smoke-host.mjs --installed --advisor
 node jev-advisor/scripts/smoke-results.mjs
+node egm/scripts/smoke-native.mjs
 UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui-rejections
 UI_REGRESSION_ACCOUNT=<explicit-routing> node verification-receipts/scripts/smoke-host.mjs --installed --ui
 ```
 
-The onboarding smoke installs `backplan` from the checkout into a throwaway GJC root, calls `backplan_check` with the bundled examples from a fresh `gjc --print` process through a scripted loopback endpoint, uninstalls it and confirms the real plugin registry is unchanged; it proves the README quick start path, not model behaviour. Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.
+The onboarding smoke installs `backplan` from the checkout into a throwaway GJC root, calls `backplan_check` with the bundled examples from a fresh `gjc --print` process through a scripted loopback endpoint, uninstalls it and confirms the real plugin registry is unchanged; it proves the README quick start path, not model behaviour. Host smoke copies installed bundles into a private isolated GJC root and uses only a loopback provider; it does not mutate user configuration. The EGM smoke clones the pinned EGM tag from GitHub (its only network step), installs it with `gjc plugin marketplace add` + `gjc plugin install egm@egm` and this checkout's `egm` bundle into a throwaway GJC root, and drives fresh `gjc --print` processes through a scripted loopback model that also answers the `task` subagent: it checks skill discovery, `egm_readiness`, the namespaced `/skill:egm:<name>` command, that a parent-only sentinel never reaches the subagent request, that `task` cannot be activated when it is not launched, and reports which host instruction files still reach the subagent; it proves the install and isolation wiring, not review quality. Jev result smoke imports installed hooks in a fresh isolated process and exercises bounded synthetic task/launch/terminal events — it proves hook/storage consumption, not a real child delegation or task quality. Browser smoke requires an actually connected Aside profile and inspected owned loopback handlers. Report source tests, installed dispatch, browser observations and real-provider judgment separately; never blend them into a single claim.
 
 ## CI
 
@@ -73,7 +74,7 @@ placeholder for the local-only existence contract.
 
 - Declare every installed surface (tools, hooks, skills) in `gajae-plugin.json`; keep generated surfaces keyless and reproducible from `lib/` + `src/` sources.
 - Add the distribution-index entry in `gjc-plugin.json` and the table row in `README.md`.
-- Reuse the shared private-result primitives (`shared/`) when persistence is required. Transient wrappers such as `aside-memory` intentionally do not journal private payloads; never serialize arbitrary tool output as evidence.
+- Reuse the shared private-result primitives (`shared/`) when persistence is required. Transient wrappers such as `aside-memory` and the read-only `egm_readiness` intentionally do not journal private payloads; never serialize arbitrary tool output as evidence.
 - Tools whose parameters are empty should carry an explicit `schema` in the manifest when static extraction fails.
 
 Typical plugin layout:

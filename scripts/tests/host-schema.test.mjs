@@ -68,6 +68,7 @@ function parametersOf(module, name) {
 const ADAPTERS = [
   "aside-memory/src/memory.adapter.ts",
   "backplan/src/check.adapter.ts",
+  "egm/src/readiness.adapter.ts",
   "jev-advisor/src/check.adapter.ts",
   "jev-advisor/src/metrics.adapter.ts",
   "jev-advisor/src/tool.adapter.ts",
@@ -83,9 +84,9 @@ const ADAPTERS = [
 ];
 
 // Tools whose adapter declares no parameters at all.
-const NO_ARGUMENT_TOOLS = new Set(["plugin_metrics", "rea_readiness"]);
+const NO_ARGUMENT_TOOLS = new Set(["egm_readiness", "plugin_metrics", "rea_readiness"]);
 
-const PLUGINS = ["aside-memory", "backplan", "jev-advisor", "rea", "rrsi", "ui-regression", "verification-receipts", "wiki"];
+const PLUGINS = ["aside-memory", "backplan", "egm", "jev-advisor", "rea", "rrsi", "ui-regression", "verification-receipts", "wiki"];
 
 for (const relative of ADAPTERS) {
   test(`${relative} advertises no host-rejectable parameter keyword`, async () => {
@@ -93,7 +94,7 @@ for (const relative of ADAPTERS) {
     const { name, parameters } = parametersOf(module, "default");
     expect(parameters, `${relative} declares parameters`).toBeTruthy();
     const schema = toSchema(parameters);
-    // Exactly these two tools take no arguments; an empty view anywhere else means the
+    // Exactly these three tools take no arguments; an empty view anywhere else means the
     // conversion broke and the assertion below stopped looking at anything.
     const fields = Object.keys(schema.properties ?? {}).length;
     expect(fields === 0, `${relative} field count`).toBe(NO_ARGUMENT_TOOLS.has(name));
