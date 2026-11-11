@@ -1,0 +1,672 @@
+{
+  "format": "gjc-installed-surface/v1",
+  "mode": "installed",
+  "generatedAt": "2026-11-11T08:29:31.204Z",
+  "repo": "~/.gajaeway-jjong-macmini/lanes/6a6a6f313039332d696e7374616c6c2d68617368",
+  "tag": "v0.0.15",
+  "tagCommit": "238aa0b175b463e95986e4a288209c50aeaa6bc9",
+  "registry": "~/.gjc/agent/gjc-plugins/registry.json",
+  "registrySha256": "d88395b4aca65a145bf7d6300ca7757105423bfb636a032a1b4e380e7275478a",
+  "laterRefs": [
+    "v0.0.16",
+    "v0.0.18",
+    "v0.0.19",
+    "v0.0.20",
+    "v0.0.21",
+    "v0.0.22",
+    "v0.0.23",
+    "v0.0.24",
+    "v0.0.25",
+    "v0.0.26",
+    "origin/main"
+  ],
+  "summary": {
+    "tagSurfaceFiles": 30,
+    "installedFiles": 38,
+    "inScopeFiles": 35,
+    "match": 2,
+    "notInTag": 5,
+    "missing": 0,
+    "laterRelease": 28,
+    "snapshotNotInGit": 0,
+    "unexplainedDrift": 0,
+    "outOfRepoPlugins": 1,
+    "outOfRepoFiles": 3,
+    "symlinks": 0
+  },
+  "plugins": [
+    {
+      "name": "agents-freshness",
+      "installedVersion": "0.1.0",
+      "tagVersion": null,
+      "classification": "out-of-repo",
+      "reason": "not listed in gjc-plugin.json at v0.0.15 or origin/main; registry source lies outside this repository",
+      "source": {
+        "kind": "path",
+        "uri": "<home>/.gjc/agent/policy/plugins/agents-freshness"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/agents-freshness",
+      "tagSurfaceFiles": 0,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "not-in-tag"
+        },
+        {
+          "path": "hooks/start.ts",
+          "status": "not-in-tag"
+        },
+        {
+          "path": "tools/check.ts",
+          "status": "not-in-tag"
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "aside-memory",
+      "installedVersion": "0.0.2",
+      "tagVersion": "0.0.2",
+      "classification": "pinned",
+      "source": {
+        "kind": "path",
+        "uri": "<home>/jjongguet/gjc-plugin/aside-memory"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/aside-memory",
+      "tagSurfaceFiles": 2,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "match",
+          "sha256": "24fe0fd219594055f0d90a87b3dfdd75728b1d644eaa3272d9dae33d3b450030"
+        },
+        {
+          "path": "tools/aside-memory.ts",
+          "status": "match",
+          "sha256": "8ef8e16efb40f570bc32210f16e56fbc7deda4ab77d1e7f5e609b51621ee38bc"
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "backplan",
+      "installedVersion": "0.0.10",
+      "tagVersion": "0.0.9",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "<home>/jjongguet/gjc-plugin/backplan"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/backplan",
+      "tagSurfaceFiles": 2,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "c8a9bca9124b0e9928951eb0fc90c2099bce36143be662042417bef3557f5292",
+          "tagSha256": "6a53dcecd366fa5d1288edd3421f2e2223e0005ffe5e436432a1bc44135cab55",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/backplan-check.ts",
+          "status": "later-release",
+          "sha256": "6705f26bdb0601b418d7812b26f24f1316de60dab7604c9b6b3b0c8785bb641a",
+          "tagSha256": "f434735b9c6256d20171596dbfdf8e1518b9e5c4b0cd1b8622e85b549697f033",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "egm",
+      "installedVersion": "0.0.1",
+      "tagVersion": null,
+      "classification": "post-tag",
+      "reason": "plugin is shipped by origin/main but not by v0.0.15",
+      "source": {
+        "kind": "path",
+        "uri": "~/jjongguet/gjc-plugin/egm"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/egm",
+      "tagSurfaceFiles": 0,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "not-in-tag"
+        },
+        {
+          "path": "tools/egm-readiness.ts",
+          "status": "not-in-tag"
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "jev-advisor",
+      "installedVersion": "0.0.16",
+      "tagVersion": "0.0.11",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "~/jjongguet/gjc-plugin/jev-advisor"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/jev-advisor",
+      "tagSurfaceFiles": 9,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "2d3951defe2f4e08b2e59d639d0f57711d9a376684bc750ee8d2c9994a1ea554",
+          "tagSha256": "03739310b9c738b1dbcaabc9fa2213c46c7aea8de54777d4059e6fcb8f3e6a3e",
+          "refs": [
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/jev-advisor-alignment-observe.ts",
+          "status": "later-release",
+          "sha256": "cf8a65b7bbb99623c84f1f50cc90458f15da7759261ef3e8227416012f767337",
+          "tagSha256": "b380565ad7ba1887ddc86bf496426797eee77818b83ccccb6f682e40f9cf2666",
+          "refs": [
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/jev-advisor-alignment-shutdown.ts",
+          "status": "later-release",
+          "sha256": "c7fff74305bb15714bd0871e291c17609ca2002d1c7f284970a4bb137192592b",
+          "tagSha256": "cec576d109ced12cecba002bc438da6be1cf377c124b9c170d442ef044b18c57",
+          "refs": [
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/jev-advisor-alignment.ts",
+          "status": "later-release",
+          "sha256": "963c3090350d20f7358beb791b1e4d24af701aaa5a81a5cdf120c9ac9cb7945a",
+          "tagSha256": "7379b3dde6a22c92cc2854666f1bb0d3e44e051240fe77dfc90de55773c2eea3",
+          "refs": [
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/jev-advisor-result.ts",
+          "status": "later-release",
+          "sha256": "5ded86121803c893b4e2599b7cd8f703ef4b376fd6d0ed7d77018f84a7a4219e",
+          "tagSha256": "c1c376f0f196e06ce84cef6503a8f160e9f21d9d363290bb3abda7ab16f93768",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        },
+        {
+          "path": "hooks/jev-advisor.ts",
+          "status": "later-release",
+          "sha256": "3bbb5565a09c9a4764643b424c695d98f25d86bc7e33aa826f276ca1ef3bed46",
+          "tagSha256": "9c78bcf049c14d6b6c3d6c86c7997925edda67f1aa33e6766cd86018c6ab6cfe",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        },
+        {
+          "path": "tools/jev-advise.ts",
+          "status": "later-release",
+          "sha256": "360b45ac8b27db941c8bd26665a46b4942ca417f5d2c46c630a3013f865fe60f",
+          "tagSha256": "1818ef37bd9d659b59f9f0a87e28093135e2a634509214c8cc9e8ca1a66ec1b6",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        },
+        {
+          "path": "tools/jev-check.ts",
+          "status": "later-release",
+          "sha256": "ecd34a4184e072cf0971b2480e21ad53f211efa688065d3824980460b4fbc245",
+          "tagSha256": "f7121c824d0740c32361765124622ee55e9d4d9a5919f3ef0b31c5e6a5cf73ba",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        },
+        {
+          "path": "tools/plugin-metrics.ts",
+          "status": "later-release",
+          "sha256": "49f7c6a30a03c7a3ce1543fb760fd8c9a52d59fee1801f9e2bcbdde469b3d83f",
+          "tagSha256": "c0002410fda9b951ecd0f2863f6a331a990d280f15ac34736715d333747bd462",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "memory-dream",
+      "installedVersion": "0.0.1",
+      "tagVersion": null,
+      "classification": "post-tag",
+      "reason": "plugin is shipped by origin/main but not by v0.0.15",
+      "source": {
+        "kind": "path",
+        "uri": "~/jjongguet/gjc-plugin/memory-dream"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/memory-dream",
+      "tagSurfaceFiles": 0,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "not-in-tag"
+        },
+        {
+          "path": "hooks/memory-dream-session-start.ts",
+          "status": "not-in-tag"
+        },
+        {
+          "path": "tools/memory-dream.ts",
+          "status": "not-in-tag"
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "rea",
+      "installedVersion": "0.0.7",
+      "tagVersion": "0.0.6",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "<home>/jjongguet/gjc-plugin/rea"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/rea",
+      "tagSurfaceFiles": 2,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "81a48e8f86ba31ae93a24c349fe42c7821d8e274bf0a318c10c96b080d7cccde",
+          "tagSha256": "30749d1e2b22e75951c69420143aca705b93ed866771c4ff56876fa559d22cda",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/rea-readiness.ts",
+          "status": "later-release",
+          "sha256": "8a93a6c7d093dde02ff8afc9b90bd97280ae0e22e7e31e9f3566931adcdd3555",
+          "tagSha256": "519d05e82e99d632255769d138ad871390df721e96613ad47aa283b4264ac48b",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "rrsi",
+      "installedVersion": "0.0.6",
+      "tagVersion": "0.0.5",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "<home>/jjongguet/gjc-plugin/rrsi"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/rrsi",
+      "tagSurfaceFiles": 3,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "7545be7aa1220c2df6679ccee818d9cef8c2d4499cbcbc97241c359ffc1d7748",
+          "tagSha256": "64f2589cc3317c19819884b70026e5f8f55f1c6f6378b86c656faefdd4c2978d",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/rrsi-periodic.ts",
+          "status": "later-release",
+          "sha256": "1647072991a69d8380716f49756f6f7b978b050552a293cb91ca9f04488be00c",
+          "tagSha256": "d8c5bebb40fecc83aa335fabb14ac8d119f987304f308f5ddacf3880f712a353",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/rrsi.ts",
+          "status": "later-release",
+          "sha256": "67f6132d2b915ea351b256c9f75094a3bb9e0f1a9e7a7fc1c6abb1f0d629adbc",
+          "tagSha256": "83ad1ffaacfd7b8d2ef46d3013dcb5b643f09ee369c6d46b2d40a33ff95cb34f",
+          "refs": [
+            "v0.0.16",
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "ui-regression",
+      "installedVersion": "0.0.10",
+      "tagVersion": "0.0.8",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "~/jjongguet/gjc-plugin/ui-regression"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/ui-regression",
+      "tagSurfaceFiles": 3,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "22cdc7d89e2f7151b77258494d4ae41b76f9a781d2dd5438ad124804d51d031e",
+          "tagSha256": "13f8effb3f9b54ff87834990102a8535b7a388656b70c12b809560674f0e5503",
+          "refs": [
+            "v0.0.18",
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/ui-regression-run.ts",
+          "status": "later-release",
+          "sha256": "07e00f8a0d8b83da02ace26f93da9c259908605ee435f9ac00b8ff5bc825c215",
+          "tagSha256": "733c53a9d3c3b9ceb069da267eaf1574f0e2e463ecde342dce687d4b66d737fd",
+          "refs": [
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22"
+          ]
+        },
+        {
+          "path": "tools/ui-regression-status.ts",
+          "status": "later-release",
+          "sha256": "5cbdccb08c016842063fdaf75a6af1c1f48f27e363130ae696d9be1d247d9a53",
+          "tagSha256": "b97009bf1beae9e124681d54dfe4f4f1bce24ffa311910ebb51911a714f7bdda",
+          "refs": [
+            "v0.0.19",
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "verification-receipts",
+      "installedVersion": "0.0.11",
+      "tagVersion": "0.0.7",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "~/.gjc/agent/vendor/gjc-plugin/verification-receipts"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/verification-receipts",
+      "tagSurfaceFiles": 6,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "5f596b7c3c35503d1ced35ac32be6538100505c34811652fc77f83de5c72bfa9",
+          "tagSha256": "ed11430a79f1caad982fc4e012145daee58451a58d166925332750f17a673152",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/verification-gate-baseline.ts",
+          "status": "later-release",
+          "sha256": "4ff626ffd04f33d11ef41071bfedced31159747ec7d4b39854f0e58f7bf7071e",
+          "tagSha256": "d7931f40aca572c30bdb8e8e5c8f8e2b5aa1efb948e33d6e92bef7df089808ea",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "hooks/verification-gate.ts",
+          "status": "later-release",
+          "sha256": "714c1e7af59cf118a72b8debb33006cd38fdffa3d374ffec8a7c5b72ea07d693",
+          "tagSha256": "fb0fda08fcef1b2ae776e49995968e02034f23af9886278adf3eaea10b7fb8d3",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/verification-loop.ts",
+          "status": "later-release",
+          "sha256": "07e9c4cb2338198e7daa14d605f612cfef12afbcb4467a723b64637a8ba630ea",
+          "tagSha256": "d4dcb2c54ddad3345579382f3c039aa1183ae49233112384f71a8fef3ebb987c",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/verification-run.ts",
+          "status": "later-release",
+          "sha256": "6090bb4dfef151c663fea7d6ab24bdfa15fd6a2e729da92fa3c0d3e1289322b1",
+          "tagSha256": "6c51b9c51d28d7b04cde8fa72b73de39357da0e32f4e6512bb8522b240a34f5a",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/verification-status.ts",
+          "status": "later-release",
+          "sha256": "2d3d996aede540c2e9bb16507da3fa007aa6fd5199b5aad305b66b6ff2c297d5",
+          "tagSha256": "b717938e4e32e1a2157a9e43290d7ddf535fd9109245365c35a485cf4652dc5c",
+          "refs": [
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    },
+    {
+      "name": "wiki",
+      "installedVersion": "0.0.8",
+      "tagVersion": "0.0.6",
+      "classification": "later-release",
+      "source": {
+        "kind": "path",
+        "uri": "~/jjongguet/gjc-plugin/wiki"
+      },
+      "installedRoot": "~/.gjc/agent/gjc-plugins/wiki",
+      "tagSurfaceFiles": 3,
+      "files": [
+        {
+          "path": "gajae-plugin.json",
+          "status": "later-release",
+          "sha256": "ad773315d6cd18581cb49f483f3aedd7baa936d07fc9c8ad01b3292a602b2096",
+          "tagSha256": "077e351bdb69f4402a41e657542d03d9d7b1ae873309f6519ebe5d855332b183",
+          "refs": [
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24",
+            "v0.0.25",
+            "v0.0.26",
+            "origin/main"
+          ]
+        },
+        {
+          "path": "tools/wiki-propose.ts",
+          "status": "later-release",
+          "sha256": "b449bc6a8daa8f946ed11d4496add56a332b82d8ded72cde7e73ef50f8b4e6f2",
+          "tagSha256": "c7bbbe4ed442a676e8d2a5816202d178eec5b671187ea0779f20b8c7603b5710",
+          "refs": [
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        },
+        {
+          "path": "tools/wiki-query.ts",
+          "status": "later-release",
+          "sha256": "5cc7226c5e3f44e4f53a947e060fbe164d27c7a44280c64bbd848ffcba682296",
+          "tagSha256": "0938048248b752e506226d63f31196226937d331fb5db2b9307bccf190531a61",
+          "refs": [
+            "v0.0.20",
+            "v0.0.21",
+            "v0.0.22",
+            "v0.0.23",
+            "v0.0.24"
+          ]
+        }
+      ],
+      "symlinks": [],
+      "missing": []
+    }
+  ],
+  "ok": false
+}
