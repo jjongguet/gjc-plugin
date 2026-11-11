@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildGuardPlan, resolveValidatorEntry, runGuards } from "../../lib/guards.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "self-improve-guards-"));
+  return realpathSync(mkdtempSync(join(tmpdir(), "self-improve-guards-")));
 }
 
 test("buildGuardPlan wires built-in checkers and smoke surfaces with a sanitized env", () => {
@@ -86,6 +86,20 @@ test("guard home can be relocated outside the run root", () => {
   });
   for (const guard of plan) {
     assert.equal(guard.env.HOME, join(root, "elsewhere-home"));
+  }
+  rmSync(root, { recursive: true, force: true });
+});
+
+test("guard home is canonical when the run root is reached through a symlink", () => {
+  const root = tempRoot();
+  const scratch = join(root, "repo");
+  mkdirSync(join(root, "real-runs"), { recursive: true });
+  mkdirSync(scratch, { recursive: true });
+  symlinkSync(join(root, "real-runs"), join(root, "linked-runs"));
+  const plan = buildGuardPlan({ repoRoot: root, scratchDir: scratch, runRoot: join(root, "linked-runs", "run"), includeSmoke: false });
+  for (const guard of plan) {
+    assert.equal(guard.env.HOME, join(root, "real-runs", "run", "home"));
+    assert.equal(guard.env.TMPDIR, guard.env.HOME);
   }
   rmSync(root, { recursive: true, force: true });
 });

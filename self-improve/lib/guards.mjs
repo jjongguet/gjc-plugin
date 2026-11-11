@@ -25,8 +25,12 @@ export function buildGuardPlan({ repoRoot, scratchDir, runRoot, includeSmoke = t
   // result-root boundary detection treats the first such component as the
   // private root, which breaks tests that intentionally relax umbrella modes
   // (e.g. shared/tests/results.test.ts under ~/.gjc-plugin/self-improve).
-  const runHome = homeRoot ? path.resolve(homeRoot) : path.join(runRoot, "home");
-  fs.mkdirSync(runHome, { recursive: true, mode: 0o700 });
+  const requestedHome = homeRoot ? path.resolve(homeRoot) : path.join(runRoot, "home");
+  fs.mkdirSync(requestedHome, { recursive: true, mode: 0o700 });
+  // The private-results store fails closed on a HOME reached through a symlink,
+  // and the macOS tmpdir is one (/var -> /private/var), so guards get the
+  // canonical path or every journal write in the scratch suite is refused.
+  const runHome = fs.realpathSync(requestedHome);
   const guardEnv = { ...sanitizeGuardEnv(env), HOME: runHome, TMPDIR: runHome };
   const validatorEntry = resolveValidatorEntry(repoRoot);
   const guards = [
