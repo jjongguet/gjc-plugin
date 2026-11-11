@@ -94,6 +94,7 @@ Typical plugin layout:
 - `gjc plugin install <path> --user` refuses a plugin that is already installed. Replace one with `gjc plugin uninstall <name> --user` followed by `gjc plugin install <path> --user`; inspect the recorded source (`~/.gjc/agent/gjc-plugins/registry.json`) first.
 - When upgrading several plugins, install **`jev-advisor` first** and **`verification-receipts` second**, then the rest, and run `gjc plugin doctor` afterwards. An older `jev-advisor` reading journal records written by a newer `verification-receipts` fails closed with `store_corrupt`.
 - Rebuilding source alone does not update a running session. Tools and hooks load at **session start**; verify upgraded surfaces in a fresh `gjc` process.
+- To check whether an install matches a release, use [installed-surface verification](docs/installed-surface-verification.md). The installer copies only the manifest-declared surface, so compare the installed files with `git show <tag>:<plugin>/<rel>` rather than listing the whole tag tree.
 
 ## Workspace standard
 
