@@ -1,0 +1,190 @@
+{
+ "tag": "v0.0.15",
+ "plugins": [
+  {
+   "name": "aside-memory",
+   "version": "0.0.2",
+   "manifestHash": "24fe0fd219594055f0d90a87b3dfdd75728b1d644eaa3272d9dae33d3b450030",
+   "source": "/Users/kyeongminkim/jjongguet/gjc-plugin/aside-memory",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "24fe0fd219594055f0d90a87b3dfdd75728b1d644eaa3272d9dae33d3b450030"
+    ],
+    [
+     "tools/aside-memory.ts",
+     "8ef8e16efb40f570bc32210f16e56fbc7deda4ab77d1e7f5e609b51621ee38bc"
+    ]
+   ]
+  },
+  {
+   "name": "backplan",
+   "version": "0.0.9",
+   "manifestHash": "6a53dcecd366fa5d1288edd3421f2e2223e0005ffe5e436432a1bc44135cab55",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/backplan",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "6a53dcecd366fa5d1288edd3421f2e2223e0005ffe5e436432a1bc44135cab55"
+    ],
+    [
+     "tools/backplan-check.ts",
+     "f434735b9c6256d20171596dbfdf8e1518b9e5c4b0cd1b8622e85b549697f033"
+    ]
+   ]
+  },
+  {
+   "name": "jev-advisor",
+   "version": "0.0.11",
+   "manifestHash": "03739310b9c738b1dbcaabc9fa2213c46c7aea8de54777d4059e6fcb8f3e6a3e",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/jev-advisor",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "03739310b9c738b1dbcaabc9fa2213c46c7aea8de54777d4059e6fcb8f3e6a3e"
+    ],
+    [
+     "hooks/jev-advisor-alignment-observe.ts",
+     "b380565ad7ba1887ddc86bf496426797eee77818b83ccccb6f682e40f9cf2666"
+    ],
+    [
+     "hooks/jev-advisor-alignment-shutdown.ts",
+     "cec576d109ced12cecba002bc438da6be1cf377c124b9c170d442ef044b18c57"
+    ],
+    [
+     "hooks/jev-advisor-alignment.ts",
+     "7379b3dde6a22c92cc2854666f1bb0d3e44e051240fe77dfc90de55773c2eea3"
+    ],
+    [
+     "hooks/jev-advisor-result.ts",
+     "c1c376f0f196e06ce84cef6503a8f160e9f21d9d363290bb3abda7ab16f93768"
+    ],
+    [
+     "hooks/jev-advisor.ts",
+     "9c78bcf049c14d6b6c3d6c86c7997925edda67f1aa33e6766cd86018c6ab6cfe"
+    ],
+    [
+     "tools/jev-advise.ts",
+     "1818ef37bd9d659b59f9f0a87e28093135e2a634509214c8cc9e8ca1a66ec1b6"
+    ],
+    [
+     "tools/jev-check.ts",
+     "f7121c824d0740c32361765124622ee55e9d4d9a5919f3ef0b31c5e6a5cf73ba"
+    ],
+    [
+     "tools/plugin-metrics.ts",
+     "c0002410fda9b951ecd0f2863f6a331a990d280f15ac34736715d333747bd462"
+    ]
+   ]
+  },
+  {
+   "name": "rea",
+   "version": "0.0.6",
+   "manifestHash": "30749d1e2b22e75951c69420143aca705b93ed866771c4ff56876fa559d22cda",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/rea",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "30749d1e2b22e75951c69420143aca705b93ed866771c4ff56876fa559d22cda"
+    ],
+    [
+     "tools/rea-readiness.ts",
+     "519d05e82e99d632255769d138ad871390df721e96613ad47aa283b4264ac48b"
+    ]
+   ]
+  },
+  {
+   "name": "rrsi",
+   "version": "0.0.5",
+   "manifestHash": "64f2589cc3317c19819884b70026e5f8f55f1c6f6378b86c656faefdd4c2978d",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/rrsi",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "64f2589cc3317c19819884b70026e5f8f55f1c6f6378b86c656faefdd4c2978d"
+    ],
+    [
+     "hooks/rrsi-periodic.ts",
+     "d8c5bebb40fecc83aa335fabb14ac8d119f987304f308f5ddacf3880f712a353"
+    ],
+    [
+     "tools/rrsi.ts",
+     "83ad1ffaacfd7b8d2ef46d3013dcb5b643f09ee369c6d46b2d40a33ff95cb34f"
+    ]
+   ]
+  },
+  {
+   "name": "ui-regression",
+   "version": "0.0.8",
+   "manifestHash": "13f8effb3f9b54ff87834990102a8535b7a388656b70c12b809560674f0e5503",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/ui-regression",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "13f8effb3f9b54ff87834990102a8535b7a388656b70c12b809560674f0e5503"
+    ],
+    [
+     "tools/ui-regression-run.ts",
+     "733c53a9d3c3b9ceb069da267eaf1574f0e2e463ecde342dce687d4b66d737fd"
+    ],
+    [
+     "tools/ui-regression-status.ts",
+     "b97009bf1beae9e124681d54dfe4f4f1bce24ffa311910ebb51911a714f7bdda"
+    ]
+   ]
+  },
+  {
+   "name": "verification-receipts",
+   "version": "0.0.7",
+   "manifestHash": "ed11430a79f1caad982fc4e012145daee58451a58d166925332750f17a673152",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/verification-receipts",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "ed11430a79f1caad982fc4e012145daee58451a58d166925332750f17a673152"
+    ],
+    [
+     "hooks/verification-gate-baseline.ts",
+     "d7931f40aca572c30bdb8e8e5c8f8e2b5aa1efb948e33d6e92bef7df089808ea"
+    ],
+    [
+     "hooks/verification-gate.ts",
+     "fb0fda08fcef1b2ae776e49995968e02034f23af9886278adf3eaea10b7fb8d3"
+    ],
+    [
+     "tools/verification-loop.ts",
+     "d4dcb2c54ddad3345579382f3c039aa1183ae49233112384f71a8fef3ebb987c"
+    ],
+    [
+     "tools/verification-run.ts",
+     "6c51b9c51d28d7b04cde8fa72b73de39357da0e32f4e6512bb8522b240a34f5a"
+    ],
+    [
+     "tools/verification-status.ts",
+     "b717938e4e32e1a2157a9e43290d7ddf535fd9109245365c35a485cf4652dc5c"
+    ]
+   ]
+  },
+  {
+   "name": "wiki",
+   "version": "0.0.6",
+   "manifestHash": "077e351bdb69f4402a41e657542d03d9d7b1ae873309f6519ebe5d855332b183",
+   "source": "/Users/jjong-macmini/jjongguet/gjc-plugin/wiki",
+   "files": [
+    [
+     "gajae-plugin.json",
+     "077e351bdb69f4402a41e657542d03d9d7b1ae873309f6519ebe5d855332b183"
+    ],
+    [
+     "tools/wiki-propose.ts",
+     "c7bbbe4ed442a676e8d2a5816202d178eec5b671187ea0779f20b8c7603b5710"
+    ],
+    [
+     "tools/wiki-query.ts",
+     "0938048248b752e506226d63f31196226937d331fb5db2b9307bccf190531a61"
+    ]
+   ]
+  }
+ ],
+ "installedSurfaceDigest": "041e389048288bf700fc18c346f75962856a260ac1c09c195c90aba1e16e4f96"
+}

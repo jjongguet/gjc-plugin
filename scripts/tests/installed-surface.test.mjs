@@ -147,6 +147,61 @@ test("installed walk pins an unchanged tree and reports missing declared files",
 	}
 });
 
+test("recorded surface accepts {path, sha256} objects and ignores extra keys", () => {
+	const { root, repo } = fixture();
+	try {
+		const surface = path.join(root, "surface.json");
+		write(root, {
+			"surface.json": JSON.stringify({
+				tag: "v0.0.1",
+				plugins: [
+					{
+						name: "pinned",
+						version: "0.0.1",
+						files: [
+							{ path: "gajae-plugin.json", status: "match", sha256: sha256(manifest("pinned", "0.0.1", ["stable"])) },
+							{ path: "tools/stable.ts", status: "match", sha256: sha256("stable\n"), refs: ["v0.0.2"] },
+						],
+					},
+				],
+			}),
+		});
+		const result = run(["--repo", repo, "--tag", "v0.0.1", "--recorded", surface]);
+		assert.equal(result.status, 0, result.out);
+		assert.match(result.out, /2\/2 match/);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("recorded surface rejects malformed input with exit 1 and no stack trace", () => {
+	const { root, repo } = fixture();
+	try {
+		const surface = path.join(root, "surface.json");
+		const cases = [
+			{ name: "files is not an array", body: { tag: "v0.0.1", plugins: [{ name: "pinned", files: "nope" }] }, message: /needs a files array/ },
+			{ name: "pair without a hash", body: { tag: "v0.0.1", plugins: [{ name: "pinned", files: [["tools/stable.ts"]] }] }, message: /64-character hex sha256/ },
+			{ name: "object without a hash", body: { tag: "v0.0.1", plugins: [{ name: "pinned", files: [{ path: "tools/stable.ts" }] }] }, message: /64-character hex sha256/ },
+			{ name: "scalar entry", body: { tag: "v0.0.1", plugins: [{ name: "pinned", files: ["tools/stable.ts"] }] }, message: /must be a \[path, sha256\] pair/ },
+			{ name: "plugin without a name", body: { tag: "v0.0.1", plugins: [{ files: [] }] }, message: /plugins need a name/ },
+			{ name: "plugins is not an array", body: { tag: "v0.0.1" }, message: /needs a plugins array/ },
+		];
+		for (const entry of cases) {
+			write(root, { "surface.json": JSON.stringify(entry.body) });
+			const result = run(["--repo", repo, "--tag", "v0.0.1", "--recorded", surface]);
+			assert.equal(result.status, 1, `${entry.name}\n${result.out}`);
+			assert.match(result.out, entry.message, entry.name);
+			assert.doesNotMatch(result.out, /TypeError|at verifyRecorded/, entry.name);
+		}
+		write(root, { "surface.json": "{not json" });
+		const broken = run(["--repo", repo, "--tag", "v0.0.1", "--recorded", surface]);
+		assert.equal(broken.status, 1, broken.out);
+		assert.match(broken.out, /cannot read recorded surface/, broken.out);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
 test("recorded surface hashes are checked against tag blobs", () => {
 	const { root, repo } = fixture();
 	try {

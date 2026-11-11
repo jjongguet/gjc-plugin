@@ -6,8 +6,16 @@ Measured 2026-11-11 on host `mini`, session `31140357-3d65-479f-bc8a-505898dd89e
 - Repository: `jjongguet/gjc-plugin`, base `e4cf7ef54fa5d2ce098d7d57f6d340d8879b1f2a`, integration branch `main`.
 - Tag under test: `v0.0.15` = `238aa0b175b463e95986e4a288209c50aeaa6bc9`.
 - Installer registry: `~/.gjc/agent/gjc-plugins/registry.json` (`sha256 d88395b4aca65a14…`).
-- Script: `scripts/verify-installed-surface.mjs` (`sha256 bc5729b22744e87d5cf8a025799254c271472ed5a962d850b4fd222433447865`).
-- Test: `scripts/tests/installed-surface.test.mjs` — 3 fixture tests, 3 pass.
+- Script: `scripts/verify-installed-surface.mjs` (`sha256 a07acc36638a452ba63dbdc0a18f3f926315f31cf9d7c95eb08907bd9b7647ec`; the initial run used `sha256 bc5729b22744e87d5cf8a025799254c271472ed5a962d850b4fd222433447865`).
+- Test: `scripts/tests/installed-surface.test.mjs` — 5 fixture tests, 5 pass (`node --test scripts/tests/installed-surface.test.mjs`).
+
+> **Follow-up (JJO-1093 후속, 2026-11-11).** This receipt's own output uses `files: [{path, sha256, …}]`, which
+> the recorded verifier crashed on (`TypeError: .for is not iterable`), and the 30/30 input existed only outside
+> the repository. `--recorded` now accepts both `[rel, sha256]` pairs and `{path, sha256, …}` objects (extra keys
+> ignored) and rejects any other shape with `exit 1`; the original input is committed byte-for-byte as
+> `recorded-20261028.input.json` (`sha256 6bef2fc4…e5489c`). Both commands in §2 and §3 therefore run from a
+> checkout (`--repo .`), and §2 no longer needs the JJO-945 archive outside the repository. Follow-up base:
+> `bd284ed34dcd483fc379114bfbceb1bbed13e967` (PR #55).
 
 ## 1. What "30" counts
 
@@ -34,14 +42,24 @@ which is why the rejected `git ls-tree -r v0.0.15 -- <plugin>` method reports 10
 ## 2. Recorded surface, recomputed (exit 0)
 
 ```
-node scripts/verify-installed-surface.mjs --repo <checkout> --tag v0.0.15 \
-  --recorded ~/jjongguet/artifacts/jjo945-pilot-20261028/installed-surface.json \
-  --json artifacts/jjo1093-installed-surface-20261111/recorded-20261028.json
+node scripts/verify-installed-surface.mjs --repo . --tag v0.0.15 \
+  --recorded artifacts/jjo1093-installed-surface-20261111/recorded-20261028.input.json
 ```
 
-- Result: **30/30 match, 0 mismatch, 0 missing-in-tag** — every recorded sha256 equals the sha256 of
+```
+recorded v0.0.15: 30/30 match (0 mismatch)
+tag surface: 30 file(s)
+```
+
+- Input: `recorded-20261028.input.json` (`sha256 6bef2fc410a3cbc73859d00535a51abe08565014bcef6bb04b390dbe3de5489c`),
+  the verbatim 2026-10-28 installer record; only the checkout is read. Its `source` fields are absolute
+  home paths, so `scripts/check-paths.mjs` hash-pins those 8 lines instead of rewriting the evidence.
+- Result: **30/30 match, 0 mismatch, 0 missing-in-tag**, exit **0** — every recorded sha256 equals the sha256 of
   `git show v0.0.15:<plugin>/<rel>`. The `installedSurfaceDigest 041e3890…e4f96` is preserved in the output.
-- Output: `recorded-20261028.json` (`sha256 52754838d5d0fcc6d5d1908a051f0686337f82d1b8fce2f0bafeb8c242d61c16`).
+- Output: `recorded-20261028.json` (`sha256 52754838d5d0fcc6d5d1908a051f0686337f82d1b8fce2f0bafeb8c242d61c16`),
+  this script's `--json` form. Because that object form is now accepted, re-running with
+  `--recorded artifacts/jjo1093-installed-surface-20261111/recorded-20261028.json` also reports `30/30 match` and
+  exits **0**.
 
 This reproduces the claim for the archived 2026-10-28 surface. It does **not** prove that today's installed bytes
 are the same: that tree was overwritten later (see §3).
@@ -49,12 +67,17 @@ are the same: that tree was overwritten later (see §3).
 ## 3. Today's installed tree is not `v0.0.15` (exit 2)
 
 ```
-node scripts/verify-installed-surface.mjs --repo <checkout> --tag v0.0.15 \
-  --registry ~/.gjc/agent/gjc-plugins/registry.json \
-  --json artifacts/jjo1093-installed-surface-20261111/installed-20261111.json
+node scripts/verify-installed-surface.mjs --repo . --tag v0.0.15 \
+  --registry ~/.gjc/agent/gjc-plugins/registry.json
 ```
 
-Result (`installed-20261111.json`, `sha256 4ef866bffbd452f77d8977eceacc8d2f60213de76c78f7505860467b4745f30f`):
+```
+installed vs v0.0.15: 2/35 match, 28 later-release, 0 snapshot-not-in-git, 0 drift, 5 not-in-tag, 0 missing; 1 out-of-repo plugin(s)/3 file(s) excluded
+tag surface: 30 file(s)
+```
+
+Exit **2**. The archived JSON for this run is `installed-20261111.json`
+(`sha256 4ef866bffbd452f77d8977eceacc8d2f60213de76c78f7505860467b4745f30f`); its `summary` equals the re-run above.
 
 | measure | value |
 | --- | ---: |
