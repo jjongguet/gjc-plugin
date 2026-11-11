@@ -179,13 +179,43 @@ class GateTests(unittest.TestCase):
         self.assertIn('"alert_type": "home"', receipts)
         self.assertIn('"alert_delivery": "sent"', receipts)
 
-    def test_persistent_gate_alert_is_sent_once_per_reason(self):
+    def test_repeated_gate_alert_with_same_reason_is_suppressed(self):
+        state_path = self.data / "default" / "state.json"
         self.keyfile.unlink()
         gate.handle_turn(GOOD, execution(), config_path=self.config)
         gate.handle_turn(GOOD, execution(execution_id="exec-2"), config_path=self.config)
+        # Past the cooldown the same reason is still one alert, not a new one.
+        state = gate.load_state(state_path)
+        state["alerts"]["job1"]["at"] -= 7200
+        gate.save_state(state_path, state)
+        gate.handle_turn(GOOD, execution(execution_id="exec-3"), config_path=self.config)
         self.assertEqual(len(self.alerts), 1)
-        receipts = (self.data / "default" / "receipts" / "job1.jsonl").read_text()
-        self.assertIn('"alert_delivery": "suppressed"', receipts)
+        receipts = [json.loads(line) for line in (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()]
+        self.assertEqual([r["reason"] for r in receipts], ["unconfigured", "unconfigured", "unconfigured"])
+        self.assertEqual([r["alert_delivery"] for r in receipts], ["sent", "suppressed", "suppressed"])
+
+    def test_gate_alert_is_resent_when_the_reason_changes(self):
+        state_path = self.data / "default" / "state.json"
+
+        def provider_error(question, artifact, cfg, key):
+            return {"status": "no_decision", "reason": "provider_error"}
+
+        self.keyfile.unlink()
+        gate.handle_turn(GOOD, execution(), config_path=self.config)
+        self.keyfile.write_text("JEV_ADVISOR_API_KEY=test-key\n", encoding="utf-8")
+        # A different reason inside the cooldown window stays quiet.
+        gate.handle_turn(GOOD, execution(execution_id="exec-2"), config_path=self.config, check_fn=provider_error)
+        self.assertEqual(len(self.alerts), 1)
+        # Once the cooldown has passed, the changed reason is a new alert.
+        state = gate.load_state(state_path)
+        state["alerts"]["job1"]["at"] -= 7200
+        gate.save_state(state_path, state)
+        gate.handle_turn(GOOD, execution(execution_id="exec-3"), config_path=self.config, check_fn=provider_error)
+        self.assertEqual(len(self.alerts), 2)
+        self.assertIn("reason=provider_error", self.alerts[1])
+        receipts = [json.loads(line) for line in (self.data / "default" / "receipts" / "job1.jsonl").read_text().splitlines()]
+        self.assertEqual([r["reason"] for r in receipts], ["unconfigured", "provider_error", "provider_error"])
+        self.assertEqual([r["alert_delivery"] for r in receipts], ["sent", "suppressed", "sent"])
 
     def test_deterministic_mode_holds_without_provider_or_alert(self):
         self.write_config(mode="deterministic")
