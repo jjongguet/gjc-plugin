@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_MAX_ISSUES, clusterFindings, clusterKey, evidenceHash, issueTitle, planFiling, priorityFor, renderEvidenceComment, renderIssueBody, summarizeFiling } from '../lib/filing.mjs';
+import { DEFAULT_MAX_ISSUES, batchTitle, citesLocation, clusterFindings, clusterKey, evidenceHash, isBatchTitle, issueTitle, locationKey, locationMarker, periodLabel, planFiling, priorityFor, renderEvidenceComment, renderIssueBody, summarizeFiling } from '../lib/filing.mjs';
 
 function finding(overrides = {}) {
   return { repo: 'yyaz-web', pr: 11, prUrl: 'https://github.com/jjongguet/yyaz-web/pull/11', file: 'tools/refresh_pack.py', line: 77, kind: 'correctness', lens: 'failure', model: 'test-only', confidence: 0.9, quote: 'if batch.exists() and not args.keep:', why_matters: 'dry-run destroys the previous batch', ...overrides };
@@ -46,6 +46,38 @@ test('offline planning creates unknown, skips known, comments new evidence witho
   const action = planFiling({ clusters: [grown], state })[0];
   assert.equal(action.type, 'comment'); assert.equal(action.findings.length, 1); assert.equal(action.findings[0].quote, 'new quote');
   assert.deepEqual(state, before);
+});
+
+test('a location is the repository plus file:line, independent of kind and quote', () => {
+  const base = finding();
+  assert.equal(locationKey(base), 'yyaz-web::tools/refresh_pack.py:77');
+  assert.equal(locationMarker(base), locationMarker({ ...base, kind: 'testgap', quote: 'another lens', lens: 'coverage' }));
+  assert.notEqual(locationMarker(base), locationMarker({ ...base, repo: 'other-repo' }));
+  assert.notEqual(locationMarker(base), locationMarker({ ...base, line: 78 }));
+  assert.match(locationMarker(base), /^<!-- nightly-location:[a-f0-9]{16} -->$/);
+});
+
+test('a filed body carries its location so a second lens lands on the same issue', () => {
+  const cluster = clusterFindings([finding()])[0];
+  const body = renderIssueBody({ cluster, runId: 'run-1' });
+  assert.ok(body.includes(locationMarker(finding())));
+  assert.ok(citesLocation({ description: body }, cluster));
+  assert.ok(citesLocation({ description: `- PR: jjongguet/yyaz-web#11 · lens failure\n\n\`tools/refresh_pack.py:77\`` }, cluster), 'a pre-JJO-1883 body matches by its readable citation');
+  assert.ok(!citesLocation({ description: '`tools/refresh_pack.py:77`' }, cluster), 'the same path in another repository is a different location');
+  assert.ok(!citesLocation({ description: 'unrelated evidence' }, cluster));
+});
+
+test('a batch title names the project, its filing count and the reviewed window', () => {
+  assert.equal(batchTitle({ project: 'Infra', period: '2026-11-02~05', count: 27 }), '[nightly 배치] Infra 미트리아지 findings 27건 — 2026-11-02~05 회차');
+  assert.ok(isBatchTitle(batchTitle({ project: 'p', period: '2026-11-12', count: 1 })));
+  assert.ok(!isBatchTitle('[nightly] p a.mjs — contract'));
+  const day = (month, date) => new Date(2026, month - 1, date, 12);
+  assert.equal(periodLabel({ since: '2026-11-12', until: day(11, 12) }), '2026-11-12');
+  assert.equal(periodLabel({ since: '2026-11-11', until: day(11, 12) }), '2026-11-11~12');
+  assert.equal(periodLabel({ since: '2026-10-31', until: day(11, 1) }), '2026-10-31~2026-11-01');
+  assert.equal(periodLabel({ until: day(11, 12) }), '2026-11-12');
+  assert.equal(periodLabel({ since: '2026-11-02T00:00:00', until: day(11, 5) }), '2026-11-02~05');
+  assert.throws(() => periodLabel({ since: '2026-11-12', until: 'not-a-date' }), /valid end date/);
 });
 
 test('offline cap is visible and summaries distinguish errors', () => {

@@ -2,12 +2,13 @@
 // proof of remote absence. Operations with an unknown result are never retried.
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
-import { clusterFindings, planFiling, evidenceHash, issueTitle, renderIssueBody, renderEvidenceComment, priorityFor, hasClusterMarker } from './filing.mjs';
+import { clusterFindings, planFiling, evidenceHash, issueTitle, renderIssueBody, renderEvidenceComment, priorityFor, hasClusterMarker, citesLocation, batchMarker, batchTitle, isBatchTitle, periodLabel } from './filing.mjs';
 import { scanProject, protectionReason, snapshotHash, validateSupervision, boundedPages } from './reconciliation.mjs';
 import { withLock, assertOwner, readOptional, validateLedger, atomicWrite, jsonBytes, digest, journalEvent, operationState, unresolvedOperations } from './state.mjs';
 
 const isTerminal = (i) => ['completed', 'canceled'].includes(i.statusType);
-const isActiveBatch = (i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isTerminal(i) && !i.archivedAt;
+const isActiveBatch = (i) => isBatchTitle(i.title) && !isTerminal(i) && !i.archivedAt;
+const isOpenIssue = (i) => !isTerminal(i) && !i.archivedAt;
 const occurrences = (text, marker) => (text ?? '').split(marker).length - 1;
 const labelNames = (issue) => (issue.labels ?? []).map((l) => typeof l === 'string' ? l : l.name);
 const projectOf = (issue) => issue.projectId ?? issue.project;
@@ -77,26 +78,31 @@ async function adoptUnknownOperations({ unresolved, clusters, next, client, dir,
 
 export const filingIncomplete = (result) => result.errors.length > 0 || result.skipped.some((s) => !['up_to_date', 'adopted_confirmed_operation'].includes(s.reason));
 
-async function createBatch({ client, project, dir, owner, supervision, clock, nightly }) {
+async function createBatch({ client, project, period, count, dir, owner, supervision, clock, nightly }) {
   const issueId = `batch:${project}`;
   validateSupervision(supervision, { at: clock(), issueId, action: 'create-batch', project });
   const latest = await scanProject({ client, project, now: clock });
+  // One active parent per project: the 14-day untriaged expiry treats a second
+  // active batch as ambiguous and stops expiring, so a new one is never opened
+  // beside an existing one (pre-JJO-1883 parents included).
   if (!latest.complete || latest.issues.some(isActiveBatch)) throw new Error('batch inventory changed');
-  const retired = latest.issues.filter((i) => /^\[nightly 배치\]/.test(i.title ?? '') && !isActiveBatch(i)).map((i) => i.id).sort();
+  const retired = latest.issues.filter((i) => isBatchTitle(i.title) && !isActiveBatch(i)).map((i) => i.id).sort();
   const id = digest(jsonBytes({ issueId, generation: owner.generation, ...(retired.length ? { retired } : {}) }));
   const marker = `<!-- nightly-operation:${id} -->`;
+  const scope = batchMarker(project, period);
+  const title = batchTitle({ project, period, count });
   const state = await operationState(dir, id);
   if (state.attempted) throw new Error('unknown batch creation quarantined');
   await assertOwner(dir, { generation: owner.generation });
   if (!state.planned) await journalEvent(dir, { id, phase: 'planned', issueId });
   await journalEvent(dir, { id, phase: 'attempted', issueId });
   try {
-    const description = `Untriaged nightly findings. Findings are evidence, not verified defects.\n${marker}`;
+    const description = `Untriaged nightly findings. Findings are evidence, not verified defects.\n${scope}\n${marker}`;
     await assertOwner(dir, { generation: owner.generation });
     validateSupervision(supervision, { at: clock(), issueId, action: 'create-batch', project });
-    const created = await client.createIssue({ title: `[nightly 배치] ${project}`, description, project, priority: 4, labels: [nightly.id] });
+    const created = await client.createIssue({ title, description, project, priority: 4, labels: [nightly.id] });
     const after = await client.getIssue(created.id);
-    if (occurrences(after.description, marker) !== 1 || !isActiveBatch(after) || ![after.projectId, after.project, after.project?.name].includes(project) || !(after.labels ?? []).some((l) => (l.name ?? l) === 'nightly')) throw new Error('batch readback mismatch');
+    if (occurrences(after.description, marker) !== 1 || occurrences(after.description, scope) !== 1 || after.title !== title || !isActiveBatch(after) || ![after.projectId, after.project, after.project?.name].includes(project) || !(after.labels ?? []).some((l) => (l.name ?? l) === 'nightly')) throw new Error('batch readback mismatch');
     await journalEvent(dir, { id, phase: 'confirmed', issueId: after.id });
     return after;
   } catch (error) {
@@ -105,7 +111,7 @@ async function createBatch({ client, project, dir, owner, supervision, clock, ni
   }
 }
 
-export async function publishFindings({ findings, client, dir, runId, supervision, maxIssues = 20, clock = Date.now }) {
+export async function publishFindings({ findings, client, dir, runId, supervision, maxIssues = 20, period, since, clock = Date.now }) {
   return withLock(dir, async () => {
     const owner = await assertOwner(dir);
     const statePath = path.join(dir, 'filed.json');
@@ -148,6 +154,15 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       if (remaining.length) return { state: next, result: { ...result, errors: remaining.map((id) => ({ operationId: id, reason: 'unknown_remote_result_quarantine' })) } };
     }
     const actions = planFiling({ clusters, state: next, maxIssues: Math.min(maxIssues, 20) });
+    const batchPeriod = period ?? periodLabel({ since, until: new Date(clock()) });
+    // A parent is created once per project; its title records what the creating
+    // window filed, and later filings reuse it without rewriting the count.
+    const plannedCreates = new Map();
+    for (const action of actions) {
+      if (action.type !== 'create') continue;
+      const mapped = client.projectFor(action.cluster.repo);
+      if (mapped) plannedCreates.set(mapped, (plannedCreates.get(mapped) ?? 0) + 1);
+    }
     for (const action of actions) {
       const { cluster } = action;
       if (action.type === 'skip') { result.skipped.push({ key: cluster.key, reason: action.reason }); continue; }
@@ -168,11 +183,18 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
       const matches = snapshot.issues.filter((i) => hasClusterMarker(i.description, cluster.key));
       if (matches.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_existing_issue' }); continue; }
       if (confirmedIssue && matches.some((i) => i.id !== confirmedIssue.id)) { result.skipped.push({ key: cluster.key, reason: 'confirmed_identity_conflict' }); continue; }
-      const existing = confirmedIssue ?? matches[0] ?? null;
+      // Same repo·file:line already open: the new lens extends that issue instead
+      // of filing a twin. Guessing between two open citations is a skip, not a pick.
+      let located = [];
+      if (!confirmedIssue && !matches.length) {
+        located = snapshot.issues.filter((i) => isOpenIssue(i) && citesLocation(i, cluster));
+        if (located.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_location_match' }); continue; }
+      }
+      const existing = confirmedIssue ?? matches[0] ?? located[0] ?? null;
       if (existing && (isTerminal(existing) || protectionReason(existing, clock()))) { result.skipped.push({ key: cluster.key, reason: 'terminal_or_protected' }); continue; }
-      // A location alone is not root-cause identity. Same file:line with a different
-      // quote/kind is never closed as duplicate; an exact existing evidence marker
-      // is the only remote adoption used here.
+      // A location alone is not root-cause identity: the issue keeps its original
+      // cause, and the new lens is appended as evidence rather than closing either
+      // one as a duplicate (JJO-1883).
       const fresh = cluster.findings.filter((f) => !(next.clusters[cluster.key]?.evidence ?? []).includes(evidenceHash(f)));
       const type = existing ? 'comment' : 'create';
       validateSupervision(supervision, { at: clock(), issueId: cluster.key, action: type, project });
@@ -193,19 +215,22 @@ export async function publishFindings({ findings, client, dir, runId, supervisio
         const parents = snapshot.issues.filter(isActiveBatch);
         if (parents.length > 1) { result.skipped.push({ key: cluster.key, reason: 'ambiguous_batch' }); continue; }
         // The separate scope entry makes this extra mutation visible to the supervisor.
-        parent = parents[0] ?? await createBatch({ client, project, dir, owner, supervision, clock, nightly: nightly[0] });
+        parent = parents[0] ?? await createBatch({ client, project, period: batchPeriod, count: plannedCreates.get(project) ?? 1, dir, owner, supervision, clock, nightly: nightly[0] });
       }
       if (!operation.planned) await journalEvent(dir, { id, phase: 'planned', key: cluster.key, type, before: existing ?? null });
       // Re-enumerate immediately before create; the scoped supervisor coordinates
       // other writers. This is not a claim of server-side CAS/exactly-once.
       const currentSnapshot = await scanProject({ client, project, maxIssues: 1000, now: clock });
       if (!currentSnapshot.complete) { result.skipped.push({ key: cluster.key, reason: 'prewrite_inventory_incomplete' }); continue; }
-      if (!existing && currentSnapshot.issues.some((i) => hasClusterMarker(i.description, cluster.key))) { result.skipped.push({ key: cluster.key, reason: 'concurrent_create' }); continue; }
+      if (!existing && (currentSnapshot.issues.some((i) => hasClusterMarker(i.description, cluster.key)) ||
+        currentSnapshot.issues.some((i) => isOpenIssue(i) && citesLocation(i, cluster)))) { result.skipped.push({ key: cluster.key, reason: 'concurrent_create' }); continue; }
       if (existing) {
         const latest = currentSnapshot.issues.find((i) => i.id === existing.id);
         if (!latest || snapshotHash(latest) !== snapshotHash(existing) || protectionReason(latest, clock())) { result.skipped.push({ key: cluster.key, reason: 'concurrent_or_protected' }); continue; }
-      } else if (currentSnapshot.issues.filter(isActiveBatch).length !== 1 || !currentSnapshot.issues.some((i) => i.id === parent.id && isActiveBatch(i) && (i.projectId ?? i.project) === (parent.projectId ?? parent.project))) {
-        result.skipped.push({ key: cluster.key, reason: 'batch_changed' }); continue;
+      } else {
+        if (currentSnapshot.issues.filter(isActiveBatch).length !== 1 || !currentSnapshot.issues.some((i) => i.id === parent.id && isActiveBatch(i) && (i.projectId ?? i.project) === (parent.projectId ?? parent.project))) {
+          result.skipped.push({ key: cluster.key, reason: 'batch_changed' }); continue;
+        }
       }
       validateSupervision(supervision, { at: clock(), issueId: cluster.key, action: type, project });
       await journalEvent(dir, { id, phase: 'attempted', key: cluster.key, type });

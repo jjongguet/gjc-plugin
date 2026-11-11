@@ -74,7 +74,10 @@ nonempty `supervisor`, `expiresAt` (at most one hour ahead),
 ```
 
 Commenting uses `type:comment`; creating the unique parent requires its own entry
-`{issueId:"batch:<project>",type:"create-batch",project:"<project>"}`.
+`{issueId:"batch:<project>",type:"create-batch",project:"<project>"}`. A cluster
+planned as `create` becomes a comment when the same repository·`file:line` is already
+open, so the scope must carry that `comment` entry as well; the filer still writes
+only the exact action it validated.
 Reconciliation entries use actual issue IDs and `expire`, `done`, `invalid`,
 `correct`, `move`, `duplicate`, or `parent`. Permission for one does not approve
 another. Never use a working or protected issue as a test fixture.
@@ -121,6 +124,19 @@ owner generation, zero-call counters and explicit deferred review. `evaluate-loc
 checks the queue digest without generating findings. Collection records PR merge
 SHA where available; a missing merge SHA is unknown, not replaced with a claim
 about current integration code.
+
+Filing keeps three identities. Every filed issue and parent carries the `nightly`
+label. A cluster is `repo::file::kind`; a citation is `repo::file:line`. When an open
+issue already cites the same location — through the
+`<!-- nightly-location:<sha256(repo::file:line)> -->` marker, or, for issues filed
+before JJO-1883, the readable `` `file:line` `` line plus the repository anchor — the
+new lens is appended as a comment on that issue instead of a second issue; two open
+citations are reported as `ambiguous_location_match`, never guessed between. New
+issues sit under exactly one active `[nightly 배치] <project> 미트리아지 findings N건
+— <기간> 회차` parent per project, identified by the title prefix and the
+`<!-- nightly-batch:<project>:<period> -->` provenance marker; N is the creating
+run's filing count for that project. A second active parent would stop the 14-day
+untriaged expiry, which requires exactly one, so a later window reuses it.
 
 Reconciliation input is `{project,snapshot,candidates}`. The bounded scan includes
 ledger-external issues and comments: pages100, project1000 issues, comments50/page
