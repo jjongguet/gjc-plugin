@@ -5,6 +5,11 @@
 // same file is more evidence for the open ticket instead of a second ticket. The
 // local state file is the dedupe source of truth — re-running a night, or re-running
 // the file step twice, must not create a second issue for the same problem.
+//
+// A second identity is the citation itself (repo·file:line). Two lenses on the same
+// line of the same file are one place to fix, so the publisher comments the new
+// lens onto the open issue instead of filing a twin (JJO-1883). Findings are also
+// grouped under one `[nightly 배치]` parent per project and 회차.
 
 import { createHash } from 'node:crypto';
 
@@ -21,6 +26,53 @@ export function priorityFor(confidence) {
 
 export function clusterKey(finding) {
   return `${finding.repo}::${finding.file}::${finding.kind}`;
+}
+
+// A citation location, keyed by repository because two repositories can own the
+// same relative path and line. The hex marker survives Linear's markdown
+// normalization; the readable `` `file:line` `` citation is the legacy fallback.
+export const locationKey = (finding) => `${finding.repo}::${finding.file}:${finding.line}`;
+export const locationMarker = (finding) =>
+  `<!-- nightly-location:${createHash('sha256').update(locationKey(finding)).digest('hex').slice(0, 16)} -->`;
+export const locationCitation = (finding) => `\`${finding.file}:${finding.line}\``;
+export const repoAnchor = (finding) => `jjongguet/${finding.repo}#`;
+export const clusterLocations = (cluster) => [...new Set(cluster.findings.map(locationMarker))];
+
+// Whether an issue already cites one of the cluster's locations: the exact hex
+// marker for issues filed after JJO-1883, or the readable `file:line` block plus
+// the repository anchor for issues filed before it.
+export function citesLocation(issue, cluster) {
+  const body = issue?.description ?? '';
+  return cluster.findings.some(
+    (finding) => body.includes(locationMarker(finding)) ||
+      (body.includes(repoAnchor(finding)) && body.includes(locationCitation(finding))),
+  );
+}
+
+// One parent per project and 회차. The title carries the count and window that a
+// human reads; the marker is what the filer matches, because the title count only
+// describes the filing that created the parent.
+export const isBatchTitle = (title) => /^\[nightly 배치\]/.test(title ?? '');
+export const batchMarker = (project, period) => `<!-- nightly-batch:${project}:${period} -->`;
+export const batchTitle = ({ project, period, count }) =>
+  `[nightly 배치] ${project} 미트리아지 findings ${count}건 — ${period} 회차`;
+
+const localDate = (value) => {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
+// The reviewed window as the title spells it: `2026-11-12`, `2026-11-11~12`, or
+// `2026-10-31~2026-11-01`. A `YYYY-MM-DD` since is already a local calendar day.
+export function periodLabel({ since, until = new Date() } = {}) {
+  const end = localDate(until);
+  if (!end) throw new Error('period needs a valid end date');
+  const start = since == null ? null : (/^\d{4}-\d{2}-\d{2}$/.test(since) ? since : localDate(since));
+  if (!start || start === end) return end;
+  return start.slice(0, 4) === end.slice(0, 4) && start.slice(5, 7) === end.slice(5, 7)
+    ? `${start}~${end.slice(8)}`
+    : `${start}~${end}`;
 }
 
 export function evidenceHash(finding) {
@@ -116,6 +168,7 @@ export function renderIssueBody({ cluster, runId }) {
   lines.push(`- run: \`${runId}\` (local-only; \`nightly-review recheck --run <dir>\`로 재게이트)`);
   lines.push(clusterMarker(cluster.key));
   lines.push(clusterKeyMarker(cluster.key));
+  for (const marker of clusterLocations(cluster)) lines.push(marker);
   return lines.join('\n');
 }
 
@@ -134,6 +187,8 @@ export function renderEvidenceComment({ cluster, findings, runId }) {
 // Decide create / comment / skip per cluster without touching the network.
 // `state` is the persisted map of previously filed clusters. The cap is a reading
 // budget for the ticket queue, so clusters past it are reported, not silently cut.
+// A cluster planned as `create` can still become a comment at publish time: the
+// publisher owns the remote check for an open issue citing the same location.
 export function planFiling({ clusters, state, maxIssues = DEFAULT_MAX_ISSUES }) {
   const actions = [];
   const known = state?.clusters ?? {};

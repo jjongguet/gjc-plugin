@@ -413,6 +413,7 @@ async function executeOnce(options) {
     const filing = await fileFindings({
       runDir,
       findings: kept,
+      since,
       stateDir,
       options,
       log,
@@ -489,7 +490,7 @@ function gateAcross({ prs, calls, maxFindings }) {
   return { kept: capped, dropped, stats };
 }
 
-async function fileFindings({ runDir, findings, stateDir, options, log }) {
+async function fileFindings({ runDir, findings, since, stateDir, options, log }) {
   const maxIssues = options.maxIssues ?? DEFAULT_MAX_ISSUES;
   const statePath = path.join(stateDir, DEFAULT_FILED_STATE);
   const state = existsSync(statePath)
@@ -529,7 +530,7 @@ async function fileFindings({ runDir, findings, stateDir, options, log }) {
     projectMap,
     publish: true,
   });
-  const { result } = await publishFindings({ findings, client, dir: stateDir, runId, supervision, maxIssues });
+  const { result } = await publishFindings({ findings, client, dir: stateDir, runId, supervision, maxIssues, since });
 
   log(`file: ${summarizeFiling(result)}`);
   for (const created of result.created) {
@@ -567,6 +568,7 @@ async function executeFile(options) {
   const filing = await fileFindings({
     runDir,
     findings: receipt.findings ?? [],
+    since: receipt.since,
     stateDir: options.out ?? DEFAULT_STATE_DIR,
     options,
     log,

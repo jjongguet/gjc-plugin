@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { publishFindings } from '../lib/publish.mjs';
 import { immutableJson, digest, jsonBytes, journalEvent } from '../lib/state.mjs';
-import { evidenceHash } from '../lib/filing.mjs';
+import { evidenceHash, locationMarker } from '../lib/filing.mjs';
 import { reviewBudget } from '../lib/supervision.mjs';
 const now = Date.now();
 const old = new Date(now - 3 * 86400000).toISOString();
@@ -400,6 +400,79 @@ test('every filing and batch write rechecks expiry, exact scope and original own
       assert.equal(f.count(), 0, `${operation}: ${invalidation}`);
     }
   }
+});
+
+test('a new filing carries the nightly label and one parent named for the window and count', async () => {
+  const f = await setup({ batch: false });
+  const created = []; const create = f.client.createIssue;
+  f.client.createIssue = async (args) => { created.push(args); return create(args); };
+  const result = await publishFindings({ ...f, findings: [finding], runId: 'run-1', period: '2026-11-02~05', clock: () => now });
+  assert.equal(result.result.created.length, 1);
+  const [parent, child] = created;
+  assert.equal(parent.title, '[nightly 배치] p 미트리아지 findings 1건 — 2026-11-02~05 회차');
+  assert.ok(parent.description.includes('<!-- nightly-batch:p:2026-11-02~05 -->'));
+  assert.deepEqual(parent.labels, ['nightly-label']);
+  assert.deepEqual(child.labels, ['nightly-label']);
+  assert.equal(child.parentId, f.issues[0].id);
+  assert.ok(child.description.includes(locationMarker(finding)));
+});
+
+test('two filings of one project window share a single parent', async () => {
+  const f = await setup({ batch: false });
+  f.supervision.actions.push({ issueId: 'r::b.mjs::contract', type: 'create', project: 'p' });
+  const period = '2026-11-02~05';
+  const first = await publishFindings({ ...f, findings: [finding], runId: 'run-1', period, clock: () => now });
+  const second = await publishFindings({ ...f, findings: [{ ...finding, file: 'b.mjs' }], runId: 'run-1', period, clock: () => now });
+  assert.equal(first.result.created.length, 1); assert.equal(second.result.created.length, 1);
+  const parents = f.issues.filter((i) => i.title.startsWith('[nightly 배치]'));
+  assert.equal(parents.length, 1);
+  assert.equal(f.issues.filter((i) => i.parentId === parents[0].id).length, 2);
+  assert.equal(f.count(), 3);
+});
+
+test('a later window reuses the project parent instead of opening a second one', async () => {
+  const f = await setup({ batch: false });
+  f.supervision.actions.push({ issueId: 'r::b.mjs::contract', type: 'create', project: 'p' });
+  await publishFindings({ ...f, findings: [finding], runId: 'run-1', period: '2026-11-02~05', clock: () => now });
+  const result = await publishFindings({ ...f, findings: [{ ...finding, file: 'b.mjs' }], runId: 'run-2', period: '2026-11-06~07', clock: () => now });
+  assert.equal(result.result.created.length, 1);
+  // A second active parent would stop the 14-day untriaged expiry (reconciliation
+  // requires exactly one), so the project keeps a single parent across windows.
+  const parents = f.issues.filter((i) => i.title.startsWith('[nightly 배치]'));
+  assert.equal(parents.length, 1);
+  assert.equal(f.issues.at(-1).parentId, parents[0].id);
+  assert.equal(f.count(), 3);
+});
+
+test('a second lens on an open file:line comments that issue instead of filing a twin', async () => {
+  const f = await setup({ batch: false });
+  const other = { ...finding, kind: 'testgap', lens: 'coverage', quote: 'assert the batch is kept' };
+  const otherKey = 'r::a.mjs::testgap';
+  f.supervision.actions.push({ issueId: otherKey, type: 'comment', project: 'p' });
+  const period = '2026-11-02~05';
+  await publishFindings({ ...f, findings: [finding], runId: 'run-1', period, clock: () => now });
+  const [filed] = f.issues.filter((i) => i.title.startsWith('[nightly]'));
+  const comments = [];
+  f.client.createComment = async ({ issueId, body }) => { comments.push({ id: `c-${comments.length}`, issueId, body }); };
+  f.client.listComments = async ({ issueId }) => ({ comments: comments.filter((c) => c.issueId === issueId), hasNextPage: false });
+  const second = await publishFindings({ ...f, findings: [other], runId: 'run-2', period, clock: () => now });
+  assert.equal(second.result.created.length, 0);
+  assert.equal(second.result.commented.length, 1);
+  assert.equal(f.issues.filter((i) => i.title.startsWith('[nightly]')).length, 1);
+  assert.equal(comments.length, 1);
+  assert.equal(comments[0].issueId, filed.id);
+  const ledger = JSON.parse(await readFile(path.join(f.dir, 'filed.json'), 'utf8'));
+  assert.equal(ledger.clusters[otherKey].issue.id, ledger.clusters[key].issue.id);
+  assert.equal(ledger.clusters[key].issue.id, filed.id);
+});
+
+test('two open issues citing the same location are reported, never guessed between', async () => {
+  const f = await setup();
+  const cited = { title: '[nightly] r a.mjs — earlier', description: '- PR: jjongguet/r#1\n\n`a.mjs:4`', project: 'p', parentId: 'parent', updatedAt: old, createdAt: old, statusType: 'backlog', labels: ['nightly'] };
+  f.issues.push({ ...cited, id: 'twin-a' }, { ...cited, id: 'twin-b' });
+  const result = await publishFindings({ ...f, findings: [finding], runId: 'run-1', period: '2026-11-02~05', clock: () => now });
+  assert.equal(result.result.skipped[0].reason, 'ambiguous_location_match');
+  assert.equal(f.count(), 0);
 });
 
 test('batch readback expiry or owner rotation prevents the follow-on finding write', async () => {
