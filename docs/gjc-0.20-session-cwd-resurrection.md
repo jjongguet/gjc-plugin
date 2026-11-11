@@ -28,12 +28,15 @@ Upstream source read at tag `v0.20.0` (`b4127889c4a8`); file:line references bel
 ## Reproduction
 
 The scenario needs three things at once: a real lane-like directory (not `/tmp`), a session whose
-cwd is that directory, and a deletion while the session is alive. The script below starts the
-session in the background, waits until the state tree exists and a long `bash` call is running,
-removes the directory, then polls for its return.
+cwd is that directory, and a deletion while a `bash` call is genuinely in flight. "In flight" has to
+be proven rather than inferred: the session is told to `touch` a sentinel file **outside** the lane
+before it sleeps, and the directory is removed only after that sentinel exists. A `ps`/`pgrep`
+predicate is not sufficient here — the `gjc -p` command line itself contains the prompt text
+`sleep 40`, and `ps -ax` also sees unrelated processes.
 
 ```sh
-REPRO="$HOME/jjo1985-repro-clean"; LANE="$REPRO/lane"; LOG="$REPRO/session.log"
+REPRO="$HOME/jjo1985-repro-clean4"; LANE="$REPRO/lane"; SENTINEL="$REPRO/inflight"
+LOG="$REPRO/session.log"
 rm -rf "$REPRO"; mkdir -p "$LANE"; cd "$LANE"
 git init -q .
 git config user.email repro@example.invalid; git config user.name repro
@@ -45,89 +48,79 @@ git config user.email repro@example.invalid; git config user.name repro
 CLEAN="env -u GJC_SESSION_ID -u GJC_SESSION_CWD -u GJC_STATE_ROOT \
   -u GJC_LIFECYCLE_REQUEST_ID -u GJC_SDK_LIFECYCLE_REQUEST -u GJC_ISOLATED_SHELL_RUNTIME"
 
-( cd "$LANE" && exec $CLEAN gjc -p --no-mcp 'Use the bash tool exactly three times and nothing
-  else. Call 1: run `pwd`. Call 2: run `sleep 40`. Call 3: run `pwd`. Then print the stdout of
-  each call, labelled 1/2/3.' ) >"$LOG" 2>&1 &
+( cd "$LANE" && exec $CLEAN gjc -p --no-mcp "Use the bash tool exactly three times and nothing
+  else. Call 1: run \`pwd\`. Call 2: run \`touch $SENTINEL && sleep 40\`. Call 3: run \`pwd\`.
+  Then print the stdout of each call, labelled 1/2/3." ) >"$LOG" 2>&1 &
 
 until compgen -G "$LANE/.gjc/_session-*/runtime/runtime-state.json" >/dev/null; do sleep 1; done
-until ps -ax -o command= | grep -q '[s]leep 40'; do sleep 1; done
+until [ -e "$SENTINEL" ]; do sleep 1; done     # call 2 has provably started
 lsof +D "$LANE" | awk 'NR==1 || /gjc|sleep/'
 
 cd "$REPRO" && rm -rf "$LANE"          # the live session's cwd is now gone
 for i in $(seq 1 120); do [ -e "$LANE" ] && { echo "recreated after ${i}s"; break; }; sleep 1; done
-find "$LANE" | sort; wait "$!"
+find "$LANE" | sort; ls -ld "$LANE"; wait
 ```
 
-Observed (first run, child launched with the ambient GJC environment). Absolute home paths below are
-shown as `$HOME`; nothing else in the transcripts was edited.
+Observed (absolute home paths are shown as `$HOME`; nothing else in the transcript was edited):
 
 ```text
 VERSION gjc/0.20.0
-START 20:23:31Z
-gjc_pid 9685
-STATE_CREATED 20:23:36Z
+START 20:30:35Z
+gjc_pid 60545
+STATE_CREATED 20:30:44Z
 --- files before deletion ---
-.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime/runtime-state.json
-.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime/runtime-state.json.lock
-.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime/runtime-state.json.lock.transition.owner
-SLEEP_STARTED 20:23:36Z
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
+CALL2_STARTED 20:30:46Z sentinel=inflight
 COMMAND PID NAME
-gjc 9685 $HOME/jjo1985-repro/lane
-DELETED 20:23:36Z exists=no
-RECREATED 20:23:38Z after_3s
+gjc 60545 $HOME/jjo1985-repro-clean4/lane
+gjc 89863 $HOME/jjo1985-repro-clean4/lane
+gjc 90351 $HOME/jjo1985-repro-clean4/lane
+gjc 90520 $HOME/jjo1985-repro-clean4/lane
+DELETED 20:30:46Z exists=no
+RECREATED 20:31:26Z after_36s
 .
 ./.gjc
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/locks
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime/runtime-state.json.lock
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/runtime/runtime-state.json.lock.transition.owner
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/token-logs
-./.gjc/_session-9a1f11ab-ff67-4555-8b0d-c3e5895b1f9f/token-logs/token-log.jsonl
-REAPPEARED yes
-GJC_EXIT 0
-```
-
-Second run, with the session environment unset so the child gets its own session id — the realistic
-lane case:
-
-```text
-VERSION gjc/0.20.0
-MODE clean
-START 20:24:38Z
-gjc_pid 12053
-STATE_CREATED 20:24:41Z
-SLEEP_STARTED 20:24:41Z
-COMMAND PID NAME
-gjc 12053 $HOME/jjo1985-repro-clean/lane
-DELETED 20:24:41Z exists=no
-RECREATED 20:24:42Z after_2s
-.session-01a1cc48-b574-7771-a8d8-aafa1eb97948/{locks,runtime,token-logs}
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/locks
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
 REAPPEARED yes
 GJC_EXIT 0
 --- final tree ---
 .
 ./.gjc
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/locks
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/runtime
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/runtime/runtime-state.json
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/runtime/runtime-state.json.lock
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/runtime/runtime-state.json.lock.transition.owner
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/token-logs
-./.gjc/_session-01a1cc48-b574-7771-a8d8-aafa1eb97948/token-logs/token-log.jsonl
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/locks
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/token-logs
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/token-logs/token-log.jsonl
+--- mode of the re-created root ---
+drwx------ $HOME/jjo1985-repro-clean4/lane
 --- session log ---
-1/ `$HOME/jjo1985-repro-clean/lane`
-2/ (no output — `sleep 40` exited 0)
-3/ `$HOME/jjo1985-repro-clean/lane`
+1: `$HOME/jjo1985-repro-clean4/lane`
+2: (no output — `touch` + `sleep 40`, exit 0)
+3: `$HOME/jjo1985-repro-clean4/lane`
 ```
 
-Both runs behaved identically. The third `bash` call (`pwd`) succeeded with the same path it printed
-before the deletion, which is only possible because the directory existed again by then: a spawn
-whose cwd is gone fails with `ENOENT`. The session never noticed that its cwd had been removed.
-A third run with the same clean environment reproduced it again (deleted 20:26:56Z, back 20:26:57Z);
-its verbatim output is `artifacts/jjo-1985/run-clean3.log`, and the three-run table is
-`artifacts/jjo-1985/run.md`.
+The 40 s window is the interesting part. The directory stayed gone for the whole `sleep`, and came
+back 36 s after the deletion — when the `sleep` call returned and the session wrote its next state.
+The write is event-driven (a tool boundary), not a timer. The third `bash` call (`pwd`) then succeeded
+with the path it printed before the deletion, which is only possible because the directory existed
+again by then: a spawn whose cwd is gone fails with `ENOENT`. The session never noticed that its cwd
+had been removed.
+
+Three earlier runs (one with the ambient GJC session environment, two with it unset) reproduced the
+same re-creation 2-3 s after deletion, using a `ps`-based wait instead of the sentinel. That weaker
+predicate can be satisfied by the `gjc` command line itself, so those runs prove "re-created while the
+session was alive" but not "mid-call"; the mid-call claim rests on the sentinel run above. All four
+runs are tabulated in `artifacts/jjo-1985/run.md`, with the sentinel run's verbatim output in
+`artifacts/jjo-1985/run-clean4.log` and the earlier one in `artifacts/jjo-1985/run-clean3.log`.
 
 ### What comes back, and what does not
 
@@ -220,9 +213,10 @@ Body:
 >    postmortem/finalizer writes must not resurrect it either.
 >
 > **Reproduction.** `gjc -p` is started in a scratch git repo and asked for three `bash` calls
-> (`pwd`, `sleep 40`, `pwd`); the directory is `rm -rf`-ed while the `sleep` runs. Two seconds later
-> the directory is back with `.gjc/_session-<id>/{locks,runtime,token-logs}` and the third call
-> prints the restored path. Full recipe and output are in
+> (`pwd`, `touch <sentinel> && sleep 40`, `pwd`); once the sentinel outside the repo exists, the
+> directory is `rm -rf`-ed. It stayed gone for the whole sleep and came back 36 s later, when the
+> call returned: `.gjc/_session-<id>/{locks,runtime,token-logs}` re-created with mode `0700`, and the
+> third call printed the restored path. Full recipe and output are in
 > `jjongguet/gjc-plugin:docs/gjc-0.20-session-cwd-resurrection.md`.
 
 Filing the upstream issue or a PR is a separate approval (JJO-1985) — nothing here has been sent to
@@ -231,9 +225,9 @@ Filing the upstream issue or a PR is a separate approval (JJO-1985) — nothing 
 ## Limits of this document
 
 - Only `gjc/0.20.0` was exercised, on Darwin arm64. Other versions were not run.
-- The re-created *set* is stable across the two runs; which writer fires first was not attributed
-  per-writer. Items 2–4 above all create the same ancestors, so attribution would need per-writer
-  tracing (`fs_usage`/`dtruss`) that this record does not include.
+- Four runs reproduced the re-creation; the *set* of returned paths was identical in all four. Which
+  writer fires first was not attributed per-writer. Items 2–4 above all create the same ancestors, so
+  attribution would need per-writer tracing (`fs_usage`/`dtruss`) that this record does not include.
 - The deletion was `rm -rf`, not `lane-release --self`; both remove the directory while a session
   lives, and `lane-release` additionally holds a `git worktree lock` that does not survive its own
   removal. The mechanism under test — a state write after the cwd is gone — is identical.
