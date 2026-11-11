@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.26] - 2026-11-11
+
+Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1
+
+### Added
+
+- **memory-dream**: a new plugin for the offline dreaming pass described by Anthropic's agent-memory article (JJO-2074). `memory_dream` reads GJC's `memory_summary.md` and `MEMORY.md`, decomposes them into claims, checks injection budgets, dead or masked `rule://` references, missing backticked paths, elapsed days on dated facts and secret shapes, retrieves bounded `path:line` evidence with `SYSTEM.md`/`RULES.md`/`AGENTS.md`/`rules/*.md` first, and can ask `typesafe/jev-1.14` whether an evidence-bearing claim is consistent with that evidence. Verdicts are `supported`, `contradicted`, `unverified` or `no-decision`; a keyless run never promotes evidence to `supported`, and the Jev path stays opt-in (`jev: true`) until the three-run golden adoption threshold is measured. The report is written under `~/.gjc-plugin/memory-dream/` with `0700`/`0600` and records before/after sha256 for every memory file it read. A `session_start` hook shows only the latest report's `contradicted` notes, bounded to 5 lines and 600 UTF-8 bytes, with no model call and no write. The plugin never edits GJC memory or session files; GJC 0.20.0 has no non-destructive correction interface (`/memory clear` deletes every project's rows), which is recorded as an upstream defect candidate. The synthetic golden set has 36 balanced claims and a `scripts/golden.ts` scorer; the deterministic baseline scores 0.67 accuracy with contradicted recall 0.00, and real Jev adoption requires a three-run mean precision ≥ 0.9 and recall ≥ 0.7. A real-memory host smoke (`scripts/smoke-host.mjs`) drives a fresh `gjc --print` process against a scripted loopback endpoint and asserts unchanged memory hashes.
+
 ## [0.0.25] - 2026-11-11
 
 Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1

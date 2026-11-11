@@ -10,6 +10,7 @@
     "backplan/gajae-plugin.json",
     "rrsi/gajae-plugin.json",
     "aside-memory/gajae-plugin.json",
-    "egm/gajae-plugin.json"
+    "egm/gajae-plugin.json",
+    "memory-dream/gajae-plugin.json"
   ]
 }

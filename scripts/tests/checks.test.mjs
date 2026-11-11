@@ -154,7 +154,7 @@ test("audit-claims checker validates a row and rejects an unlisted sentence", ()
 
 test("every plugin build --check passes in sync and fails on generated-surface drift", () => {
 	const plugins = JSON.parse(readFileSync(join(REPO, "gjc-plugin.json"), "utf8")).plugins.map(manifest => dirname(manifest));
-	assert.equal(plugins.length, 9);
+	assert.equal(plugins.length, 10);
 	// Builders inline sibling sources (shared/, verification-receipts/lib, self-improve/lib), so copy the tracked tree once.
 	const root = mkdtempSync(join(tmpdir(), "gjc-plugin-build-"));
 	try {
