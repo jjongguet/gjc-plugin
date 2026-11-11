@@ -1,0 +1,42 @@
+VERSION gjc/0.20.0
+START 20:30:35Z
+gjc_pid 60545
+STATE_CREATED 20:30:44Z
+--- files before deletion ---
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
+CALL2_STARTED 20:30:46Z sentinel=inflight
+COMMAND PID NAME
+gjc 60545 $HOME/jjo1985-repro-clean4/lane
+gjc 89863 $HOME/jjo1985-repro-clean4/lane
+gjc 90351 $HOME/jjo1985-repro-clean4/lane
+gjc 90520 $HOME/jjo1985-repro-clean4/lane
+DELETED 20:30:46Z exists=no
+RECREATED 20:31:26Z after_36s
+.
+./.gjc
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/locks
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
+REAPPEARED yes
+GJC_EXIT 0
+--- final tree ---
+.
+./.gjc
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/locks
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/runtime/runtime-state.json.lock.transition.owner
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/token-logs
+./.gjc/_session-01a1cc4e-3073-748f-a5c4-4a8c52d945e8/token-logs/token-log.jsonl
+--- mode of the re-created root ---
+drwx------ $HOME/jjo1985-repro-clean4/lane
+--- session log ---
+1: `$HOME/jjo1985-repro-clean4/lane`
+2: (출력 없음 — `touch` + `sleep 40`, exit 0)
+3: `$HOME/jjo1985-repro-clean4/lane`
