@@ -1,0 +1,12 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "egm",
+  "version": "0.0.1",
+  "tools": [
+    {
+      "name": "egm_readiness",
+      "path": "tools/egm-readiness.ts",
+      "description": "Read-only offline readiness report for the Elephant-Goldfish Model (EGM) skills installed natively with `gjc plugin install egm@egm`, pinned to EGM v0.1.1: marketplace and user-scope install state, the commit the marketplace source names, a sha256 comparison of every runtime file (skills, reviewer personas, document standards) with the pinned release, the egm:egm-* skill names and the session settings that can disable marketplace skills, the task subagent tool or the reviewer personas, with remediation. Never installs, fetches or runs EGM, writes nothing and never contacts the network."
+    }
+  ]
+}

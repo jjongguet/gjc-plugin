@@ -46,12 +46,13 @@ To check the same install → call → uninstall path without a model or key, ru
 | [`verification-receipts`](verification-receipts/) | Run explicit `node:test` files as private receipts; recheck that delegated work was followed by covering verification | Which named test files ran, their counts, and whether their sources changed since | Coverage, correctness of untested code, or that the tests are meaningful | Node.js on `PATH`; keyless (an optional Jev key adds warning-only adequacy notes) |
 | [`rrsi`](rrsi/) | Store exploration traces and replay deterministic policies (Dream-RSI) | What the stored corpus supports under the replay rules, including "insufficient evidence" | Online improvement; replay alone is not closed-loop efficacy | None: offline, keyless |
 | [`rea`](rea/) | Check the pinned [REA](https://github.com/morluto/rea) CLI and use its workflow skill | Whether local Node/npx/Bun fit the pinned `rea-agents` 6.4.0 | The quality of REA's analysis | Node.js or Bun; the first `npx` call downloads `rea-agents` |
+| [`egm`](egm/) | Run Google's [Elephant-Goldfish Model](https://github.com/google/elephant-goldfish-model) design and review skills, installed natively by `gjc`, and check that install | Whether the installed EGM runtime files match the pinned v0.1.1 release and whether the session settings let the Goldfish reviewer subagents run | Review quality, or that reviewers see no host instructions: they start without the parent conversation but still receive `SYSTEM.md`, `RULES.md` and always-apply rules | `gjc` 0.20.0 or newer and `git`; installing EGM clones the pinned tag from GitHub |
 | [`jev-advisor`](jev-advisor/) | Get advisory `fast` / `balanced` / `strong` tier advice before delegated tasks, one-shot artifact checks and an offline metrics report | What the decision model returned, or an explicit no-decision | Model routing, task quality or correctness; shadow mode by default | `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` for advice; `plugin_metrics` is offline |
 | [`ui-regression`](ui-regression/) | Run one bounded browser scenario against a page you serve on loopback | The asserted DOM text and visibility in that run | Deployed UI state, visual quality, or flows you did not assert | The `aside` browser CLI with a connected profile and an explicit account |
 | [`wiki`](wiki/) | Search a guarded personal wiki and file pending proposals | Canonical page matches, with citations | That a page is true; it never approves or publishes | A personal-wiki checkout with `scripts/wiki.py` (`WIKI_ROOT`) |
 | [`aside-memory`](aside-memory/) | Search Aside memory read-only for an explicit account | Bounded, quoted historical context | That a memory is current or authoritative | The `aside` CLI and an explicit numeric account |
 
-`backplan`, `verification-receipts`, `rrsi` and `rea` work for anyone with `gjc`. `jev-advisor` needs a decision-model key for its advice. `ui-regression`, `wiki` and `aside-memory` wrap the maintainer's personal tools; install them only if you run the same tools.
+`backplan`, `verification-receipts`, `rrsi`, `rea` and `egm` work for anyone with `gjc` (`egm` needs 0.20.0 or newer). `jev-advisor` needs a decision-model key for its advice. `ui-regression`, `wiki` and `aside-memory` wrap the maintainer's personal tools; install them only if you run the same tools.
 
 Measured attributes (tiers, counts, durations, journals) are descriptive observations, not quality, routing or causal proof.
 
@@ -92,6 +93,7 @@ flowchart TB
     vr["verification-receipts"]
     rr["rrsi"]
     rea["rea"]
+    egm["egm"]
   end
   subgraph external["Need extra setup"]
     direction LR
@@ -127,6 +129,7 @@ Installing and using a plugin needs only `gjc` (verified with 0.18.12). Building
 | `jev-advisor` | 3 tools, 6 hooks | `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` for advice and checks | Without a key, advice is an explicit no-decision; `plugin_metrics` is offline. |
 | `rrsi` | 1 tool, 1 hook | Nothing | Yes |
 | `rea` | 1 tool, loose skill | Node.js `^22.19 \|\| ^24.11 \|\| >=26` or Bun; the first `npx` call downloads `rea-agents` | `rea_readiness` is offline; the CLI fetch uses the network. |
+| `egm` | 1 tool; EGM's 7 skills and 10 reviewer personas come from GJC's native marketplace install | `gjc` 0.20.0 or newer and `git` | `egm_readiness` is offline and writes nothing; installing EGM clones the pinned tag from GitHub. |
 | `wiki` | 2 tools | A personal-wiki checkout with `scripts/wiki.py`, located by `WIKI_ROOT` (default `$HOME/jjongguet/personal-wiki`) | Local only |
 | `aside-memory` | 1 tool | The `aside` CLI and an explicit numeric account | Network through Aside; no key |
 
@@ -139,6 +142,7 @@ Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev
 | `gjc: command not found` | gajae-code is not installed or not on `PATH`. Install it from [gajae-code](https://github.com/Yeachan-Heo/gajae-code); `node scripts/onboarding-smoke.mjs` reports the missing prerequisite and exits `2`. |
 | `gjc plugin install` refuses because the plugin is already installed | Replace it: `gjc plugin uninstall <name> --user`, then install again. |
 | `gjc plugin upgrade` fails with `The stored source for GJC bundle "<name>" could not be resolved` | The plugin was installed from a path that no longer exists, for example a temporary worktree or a deleted clone. Reinstall from the checkout you keep: `gjc plugin uninstall <name> --user`, then `gjc plugin install <path> --user`. |
+| `/skill:egm-review` is not recognised | GJC registers marketplace skills under the plugin name. Use `/skill:egm:egm-review` (and `egm:egm-<name>` for the other six); `egm_readiness` lists every invocation. |
 | An installed tool is missing from the session | Tools and hooks load when a session starts. Start a new `gjc` process, then check `gjc plugin list` and `gjc plugin doctor`. |
 | `jev_advise` or `jev_check` returns `no_decision` with reason `disabled` | No decision-model key is configured. This is the documented keyless behaviour; add `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` to enable advice. |
 | A metrics or journal read fails with `store_corrupt` after upgrading several plugins | An older `jev-advisor` read records written by a newer `verification-receipts`. Reinstall `jev-advisor` first, `verification-receipts` second, then the rest ([install order](CONTRIBUTING.md#install-order-and-replacement)). |

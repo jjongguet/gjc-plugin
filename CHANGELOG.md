@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.25] - 2026-11-11
+
+Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1
+
+### Added
+
+- **egm**: a new plugin for Google's Elephant-Goldfish Model design and review skills, pinned to EGM v0.1.1 (JJO-2073). GJC 0.20.0 installs EGM natively (`gjc plugin marketplace add` on a v0.1.1 checkout, then `gjc plugin install egm@egm`), so EGM's text is not bundled or forked; the plugin adds `egm_readiness`, an offline report of the marketplace and install state, a sha256 comparison of the 27 runtime files with the release, the namespaced `/skill:egm:egm-<name>` invocations and the session settings that can disable the `task` reviewers. `egm/scripts/smoke-native.mjs` checks the native install and the reviewer isolation in a throwaway GJC root: the parent conversation does not reach a reviewer, while the user `SYSTEM.md`, `RULES.md` and always-apply rules do, so a GJC Goldfish review is documented as not zero-context.
+
 ## [0.0.23] - 2026-11-03
 
 Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2

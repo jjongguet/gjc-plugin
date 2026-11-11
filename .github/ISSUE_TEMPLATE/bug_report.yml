@@ -6,7 +6,7 @@ body:
     id: plugin
     attributes:
       label: Plugin
-      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, repository / CI]
+      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, egm, repository / CI]
     validations:
       required: true
   - type: input

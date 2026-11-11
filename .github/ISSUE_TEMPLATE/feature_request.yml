@@ -6,7 +6,7 @@ body:
     id: plugin
     attributes:
       label: Plugin
-      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, new plugin, repository / CI]
+      options: [verification-receipts, ui-regression, backplan, jev-advisor, rrsi, rea, wiki, aside-memory, egm, new plugin, repository / CI]
     validations:
       required: true
   - type: textarea
