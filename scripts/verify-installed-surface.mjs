@@ -7,8 +7,10 @@
 // reports source files the installer never writes as MISSING (JJO-1093).
 //
 // Two modes:
-//   --recorded <surface.json>  verify a recorded `{tag, plugins:[{name,files:[[rel,sha256]]}]}`
-//                              surface against `git show <tag>:<plugin>/<rel>`
+//   --recorded <surface.json>  verify a recorded surface against
+//                              `git show <tag>:<plugin>/<rel>`; `files` entries may be
+//                              installer `[rel, sha256]` pairs or this script's
+//                              `{path, sha256, ...}` objects (extra keys are ignored)
 //   (default)                  walk every pluginRoot in the installer registry,
 //                              hash each installed file and compare it with the tag blob
 //
@@ -210,23 +212,59 @@ function summarize(plugins) {
 	return summary;
 }
 
+// A recorded `files` entry is either an installer pair `[rel, sha256]` or this
+// script's `{path, sha256, ...}` object; keys other than path/sha256 are ignored.
+// Every other shape is a malformed record, not a hash mismatch, so it exits 1.
+function recordedFile(plugin, entry, index) {
+	const where = `plugin ${JSON.stringify(plugin.name)} files[${index}]`;
+	let rel;
+	let expected;
+	if (Array.isArray(entry)) {
+		[rel, expected] = entry;
+	} else if (entry !== null && typeof entry === "object") {
+		rel = entry.path;
+		expected = entry.sha256;
+	} else {
+		fail(`recorded surface ${where} must be a [path, sha256] pair or a {path, sha256} object`);
+	}
+	if (typeof rel !== "string" || rel.length === 0) fail(`recorded surface ${where} has no path`);
+	if (typeof expected !== "string" || !/^[0-9a-f]{64}$/i.test(expected)) {
+		fail(`recorded surface ${where} needs a 64-character hex sha256`);
+	}
+	return { path: rel, sha256: expected.toLowerCase() };
+}
+
 function verifyRecorded(repo, tag, recordedPath) {
-	const recorded = JSON.parse(readFileSync(recordedPath, "utf8"));
+	let recorded;
+	try {
+		recorded = JSON.parse(readFileSync(recordedPath, "utf8"));
+	} catch (error) {
+		fail(`cannot read recorded surface ${displayPath(recordedPath)}: ${error.message}`);
+	}
+	if (recorded === null || typeof recorded !== "object" || Array.isArray(recorded)) {
+		fail(`recorded surface ${displayPath(recordedPath)} must be a JSON object`);
+	}
+	if (!Array.isArray(recorded.plugins)) fail(`recorded surface ${displayPath(recordedPath)} needs a plugins array`);
 	const recordTag = recorded.tag ?? tag;
 	if (recordTag !== tag) fail(`recorded surface tag ${recordTag} does not match --tag ${tag}`);
 	const plugins = [];
 	let total = 0;
 	let match = 0;
 	let missing = 0;
-	for (const plugin of recorded.plugins ?? []) {
+	for (const plugin of recorded.plugins) {
+		if (plugin === null || typeof plugin !== "object" || typeof plugin.name !== "string" || plugin.name.length === 0) {
+			fail("recorded surface plugins need a name");
+		}
+		if (!Array.isArray(plugin.files)) fail(`recorded surface plugin ${JSON.stringify(plugin.name)} needs a files array`);
 		const files = [];
-		for (const [rel, expected] of plugin.files ?? []) {
+		plugin.files.forEach((entry, index) => {
+			const { path: rel, sha256: expected } = recordedFile(plugin, entry, index);
 			total += 1;
 			const blob = tagBlob(repo, tag, plugin.name, rel);
 			if (!blob) {
 				missing += 1;
 				files.push({ path: rel, status: "missing-in-tag", expected });
-				continue;
+				return;
 			}
 			const actual = sha256(blob);
 			if (actual === expected) {
@@ -235,7 +273,7 @@ function verifyRecorded(repo, tag, recordedPath) {
 			} else {
 				files.push({ path: rel, status: "mismatch", expected, actual });
 			}
-		}
+		});
 		plugins.push({ name: plugin.name, version: plugin.version ?? null, files });
 	}
 	const mismatches = total - match - missing;
