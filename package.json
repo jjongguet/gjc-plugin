@@ -18,6 +18,7 @@
     "hermes:test": "cd integrations/hermes/jev-gate && python3 -m unittest discover -s tests",
     "build:advisor": "bun jev-advisor/scripts/build.mjs",
     "test:scripts": "node --test scripts/tests/checks.test.mjs scripts/tests/ultragoal-gate.test.mjs scripts/tests/ultragoal-succession.test.mjs scripts/tests/installed-surface.test.mjs",
+    "test:plugin-cli": "node scripts/check-plugin-cli.mjs",
     "test:schemas": "bun test scripts/tests/host-schema.test.mjs",
     "test:advisor": "bun jev-advisor/scripts/verify.ts",
     "build:verification": "bun verification-receipts/scripts/build.mjs",

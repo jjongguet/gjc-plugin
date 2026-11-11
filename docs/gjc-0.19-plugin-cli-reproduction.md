@@ -1,5 +1,9 @@
 # `gjc plugin` CLI defects reproduced on 0.19.0
 
+> Historical measurement. Three of these defects were addressed upstream and re-measured on
+> 0.20.0: see [the 0.20.0 observed contract](gjc-0.20-plugin-cli-verification.md) before acting on
+> any command or conclusion below.
+
 Three `gjc plugin` CLI behaviours make local plugin work misleading, and one of them hides the only
 information needed to fix the failure. All of them live in GJC core, not in this repository: the
 decisions are taken by `gjc`'s own manifest parser, loader and installer, and none of those modules
@@ -183,6 +187,10 @@ The eight plugin manifests this repository shipped at this measurement already u
 fields, which is why they install on 0.19.0 while a Claude-Code-shaped or extended manifest does not.
 
 ## Upstream requests
+
+Status on 0.20.0 is recorded per item in [the 0.20.0 observed contract](gjc-0.20-plugin-cli-verification.md):
+items 1–3 are partly fixed (link discoverable, dry-run honoured, diagnostic restored) with the
+remaining gaps listed there; items 4–5 were not re-measured.
 
 1. `plugin link`: register the linked package where the loaders actually look — add it to
    `$HOME/.gjc/plugins/package.json` `dependencies` and/or write the bundle
