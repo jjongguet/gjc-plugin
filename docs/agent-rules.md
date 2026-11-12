@@ -36,6 +36,18 @@ These are the working rules for agents and contributors changing this repository
 - Tests and demos run in disposable homes with synthetic or disabled transport; they must not write to a real `~/.gjc-plugin/` store or call a live provider.
 - External pull requests are accepted only through the owner-dispatched `pr-validate.yml` lane: their code never runs automatically, on the self-hosted runner, with secrets, or with a persistent cache.
 
+## Code Review Rules
+
+Use these approved replacement rules when reviewing a change; they are not a reconstruction of an earlier snippet.
+
+1. Prioritize actual runtime failures, data loss and security issues over style.
+2. Report problems introduced or worsened by the change under review.
+3. For each finding, identify the file and line, triggering conditions and user impact.
+4. Do not present an unsupported possibility as a confirmed defect.
+5. Check invalid input, failure, concurrent execution and recovery boundaries as well as the happy path.
+6. Check for secrets, privilege expansion, external data transfers and costs.
+7. Check for code, configuration and documentation contract mismatches and duplicate sources of truth; do not demand unnecessary structural refactoring.
+
 ## Records
 
 - Committed evidence uses repository-relative paths; `bun run evidence:check` enforces this for `self-improve/`.
