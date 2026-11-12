@@ -3,11 +3,12 @@
  * Offline generated-package acceptance for the backplan plugin.
  *
  * Hermetic: a temporary isolated HOME for journal writes; the user's real
- * ~/.gjc state, credentials and the network are never touched. All cases run
- * against the committed generated surface with a fake TypeBox provider.
+ * ~/.gjc state, credentials and the network are never touched. Cases exercise
+ * the core and generated tool with a fake TypeBox provider. An installed
+ * completion-gate CLI additionally lints temporary rendered descriptions.
  */
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -15,14 +16,33 @@ import { spawnSync } from "node:child_process";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
+
+function findCompletionGate() {
+	const candidates = [
+		process.env.GJC_COMPLETION_GATE,
+		process.env.COMPLETION_GATE_BIN,
+		...(process.env.PATH ?? "").split(path.delimiter).filter(Boolean).map(dir => path.join(dir, "completion-gate")),
+		path.join(os.homedir(), ".gjc", "agent", "policy", "bin", "completion-gate"),
+	];
+	for (const candidate of candidates) {
+		if (!candidate) continue;
+		const file = path.resolve(candidate.startsWith("~/") ? path.join(os.homedir(), candidate.slice(2)) : candidate);
+		try {
+			accessSync(file, constants.X_OK);
+			if (statSync(file).isFile()) return file;
+		} catch { /* Try the next installed executable; never copy or synthesize one. */ }
+	}
+	return "";
+}
+
 if (process.argv[2] !== "--isolated") {
 	const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "backplan-offline-")));
 	let status = 1;
 	try {
 		for (const dir of ["home", "tmp", "cwd", "config"]) mkdirSync(path.join(root, dir), { mode: 0o700 });
-		const child = spawnSync(process.execPath, ["--no-env-file", script, "--isolated", root], {
+		const child = spawnSync(process.execPath, ["--no-env-file", script, "--isolated", root, findCompletionGate()], {
 			cwd: path.join(root, "cwd"),
-			env: { HOME: path.join(root, "home"), TMPDIR: path.join(root, "tmp"), XDG_CONFIG_HOME: path.join(root, "config"), LC_ALL: "C", BACKPLAN_VERIFY_CHILD: "1" },
+			env: { HOME: path.join(root, "home"), TMPDIR: path.join(root, "tmp"), XDG_CONFIG_HOME: path.join(root, "config"), PATH: process.env.PATH, LC_ALL: "C", BACKPLAN_VERIFY_CHILD: "1" },
 			stdio: "inherit",
 			timeout: 180000,
 		});
@@ -33,10 +53,10 @@ if (process.argv[2] !== "--isolated") {
 	}
 	process.exitCode = status;
 } else {
-	await runSuite(process.argv[3]);
+	await runSuite(process.argv[3], process.argv[4]);
 }
 
-async function runSuite(root) {
+async function runSuite(root, completionGate) {
 	assert.equal(process.env.BACKPLAN_VERIFY_CHILD, "1");
 	assert.equal(os.homedir(), path.join(root, "home"));
 	let cases = 0;
@@ -142,6 +162,170 @@ async function runSuite(root) {
 		assert.match(issue.description, /브랜치 feat\/x/);
 		assert.deepEqual(issue.labels, ["repo:widgets"]);
 	});
+
+	const explicitGate = () => [
+		{ kind: "lane-receipt" },
+		{ kind: "evidence", arg: "Regression check rejects malformed input" },
+		{ kind: "vercel", arg: "widget-web.dev_1" },
+	];
+	const gatePlan = gate => {
+		const plan = validPlan();
+		plan.issues[0].completion_gate = gate;
+		return plan;
+	};
+	const gateLines = description => description.split("\n").filter(line => /^- \[C\d+\]/.test(line));
+	const gateBytes = gate => Buffer.byteLength(gate.map((item, index) => `- [C${index + 1}] ${item.kind}: ${item.arg}\n`).join(""), "utf8");
+	const exactByteGate = () => {
+		const gate = Array.from({ length: 20 }, () => ({ kind: "evidence", arg: "x".repeat(186) }));
+		const remaining = 4096 - gateBytes(gate);
+		assert.ok(remaining >= 0 && remaining <= 14);
+		gate[19].arg += "x".repeat(remaining);
+		assert.equal(gateBytes(gate), 4096);
+		return gate;
+	};
+
+	await check("omitted completion_gate renders the default C0 contract after human criteria", () => {
+		const report = core.checkBackplanPlan(validPlan());
+		assert.equal(report.status, "ok");
+		const description = report.linear.issues[0].description;
+		assert.deepEqual(gateLines(description), ["- [C0] lane-receipt"]);
+		assert.ok(description.includes("완료 조건\n\n- [ ] `bun test tests/pipeline.test.ts` shows the malformed-input case green\n\n## 완료 게이트\n\n<!-- completion-gate v1 -->\n\n- [C0] lane-receipt\n\n의존성·실행 경계"));
+	});
+
+	await check("explicit completion_gate renders exact ordered C1..Cn criteria per issue", () => {
+		const plan = gatePlan(explicitGate());
+		plan.issues.push({ ...validPlan().issues[0], title: "A second independently verifiable issue" });
+		const report = core.checkBackplanPlan(plan);
+		assert.equal(report.status, "ok");
+		assert.deepEqual(gateLines(report.linear.issues[0].description), [
+			"- [C1] lane-receipt",
+			"- [C2] evidence: Regression check rejects malformed input",
+			"- [C3] vercel: widget-web.dev_1",
+		]);
+		assert.deepEqual(gateLines(report.linear.issues[1].description), ["- [C0] lane-receipt"]);
+		assert.ok(report.linear.issues[0].description.indexOf("## 완료 게이트") > report.linear.issues[0].description.indexOf("완료 조건"));
+		assert.notEqual(report.digest, core.checkBackplanPlan(validPlan()).digest);
+		assert.equal(report.digest, core.checkBackplanPlan(JSON.parse(JSON.stringify(plan))).digest);
+	});
+
+	await check("completion_gate accepts every kind and exact character/count/byte boundaries", () => {
+		for (const gate of [
+			[{ kind: "lane-receipt" }, { kind: "propagate" }, { kind: "post-merge-ci" }],
+			[{ kind: "evidence", arg: "x" }],
+			[{ kind: "evidence", arg: "x".repeat(200) }],
+			[{ kind: "evidence", arg: "𐐀".repeat(200) }],
+			[{ kind: "vercel", arg: "x".repeat(64) }],
+			exactByteGate(),
+		]) {
+			const report = core.checkBackplanPlan(gatePlan(gate));
+			assert.equal(report.status, "ok", JSON.stringify(report.errors));
+		}
+	});
+
+	const invalidGates = [
+		["unknown kind", [{ kind: "deploy" }], /\[0\]\.kind:/],
+		["missing kind", [{}], /\[0\]\.kind: required/],
+		["undefined kind", [{ kind: undefined }], /\[0\]\.kind: expected/],
+		["unknown key", [{ kind: "lane-receipt", id: "X1" }], /\[0\]\.id: unknown key/],
+		["empty list", [], /needs at least one/],
+		["non-array", null, /expected an array/],
+		["non-object", ["lane-receipt"], /expected an object/],
+		...["lane-receipt", "propagate", "post-merge-ci"].map(kind => [`${kind} with arg`, [{ kind, arg: "" }], /\.arg: .* takes no argument/]),
+		["missing evidence arg", [{ kind: "evidence" }], /\.arg: expected a string/],
+		["non-string arg", [{ kind: "evidence", arg: 42 }], /\.arg: expected a string/],
+		["empty evidence", [{ kind: "evidence", arg: "" }], /1\.\.200-character/],
+		["blank evidence", [{ kind: "evidence", arg: "  " }], /1\.\.200-character/],
+		["201-character evidence", [{ kind: "evidence", arg: "x".repeat(201) }], /1\.\.200-character/],
+		["vercel path", [{ kind: "vercel", arg: "foo/bar" }], /vercel needs a project name/],
+		["vercel spaces", [{ kind: "vercel", arg: "foo bar" }], /vercel needs a project name/],
+		["vercel surrounding spaces", [{ kind: "vercel", arg: " foo " }], /vercel needs a project name/],
+		["65-character vercel", [{ kind: "vercel", arg: "x".repeat(65) }], /vercel needs a project name/],
+		["LF arg", [{ kind: "evidence", arg: "one\ntwo" }], /must not contain line breaks/],
+		["CR arg", [{ kind: "evidence", arg: "one\rtwo" }], /must not contain line breaks/],
+		["Unicode line separator arg", [{ kind: "evidence", arg: "one\u2028two" }], /must not contain line breaks/],
+		["21 criteria", Array.from({ length: 21 }, () => ({ kind: "lane-receipt" })), /20-criterion limit/],
+		["UTF-8 byte overflow", Array.from({ length: 14 }, () => ({ kind: "evidence", arg: "한".repeat(100) })), /4096-byte limit/],
+	];
+	for (const [name, gate, pattern] of invalidGates) {
+		await check(`completion_gate rejects ${name} with a path-addressed error`, () => {
+			const report = core.checkBackplanPlan(gatePlan(gate));
+			assert.equal(report.status, "invalid");
+			assert.equal(report.digest, null);
+			assert.equal(report.linear, null);
+			assert.ok(report.errors.some(error => error.startsWith("issues[0].completion_gate") && pattern.test(error)), JSON.stringify(report.errors));
+		});
+	}
+
+	await check("completion_gate rejects exactly one byte beyond the canonical block limit", () => {
+		const gate = exactByteGate();
+		gate[19].arg += "x";
+		assert.equal(gateBytes(gate), 4097);
+		assert.deepEqual(core.checkBackplanPlan(gatePlan(gate)).errors, ["issues[0].completion_gate: rendered block exceeds the 4096-byte limit"]);
+	});
+
+	await check("free text cannot introduce reserved completion-gate markers or title lines", () => {
+		const mutations = [
+			plan => { plan.request = "<!-- completion-gate v1 -->"; },
+			plan => { plan.goal = "Goal\n## 완료 게이트"; },
+			plan => { plan.end_state = "<!-- completion-gate v1 -->"; },
+			plan => { plan.success_criteria = ["Check result\n완료 게이트"]; },
+			plan => { plan.project.name = "Project\n완료 게이트"; },
+			plan => { plan.project.reason = "<!-- completion-gate v1 -->"; },
+			plan => { plan.project.boundaries = ["완료 게이트"]; },
+			...["title", "objective", "context", "delivery"].map(key => plan => { plan.issues[0][key] = "Text\n  ###완료 게이트  \n"; }),
+			...["scope_in", "scope_out", "completion_criteria", "dependencies"].map(key => plan => { plan.issues[0][key] = ["Text <!-- completion-gate v1 --> text"]; }),
+			plan => { plan.issues[0].context = "Example\r완료 게이트"; },
+			plan => { plan.policy_decisions = [{ topic: "완료 게이트", needs_user_decision: false, options: [], record_location: "project" }]; },
+			plan => { plan.automation_candidates = [{ candidate: "<!-- completion-gate v1 -->", disposition: "backlog" }]; },
+			plan => { plan.issues[0].completion_gate = [{ kind: "evidence", arg: "<!-- completion-gate v1 -->" }]; },
+		];
+		for (const mutate of mutations) {
+			const plan = validPlan();
+			mutate(plan);
+			const report = core.checkBackplanPlan(plan);
+			assert.equal(report.status, "invalid");
+			assert.ok(report.errors.some(error => /completion-gate (marker|title) is reserved/.test(error)), JSON.stringify(report.errors));
+		}
+		for (const key of ["session", "worktree", "branch"]) {
+			assert.equal(core.checkBackplanPlan(validPlan(), { [key]: "Text\n완료 게이트" }).status, "invalid");
+		}
+		const prose = validPlan();
+		prose.issues[0].context = "완료 게이트를 확인하는 일반 문장";
+		assert.equal(core.checkBackplanPlan(prose).status, "ok");
+	});
+
+	await check("free-text code fences cannot hide the rendered authoritative block", () => {
+		for (const fence of ["```", "~~~"]) {
+			const plan = gatePlan(explicitGate());
+			plan.issues[0].context = `Example\n${fence}\ntruncated code`;
+			assert.deepEqual(core.checkBackplanPlan(plan).errors, ["issues[0]: unclosed free-text code fence hides the completion-gate block"]);
+			plan.issues[0].context += `\n${fence}`;
+			assert.equal(core.checkBackplanPlan(plan).status, "ok", "balanced fences remain supported");
+		}
+	});
+
+	if (!completionGate) {
+		console.log("skip: completion-gate not installed");
+	} else {
+		await check("installed completion-gate lint accepts rendered descriptions with matching criteria", () => {
+			const fenced = gatePlan(explicitGate());
+			fenced.issues[0].context = "Example\n```\nquoted code\n```";
+			for (const plan of [validPlan(), gatePlan(explicitGate()), gatePlan(exactByteGate()), fenced]) {
+				const report = core.checkBackplanPlan(plan);
+				assert.equal(report.status, "ok", JSON.stringify(report.errors));
+				const file = path.join(root, "tmp", "completion-gate.md");
+				writeFileSync(file, report.linear.issues[0].description);
+				const lint = spawnSync(completionGate, ["lint", file, "--json"], { encoding: "utf8", timeout: 30000 });
+				assert.equal(lint.status, 0, lint.stderr || lint.stdout || lint.error?.message);
+				const result = JSON.parse(lint.stdout);
+				assert.equal(result.ok, true);
+				assert.equal(result.block, "block", "the rendered contract must be authoritative, not a parser fallback");
+				assert.deepEqual(result.criteria, plan.issues[0].completion_gate
+					? plan.issues[0].completion_gate.map((item, index) => ({ id: `C${index + 1}`, kind: item.kind, arg: item.arg ?? "" }))
+					: [{ id: "C0", kind: "lane-receipt", arg: "" }]);
+			}
+		});
+	}
 
 	await check("create mode renders a project description from the goal and criteria", () => {
 		const plan = validPlan();
@@ -306,7 +490,8 @@ async function runSuite(root) {
 	});
 
 	await check("execute renders ok and journals one sanitized record", async () => {
-		const result = await tool.execute("call-ok", { plan: JSON.stringify(validPlan()), session: "s", worktree: "/w", branch: "b" });
+		const plan = gatePlan(explicitGate());
+		const result = await tool.execute("call-ok", { plan: JSON.stringify(plan), session: "s", worktree: "/w", branch: "b" });
 		assert.notEqual(result.isError, true);
 		const text = result.content[0].text;
 		assert.match(text, /^backplan_check: ok\n/);
@@ -315,6 +500,11 @@ async function runSuite(root) {
 		const reportLine = JSON.parse(lines[lines.length - 2]);
 		assert.equal(journalLine.journalStorage.persisted, true, JSON.stringify(journalLine));
 		assert.equal(reportLine.status, "ok");
+		assert.deepEqual(gateLines(reportLine.linear.issues[0].description), [
+			"- [C1] lane-receipt",
+			"- [C2] evidence: Regression check rejects malformed input",
+			"- [C3] vercel: widget-web.dev_1",
+		]);
 		const segment = journalText();
 		assert.match(segment, /"operation":"backplan_check"/);
 		assert.doesNotMatch(segment, /CANARY/, "journal must not carry plan content");
@@ -338,6 +528,9 @@ async function runSuite(root) {
 		const invalid = await tool.execute("call-invalid", { plan: JSON.stringify(violations) });
 		assert.equal(invalid.isError, true);
 		assert.match(invalid.content[0].text, /^backplan_check: invalid\n/);
+		const badGate = await tool.execute("call-invalid-gate", { plan: JSON.stringify(gatePlan([{ kind: "deploy" }])) });
+		assert.equal(badGate.isError, true);
+		assert.match(badGate.content[0].text, /issues\[0\]\.completion_gate\[0\]\.kind/);
 	});
 
 	await check("execute reads a plan file and refuses oversized or symlinked paths", async () => {

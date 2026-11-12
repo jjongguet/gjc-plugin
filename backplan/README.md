@@ -44,7 +44,7 @@ running session does not.
 Required sections (snake_case JSON): `goal`, `end_state`, `success_criteria`,
 `project` (`{name, mode: "reuse"|"create", reason, boundaries?}`), `issues`,
 `policy_decisions`, `automation_candidates`; optional `request` and per-issue
-`dependencies[]`/`labels[]`. Sizes are bounded (strings ≤ 2000 characters,
+`dependencies[]`/`labels[]`/`completion_gate[]`. Sizes are bounded (strings ≤ 2000 characters,
 plan ≤ 256 KiB); unknown keys are rejected. See
 [`skills/backplan/SKILL.md`](skills/backplan/SKILL.md) for the method and a
 minimal example.
@@ -58,6 +58,13 @@ warn and duplicate titles are rejected); a project mapping with a reason for eve
 carry `needs_user_decision`, options and a record location; automation
 candidates are `backlog` or `out_of_scope` only.
 
+Each issue also renders one completion-gate v1 block after its human completion
+criteria: omitted `completion_gate` defaults to `C0 lane-receipt`; explicit
+contracts validate kinds (`lane-receipt`, `propagate`, `post-merge-ci`,
+`evidence`, `vercel`), arguments, 1..20 criteria and the 4096-byte criterion
+block limit. Reserved marker/title text and unclosed code fences that would
+hide the rendered contract in free-text fields are rejected.
+
 Does not: write to Linear, approve or publish anything, execute work, read
 credentials, or prove that a registered ticket exists — registration remains
 the agent's Linear MCP / `linear-trace.py` step.
@@ -68,6 +75,12 @@ the agent's Linear MCP / `linear-trace.py` step.
 bun scripts/build.mjs   # regenerate tools/backplan-check.ts (keyless)
 bun scripts/verify.ts   # hermetic offline acceptance (isolated HOME, no network)
 ```
+
+Verification also runs the installed `completion-gate lint <file> --json` and
+compares parsed criteria when an executable is found via `GJC_COMPLETION_GATE`,
+`COMPLETION_GATE_BIN`, `PATH`, then `~/.gjc/agent/policy/bin/completion-gate`.
+Without one it prints `skip: completion-gate not installed`; no CLI is copied
+or synthesized, and a failing installed CLI fails verification.
 
 Repo root: `bun run build:backplan`, `bun run test:backplan`. The generated
 package embeds `shared/lib/results.ts` and its core/adapter sources; rebuild
