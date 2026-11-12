@@ -106,7 +106,7 @@ Required: `goal`, `end_state`, `success_criteria` (1..12), `project`
 (`{name, mode: "reuse"|"create", reason, boundaries?}`), `issues` (1..24),
 `policy_decisions`, `automation_candidates` (both may be `[]` — but ask
 yourself honestly before writing an empty array). Optional: `request`,
-per-issue `dependencies[]` and `labels[]`.
+per-issue `dependencies[]`, `labels[]` and `completion_gate[]`.
 
 Each issue: `title`, `objective`, `context`, `scope_in` (≥1), `scope_out`
 (≥1 — write "해당 없음" if truly none), `completion_criteria` (1..12),
@@ -115,6 +115,20 @@ Each issue: `title`, `objective`, `context`, `scope_in` (≥1), `scope_out`
 Completion criteria must be observable; generic phrases ("완료", "동작함",
 "done") are rejected, repeated criteria only warn, and duplicate issue titles are rejected. Unknown keys are rejected. Sizes are
 bounded (strings ≤ 2000 chars, plan ≤ 256 KiB).
+
+`completion_gate` is an optional per-issue array of 1..20 `{kind, arg?}`
+objects. Allowed kinds: `lane-receipt`, `propagate`, `post-merge-ci` (no `arg`
+key); `evidence` (a non-blank 1..200-character `arg`); `vercel` (an `arg`
+matching `[A-Za-z0-9._-]{1,64}`). Arguments must be single-line. The rendered
+criterion lines, including trailing newlines, must fit in 4096 UTF-8 bytes.
+Unknown kinds/keys are rejected. The tool emits one `## 완료 게이트` /
+`<!-- completion-gate v1 -->` block after the human completion criteria with
+ordered IDs `C1`..`Cn`; omission emits `- [C0] lane-receipt`, matching the
+completion-gate CLI default. Do not put the marker string or a standalone
+`완료 게이트` title line (with or without leading `#`) in free-text fields —
+they are reserved and rejected so only the rendered contract is authoritative.
+An unclosed code fence that would hide the rendered block is also rejected;
+balanced fenced examples remain supported.
 
 Minimal example:
 
@@ -133,6 +147,10 @@ Minimal example:
       "scope_in": ["이번에 할 것"],
       "scope_out": ["하지 않을 것"],
       "completion_criteria": ["실행할 검증 명령과 기대 결과"],
+      "completion_gate": [
+        { "kind": "lane-receipt" },
+        { "kind": "evidence", "arg": "검증 명령과 관찰 결과가 결과 댓글에 기록됨" }
+      ],
       "delivery": "승인된 전달 범위 (로컬/푸시/배포)"
     }
   ],

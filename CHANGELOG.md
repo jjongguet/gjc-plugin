@@ -2,6 +2,14 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.27] - 2026-11-12
+
+Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.11 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1
+
+### Added
+
+- **backplan**: optional per-issue `completion_gate` contracts render a completion-gate v1 block after the human completion criteria (JJO-2097). Omission renders `C0 lane-receipt`; explicit criteria use `C1`..`Cn` and validate the five supported kinds, arguments, count and UTF-8 byte bounds. Reserved marker/title text is rejected. Offline acceptance also lints rendered descriptions with the installed completion-gate CLI when available, without copying or synthesizing it.
+
 ## [0.0.26] - 2026-11-11
 
 Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.10 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1

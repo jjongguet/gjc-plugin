@@ -16,6 +16,10 @@ export const BACKPLAN_ERROR_LIMIT = 64;
 
 export type BackplanRenderContext = { session?: string; worktree?: string; branch?: string };
 
+type BackplanCompletionGate =
+	| { kind: "lane-receipt" | "propagate" | "post-merge-ci" }
+	| { kind: "evidence" | "vercel"; arg: string };
+
 export type BackplanIssue = {
 	title: string;
 	objective: string;
@@ -26,6 +30,7 @@ export type BackplanIssue = {
 	delivery: string;
 	dependencies: string[];
 	labels: string[] | null;
+	completionGate?: BackplanCompletionGate[];
 };
 
 export type BackplanPolicyDecision = {
@@ -64,12 +69,23 @@ export type BackplanReport = {
 };
 
 const rootKeys = ["request", "goal", "end_state", "success_criteria", "project", "issues", "policy_decisions", "automation_candidates"];
-const issueKeys = ["title", "objective", "context", "scope_in", "scope_out", "completion_criteria", "delivery", "dependencies", "labels"];
+const issueKeys = ["title", "objective", "context", "scope_in", "scope_out", "completion_criteria", "delivery", "dependencies", "labels", "completion_gate"];
 const projectKeys = ["name", "mode", "reason", "boundaries"];
 const decisionKeys = ["topic", "needs_user_decision", "options", "record_location"];
 const candidateKeys = ["candidate", "disposition"];
 const genericCriterion = /^(완료|완성|됨|정상|동작|동작함|잘\s*됨|잘됨|끝|done|complete|completed|works|working|ok|n\/a|없음)\.?$/i;
 const labelPattern = /^[a-z0-9][a-z0-9:._-]*$/i;
+const completionGateMarker = "<!-- completion-gate v1 -->";
+const completionGateKinds = ["lane-receipt", "propagate", "post-merge-ci", "evidence", "vercel"];
+// Match the line boundaries used by the canonical Python parser's splitlines().
+const completionGateLineBreak = /[\r\n\v\f\u001c-\u001e\u0085\u2028\u2029]/u;
+
+function rejectCompletionGateText(text: string, path: string, errors: string[]): void {
+	if (text.includes(completionGateMarker)) errors.push(`${path}: completion-gate marker is reserved for the rendered contract`);
+	if (text.split(completionGateLineBreak).some(line => line.trim().replace(/^#+/, "").trim() === "완료 게이트")) {
+		errors.push(`${path}: completion-gate title is reserved for the rendered contract`);
+	}
+}
 
 function plainObject(value: unknown): Record<string, unknown> | null {
 	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
@@ -97,6 +113,7 @@ function collectString(value: unknown, path: string, errors: string[], limit: nu
 		errors.push(`${path}: expected a string`);
 		return "";
 	}
+	rejectCompletionGateText(value, path, errors);
 	const text = value.trim();
 	if (!text) {
 		errors.push(`${path}: must not be empty`);
@@ -158,6 +175,51 @@ function collectCriteria(value: unknown, path: string, errors: string[], warning
 	return out;
 }
 
+function renderCompletionGateCriteria(criteria?: BackplanCompletionGate[]): string[] {
+	return criteria
+		? criteria.map((criterion, index) => `- [C${index + 1}] ${criterion.kind}${"arg" in criterion ? `: ${criterion.arg}` : ""}`)
+		: ["- [C0] lane-receipt"];
+}
+
+function collectCompletionGate(value: unknown, path: string, errors: string[]): BackplanCompletionGate[] {
+	const list = asArray(value, path, errors);
+	if (list.length < 1) errors.push(`${path}: needs at least one criterion`);
+	if (list.length > 20) errors.push(`${path}: exceeds the 20-criterion limit`);
+	const criteria: BackplanCompletionGate[] = [];
+	list.slice(0, 20).forEach((entry, index) => {
+		const itemPath = `${path}[${index}]`;
+		const record = collectObject(entry, itemPath, ["kind", "arg"], ["kind"], errors);
+		if (typeof record.kind !== "string" || !completionGateKinds.includes(record.kind)) {
+			if (Object.hasOwn(record, "kind")) errors.push(`${itemPath}.kind: expected ${completionGateKinds.join(", ")}`);
+			return;
+		}
+		const kind = record.kind as BackplanCompletionGate["kind"];
+		if (kind !== "evidence" && kind !== "vercel") {
+			if (Object.hasOwn(record, "arg")) errors.push(`${itemPath}.arg: ${kind} takes no argument`);
+			criteria.push({ kind });
+			return;
+		}
+		if (typeof record.arg !== "string") {
+			errors.push(`${itemPath}.arg: expected a string`);
+			return;
+		}
+		rejectCompletionGateText(record.arg, `${itemPath}.arg`, errors);
+		if (completionGateLineBreak.test(record.arg)) errors.push(`${itemPath}.arg: must not contain line breaks`);
+		const arg = record.arg.trim();
+		if (kind === "evidence" && (!arg || Array.from(record.arg).length > 200)) {
+			errors.push(`${itemPath}.arg: evidence needs a 1..200-character description`);
+		}
+		if (kind === "vercel" && !/^[A-Za-z0-9._-]{1,64}$/.test(record.arg)) {
+			errors.push(`${itemPath}.arg: vercel needs a project name matching [A-Za-z0-9._-]{1,64}`);
+		}
+		criteria.push({ kind, arg });
+	});
+	// The canonical lint counts criterion lines, including each trailing newline.
+	const block = `${renderCompletionGateCriteria(criteria).join("\n")}\n`;
+	if (Buffer.byteLength(block, "utf8") > 4096) errors.push(`${path}: rendered block exceeds the 4096-byte limit`);
+	return criteria;
+}
+
 function normalizePlan(raw: unknown, errors: string[], warnings: string[]): BackplanPlan {
 	const root = collectObject(raw, "plan", rootKeys, ["goal", "end_state", "success_criteria", "project", "issues", "policy_decisions", "automation_candidates"], errors);
 
@@ -196,6 +258,7 @@ function normalizePlan(raw: unknown, errors: string[], warnings: string[]): Back
 			delivery: collectString(record.delivery, `${path}.delivery`, errors, BACKPLAN_STRING_LIMIT),
 			dependencies: record.dependencies === undefined ? [] : collectStringArray(record.dependencies, `${path}.dependencies`, errors, BACKPLAN_STRING_LIMIT, 0),
 			labels: record.labels === undefined ? null : collectStringArray(record.labels, `${path}.labels`, errors, 64, 0),
+			completionGate: record.completion_gate === undefined ? undefined : collectCompletionGate(record.completion_gate, `${path}.completion_gate`, errors),
 		} satisfies BackplanIssue;
 	});
 	const titleSeen = new Map<string, number>();
@@ -289,6 +352,7 @@ function renderIssueDescription(issue: BackplanIssue, project: BackplanPlan["pro
 	for (const item of issue.scopeOut) lines.push(`  - ${item}`);
 	lines.push("", "완료 조건", "");
 	for (const item of issue.completionCriteria) lines.push(`- [ ] ${item}`);
+	lines.push("", "## 완료 게이트", "", completionGateMarker, "", ...renderCompletionGateCriteria(issue.completionGate));
 	lines.push(
 		"",
 		"의존성·실행 경계",
@@ -341,6 +405,19 @@ export function checkBackplanPlan(raw: unknown, context: BackplanRenderContext =
 	const collected: string[] = [];
 	const warnings: string[] = [];
 	const plan = normalizePlan(raw, collected, warnings);
+	for (const [key, value] of Object.entries(context)) {
+		if (typeof value === "string") rejectCompletionGateText(value, `render_context.${key}`, collected);
+	}
+	const descriptions = collected.length === 0 ? plan.issues.map(issue => renderIssueDescription(issue, plan.project, context)) : [];
+	descriptions.forEach((description, index) => {
+		let fenced = false;
+		for (const line of description.split(completionGateLineBreak)) {
+			if (/^\s*(```|~~~)/.test(line)) fenced = !fenced;
+			if (line === completionGateMarker && fenced) {
+				collected.push(`issues[${index}]: unclosed free-text code fence hides the completion-gate block`);
+			}
+		}
+	});
 	const errors = dropMissingKeyEchoes(collected);
 	if (errors.length > 0) {
 		const shown = errors.slice(0, BACKPLAN_ERROR_LIMIT);
@@ -360,9 +437,9 @@ export function checkBackplanPlan(raw: unknown, context: BackplanRenderContext =
 				reason: plan.project.reason,
 				description: plan.project.mode === "create" ? renderProjectDescription(plan, digest) : null,
 			},
-			issues: plan.issues.map(issue => ({
+			issues: plan.issues.map((issue, index) => ({
 				title: issue.title,
-				description: renderIssueDescription(issue, plan.project, context),
+				description: descriptions[index],
 				labels: issue.labels,
 			})),
 			notes: renderNotes(plan),
