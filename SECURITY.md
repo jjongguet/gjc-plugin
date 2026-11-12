@@ -17,3 +17,5 @@ You will get an acknowledgement on the advisory. Confirmed issues are fixed in a
 In scope: the plugin bundles in this repository, their generated tool and hook surfaces, the private result store under `~/.gjc-plugin/`, and the repository's CI workflows. Particularly relevant are credential handling (`~/.gjc/agent/jev-advisor/.env`), file-permission and symlink checks on private stores, process isolation in the test and browser runners, and any path by which a tool could write outside its own store or send data to an unexpected endpoint.
 
 Out of scope: vulnerabilities in gajae-code itself, Aside, REA (`rea-agents`), OpenRouter or other upstream services; report those to their maintainers.
+
+See the [threat model](docs/threat-model.md) for implemented trust boundaries and their limits.
