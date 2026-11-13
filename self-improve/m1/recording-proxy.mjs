@@ -2,16 +2,31 @@ import http from "node:http";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { admitCall } from "../lib/behavior-eval.mjs";
 
-export const UPSTREAM = "https://openrouter.ai/api/v1/chat/completions";
-export const MODEL = "openai/gpt-4.1-mini";
+export const UPSTREAM = "https://apis.opengateway.ai/v1/chat/completions";
+export const MODEL = "deepseek/deepseek-v4.1-flash-eco";
+export const PROVIDER = "sionic-ai";
 const hash = (value) => createHash("sha256").update(value).digest("hex");
 const fail = (code) => { throw new Error(code); };
+
+/**
+ * OpenGateway echoes the requested model id and may also name the routed
+ * provider. The model id is mandatory; a provider field is validated whenever
+ * the response carries one, so an unexpected route fails closed instead of
+ * being ignored.
+ */
+export function upstreamIdentity(data) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return { ok: false };
+  if (typeof data.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(data.id)) return { ok: false };
+  if (data.model !== MODEL) return { ok: false };
+  if (data.provider !== undefined && data.provider !== PROVIDER) return { ok: false };
+  return { ok: true, provider: data.provider ?? null };
+}
 
 /** The observed native completions transport admits only text and no prior assistant turns. */
 export function normalizeRequest(body, route) {
   if (route !== "/v1/chat/completions") fail("unexpected_endpoint");
   if (!body || typeof body !== "object" || Array.isArray(body)) fail("invalid_body");
-  if (body.model !== "gpt-4.1-mini") fail("model_mismatch");
+  if (body.model !== MODEL) fail("model_mismatch");
   if (body.tools?.length || body.functions?.length || body.previous_response_id) fail("unexpected_tools_or_continuation");
   const maxOutput = body.max_output_tokens ?? body.max_completion_tokens ?? body.max_tokens;
   if (maxOutput !== 300) fail("output_bound_mismatch");
@@ -41,10 +56,12 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
   const reservation = 3000 * inputPrice + 300 * outputPrice;
   let calls = 0;
   let spent = 0;
+  let measuredSpent = 0;
+  let computedSpent = 0;
   let blocked = priorUnresolvedUsd > 0;
   const pending = new Map();
   const seen = new Set();
-  const snapshot = () => ({ calls, spentUsd: spent, reservedUsd: [...pending.values()].reduce((a, b) => a + b, 0), priorSpentUsd, priorReservedUsd, priorUnresolvedUsd, blocked });
+  const snapshot = () => ({ calls, spentUsd: spent, measuredUsd: measuredSpent, computedUsd: computedSpent, reservedUsd: [...pending.values()].reduce((a, b) => a + b, 0), priorSpentUsd, priorReservedUsd, priorUnresolvedUsd, blocked });
   return {
     snapshot,
     reserve(id) {
@@ -63,19 +80,25 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
     },
     settle(id, usage) {
       if (!pending.has(id)) fail("unknown_request");
-      const valid = usage && Number.isFinite(usage.cost) && usage.cost >= 0 && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens >= 0 && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0;
-      if (!valid) {
-        blocked = true;
-        onEvent({ kind: "unresolved", id, reason: "usage_missing", state: snapshot() });
-        fail("usage_missing");
-      }
-      spent += usage.cost;
-      const boundBroken = usage.cost > pending.get(id) + 1e-12 || usage.prompt_tokens > 3000 || usage.completion_tokens > 300;
+      // Owner decision 2026-11-10: a gateway response without a billed cost is priced from
+      // the provider-reported token counts at the approved rates, and recorded as computed.
+      // When even the token counts are absent the full reserved bound is charged instead of
+      // leaving the call unmeasured; a charge is never silently zero.
+      const tokens = usage && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens >= 0 && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0;
+      const billed = usage && Number.isFinite(usage.cost) && usage.cost >= 0;
+      const input = tokens ? usage.prompt_tokens : 3000;
+      const output = tokens ? usage.completion_tokens : 300;
+      const usd = billed ? usage.cost : input * inputPrice + output * outputPrice;
+      const basis = billed ? "measured" : tokens ? "computed_tokens" : "computed_bound";
+      spent += usd;
+      if (basis === "measured") measuredSpent += usd; else computedSpent += usd;
+      const boundBroken = (billed && usage.cost > pending.get(id) + 1e-12) || input > 3000 || output > 300;
       pending.delete(id);
       blocked ||= boundBroken;
-      onEvent({ kind: "settled", id, usage: { usd: usage.cost, input: usage.prompt_tokens, output: usage.completion_tokens }, state: snapshot() });
+      const settlement = { usd, input, output, basis, measured: basis === "measured" };
+      onEvent({ kind: "settled", id, usage: settlement, state: snapshot() });
       if (boundBroken) fail("provider_bound_exceeded");
-      return { usd: usage.cost, input: usage.prompt_tokens, output: usage.completion_tokens };
+      return settlement;
     },
     unresolved(id) {
       if (!pending.has(id)) return;
@@ -87,7 +110,7 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
 
 function reply(res, text, id) {
   res.writeHead(200, { "content-type": "text/event-stream" });
-  const base = { id, object: "chat.completion.chunk", created: 0, model: "gpt-4.1-mini" };
+  const base = { id, object: "chat.completion.chunk", created: 0, model: MODEL };
   res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: { role: "assistant", content: text }, finish_reason: null }] })}\n\n`);
   res.write(`data: ${JSON.stringify({ ...base, choices: [{ index: 0, delta: {}, finish_reason: "stop" }] })}\n\n`);
   res.end("data: [DONE]\n\n");
@@ -120,7 +143,7 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
       if (!slot) fail("no_active_slot");
       if (req.method === "GET" && req.url === "/v1/models") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify({ object: "list", data: [{ id: "gpt-4.1-mini", object: "model", owned_by: "local", context_window: 1000000, max_output_tokens: 300 }] }));
+        res.end(JSON.stringify({ object: "list", data: [{ id: MODEL, object: "model", owned_by: "local", context_window: 1000000, max_output_tokens: 300 }] }));
         return;
       }
       if (req.method !== "POST" || req.url !== "/v1/chat/completions") fail("unexpected_endpoint");
@@ -167,7 +190,7 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
         const response = await fetchImpl(UPSTREAM, {
           method: "POST", redirect: "error", signal: controller.signal,
           headers: { authorization: `Bearer ${apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false, provider: { order: ["OpenAI"], allow_fallbacks: false } }),
+          body: JSON.stringify({ model: MODEL, messages: normalized.messages, max_tokens: 300, temperature: 0, stream: false, reasoning_effort: "none", usage: { include: true } }),
         });
         if (!response.ok) fail("upstream_http_error");
         const responseChunks = [];
@@ -178,11 +201,15 @@ export async function startRecordingProxy({ mode = "dry", apiKey, ledger, ruleTe
           responseChunks.push(chunk);
         }
         const data = JSON.parse(Buffer.concat(responseChunks).toString("utf8"));
+        // Billing evidence is recorded before settlement: an unmeasurable charge must still
+        // leave the provider request id and the usage fields it actually returned.
+        row.providerRequestId = typeof data.id === "string" ? data.id : null;
+        row.usageFields = data.usage && typeof data.usage === "object" ? Object.keys(data.usage).sort() : [];
         row.usage = ledger.settle(boundSlot.id, data.usage);
         reserved = false;
-        if (typeof data.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(data.id) || data.model !== MODEL || data.provider !== "OpenAI") fail("upstream_identity_mismatch");
-        row.providerRequestId = data.id;
-        row.provider = data.provider;
+        const identity = upstreamIdentity(data);
+        if (!identity.ok) fail("upstream_identity_mismatch");
+        row.provider = identity.provider;
         row.model = data.model;
         const choice = data.choices?.[0];
         if (choice?.message?.tool_calls || choice?.finish_reason !== "stop" || typeof choice?.message?.content !== "string") fail("invalid_upstream_output");

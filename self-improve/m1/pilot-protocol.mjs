@@ -5,10 +5,17 @@ import { manifestDigest, validateTrialReceipt } from "../lib/behavior-eval.mjs";
 import { executionKeyFor, validateQualityTrial } from "../lib/quality-trial.mjs";
 import { planCells, planRequests, taskDigestFor } from "./preflight.mjs";
 import { compareDecision, digest, publicDecision } from "./pilot-oracle.mjs";
+import { MODEL, PROVIDER } from "./recording-proxy.mjs";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 export const LIMITS = Object.freeze({ requests: 21, cells: 9, inputTokens: 3000, outputTokens: 300, cellWallMs: 90000, pilotWallMs: 2400000, pilotUsd: 1, taskUsd: 5 });
 const SOURCE_FILES = ["self-improve/lib/isolation-runtime.mjs", "self-improve/lib/behavior-eval.mjs", "self-improve/lib/quality-trial.mjs", "self-improve/lib/loading-receipt.mjs", "self-improve/lib/isolate.mjs", "self-improve/m1/preflight.mjs", "self-improve/m1/native-pilot.mjs", "self-improve/m1/recording-proxy.mjs", "self-improve/m1/pilot-oracle.mjs", "self-improve/m1/pilot-protocol.mjs", "self-improve/m1/run-pilot.mjs", "self-improve/m1/pilot-rule.txt", "self-improve/m1/pilot-task.json", "self-improve/tests/fixtures/pilot/manifest.json", "self-improve/tests/fixtures/pilot/oracle/decision-probability-boundary-dev10.json"];
+
+/** The read-only public catalog the approved prices and provider are observed from. */
+export const PRICING_SOURCE = "https://apis.opengateway.ai/v1/models";
+export const PRICING_MAX_AGE_MS = 86400000;
+/** Approved per-token prices from that catalog; a changed value needs a new approval. */
+export const APPROVED_PRICING = Object.freeze({ model: MODEL, provider: PROVIDER, inputPrice: 0.00000003, outputPrice: 0.00000012 });
 export const sourceDigest = () => digest([...SOURCE_FILES, "self-improve/m1/probe-native.mjs"].map((file) => ({ file, digest: digest(readFileSync(path.join(ROOT, file), "utf8")) })));
 export const loadJson = (file) => JSON.parse(readFileSync(file, "utf8"));
 
@@ -52,8 +59,10 @@ export function checkLiveEvidence({ budget, pricing, nativeProof, sharedDelivery
   if (budget.priorPilotCalls !== 0 || budget.priorPilotSpentUsd !== 0 || budget.priorPilotReservedUsd !== 0 || budget.priorPilotUnresolvedUsd !== 0) fail("pilot_prior_execution_or_unknown");
   if (budget.priorUnresolvedUsd !== 0 || budget.accountingStatus !== "reconciled" || !/^[a-f0-9]{64}$/.test(budget.accountingEvidenceDigest ?? "")) fail("prior_cost_unreconciled");
   const age = now - Date.parse(pricing?.observedAt);
-  if (!Number.isFinite(age) || age < 0 || age > 86400000 || pricing?.source !== "https://openrouter.ai/api/v1/models/openai/gpt-4.1-mini/endpoints" || pricing.model !== "openai/gpt-4.1-mini" || pricing.provider !== "OpenAI") fail("pricing_unverified");
-  for (const field of ["inputPrice", "outputPrice"]) if (!Number.isFinite(pricing[field]) || pricing[field] <= 0) fail("pricing_unverified");
+  if (!Number.isFinite(age) || age < 0 || age > PRICING_MAX_AGE_MS) fail("pricing_unverified");
+  if (pricing?.source !== PRICING_SOURCE || pricing?.model !== MODEL || pricing?.provider !== PROVIDER) fail("pricing_unverified");
+  // Approved catalog values only; an unobserved or changed price is a new decision.
+  if (pricing?.inputPrice !== APPROVED_PRICING.inputPrice || pricing?.outputPrice !== APPROVED_PRICING.outputPrice) fail("pricing_unverified");
   const ceiling = 21 * (3000 * pricing.inputPrice + 300 * pricing.outputPrice) + budget.cleanupUsd;
   if (ceiling > 1 || ceiling + budget.priorSpentUsd + budget.priorReservedUsd > 5) fail("aggregate_budget_exceeded");
   if (nativeProof?.passed !== true || nativeProof.sourceDigest !== currentSourceDigest || nativeProof.results?.length !== 3 || !nativeProof.results.every((r, index) => r.arm === ["B0", "B1", "B2"][index] && r.isolation?.status === "pass" && r.native?.code === 0 && r.requests?.length === 1 && r.requests[0].status === "ok" && r.requests[0].rulePresent === (r.arm === "B2"))) fail("native_proof_stale_or_missing");
@@ -69,8 +78,12 @@ export function cellReceipt({ cell, attempts, inputs, loading, isolation, source
   const outcome = executionError ? "error" : complete ? judged?.passed ? "passed" : "failed" : attempts.some((attempt) => attempt.status === "error") ? "error" : "skipped";
   const receiptDigest = digest(attempts);
   const oracleEvidence = judged?.evidenceDigest ?? digest({ oracleDigest: digest(inputs.oracle), selected: null });
-  const measured = mode === "live" && attempts.every((attempt) => attempt.usage && Number.isFinite(attempt.usage.usd));
-  const cost = { measured, wallMs, inputTokens: attempts.reduce((n, a) => n + (a.usage?.input ?? 0), 0), outputTokens: attempts.reduce((n, a) => n + (a.usage?.output ?? 0), 0), usd: measured ? attempts.reduce((n, a) => n + a.usage.usd, 0) : null };
+  const priced = mode === "live" && attempts.every((attempt) => attempt.usage && Number.isFinite(attempt.usage.usd));
+  // A price derived from provider-reported tokens at the approved rates is not a provider-billed
+  // charge; the receipt states which basis produced the figure instead of letting it pass as metered.
+  const providerMetered = priced && attempts.every((attempt) => attempt.usage.measured === true);
+  const costBasis = !priced ? null : providerMetered ? "measured" : attempts.some((attempt) => attempt.usage.basis === "computed_bound") ? "computed_bound" : "computed_tokens";
+  const cost = { measured: priced, providerMetered, basis: costBasis, wallMs, inputTokens: attempts.reduce((n, a) => n + (a.usage?.input ?? 0), 0), outputTokens: attempts.reduce((n, a) => n + (a.usage?.output ?? 0), 0), usd: priced ? attempts.reduce((n, a) => n + a.usage.usd, 0) : null };
   const record = {
     schema: "gjc.quality_trial.v2", trialId: `${cell.arm}-r${cell.repeat}`, taskId: cell.taskId, taskVersion: "1", split: "development", arm: cell.arm, repeat: cell.repeat, goalRevision: "1",
     producer: { id: "jjo945-frozen-protocol", kind: "consensus-reviewed-harness" },
