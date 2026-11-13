@@ -343,7 +343,7 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
   await resultsCheckDirectories(directories);
   const before = await resultsFs.lstat(file);
   resultsPrivateFile(before);
-  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW);
+  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try {
     const opened = await handle.stat();
     resultsPrivateFile(opened);
@@ -362,7 +362,8 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
 // (symlink, foreign owner, wrong mode, extra links) still fail closed.
 async function resultsProbeBusyLock(file: string): Promise<void> {
   resultsPrivateFile(await resultsFs.lstat(file), true);
-  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
+  // Non-blocking like every other lock open: a FIFO swapped in after the lstat fails closed.
+  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try { resultsPrivateFile(await handle.stat(), true); }
   finally { await handle.close(); }
 }
@@ -715,6 +716,9 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     if (lock) {
       try {
         await resultsCheckDirectories(directories);
+        // One retry on the held handle: a transient stat failure right after the O_EXCL acquire
+        // must not be mistaken for a lost name (which would strand this process's own lock).
+        if (!lockInfo) { try { lockInfo = await lock.stat(); } catch { /* judged below */ } }
         let current: ResultsStats | undefined;
         try { current = await resultsFs.lstat(lockPath); }
         catch (error) { if (!resultsSafeMissing(error)) throw error; }

@@ -136,6 +136,12 @@ before the provider's own key names.
 | L3 | `~/.gjc/agent/jev-advisor/settings.env` | only `JEV_ADVISOR_MODE`, `JEV_ADVISOR_MIN_CONFIDENCE`, `JEV_ADVISOR_MIN_INTERVAL_MS`, `JEV_ADVISOR_PROVIDER`, `JEV_ADVISOR_MODEL`, `JEV_ADVISOR_TIMEOUT_MS`, `JEV_ADVISOR_MEMORY*`; other keys (credentials, endpoint) are ignored and listed by name |
 | L4 | `~/.gjc/agent/.env` | only credential names (`JEV_ADVISOR_API_KEY`, `OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`), read only when no upper layer has a credential and only when the file is a regular, non-symlinked, owner-only file of at most 16 KiB |
 
+L2 and L3 are read only when they are regular, non-symlinked files of at most
+64 KiB (opened non-blocking, so a FIFO cannot hang a session); anything else is
+skipped as if absent. `--describe-config` (see `scripts/e2e-installed.mjs`)
+reports `settingsStatus` (`read`, `absent`, `unsafe`, `unreadable`) for L3 and
+`sharedEnvStatus` for L4, so a missing or refused baseline is visible.
+
 A lower layer never overrides a key an upper layer defines, so an L4
 `JEV_ADVISOR_API_KEY` cannot beat an L1 `OPENROUTER_API_KEY`. Each provider
 reads only its own variable (`OPENROUTER_API_KEY` for `jev` and `openrouter`,
@@ -214,9 +220,17 @@ sha256) and `usage` (`promptTokens`, `completionTokens`, `totalTokens`,
 unmeasured, never zero. A telemetry write failure is reported as
 `telemetryStorage` and never changes the check. `plugin_metrics.telemetry`
 aggregates the join (records, joined/unjoined, by provider/model/HTTP status,
-latency, distinct sessions, usage sums or `null`). The report-wide
+latency, `sessions.distinct` and `sessions.truncated` — true when the telemetry
+journal is at its retained-segment bound, so older sessions may be gone —
+and usage sums or `null`). The envelope `status` still covers only the four
+historical sources; a missing or unreadable telemetry journal is named by the
+`telemetry_source_missing` / `telemetry_source_unavailable` limitations, and
+the join is bounded by the two journals' independent retention
+(`telemetry_join_limited_by_independent_retention`). The report-wide
 `unavailableMeasures` stay `null` because they describe report-scope
-measurement; `jevLock` appears when the jev-advisor journal is held by a lock.
+measurement. `jevLock` appears when the jev-advisor journal is held by a lock
+and `jevGuard` when a reclaim guard exists (a stale one blocks the next
+automatic reclaim and is the operator's to clear).
 
 `JEV_ADVISOR_MEMORY_HEAD_CHARS` is no longer used: v2 stores no assignment heads.
 Existing configuration and legacy memory are not changed or migrated.

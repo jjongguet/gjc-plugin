@@ -2069,6 +2069,8 @@ export interface PluginMetricsReport {
 	telemetry: JournalSource<TelemetryMetrics>;
 	/** Present when the jev-advisor journal is held by a lock: owner and age, judged without mutation. */
 	jevLock?: ResultsLockInfo;
+	/** Present when a reclaim guard exists, even without a held lock; a stale one blocks the next reclaim. */
+	jevGuard?: { ageMs: number; owner: string; stale: boolean };
 	unavailableMeasures: {
 		pluginOverheadMs: null; providerLatencyMs: null; assessmentLatencyMs: null;
 		endToEndInvocationMs: null; providerCost: null; tokenUsage: null;
@@ -2439,6 +2441,7 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
 		}
 	}
+	const jevGuard = (await inspectPluginOutcomeLock("jev-advisor")).guard;
 	const telemetryStartedAt = new Date();
 	const telemetrySnapshot = await readPluginOutcomeSnapshot("jev-telemetry");
 	const telemetrySource = aggregateJournalSnapshot(telemetrySnapshot, records => aggregateTelemetryMetrics(records, checkDigests));
@@ -2481,6 +2484,7 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 		correlation,
 		telemetry,
 		...(jevLock ? { jevLock } : {}),
+		...(jevGuard ? { jevGuard } : {}),
 		unavailableMeasures: {
 			pluginOverheadMs: null, providerLatencyMs: null, assessmentLatencyMs: null,
 			endToEndInvocationMs: null, providerCost: null, tokenUsage: null,

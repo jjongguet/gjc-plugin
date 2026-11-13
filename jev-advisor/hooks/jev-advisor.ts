@@ -492,7 +492,7 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
   await resultsCheckDirectories(directories);
   const before = await resultsFs.lstat(file);
   resultsPrivateFile(before);
-  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW);
+  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try {
     const opened = await handle.stat();
     resultsPrivateFile(opened);
@@ -511,7 +511,8 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
 // (symlink, foreign owner, wrong mode, extra links) still fail closed.
 async function resultsProbeBusyLock(file: string): Promise<void> {
   resultsPrivateFile(await resultsFs.lstat(file), true);
-  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
+  // Non-blocking like every other lock open: a FIFO swapped in after the lstat fails closed.
+  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try { resultsPrivateFile(await handle.stat(), true); }
   finally { await handle.close(); }
 }
@@ -864,6 +865,9 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     if (lock) {
       try {
         await resultsCheckDirectories(directories);
+        // One retry on the held handle: a transient stat failure right after the O_EXCL acquire
+        // must not be mistaken for a lost name (which would strand this process's own lock).
+        if (!lockInfo) { try { lockInfo = await lock.stat(); } catch { /* judged below */ } }
         let current: ResultsStats | undefined;
         try { current = await resultsFs.lstat(lockPath); }
         catch (error) { if (!resultsSafeMissing(error)) throw error; }
@@ -3108,6 +3112,8 @@ export interface PluginMetricsReport {
 	telemetry: JournalSource<TelemetryMetrics>;
 	/** Present when the jev-advisor journal is held by a lock: owner and age, judged without mutation. */
 	jevLock?: ResultsLockInfo;
+	/** Present when a reclaim guard exists, even without a held lock; a stale one blocks the next reclaim. */
+	jevGuard?: { ageMs: number; owner: string; stale: boolean };
 	unavailableMeasures: {
 		pluginOverheadMs: null; providerLatencyMs: null; assessmentLatencyMs: null;
 		endToEndInvocationMs: null; providerCost: null; tokenUsage: null;
@@ -3478,6 +3484,7 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
 		}
 	}
+	const jevGuard = (await inspectPluginOutcomeLock("jev-advisor")).guard;
 	const telemetryStartedAt = new Date();
 	const telemetrySnapshot = await readPluginOutcomeSnapshot("jev-telemetry");
 	const telemetrySource = aggregateJournalSnapshot(telemetrySnapshot, records => aggregateTelemetryMetrics(records, checkDigests));
@@ -3520,6 +3527,7 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 		correlation,
 		telemetry,
 		...(jevLock ? { jevLock } : {}),
+		...(jevGuard ? { jevGuard } : {}),
 		unavailableMeasures: {
 			pluginOverheadMs: null, providerLatencyMs: null, assessmentLatencyMs: null,
 			endToEndInvocationMs: null, providerCost: null, tokenUsage: null,

@@ -251,6 +251,51 @@ test('readers never reclaim and report the stale lock owner and age', async () =
   expect(await inspectPluginOutcomeLock('jev-telemetry', { baseDir })).toEqual({ status: 'none' });
 });
 
+test('a FIFO planted as the lock or the guard fails closed without blocking', async () => {
+  for (const target of ['lock', 'guard'] as const) {
+    const { baseDir, lockPath, guardPath } = await fixture();
+    if (target === 'lock') {
+      expect((await appendPluginOutcome('jev-advisor', check, { baseDir })).persisted).toBe(true);
+      expect(spawnSync('mkfifo', ['-m', '600', lockPath]).status).toBe(0);
+    } else {
+      await plantLock(baseDir, lockPath, '', 3_600_000);
+      expect(spawnSync('mkfifo', ['-m', '600', guardPath]).status).toBe(0);
+    }
+    const started = performance.now();
+    const result = await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10 });
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(result.persisted).toBe(false);
+    expect(['unsafe_path', 'store_busy']).toContain(result.reason);
+    expect(await missing(target === 'lock' ? lockPath : guardPath)).toBe(false);
+  }
+});
+
+test('a transient stat failure right after acquiring the lock never strands the lock', async () => {
+  const { baseDir, lockPath } = await fixture();
+  expect((await appendPluginOutcome('jev-advisor', check, { baseDir })).persisted).toBe(true);
+  const original = fs.open;
+  let failed = false;
+  const spy = spyOn(fs, 'open').mockImplementation((async (...args: Parameters<typeof fs.open>) => {
+    const handle = await original(...args);
+    const flags = args[1];
+    if (!failed && String(args[0]) === lockPath && typeof flags === 'number' && (flags & fsConstants.O_EXCL) !== 0) {
+      failed = true;
+      const stat = handle.stat.bind(handle);
+      let calls = 0;
+      (handle as { stat: typeof handle.stat }).stat = (async (...statArgs: Parameters<typeof handle.stat>) => { if (calls++ === 0) throw Object.assign(new Error('transient'), { code: 'EIO' }); return stat(...statArgs); }) as typeof handle.stat;
+    }
+    return handle;
+  }) as typeof fs.open);
+  let result;
+  try { result = await appendPluginOutcome('jev-advisor', check, { baseDir }); }
+  finally { spy.mockRestore(); }
+  expect(failed).toBe(true);
+  expect(result.persisted).toBe(false);
+  expect(result.lockLost).toBeUndefined();
+  expect(await missing(lockPath)).toBe(true);
+  expect((await appendPluginOutcome('jev-advisor', check, { baseDir })).persisted).toBe(true);
+});
+
 test('an unsafe stale lock fails closed and is never removed', async () => {
   const { baseDir, lockPath } = await fixture();
   await plantLock(baseDir, lockPath, '', 3_600_000);

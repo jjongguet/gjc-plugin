@@ -9,7 +9,11 @@
 // from the plugin's layered resolution; `--describe-config` prints the installed resolution
 // (names and layers, never values) under that same environment without calling anything.
 //
-//   JEV_E2E_REAL=1 bun jev-advisor/scripts/e2e-installed.mjs [--agent-dir DIR] [--gjc CMD...] [--health stderr] [--rrsi-import]
+//   JEV_E2E_REAL=1 bun jev-advisor/scripts/e2e-installed.mjs [--agent-dir DIR] [--gjc CMD...] [--health stderr] [--rrsi-import] [--expect-settings]
+//
+// The pass gate requires an observed (not absent) installed registry left unchanged, no new session
+// files (the child runs --no-session), the tracked settings baseline present and unchanged when
+// --expect-settings is given, and an rrsi import reporting status ok when --rrsi-import is given.
 //   bun jev-advisor/scripts/e2e-installed.mjs --describe-config [--agent-dir DIR] [--env K=V ...]
 //
 // --gjc takes the launcher as one string split on spaces, e.g. "bun /path/gjc.js" for a pinned
@@ -160,9 +164,19 @@ const report = {
 	metrics: state.metrics && { status: state.metrics.status, jevAdvisor: state.metrics.plugins?.["jev-advisor"]?.status ?? null, telemetry: state.metrics.telemetry && { status: state.metrics.telemetry.status, records: state.metrics.telemetry.metrics?.records ?? null, joined: state.metrics.telemetry.metrics?.joined ?? null, usage: state.metrics.telemetry.metrics?.usage ?? null, byProvider: state.metrics.telemetry.metrics?.byProvider ?? null }, jevLock: state.metrics.jevLock ?? null },
 	healthLines,
 	rrsi: rrsi ?? { skipped: "rrsi import not requested (--rrsi-import)" },
-	sideEffects: { before: sideBefore, after: sideAfter, registryUnchanged: sideBefore.registry === sideAfter.registry, settingsUnchanged: sideBefore.settings === sideAfter.settings, sessionFilesDelta: sideAfter.sessionFiles - sideBefore.sessionFiles },
+	sideEffects: {
+		before: sideBefore,
+		after: sideAfter,
+		registryChecked: sideBefore.registry !== null,
+		registryUnchanged: sideBefore.registry !== null && sideBefore.registry === sideAfter.registry,
+		settingsPresent: sideBefore.settings !== null,
+		settingsUnchanged: sideBefore.settings === sideAfter.settings,
+		sessionFilesDelta: sideAfter.sessionFiles - sideBefore.sessionFiles,
+	},
 };
 console.log(JSON.stringify(report, null, 2));
-const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok" && report.sideEffects.registryUnchanged && report.sideEffects.settingsUnchanged && (!rrsi || !rrsi.storeBusy);
+const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok" && report.sideEffects.registryUnchanged && report.sideEffects.settingsUnchanged && report.sideEffects.sessionFilesDelta === 0
+	&& (!args.includes("--expect-settings") || report.sideEffects.settingsPresent)
+	&& (!args.includes("--rrsi-import") || rrsi?.status === "ok");
 if (!ok) console.error(`e2e-installed: not passed${result.code !== 0 ? `; gjc exit ${result.code}: ${result.stderr.slice(0, 300)}` : ""}`);
 process.exitCode = ok ? 0 : 1;

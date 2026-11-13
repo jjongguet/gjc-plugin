@@ -2186,6 +2186,7 @@ async function runSuite(root: string) {
 		assert.deepEqual(result.limitations.slice(18), ["source_missing", "telemetry_source_missing", "telemetry_usage_only_when_provider_reports_it", "telemetry_join_limited_by_independent_retention", "report_scope_vs_record_scope"]);
 		assert.equal(result.telemetry.status, "missing"); assert.equal(result.telemetry.metrics, null);
 		assert.equal(result.jevLock, undefined);
+		assert.equal(result.jevGuard, undefined);
 		for (const key of ["pluginOverheadMs", "providerLatencyMs", "assessmentLatencyMs", "endToEndInvocationMs", "providerCost", "tokenUsage", "quality", "accuracy", "causalRoi"]) assert.equal(result.unavailableMeasures[key], null);
 		// privacy canaries / raw identifier exclusion
 		const serialized = JSON.stringify(result);
@@ -2770,6 +2771,9 @@ async function runSuite(root: string) {
 			rmSync(lock);
 			const guardOnly = await healthRun();
 			assert.equal(guardOnly.length, 1); assert.match(guardOnly[0], /reclaim guard left \(guardAgeMs=\d+, guardOwner=dead\)/);
+			const metricsGuard = JSON.parse(text(await (await metricsSurface()).execute("guard-metrics", {})));
+			assert.equal(metricsGuard.jevLock, undefined);
+			assert.deepEqual([metricsGuard.jevGuard.owner, metricsGuard.jevGuard.stale], ["dead", true], "plugin_metrics reports a leftover guard without a held lock");
 			rmSync(guard);
 			writeFileSync(lock, JSON.stringify({ v: 1, pid: process.pid, host: os.hostname(), createdAt: Date.now(), nonce: "00000000-0000-4000-8000-000000000000" }), { mode: 0o600 });
 			assert.deepEqual(await healthRun(), [], "a young lock held by a live owner is ordinary contention: silent");
