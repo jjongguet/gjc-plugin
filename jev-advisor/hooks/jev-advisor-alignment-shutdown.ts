@@ -511,7 +511,10 @@ export type AlignmentState = {
 	updatedAt: number;
 };
 
-export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded";
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded" | "bash_coverage";
+
+/** Cumulative per-session bash bridge counts; pattern ids only, never command text. */
+export type BashCoverage = { bashCalls: number; destructive: number; notices: number; patterns: Record<string, number> };
 
 export type AlignmentCounts = {
 	corrections: number;
@@ -533,6 +536,7 @@ export type AlignmentEvent = {
 	retryCount?: number;
 	stopRecommended?: boolean;
 	counts?: AlignmentCounts;
+	bashCoverage?: BashCoverage;
 };
 
 export type Transition = {
@@ -727,7 +731,7 @@ export const ALIGNMENT_LIMITS = {
 	retentionMs: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
-const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown", "hook_error", "latency_exceeded"]);
+const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown", "hook_error", "latency_exceeded", "bash_coverage"]);
 const RECOVERY_STATUSES = new Set<string>(["correction_recorded", "aligned_admitted", "result_observed", "recovered", "recovery_unverified"]);
 
 function fresh(at: number, now: number): boolean {
@@ -912,6 +916,49 @@ export async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T)
 	}
 }
 
+/**
+ * Destructive-bash patterns for the advisory bridge (RULES: run jev_check once before an
+ * irreversible or shared-resource command). Detection only ever yields pattern ids; it never
+ * blocks, rewrites or stores the command.
+ */
+export const DESTRUCTIVE_BASH_PATTERNS: readonly { id: string; pattern: RegExp }[] = [
+	{ id: "rm_recursive_force", pattern: /\brm\s+(?:-[A-Za-z]{0,8}[rR][A-Za-z]{0,8}f|-[A-Za-z]{0,8}f[A-Za-z]{0,8}[rR]|-[A-Za-z]{0,8}[rR][A-Za-z]{0,8}\s+-[A-Za-z]{0,8}f|-[A-Za-z]{0,8}f[A-Za-z]{0,8}\s+-[A-Za-z]{0,8}[rR]|--recursive\s+(?:\S+\s+){0,4}--force\b|--force\s+(?:\S+\s+){0,4}--recursive\b)/ },
+	{ id: "git_force_push", pattern: /\bgit\s+push\b[^\n;|&]*(?:\s--force(?:-with-lease)?\b|\s-f\b|\s\+\S+)/ },
+	{ id: "git_branch_delete", pattern: /\bgit\s+(?:branch\s+(?:-[A-Za-z]*[dD]\b|--delete\b)|push\b[^\n;|&]*\s(?:--delete\b|:[^\s]+))/ },
+	{ id: "git_worktree_remove", pattern: /\bgit\s+worktree\s+(?:remove|prune)\b/ },
+	{ id: "git_reset_hard", pattern: /\bgit\s+reset\s+[^\n;|&]*--hard\b/ },
+	{ id: "git_clean_force", pattern: /\bgit\s+clean\s+-[A-Za-z]*f/ },
+	{ id: "migration_rollback", pattern: /\b(?:migrate|migration|migrations)\b[^\n;|&]*\b(?:down|rollback|revert|reset)\b/i },
+	{ id: "lane_retire", pattern: /\blane-(?:finish|retire)\b/ },
+];
+
+/** Pattern ids matched by one bash command, in table order; [] for non-strings. */
+export function detectDestructiveBash(command: unknown): string[] {
+	if (typeof command !== "string" || !command) return [];
+	// Bounded input and bounded quantifiers keep detection linear on the tool-call path.
+	const text = command.length > 4096 ? command.slice(0, 4096) : command;
+	return DESTRUCTIVE_BASH_PATTERNS.filter(entry => entry.pattern.test(text)).map(entry => entry.id);
+}
+
+/** One cumulative bash_coverage record (counts and pattern ids only). */
+export function recordBashCoverage(input: { coverage: BashCoverage; now: number }): AlignmentEvent {
+	const { bashCalls, destructive, notices, patterns } = input.coverage;
+	return { v: 1, kind: "bash_coverage", at: input.now, recoveryId: null, state: null, bashCoverage: { bashCalls, destructive, notices, patterns: { ...patterns } } };
+}
+
+/**
+ * One status line describing the authority the deterministic rules already computed: entry
+ * digest, constraint kinds, target count, criterion kind and release mode. It never includes
+ * user text or target paths, and it does not widen or alter any decision.
+ */
+export function formatAuthorityLine(authority: Authority | null): string {
+	if (!authority) return "jev alignment authority: none";
+	const kinds: Record<string, number> = {};
+	for (const constraint of authority.constraints) kinds[constraint.kind] = (kinds[constraint.kind] ?? 0) + 1;
+	const constraints = Object.keys(kinds).length ? Object.entries(kinds).map(([kind, count]) => (count > 1 ? `${kind}x${count}` : kind)).join(",") : "none";
+	return `jev alignment authority: entry ${digestText(authority.latestUserEntryId).slice(0, 8)} constraints=${constraints} targets=${authority.targets.length} criterion=${authority.criterion?.kind ?? "none"} release=${authority.release}${authority.authorityTruncated ? " truncated" : ""}`;
+}
+
 /** Deterministic evaluation exceeded its latency budget: allow and record it. */
 export function recordLatencyExceeded(input: { elapsedMs: number; budgetMs: number; now: number }): AlignmentEvent {
 	return { v: 1, kind: "latency_exceeded", at: input.now, elapsedMs: Math.max(0, Math.trunc(input.elapsedMs)), budgetMs: Math.max(0, Math.trunc(input.budgetMs)) } as AlignmentEvent;
@@ -1094,6 +1141,17 @@ export async function appendJournalStore(
 // Goal-alignment session-shutdown surface. Flushes the unresolved recovery
 // counts once per recovery id; a repeated shutdown appends nothing.
 
+/** The opt-in bash bridge's per-session counts (written by the before-tool surface). */
+function shutdownBridgeCoverage(ctx: unknown): BashCoverage | null {
+	const slot = (globalThis as Record<symbol, unknown>)[Symbol.for("gjc.jev-advisor.bash-bridge")];
+	if (!(slot instanceof Map)) return null;
+	const key = journalSessionKey(ctx);
+	const coverage = slot.get(key) as BashCoverage | undefined;
+	if (!coverage || coverage.bashCalls === 0) return null;
+	slot.delete(key);
+	return coverage;
+}
+
 export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
 }) {
@@ -1103,6 +1161,8 @@ export default function register(api: {
 		const storeBudgetMs = journalStoreBudgetMs();
 		try {
 			const now = Date.now();
+			const coverage = shutdownBridgeCoverage(ctx);
+			if (coverage) await appendJournalStore(ctx, [recordBashCoverage({ coverage, now })], now, storeBudgetMs);
 			const { snapshot } = await loadJournalStore(ctx, now, storeBudgetMs);
 			const state = snapshot.latest;
 			if (!state || state.step >= 4) return undefined;

@@ -9,7 +9,7 @@ export default function pluginMetrics(pi: {
 	return {
 		name: 'plugin_metrics',
 		label: 'Plugin Metrics',
-		description: 'One bounded offline aggregate report of the three plugins\' retained sanitized journals and Jev\'s retained v2 correlation state. Read-only: creates nothing, appends nothing, no provider/browser/tests. Missing is not zero; unmeasured is null. Descriptive monitoring only — never proof of routing accuracy, task quality or causal benefit.',
+		description: 'One bounded offline aggregate report of the three plugins\' retained sanitized journals, Jev\'s jev_check telemetry journal and Jev\'s retained v2 correlation state. Read-only: creates nothing, appends nothing, no provider/browser/tests. Missing is not zero; unmeasured is null. Descriptive monitoring only — never proof of routing accuracy, task quality or causal benefit.',
 		parameters: pi.typebox.Type.Object({}),
 		async execute(_toolCallId: string, params: unknown) {
 			// Reject anything other than an ordinary empty object before store reads.

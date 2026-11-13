@@ -43,7 +43,7 @@ Advisory only by default. The plugin has four surfaces:
    correlation state is untouched. A verdict is an advisory decision-model
    opinion — not verification evidence, correctness proof or acceptance of
    quality.
-4. **`plugin_metrics` tool**: read-only offline aggregate of all three plugins'
+4. **`plugin_metrics` tool**: read-only offline aggregate (including the jev-telemetry join) of all three plugins'
    retained journals and Jev's retained v2 correlation state. Accepts exactly
    `{}` — no paths, filters or config. Never writes, locks, repairs, loads
    credentials or uses the network, and appends no journal record of its own.
@@ -62,13 +62,15 @@ outcomes are never injected into advisories and no `prior` suffix exists in v2.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `JEV_ADVISOR_PROVIDER` | `jev` | `jev` = TypeSafe Jev on OpenRouter via `/api/alpha/decisions`; `openrouter` = chat; `typesafe-jev` = hosted systemone; `ollaya` = keyless local server; `off` disables provider/correlation, not local journaling |
-| `JEV_ADVISOR_API_KEY` | — | Environment overrides same-named file values in `~/.gjc/agent/jev-advisor/.env`; the merged plugin key takes priority over `OPENROUTER_API_KEY`. Credentials survive upgrades and are never result records |
+| `JEV_ADVISOR_API_KEY` | — | Layer first (process env, then `~/.gjc/agent/jev-advisor/.env`, then credential names only from `~/.gjc/agent/.env`), and within a layer this key comes before `OPENROUTER_API_KEY`. Non-secret defaults may come from `~/.gjc/agent/jev-advisor/settings.env`. Credentials survive upgrades and are never result records |
 | `JEV_ADVISOR_MODEL` | per provider (`typesafe/jev-1.14`; `openai/gpt-5-mini` for openrouter chat; `laya` for ollaya) | decision model id |
 | `JEV_ADVISOR_MODE` | `shadow` | `shadow` / `hint` / `enforce` |
 | `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | per-task confidence threshold for explicit weaker-tier enforcement |
 | `JEV_ADVISOR_TIMEOUT_MS` | `8000` | decision request timeout |
 | `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | rate limit between advisory calls |
 | `JEV_ADVISOR_ENDPOINT` | per provider | override endpoint (code-enforced allowlist: HTTPS origins `openrouter.ai`, `api.typesafe.ai`, plus loopback HTTP for local servers; everything else is refused, no request leaves the machine) |
+| `JEV_HEALTH_LINE` | `notify` | session_start health line: `off`, `notify`, `stderr`; silent when healthy, no provider call |
+| `JEV_BASH_BRIDGE` | unset (off) | `1` enables the advisory destructive-bash bridge (≤3 notices/session, `bash_coverage` counts; silent when `JEV_ALIGNMENT_MODE=off`) |
 | `JEV_ADVISOR_MEMORY` | `on` | disables correlation-state writes, not sanitized outcome journaling; previous outcomes are never injected |
 
 `JEV_ADVISOR_STATE` is retired and ignored with `state_override_ignored`;

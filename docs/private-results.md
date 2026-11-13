@@ -1,6 +1,6 @@
 # Private results
 
-All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJC still owns installed code under `~/.gjc/agent/gjc-plugins/`, and the Jev credential file (`~/.gjc/agent/jev-advisor/.env`) is unchanged.
+All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJC still owns installed code under `~/.gjc/agent/gjc-plugins/`; Jev configuration stays under `~/.gjc/agent/` (`jev-advisor/.env`, the tracked non-secret `jev-advisor/settings.env`, and credential names only from `~/.gjc/agent/.env`; see `jev-advisor/README.md`).
 
 ## Inventory
 
@@ -10,6 +10,9 @@ All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJ
 | `verification-receipts/receipts/v1/<repository-digest>/<receipt-id>.json` | Shared immutable verification/UI storage envelopes: public receipt and private selected-input binding |
 | `verification-receipts/loop/v1/<repository-digest>/<session-digest>.json` | Per-session delegation-gate state (baselines, pending async launches, gates and resolutions). Writer-owned: a session writes only its own file and read-merges at most 16 other session files |
 | `<plugin>/journal/v1/` | Sanitized handled-outcome records, including run/status/manual/advice/observation failures and assessment/storage results |
+| `<plugin>/journal/v1/.append.lock` | Writer lock held only during one append; carries `{v,pid,host,createdAt,nonce}` (legacy writers leave it empty) |
+| `<plugin>/journal/.append.reclaim.lock` | Single-flight guard held only while one waiter removes a stale `.append.lock`; outside `v1` so readers and old writers never list it |
+| `jev-telemetry/journal/v1/` | Extended `jev_check` telemetry (provider, model, HTTP status, session key digest, provider-reported usage) joined to the `jev-advisor` check record by `toolCallDigest`. A separate journal so already-running bundles, whose strict decoder rejects unknown check keys, never read it |
 | `rrsi/periodic.json` | Bounded periodic-refresh state (last attempt/success, outcome, reason, backoff, projection digest, applied limits) |
 | `rrsi/runs/v1/<receiptId>.json` | Periodic run receipts; ≤ 64 KiB each, ≤ 60 retained, oldest pruned on write |
 | `rrsi/{periodic.lock,store.lock}` | Exclusive plugin-local locks for the periodic writer and for capture/import read-modify-write sequences |
@@ -18,7 +21,7 @@ All plugin-owned result/state writes use **`~/.gjc-plugin/`**, not `~/.gjc/`. GJ
 | `memory-dream/latest.json` | Bounded pointer to the latest report: counts and up to five `contradicted` claim excerpts used by the `session_start` notice (≤5 lines / 600 UTF-8 bytes) |
 | `memory-dream/golden/<id>.json` | Golden-set scoring output: model, prompt version, run count, thresholds, per-run confusion counts, adoption decision and measured OpenRouter usage delta (or `null` when unavailable) |
 
-Directories are owned `0700`; files are owned single-link regular `0600`. Symlinks, unsafe owners/modes, hard links and corrupt/unknown inventory fail closed without permission repair, lock stealing or legacy fallback. `JEV_ADVISOR_STATE` does not select the result path; a supplied value is ignored and reported as `state_override_ignored`, and is never recorded.
+Directories are owned `0700`; files are owned single-link regular `0600`. Symlinks, unsafe owners/modes, hard links and corrupt/unknown inventory fail closed without permission repair or legacy fallback. A lock with same-host owner metadata is never removed while its pid is alive (EPERM counts as alive; pid reuse errs toward `store_busy`). A lock without owner metadata (written by bundles before 0.0.28) or naming another host cannot be judged by owner, so it is removed after 10 minutes unless its pid is alive here; a legacy writer still running but stalled longer than that is the one remaining double-writer window, and it closes once every running session uses 0.0.28 or later. A waiter removes `.append.lock` only on those grounds; removal happens once, inside the reclaim guard, after re-judging the same inode, and is reported as `reclaim:"reclaimed"`. A stale reclaim guard is never taken over: appends report `store_busy` with `reclaim:"blocked_guard"`. Readers never remove anything; a `store_busy` snapshot reports the lock `ageMs`/`owner` (and guard) instead. `JEV_ADVISOR_STATE` does not select the result path; a supplied value is ignored and reported as `state_override_ignored`, and is never recorded.
 
 Legacy `.gjc` result locations are never migrated, deleted or looked up automatically; receipt IDs from that location are not resolvable through this store. Uninstalling or upgrading code does not erase results. Archive or remove history only through an explicit user-owned operation after checking ownership and stopping writers.
 

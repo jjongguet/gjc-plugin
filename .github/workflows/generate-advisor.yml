@@ -80,7 +80,7 @@ jobs:
             'shared/lib/results.ts', 'shared/lib/decision-contract.ts',
             'jev-advisor/lib/decision.ts', 'jev-advisor/lib/alignment.ts', 'jev-advisor/lib/alignment-journal.ts',
             'jev-advisor/src/hook.adapter.ts', 'jev-advisor/src/tool.adapter.ts', 'jev-advisor/src/check.adapter.ts',
-            'jev-advisor/src/result.adapter.ts', 'jev-advisor/src/metrics.adapter.ts', 'jev-advisor/src/alignment.adapter.ts',
+            'jev-advisor/src/result.adapter.ts', 'jev-advisor/src/metrics.adapter.ts', 'jev-advisor/src/session-start.adapter.ts', 'jev-advisor/src/alignment.adapter.ts',
             'jev-advisor/src/alignment-observe.adapter.ts', 'jev-advisor/src/alignment-shutdown.adapter.ts',
             'jev-advisor/scripts/build.mjs',
           ]) {
@@ -93,7 +93,7 @@ jobs:
           const outputs = [];
           for (const file of [
             'jev-advisor/hooks/jev-advisor.ts', 'jev-advisor/tools/jev-advise.ts', 'jev-advisor/tools/jev-check.ts',
-            'jev-advisor/hooks/jev-advisor-result.ts', 'jev-advisor/tools/plugin-metrics.ts',
+            'jev-advisor/hooks/jev-advisor-result.ts', 'jev-advisor/tools/plugin-metrics.ts', 'jev-advisor/hooks/jev-advisor-session-start.ts',
             'jev-advisor/hooks/jev-advisor-alignment.ts', 'jev-advisor/hooks/jev-advisor-alignment-observe.ts',
             'jev-advisor/hooks/jev-advisor-alignment-shutdown.ts',
           ]) {
@@ -123,6 +123,7 @@ jobs:
             ${{ env.BUNDLE_DIR }}/jev-advisor/tools/jev-check.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-result.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/tools/plugin-metrics.ts
+            ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-session-start.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-observe.ts
             ${{ env.BUNDLE_DIR }}/jev-advisor/hooks/jev-advisor-alignment-shutdown.ts

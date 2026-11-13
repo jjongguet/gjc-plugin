@@ -7,7 +7,7 @@ import { createHash as checkDigestHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { appendPluginOutcome } from '../../shared/lib/results';
-import { IMAGE_MAX_BYTES, MAX_CHECK_IMAGES, askCheckModel, inspectImage, noCheckDecision, prepareCheck, providerPromptLimit, readConfig, type CheckAdvice } from '../lib/decision';
+import { IMAGE_MAX_BYTES, MAX_CHECK_IMAGES, askCheckModel, inspectImage, noCheckDecision, prepareCheck, providerPromptLimit, readConfig, readSessionId, type CheckAdvice, type CheckObservation } from '../lib/decision';
 
 type LoadedImages =
 	| { status: 'ok'; images: { mediaType: 'image/png' | 'image/jpeg'; base64: string; width: number; height: number }[] }
@@ -54,29 +54,56 @@ export default function jevCheck(pi: {
 			artifact: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'The produced artifact or claim to check; a missing or empty value is rejected in-plugin (invalid_task).' })),
 			images: pi.typebox.Type.Optional(pi.typebox.Type.Array(pi.typebox.Type.String({ description: 'PNG or JPEG file path (absolute, or relative to the session directory). At most 4 images; each 256-1568 px per side and at most 16 MiB.' }), { description: 'Images the verdict may be grounded on, in reading order. Rejected deterministically when a file is unreadable, animated, outside PNG/JPEG, or outside Jev image limits.' })),
 		}),
-		async execute(_toolCallId: string, params: { question?: unknown; artifact?: unknown; images?: unknown }) {
+		async execute(_toolCallId: string, params: { question?: unknown; artifact?: unknown; images?: unknown }, _update?: unknown, ctx?: unknown) {
+			const startedAt = performance.now();
 			const cfg = readConfig();
+			const observation: CheckObservation = {};
+			const sessionId = readSessionId(ctx);
 			const finish = async (value: CheckAdvice) => {
 				const check = value.status === 'decision'
 					? { status: value.status, verdict: value.verdict, confidence: value.confidence, confidenceKind: value.confidenceKind, ...(value.probabilities ? { probabilities: value.probabilities } : {}) }
 					: { status: value.status, reason: value.reason };
+				const toolCallDigest = checkDigestHash('sha256').update(_toolCallId).digest('hex');
+				const durationMs = Math.max(0, Math.round(performance.now() - startedAt));
 				let journalStorage;
+				// The jev-advisor record keeps the shape every released decoder accepts (durationMs is
+				// a long-standing top-level field); extended telemetry goes to jev-telemetry only.
 				try {
 					journalStorage = await appendPluginOutcome('jev-advisor', {
 						operation: 'check',
-						toolCallDigest: checkDigestHash('sha256').update(_toolCallId).digest('hex'),
+						toolCallDigest,
+						durationMs,
 						stateOverrideIgnored: cfg.stateOverrideIgnored,
 						check,
 					});
 				} catch { journalStorage = { persisted: false, reason: 'store_unavailable' }; }
-				const persistence = { journalStorage, stateOverrideIgnored: cfg.stateOverrideIgnored };
+				let telemetryStorage;
+				try {
+					const model = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/.test(cfg.model) ? cfg.model : undefined;
+					const provider = /^[a-z0-9][a-z0-9-]{0,39}$/.test(cfg.provider) ? cfg.provider : undefined;
+					const stored = await appendPluginOutcome('jev-telemetry', {
+						operation: 'check',
+						toolCallDigest,
+						durationMs,
+						check: {
+							...check,
+							...(provider ? { provider } : {}),
+							...(model ? { model } : {}),
+							...(observation.httpStatus !== undefined ? { httpStatus: observation.httpStatus } : {}),
+							...(sessionId ? { sessionKey: checkDigestHash('sha256').update(sessionId, 'utf8').digest('hex').slice(0, 16) } : {}),
+							...(observation.usage ? { usage: observation.usage } : {}),
+						},
+					});
+					telemetryStorage = { persisted: stored.persisted, reason: stored.reason };
+				} catch { telemetryStorage = { persisted: false, reason: 'store_unavailable' }; }
+				const persistence = { journalStorage, telemetryStorage, credentialSource: cfg.credentialSource, durationMs, ...(observation.usage ? { usage: observation.usage } : {}), stateOverrideIgnored: cfg.stateOverrideIgnored };
 				return { content: [{ type: 'text', text: JSON.stringify({ ...value, ...persistence }, null, 2) }] };
 			};
 			const loaded = loadCheckImages(params?.images);
 			if (loaded.status !== 'ok') return finish(noCheckDecision(loaded.status));
 			const prepared = prepareCheck(params?.question, params?.artifact, providerPromptLimit(cfg), loaded.images);
 			if (prepared.status !== 'ok') return finish(noCheckDecision(prepared.status));
-			try { return finish(await askCheckModel(cfg, prepared.check, (input, init) => fetch(input, init))); }
+			try { return finish(await askCheckModel(cfg, prepared.check, (input, init) => fetch(input, init), undefined, cfg.timeoutMs, observation)); }
 			catch { return finish(noCheckDecision('provider_error')); }
 		},
 	};

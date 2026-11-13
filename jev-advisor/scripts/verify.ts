@@ -1296,22 +1296,22 @@ async function runSuite(root: string) {
 		(globalThis as any)[slotKey] = undefined;
 		core.widgetLifecycleResetForTests();
 	});
-	await check("canonical builder exact bytes for all eight surfaces and stale candidate", () => {
+	await check("canonical builder exact bytes for all nine surfaces and stale candidate", () => {
 		const fixture = path.join(root, "builder");
 		for (const dir of ["scripts", "lib", "src", "hooks", "tools"]) mkdirSync(path.join(fixture, dir), { recursive: true });
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
 		copyFileSync(path.join(plugin, "../shared/lib/decision-contract.ts"), path.join(root, "shared/lib/decision-contract.ts"));
-		for (const file of ["scripts/build.mjs", "semantic.openapi.json", "lib/semantic.ts", "lib/decision.ts", "lib/alignment.ts", "lib/alignment-journal.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "semantic.openapi.json", "lib/semantic.ts", "lib/decision.ts", "lib/alignment.ts", "lib/alignment-journal.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/session-start.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
-		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts", "hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
+		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts", "hooks/jev-advisor-session-start.ts", "hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
 			const expected = readFileSync(path.join(fixture, file)); const actual = readFileSync(path.join(plugin, file)); assert.deepEqual(actual, expected, file);
 			assert.notDeepEqual(Buffer.concat([actual, Buffer.from(" ")]), expected); console.log(`artifact-sync ${file}: exact`);
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.17");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.18");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1319,9 +1319,10 @@ async function runSuite(root: string) {
 			["tool_call", "*", "before"],
 			["tool_result", "*", "after"],
 			["session_shutdown", undefined, undefined],
+			["session_start", undefined, undefined],
 		]);
-		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 6);
-		for (const name of ["jev-goal-alignment", "jev-goal-alignment-observe", "jev-goal-alignment-shutdown"]) assert.ok(manifest.hooks.some((h: any) => h.name === name), name);
+		assert.equal(new Set(manifest.hooks.map((h: any) => h.name)).size, 7);
+		for (const name of ["jev-goal-alignment", "jev-goal-alignment-observe", "jev-goal-alignment-shutdown", "jev-advisor-session-start"]) assert.ok(manifest.hooks.some((h: any) => h.name === name), name);
 		const toolNames = manifest.tools.map((t: any) => t.name);
 		assert.deepEqual(toolNames.sort(), ["jev_advise", "jev_check", "plugin_metrics"]);
 		const checkToolEntry = manifest.tools.find((t: any) => t.name === "jev_check"); assert.equal(checkToolEntry.path, "tools/jev-check.ts");
@@ -1714,7 +1715,7 @@ async function runSuite(root: string) {
 				if (choice === "transport_error") throw new Error("PRIVATE_PROVIDER_ERROR");
 				return new Response(JSON.stringify(semanticAnswer(choice === "ui_error" ? "aligned" : choice === "precision_anomaly" ? "drift" : choice, 0.9, choice === "precision_anomaly" ? { aligned: 0.0001, drift: 0.9993, uncertain: 0.0007 } : { aligned: choice === "aligned" || choice === "ui_error" ? 1 : 0, drift: choice === "drift" ? 1 : 0, uncertain: choice === "uncertain" ? 1 : 0 })));
 			};
-			const ui = { setStatus(_key: string, value: string) { if (choice === "ui_error") throw new Error("ui failed"); statuses.push(value); } };
+			const ui = { setStatus(key: string, value: string) { if (choice === "ui_error") throw new Error("ui failed"); if (key === "jev-alignment-semantic") statuses.push(value); } };
 			for (const forbidden of [false, true]) {
 				const ctx = { ...alignmentContext([alignmentUser("semantic-hook", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`")]), ui };
 				const before = fetchCalls;
@@ -1732,7 +1733,7 @@ async function runSuite(root: string) {
 	await check("JJO-663 opt-in never sends read/bash/off calls and reports unconfigured without outbound", async () => {
 		env({ JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ALIGNMENT_MODE: "off" });
 		const statuses: string[] = [];
-		const ctx = { ...alignmentContext(semanticInput.branchEntries), ui: { setStatus(_key: string, value: string) { statuses.push(value); } } };
+		const ctx = { ...alignmentContext(semanticInput.branchEntries), ui: { setStatus(key: string, value: string) { if (key === "jev-alignment-semantic") statuses.push(value); } } };
 		const before = fetchCalls;
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("off", "src/demo.ts"), ctx), undefined);
 		process.env.JEV_ALIGNMENT_MODE = "deterministic";
@@ -1758,7 +1759,7 @@ async function runSuite(root: string) {
 		const before = fetchCalls;
 		for (const input of inputs) for (const forbidden of [false, true]) {
 			const statuses: string[] = [];
-			const ctx = { ...alignmentContext([alignmentUser("incomplete-targets", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`.")]), ui: { setStatus(_key: string, value: string) { statuses.push(value); } } };
+			const ctx = { ...alignmentContext([alignmentUser("incomplete-targets", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`.")]), ui: { setStatus(key: string, value: string) { if (key === "jev-alignment-semantic") statuses.push(value); } } };
 			const got = await alignmentBefore[0].handler({ type: "tool_call", toolName: "apply_patch", toolCallId: "incomplete-targets", input }, ctx);
 			assert.equal(got?.block === true, forbidden, "semantic rejection cannot change the deterministic verdict");
 			assert.deepEqual(JSON.parse(statuses[0]), { model: "sionic-ai/jev-omni", status: "no_decision", reason: "invalid_input" });
@@ -1901,7 +1902,10 @@ async function runSuite(root: string) {
 			const text = readFileSync(path.join(plugin, name), "utf8");
 			assert.ok(text.includes("journalStoreBudgetMs()"), `${name} resolves the store budget per call`);
 			const calls = text.split("\n").filter(line => /(?:load|append)JournalStore\(/.test(line));
-			assert.equal(calls.length, 3, `${name} has one bounded read and two bounded appends`);
+			// The before-tool and shutdown surfaces each carry one more bounded append: the opt-in
+			// bash bridge's bash_coverage record (JJO-2327).
+			const expected = name === "src/alignment-observe.adapter.ts" ? 3 : 4;
+			assert.equal(calls.length, expected, `${name} has one bounded read and ${expected - 1} bounded appends`);
 			for (const call of calls) assert.match(call.trim(), /storeBudgetMs\);$/, `${name} passes the bounded budget: ${call.trim()}`);
 		}
 	});
@@ -2179,7 +2183,10 @@ async function runSuite(root: string) {
 		assert.equal(result.correlation.status, "missing"); assert.equal(result.correlation.metrics, null);
 		assert.equal(result.correlation.window, "retained_v2_metadata");
 		assert.ok(result.limitations.slice(0, 18).join(",") === "retained_not_lifetime,unrecorded_invocations_unknown,independent_source_snapshots,wall_clock_not_event_authority,run_observations_not_unique_executions,status_not_reexecution,terminal_sightings_not_unique_jobs,correlation_window_independent,unknown_identity_and_unobserved_terminals,receipt_duration_excludes_storage_assessment_journal,hook_duration_excludes_journal,provider_assessment_latency_unmeasured,end_to_end_and_isolated_overhead_unmeasured,historical_version_unidentified,smoke_real_workload_unidentified,counts_not_coverage,assessment_not_quality,causal_effect_unmeasured");
-		assert.deepEqual(result.limitations.slice(18), ["source_missing"]);
+		assert.deepEqual(result.limitations.slice(18), ["source_missing", "telemetry_source_missing", "telemetry_usage_only_when_provider_reports_it", "telemetry_join_limited_by_independent_retention", "report_scope_vs_record_scope"]);
+		assert.equal(result.telemetry.status, "missing"); assert.equal(result.telemetry.metrics, null);
+		assert.equal(result.jevLock, undefined);
+		assert.equal(result.jevGuard, undefined);
 		for (const key of ["pluginOverheadMs", "providerLatencyMs", "assessmentLatencyMs", "endToEndInvocationMs", "providerCost", "tokenUsage", "quality", "accuracy", "causalRoi"]) assert.equal(result.unavailableMeasures[key], null);
 		// privacy canaries / raw identifier exclusion
 		const serialized = JSON.stringify(result);
@@ -2621,7 +2628,233 @@ async function runSuite(root: string) {
 		state.jobs[JSON.stringify(["s", "j0"])] = { ref: { sessionId: "s", jobId: "j0" }, status: "completed", statusObservations: ["completed"], durationObservations: [], requestedModelObservations: [], effectiveModelObservations: [], allocatedChildIds: [], actualTier: null, observedAt: Date.now(), taskKey: null, conflicts: [] };
 		writeFileSync(file, JSON.stringify(state), { mode: 0o600 });
 	}
-	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 8 }));
+	// ---- JJO-2327: layered configuration, check telemetry, advisory checkpoints ----
+	// The canary is assembled at runtime so no key-shaped literal ever exists in the repository.
+	const runtimeCanary = ["sk", "or", "v1"].join("-") + "-" + (await import("node:crypto")).randomBytes(24).toString("hex");
+	const sharedLayer = (values: Record<string, string>, reads = { count: 0 }) => (names: readonly string[]) => {
+		reads.count++;
+		return { status: "read" as const, env: Object.fromEntries(names.filter(name => values[name]).map(name => [name, values[name]])) };
+	};
+	await check("JJO-2327 config: layer first, explicit key first within a layer, shared credentials read lazily", () => {
+		const reads = { count: 0 };
+		let c = core.readConfig({ OPENROUTER_API_KEY: "l1-provider" }, {}, {}, sharedLayer({ JEV_ADVISOR_API_KEY: "l4-explicit" }, reads));
+		assert.equal(c.apiKey, "l1-provider", "an L4 explicit key never beats an L1 provider key");
+		assert.equal(c.credentialSource, "env");
+		assert.equal(reads.count, 0, "the shared file is not opened when an upper layer has a credential");
+		c = core.readConfig({ OPENROUTER_API_KEY: "l1-provider", JEV_ADVISOR_API_KEY: "l1-explicit" }, {}, {}, sharedLayer({}, reads));
+		assert.equal(c.apiKey, "l1-explicit", "within one layer the explicit key comes first");
+		c = core.readConfig({}, { OPENROUTER_API_KEY: "l2" }, {}, sharedLayer({ OPENROUTER_API_KEY: "l4" }, reads));
+		assert.deepEqual([c.apiKey, c.credentialSource, reads.count], ["l2", "plugin_file", 0]);
+		c = core.readConfig({}, {}, {}, sharedLayer({ OPENROUTER_API_KEY: "l4" }, reads));
+		assert.deepEqual([c.apiKey, c.credentialSource, core.isConfigured(c), reads.count], ["l4", "shared_env", true, 1], "a broker-like empty env resolves the shared credential");
+		c = core.readConfig({ JEV_ADVISOR_PROVIDER: "typesafe-jev" }, {}, {}, sharedLayer({ OPENROUTER_API_KEY: "wrong-provider" }));
+		assert.deepEqual([c.apiKey, c.credentialSource, core.isConfigured(c)], ["", "none", false], "a provider never borrows another provider's key");
+		c = core.readConfig({ JEV_ADVISOR_PROVIDER: "ollaya" }, {}, {}, sharedLayer({}, reads));
+		assert.equal(c.credentialSource, "keyless");
+		const settings = { JEV_ADVISOR_MODE: "hint", JEV_ADVISOR_MIN_CONFIDENCE: "0.8", JEV_ADVISOR_MIN_INTERVAL_MS: "0", OPENROUTER_API_KEY: runtimeCanary, JEV_ADVISOR_ENDPOINT: "https://evil.invalid" };
+		c = core.readConfig({}, {}, settings, sharedLayer({}));
+		assert.deepEqual([c.mode, c.minConfidence, c.minIntervalMs, c.apiKey, c.endpoint], ["hint", 0.8, 0, "", core.PROVIDERS.jev.endpoint], "settings.env supplies only allowlisted non-secret keys");
+		c = core.readConfig({ JEV_ADVISOR_MODE: "shadow" }, { JEV_ADVISOR_MIN_CONFIDENCE: "0.7" }, settings, sharedLayer({}));
+		assert.deepEqual([c.mode, c.minConfidence, c.minIntervalMs], ["shadow", 0.7, 0], "upper layers win per key");
+		const described = core.describeEffectiveConfig({}, {}, settings, sharedLayer({ OPENROUTER_API_KEY: runtimeCanary }), "read");
+		assert.deepEqual(described, { provider: "jev", model: "typesafe/jev-1.14", mode: "hint", minConfidence: 0.8, minIntervalMs: 0, configured: true, credentialSource: "shared_env", sharedEnvStatus: "read", settingsStatus: "read", layersUsed: ["settings", "shared_env"], settingsIgnoredKeys: ["JEV_ADVISOR_ENDPOINT", "OPENROUTER_API_KEY"] });
+		assert.equal(core.describeEffectiveConfig({}, {}, {}, sharedLayer({})).settingsStatus, "absent", "a missing tracked baseline is visible");
+		assert.ok(!JSON.stringify(described).includes(runtimeCanary), "describe-config never carries a credential value");
+	});
+	await check("JJO-2327 shared credential file is read only when owner-only, regular and small, and only for allowlisted names", () => {
+		const dir = path.join(root, "shared-env"); mkdirSync(dir, { recursive: true, mode: 0o700 });
+		const file = path.join(dir, ".env");
+		writeFileSync(file, `OTHER_SECRET=${runtimeCanary}\nOPENROUTER_API_KEY=${runtimeCanary}\n`, { mode: 0o600 });
+		const names = core.sharedCredentialNames();
+		assert.ok(names.includes("OPENROUTER_API_KEY") && names.includes("JEV_ADVISOR_API_KEY") && names.includes("TYPESAFE_API_KEY") && !names.includes("OTHER_SECRET"));
+		const read = core.readSharedCredentials(names, file);
+		assert.equal(read.status, "read"); assert.deepEqual(Object.keys(read.env), ["OPENROUTER_API_KEY"]);
+		fs.chmodSync(file, 0o644);
+		assert.deepEqual(core.readSharedCredentials(names, file), { status: "unsafe", env: {} }, "group/other-readable SOT is skipped");
+		fs.chmodSync(file, 0o600);
+		const link = path.join(dir, "link.env"); symlinkSync(file, link);
+		assert.deepEqual(core.readSharedCredentials(names, link), { status: "unsafe", env: {} }, "a symlinked SOT is skipped");
+		const big = path.join(dir, "big.env"); writeFileSync(big, "X=" + "y".repeat(17 * 1024), { mode: 0o600 });
+		assert.equal(core.readSharedCredentials(names, big).status, "unsafe");
+		assert.equal(core.readSharedCredentials(names, path.join(dir, "absent.env")).status, "absent");
+		// A FIFO without a writer must be refused without blocking (Codex review, PR #65).
+		const fifo = path.join(dir, "fifo.env");
+		assert.equal(spawnSync("mkfifo", ["-m", "600", fifo]).status, 0);
+		const started = performance.now();
+		assert.deepEqual(core.readSharedCredentials(names, fifo), { status: "unsafe", env: {} });
+		assert.ok(performance.now() - started < 1000, "a writer-less FIFO never blocks the read");
+		const describedFifo = core.describeEffectiveConfig({}, {}, {}, (list: readonly string[]) => core.readSharedCredentials(list, fifo));
+		assert.deepEqual([describedFifo.configured, describedFifo.sharedEnvStatus], [false, "unsafe"]);
+	});
+	const metricsSurface = () => (async () => (await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href)).default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } }))();
+	await check("JJO-2327 jev_check journals a released-decoder-compatible record plus a joined jev-telemetry record", async () => {
+		env({ JEV_ADVISOR_PROVIDER: "jev" });
+		const ctx = { sessionManager: { getSessionId: () => "session-telemetry" } };
+		responder = () => new Response(JSON.stringify({ answers: { check: { type: "choice", choice: "correct", confidence: 0.9 } }, usage: { prompt_tokens: 1200, completion_tokens: 3, total_tokens: 1203, cost: 0.0000504 } }));
+		const first = JSON.parse(text(await checkTool.execute("tele-1", { question: "Is it done?", artifact: "done" }, undefined, ctx)));
+		assert.equal(first.status, "decision");
+		assert.deepEqual([first.journalStorage.persisted, first.telemetryStorage.persisted, first.credentialSource], [true, true, "env"]);
+		assert.deepEqual(first.usage, { promptTokens: 1200, completionTokens: 3, totalTokens: 1203, costMicroUsd: 50 });
+		assert.ok(Number.isInteger(first.durationMs));
+		responder = () => systemCheck();
+		const second = JSON.parse(text(await checkTool.execute("tele-2", { question: "Is it done?", artifact: "done" })));
+		assert.equal(second.usage, undefined, "no provider usage means no usage field, never zero");
+		responder = () => new Response("private", { status: 503 });
+		const third = JSON.parse(text(await checkTool.execute("tele-3", { question: "Is it done?", artifact: "done" })));
+		assert.deepEqual([third.status, third.reason, third.httpStatus], ["no_decision", "provider_error", 503]);
+		responder = undefined;
+		const legacy = journalRecords().filter((record: any) => record.operation === "check");
+		assert.equal(legacy.length, 3);
+		for (const record of legacy) {
+			assert.ok(Object.keys(record.check).every(key => ["status", "verdict", "confidence", "confidenceKind", "probabilities", "reason"].includes(key)), "legacy namespace keeps the released check shape");
+			assert.ok(Number.isInteger(record.durationMs));
+		}
+		assert.equal(legacy[0].toolCallDigest, createHash("sha256").update("tele-1").digest("hex"));
+		const tele = await sharedResults.readPluginOutcomeSnapshot("jev-telemetry");
+		assert.equal(tele.status, "ok"); assert.equal(tele.records.length, 3);
+		assert.deepEqual(tele.records.map((record: any) => record.toolCallDigest), legacy.map((record: any) => record.toolCallDigest), "telemetry joins by toolCallDigest");
+		assert.deepEqual(tele.records[0].check, { status: "decision", verdict: "correct", confidence: 0.9, confidenceKind: "provider_choice", provider: "jev", model: "typesafe/jev-1.14", sessionKey: createHash("sha256").update("session-telemetry").digest("hex").slice(0, 16), usage: { promptTokens: 1200, completionTokens: 3, totalTokens: 1203, costMicroUsd: 50 } });
+		assert.equal(tele.records[1].check.usage, undefined);
+		assert.deepEqual([tele.records[2].check.httpStatus, tele.records[2].check.reason], [503, "provider_error"]);
+		const metrics = JSON.parse(text(await (await metricsSurface()).execute("tele-metrics", {})));
+		assert.equal(metrics.telemetry.status, "ok");
+		assert.deepEqual({ records: metrics.telemetry.metrics.records, joined: metrics.telemetry.metrics.joined, unjoined: metrics.telemetry.metrics.unjoined, byProvider: metrics.telemetry.metrics.byProvider, byHttpStatus: metrics.telemetry.metrics.byHttpStatus, sessions: metrics.telemetry.metrics.sessions, measured: metrics.telemetry.metrics.latencyMs.measured }, { records: 3, joined: 3, unjoined: 0, byProvider: { jev: 3 }, byHttpStatus: { 503: 1 }, sessions: { distinct: 1, truncated: false }, measured: 3 });
+		assert.deepEqual(metrics.telemetry.metrics.usage, { records: 1, measured: 1, promptTokens: 1200, completionTokens: 3, totalTokens: 1203, costMicroUsd: 50 });
+		assert.equal(metrics.telemetry.metrics.sessions.truncated, false);
+		assert.ok(!metrics.limitations.includes("telemetry_source_missing") && !metrics.limitations.includes("telemetry_source_unavailable"));
+		assert.deepEqual(core.aggregateTelemetryMetrics([{ operation: "check", toolCallDigest: "a".repeat(64), durationMs: 1, check: { status: "decision", provider: "jev" } }], null).usage, { records: 0, measured: 0, promptTokens: null, completionTokens: null, totalTokens: null, costMicroUsd: null }, "no reported usage keeps sums null, never zero");
+		assert.deepEqual([core.aggregateTelemetryMetrics([], null).joined, core.aggregateTelemetryMetrics([], null).unjoined], [null, null], "an unreadable legacy journal makes the join unknown");
+		assert.ok(!JSON.stringify([first, second, third, metrics]).includes("synthetic-key"));
+	});
+	await check("JJO-2327 a telemetry storage failure never fails the check or its legacy record", async () => {
+		env({ JEV_ADVISOR_PROVIDER: "jev" });
+		mkdirSync(path.join(process.env.HOME!, ".gjc-plugin"), { recursive: true, mode: 0o700 });
+		writeFileSync(path.join(process.env.HOME!, ".gjc-plugin", "jev-telemetry"), "not a directory", { mode: 0o600 });
+		responder = () => systemCheck();
+		const out = JSON.parse(text(await checkTool.execute("tele-fail", { question: "q?", artifact: "a" })));
+		responder = undefined;
+		assert.equal(out.status, "decision");
+		assert.equal(out.journalStorage.persisted, true);
+		assert.equal(out.telemetryStorage.persisted, false);
+		assert.equal(journalRecords().length, 1);
+		const metrics = JSON.parse(text(await (await metricsSurface()).execute("tele-fail-metrics", {})));
+		assert.equal(metrics.telemetry.status, "unavailable");
+		assert.ok(metrics.limitations.includes("telemetry_source_unavailable"), "a telemetry-only failure is a named limitation");
+	});
+	const sessionStartModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-session-start.ts")).href);
+	const healthHook = (warnings: string[] = []) => { let handler: any; sessionStartModule.default({ on: (event: string, fn: any) => { assert.equal(event, "session_start"); handler = fn; }, logger: { warn: (message: string) => warnings.push(message) } }); return handler; };
+	const healthRun = async (ui: any = {}) => { const notices: string[] = []; const ctx = { ui: { notify: (message: string) => notices.push(message), ...ui } }; const before = fetchCalls; const value = await healthHook()({ type: "session_start" }, ctx); assert.equal(value, undefined); assert.equal(fetchCalls, before, "the health line never calls a provider"); return notices; };
+	await check("JJO-2327 session_start health line is silent when healthy and names the cause otherwise", async () => {
+		try {
+			env();
+			assert.deepEqual(await healthRun(), [], "configured with an empty journal: silent");
+			delete process.env.JEV_ADVISOR_API_KEY;
+			const unconfigured = await healthRun();
+			assert.equal(unconfigured.length, 1);
+			assert.match(unconfigured[0], /^jev-advisor health: unconfigured \(jev credential missing: JEV_ADVISOR_API_KEY\|OPENROUTER_API_KEY; shared \.env absent\)$/);
+			assert.ok(core.describeEffectiveConfig().configured === false, "the boundary is gated on describe-config");
+			env();
+			for (let index = 0; index < 5; index++) assert.equal((await appendPluginOutcome("jev-advisor", { operation: "check", toolCallDigest: "f".repeat(64), check: { status: "no_decision", reason: "unconfigured" } })).persisted, true);
+			assert.deepEqual(await healthRun(), ["jev-advisor health: recent jev_check no_decision 5/5 (unconfigured 5)"]);
+			const lock = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "journal", "v1", ".append.lock");
+			writeFileSync(lock, "", { mode: 0o600 });
+			const old = new Date(Date.now() - 3_600_000); fs.utimesSync(lock, old, old);
+			const busy = await healthRun();
+			assert.equal(busy.length, 1); assert.match(busy[0], /journal store_busy \(lockAgeMs=\d+, owner=unknown\)/);
+			assert.ok(existsSync(lock), "the health line never reclaims a lock");
+			const metricsBusy = JSON.parse(text(await (await metricsSurface()).execute("busy-metrics", {})));
+			assert.deepEqual(metricsBusy.jevLock, { ageMs: metricsBusy.jevLock.ageMs, owner: "unknown" }, "plugin_metrics reports the held jev lock");
+			const guard = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "journal", ".append.reclaim.lock");
+			writeFileSync(guard, JSON.stringify({ v: 1, pid: 2_147_483_000, host: os.hostname(), createdAt: 0, nonce: "00000000-0000-4000-8000-000000000000" }), { mode: 0o600 });
+			const blocked = await healthRun();
+			assert.equal(blocked.length, 1); assert.match(blocked[0], /^jev-advisor health: reclaim_blocked \(lockAgeMs=\d+, owner=unknown, guardAgeMs=\d+, guardOwner=dead\)$/);
+			rmSync(lock);
+			const guardOnly = await healthRun();
+			assert.equal(guardOnly.length, 1); assert.match(guardOnly[0], /reclaim guard left \(guardAgeMs=\d+, guardOwner=dead\)/);
+			const metricsGuard = JSON.parse(text(await (await metricsSurface()).execute("guard-metrics", {})));
+			assert.equal(metricsGuard.jevLock, undefined);
+			assert.deepEqual([metricsGuard.jevGuard.owner, metricsGuard.jevGuard.stale], ["dead", true], "plugin_metrics reports a leftover guard without a held lock");
+			rmSync(guard);
+			writeFileSync(lock, JSON.stringify({ v: 1, pid: process.pid, host: os.hostname(), createdAt: Date.now(), nonce: "00000000-0000-4000-8000-000000000000" }), { mode: 0o600 });
+			assert.deepEqual(await healthRun(), [], "a young lock held by a live owner is ordinary contention: silent");
+			rmSync(lock);
+			const inventory = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "journal", "v1", "inventory.json");
+			const savedInventory = readFileSync(inventory);
+			writeFileSync(inventory, "{not json", { mode: 0o600 });
+			assert.deepEqual(await healthRun(), ["jev-advisor health: journal store_corrupt"]);
+			writeFileSync(inventory, savedInventory, { mode: 0o600 });
+			writeFileSync(lock, "", { mode: 0o600 });
+			fs.utimesSync(lock, old, old);
+			process.env.JEV_HEALTH_LINE = "off";
+			assert.deepEqual(await healthRun(), []);
+			process.env.JEV_HEALTH_LINE = "stderr";
+			const written: string[] = []; const original = process.stderr.write.bind(process.stderr);
+			(process.stderr as any).write = (chunk: any) => { written.push(String(chunk)); return true; };
+			try { assert.deepEqual(await healthRun(), []); } finally { (process.stderr as any).write = original; }
+			assert.equal(written.length, 1); assert.match(written[0], /^jev-advisor health: journal store_busy/);
+			process.env.JEV_HEALTH_LINE = "notify";
+			const warnings: string[] = [];
+			assert.equal(await healthHook(warnings)({ type: "session_start" }, { ui: { notify() { throw new Error("ui broke"); } } }), undefined, "a failing UI never blocks the session");
+			assert.equal(warnings.length, 1);
+		} finally { delete process.env.JEV_HEALTH_LINE; }
+	});
+	await check("JJO-2327 alignment authority status is one line per identity and changes no verdict", async () => {
+		env();
+		process.env.JEV_ALIGNMENT_MODE = "deterministic";
+		try {
+			const statuses: [string, string][] = [];
+			const ui = { notify() {}, setWidget() {}, setStatus(key: string, value: string) { statuses.push([key, value]); } };
+			const entries = [alignmentUser("authority-1", "PRIVATE_AUTHORITY_CANARY Read only: do not modify any files.")];
+			const ctx = { sessionManager: { getBranch: () => entries, getSessionId: () => "authority-session" }, ui };
+			const a = await alignmentBefore[0].handler(alignmentWrite("authority-a", "src/demo.ts"), ctx);
+			const b = await alignmentBefore[0].handler(alignmentWrite("authority-b", "src/demo.ts"), ctx);
+			assert.equal(a?.block, true); assert.equal(b?.block, true, "the deterministic verdict is unchanged");
+			const authority = statuses.filter(([key]) => key === "jev-alignment-authority");
+			assert.equal(authority.length, 1, "the same authority publishes once");
+			assert.match(authority[0][1], /^jev alignment authority: entry [a-f0-9]{8} constraints=read_only targets=0 criterion=none release=/);
+			assert.ok(!authority[0][1].includes("PRIVATE_AUTHORITY_CANARY"), "no user text in the status");
+			entries.push(alignmentUser("authority-2", "Implement `src/demo.ts`."));
+			await alignmentBefore[0].handler(alignmentWrite("authority-c", "src/demo.ts"), ctx);
+			assert.equal(statuses.filter(([key]) => key === "jev-alignment-authority").length, 2, "a new identity publishes again");
+		} finally { delete process.env.JEV_ALIGNMENT_MODE; }
+	});
+	await check("JJO-2327 destructive-bash bridge: off changes nothing; on notices at most three times and counts coverage", async () => {
+		assert.deepEqual(alignmentCore.detectDestructiveBash("rm -rf build"), ["rm_recursive_force"]);
+		for (const command of ["rm -fr x", "rm -r -f x", "rm --recursive --force x", "git push --force origin x", "git push -f origin x", "git push origin +main", "git branch -D topic", "git push origin --delete topic", "git worktree remove ../lane", "git reset --hard HEAD~1", "git clean -fdx", "npm run migrate:down", "lane-finish --self"]) assert.ok(alignmentCore.detectDestructiveBash(command).length > 0, command);
+		for (const command of ["rm file.txt", "git push origin main", "git branch -a", "git status", "grep -rf patterns src", "git worktree list", "bun test"]) assert.deepEqual(alignmentCore.detectDestructiveBash(command), [], command);
+		const bash = (id: string, command: string) => ({ type: "tool_call", toolName: "bash", toolCallId: id, input: { command } });
+		const run = async (bridge: string | undefined, alignmentModeValue: string | undefined) => {
+			env();
+			if (bridge === undefined) delete process.env.JEV_BASH_BRIDGE; else process.env.JEV_BASH_BRIDGE = bridge;
+			if (alignmentModeValue === undefined) delete process.env.JEV_ALIGNMENT_MODE; else process.env.JEV_ALIGNMENT_MODE = alignmentModeValue;
+			const notices: string[] = [];
+			const sessionId = `bridge-${bridge}-${alignmentModeValue}-${serial}`;
+			const ctx = { sessionManager: { getBranch: () => [], getSessionId: () => sessionId }, ui: { notify: (message: string) => notices.push(message), setWidget() {}, setStatus() {} } };
+			const results: unknown[] = [];
+			for (let index = 0; index < 4; index++) results.push(await alignmentBefore[0].handler(bash(`bridge-${index}`, `rm -rf /tmp/${runtimeCanary}-${index}`), ctx));
+			results.push(await alignmentBefore[0].handler(bash("bridge-benign", "ls -la"), ctx));
+			await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, ctx);
+			const key = createHash("sha256").update(sessionId, "utf8").digest("hex").slice(0, 32).slice(0, 16);
+			const read = (name: string) => { try { return readFileSync(path.join(alignmentHome(key), name), "utf8"); } catch { return ""; } };
+			const journalText = read("events.1.jsonl") + read("events.jsonl");
+			return { results, notices, journalText, events: journalText.split("\n").filter(Boolean).map(line => JSON.parse(line)) };
+		};
+		try {
+			const off = await run(undefined, "deterministic");
+			assert.deepEqual(off.results, [undefined, undefined, undefined, undefined, undefined]);
+			assert.deepEqual([off.notices, off.events], [[], []], "bridge off: no notice and no journal record");
+			const on = await run("1", "deterministic");
+			assert.deepEqual(on.results, [undefined, undefined, undefined, undefined, undefined], "the bridge never blocks");
+			assert.equal(on.notices.length, 3, "at most three notices per session");
+			assert.ok(on.notices.every(message => message.includes("rm_recursive_force") && message.includes("jev_check")));
+			const coverage = on.events.filter((event: any) => event.kind === "bash_coverage").map((event: any) => event.bashCoverage);
+			assert.deepEqual(coverage.at(-1), { bashCalls: 5, destructive: 4, notices: 3, patterns: { rm_recursive_force: 4 } }, "shutdown flushes the cumulative counts");
+			assert.ok(!on.journalText.includes(runtimeCanary) && !on.notices.join("").includes(runtimeCanary), "command text never leaves the hook");
+			const silenced = await run("1", "off");
+			assert.deepEqual([silenced.notices, silenced.events], [[], []], "alignment off silences the bridge");
+		} finally { delete process.env.JEV_BASH_BRIDGE; delete process.env.JEV_ALIGNMENT_MODE; }
+	});
+	console.log(JSON.stringify({ kind: "api-package-test-report", cases, failures, scriptedFetchCalls: fetchCalls, unexpectedFetches, realNetworkCalls: 0, generatedArtifactsCompared: 9 }));
 	console.log(failures ? `FAILED ${failures}/${cases}` : `ALL PASS (${cases} cases)`);
 	process.exitCode = failures || cases === 0 ? 1 : 0;
 }

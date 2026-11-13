@@ -150,7 +150,7 @@ export function validateProbabilityMap(labels: readonly string[], value: unknown
 import { constants as resultsConstants, promises as resultsFs } from 'node:fs';
 import type { Stats as ResultsStats } from 'node:fs';
 import type { FileHandle as ResultsFileHandle } from 'node:fs/promises';
-import { homedir as resultsHomedir } from 'node:os';
+import { homedir as resultsHomedir, hostname as resultsHostname } from 'node:os';
 import { dirname as resultsDirname, join as resultsJoin, parse as resultsParse, resolve as resultsResolve, sep as resultsSep } from 'node:path';
 import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypto';
 import { performance as resultsClock } from 'node:perf_hooks';
@@ -166,7 +166,7 @@ export type PluginOutcome = {
   execution?: { status: string; reason: string; counts?: Record<string, number> | null; assertions?: { step: number; id: string; kind: string; status: string }[]; cleanup?: string };
   assessment?: { status: string; reason: string; answers?: { coverage_alignment: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> }; boundary_evidence: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> } } };
   advice?: { status: string; tier?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
-  check?: { status: string; verdict?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
+  check?: { status: string; verdict?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string; provider?: string; model?: string; httpStatus?: number; sessionKey?: string; usage?: ResultsUsage };
   taskAdvice?: { index:number; status:string; tier?:string; confidence?:number; basis?:string; reason?:string }[];
   evidenceObservations?: {completed:number;failed:number;cancelled:number;stored:number;unavailable:number};
   receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
@@ -175,12 +175,20 @@ export type PluginOutcome = {
   loop?: { status: 'clean' | 'gaps' | 'blocked'; openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKind[] };
   rrsi?: { action: RrsiAction; episodes?: number; attempts?: number; imported?: number; policies?: number; storage: 'ok' | 'missing' | 'unavailable' | 'invalid' };
 };
+/** Provider-reported usage only; an absent object means unmeasured, never zero. Only the jev-telemetry namespace accepts it. */
+export type ResultsUsage = { promptTokens?: number; completionTokens?: number; totalTokens?: number; costMicroUsd?: number };
 export type RrsiAction = 'capture' | 'import' | 'dream' | 'status' | 'cohort';
 export type LoopGapKind = 'no_receipt_after_gate' | 'receipt_not_passed' | 'receipt_no_tests' | 'receipt_incomplete' | 'receipt_stale' | 'receipt_changed_during_run' | 'receipt_freshness_unavailable' | 'changed_test_uncovered' | 'state_unavailable' | 'not_a_repository';
-type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan' | 'rrsi';
-type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
-type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
-const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
+type ResultsPlugin = 'jev-advisor' | 'jev-telemetry' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan' | 'rrsi';
+/** Who holds a journal lock, judged without mutation: live/dead from this host's pid table, foreign_host when the lock names another host, unknown for a legacy lock without owner metadata. */
+export type ResultsLockOwner = 'live' | 'dead' | 'foreign_host' | 'unknown';
+export type ResultsLockInfo = { ageMs: number; owner: ResultsLockOwner; guardAgeMs?: number; guardOwner?: ResultsLockOwner; reclaimBlocked?: boolean };
+/** Response-only fields (`lock`, `reclaim`, `lockLost`) are never journaled. */
+type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number; lock?: ResultsLockInfo; reclaim?: 'reclaimed' | 'blocked_guard'; lockLost?: boolean };
+type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number; legacyStaleMs?: number };
+// jev-telemetry is jev-advisor's extended check telemetry. It is a separate journal so that
+// already-running bundles, whose strict decoder rejects unknown check keys, never read it.
+const resultsPlugins = ['jev-advisor', 'jev-telemetry', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
 const resultsOperations = ['run', 'status', 'advise', 'calibration', 'check', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream', 'cohort'];
 const resultsRrsiActions = ['capture', 'import', 'dream', 'status', 'cohort'];
 const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'];
@@ -274,8 +282,11 @@ function resultsAdvice(value:unknown):Record<string,unknown> {
   return advice;
 }
 const resultsCheckVerdicts = ['correct', 'incorrect', 'unsure'];
-function resultsCheck(value: unknown): Record<string, unknown> {
-  const c = resultsObject(value, ['status', 'verdict', 'confidence', 'confidenceKind', 'probabilities', 'reason'], ['status']);
+const resultsCheckKeys = ['status', 'verdict', 'confidence', 'confidenceKind', 'probabilities', 'reason'];
+const resultsTelemetryKeys = ['provider', 'model', 'httpStatus', 'sessionKey', 'usage'];
+const resultsUsageKeys = ['promptTokens', 'completionTokens', 'totalTokens', 'costMicroUsd'];
+function resultsCheck(value: unknown, telemetry = false): Record<string, unknown> {
+  const c = resultsObject(value, telemetry ? [...resultsCheckKeys, ...resultsTelemetryKeys] : resultsCheckKeys, ['status']);
   const check: Record<string, unknown> = { status: resultsEnum(c.status, ['decision', 'no_decision']) };
   if (c.verdict !== undefined) check.verdict = resultsEnum(c.verdict, resultsCheckVerdicts);
   if (c.confidence !== undefined) check.confidence = resultsProbability(c.confidence);
@@ -285,6 +296,20 @@ function resultsCheck(value: unknown): Record<string, unknown> {
     check.probabilities = Object.fromEntries(Object.entries(probabilities).map(([verdict, probability]) => [verdict, resultsProbability(probability)]));
   }
   if (c.reason !== undefined) check.reason = resultsEnum(c.reason, resultsAdviceReasons);
+  if (c.provider !== undefined) check.provider = resultsPattern(c.provider, /^[a-z0-9][a-z0-9-]{0,39}$/);
+  if (c.model !== undefined) check.model = resultsPattern(c.model, /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/);
+  if (c.httpStatus !== undefined) {
+    const status = resultsInteger(c.httpStatus, 599);
+    if (status < 100) resultsFail('invalid_metadata');
+    check.httpStatus = status;
+  }
+  if (c.sessionKey !== undefined) check.sessionKey = resultsPattern(c.sessionKey, /^[a-f0-9]{16}$/);
+  if (c.usage !== undefined) {
+    const u = resultsObject(c.usage, resultsUsageKeys);
+    const usage = Object.fromEntries(resultsUsageKeys.filter(key => u[key] !== undefined).map(key => [key, resultsInteger(u[key], 1e12)]));
+    if (!Object.keys(usage).length) resultsFail('invalid_metadata');
+    check.usage = usage;
+  }
   return check;
 }
 function resultsGate(value: unknown): Record<string, unknown> {
@@ -315,8 +340,11 @@ function resultsLoop(value: unknown): Record<string, unknown> {
   };
   return loop;
 }
-function resultsProject(value: unknown): Record<string, unknown> {
+function resultsProject(value: unknown, plugin: string): Record<string, unknown> {
   const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'check', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['operation']);
+  const telemetry = plugin === 'jev-telemetry';
+  // The telemetry namespace carries exactly one shape: a check joined to its jev-advisor record.
+  if (telemetry && (raw.operation !== 'check' || raw.check === undefined || raw.toolCallDigest === undefined || Object.keys(raw).some(key => !['operation', 'toolCallDigest', 'durationMs', 'check'].includes(key)))) resultsFail('invalid_metadata');
   const output: Record<string, unknown> = { operation: resultsEnum(raw.operation, resultsOperations) };
   for (const key of ['repositoryDigest', 'receiptId']) if (raw[key] !== undefined) output[key] = raw[key] === null ? null : resultsPattern(raw[key], key === 'receiptId' ? resultsId : resultsHex);
   if (raw.toolCallDigest !== undefined) output.toolCallDigest = resultsPattern(raw.toolCallDigest, resultsHex);
@@ -353,7 +381,7 @@ function resultsProject(value: unknown): Record<string, unknown> {
     output.assessment = assessment;
   }
   if (raw.advice !== undefined) output.advice = resultsAdvice(raw.advice);
-  if (raw.check !== undefined) output.check = resultsCheck(raw.check);
+  if (raw.check !== undefined) output.check = resultsCheck(raw.check, telemetry);
   if (raw.taskAdvice !== undefined) {
     const seen = new Set<number>();
     output.taskAdvice = resultsArray(raw.taskAdvice,32).map(value=>{
@@ -464,7 +492,7 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
   await resultsCheckDirectories(directories);
   const before = await resultsFs.lstat(file);
   resultsPrivateFile(before);
-  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW);
+  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try {
     const opened = await handle.stat();
     resultsPrivateFile(opened);
@@ -483,9 +511,120 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
 // (symlink, foreign owner, wrong mode, extra links) still fail closed.
 async function resultsProbeBusyLock(file: string): Promise<void> {
   resultsPrivateFile(await resultsFs.lstat(file), true);
-  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
+  // Non-blocking like every other lock open: a FIFO swapped in after the lstat fails closed.
+  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try { resultsPrivateFile(await handle.stat(), true); }
   finally { await handle.close(); }
+}
+
+// Stale-lock recovery. A writer records {v,pid,host,createdAt,nonce} in its lock right after the
+// O_EXCL create. A waiter may remove a lock only when (a) the owner pid on this host is dead
+// (ESRCH), or (b) a lock without valid metadata (legacy bundles write none) or naming another
+// host is older than legacyStaleMs and its pid, if any, is not alive here. Removal happens only
+// inside the single-flight reclaim guard (journal/.append.reclaim.lock, outside journal/v1), after
+// re-judging the same inode, with exactly one unlink and no restore. A stale guard is never taken
+// over: it fails closed as reclaim_blocked, because POSIX offers no compare-and-unlink and two
+// takeovers could produce two guard holders. A live or EPERM pid is never reclaimed; pid reuse
+// therefore errs toward store_busy, never toward a second writer.
+const RESULTS_LEGACY_STALE_MS = 600_000;
+type ResultsLockMeta = { pid: number; host: string };
+type ResultsLockObservation = { info: ResultsStats; meta: ResultsLockMeta | null; stale: boolean; report: ResultsLockInfo };
+function resultsLockMetadata(): string {
+  return JSON.stringify({ v: 1, pid: process.pid, host: resultsHostname(), createdAt: Date.now(), nonce: resultsUUID() });
+}
+function resultsParseLockMeta(text: string): ResultsLockMeta | null {
+  try {
+    const raw = JSON.parse(text);
+    if (!raw || typeof raw !== 'object' || raw.v !== 1 || !Number.isSafeInteger(raw.pid) || raw.pid <= 0 || typeof raw.host !== 'string' || !raw.host || raw.host.length > 255) return null;
+    return { pid: raw.pid, host: raw.host };
+  } catch { return null; }
+}
+function resultsPidAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+}
+function resultsJudgeLock(meta: ResultsLockMeta | null, ageMs: number, legacyStaleMs: number): { stale: boolean; owner: ResultsLockOwner } {
+  if (meta && meta.host === resultsHostname()) {
+    const alive = resultsPidAlive(meta.pid);
+    return { stale: !alive, owner: alive ? 'live' : 'dead' };
+  }
+  if (meta) return { stale: ageMs >= legacyStaleMs && !resultsPidAlive(meta.pid), owner: 'foreign_host' };
+  return { stale: ageMs >= legacyStaleMs, owner: 'unknown' };
+}
+/** Read-only observation of one lock file; null when it no longer exists. Unsafe files fail closed. */
+async function resultsObserveLock(file: string, legacyStaleMs: number): Promise<ResultsLockObservation | null> {
+  let info: ResultsStats;
+  try { info = await resultsFs.lstat(file); }
+  catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
+  resultsPrivateFile(info);
+  let text = '';
+  let handle: ResultsFileHandle;
+  // Non-blocking: a FIFO swapped in after the lstat must not hang the waiter.
+  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK); }
+  catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
+  try {
+    const opened = await handle.stat();
+    if (opened.nlink === 0) return null;
+    resultsPrivateFile(opened);
+    if (!resultsSame(info, opened)) return null;
+    const buffer = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    text = buffer.subarray(0, bytesRead).toString('utf8');
+  } finally { await handle.close(); }
+  const meta = resultsParseLockMeta(text);
+  const ageMs = Math.max(0, Math.round(Date.now() - info.mtimeMs));
+  const judged = resultsJudgeLock(meta, ageMs, legacyStaleMs);
+  return { info, meta, stale: judged.stale, report: { ageMs, owner: judged.owner } };
+}
+function resultsSameGeneration(a: ResultsStats, b: ResultsStats): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+}
+type ResultsReclaim = { action: 'reclaimed' | 'live' | 'gone' | 'busy_guard' | 'blocked_guard'; report?: ResultsLockInfo };
+async function resultsReclaimStaleLock(dir: string, lockPath: string, guardPath: string, directories: ResultsDirectory[], legacyStaleMs: number): Promise<ResultsReclaim> {
+  const observed = await resultsObserveLock(lockPath, legacyStaleMs);
+  if (!observed) return { action: 'gone' };
+  if (!observed.stale) return { action: 'live', report: observed.report };
+  let guard: ResultsFileHandle;
+  try {
+    await resultsCheckDirectories(directories);
+    guard = await resultsFs.open(guardPath, resultsConstants.O_WRONLY | resultsConstants.O_CREAT | resultsConstants.O_EXCL | resultsConstants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const held = await resultsObserveLock(guardPath, legacyStaleMs);
+    if (!held) return { action: 'busy_guard', report: observed.report };
+    const report = { ...observed.report, guardAgeMs: held.report.ageMs, guardOwner: held.report.owner };
+    return held.stale ? { action: 'blocked_guard', report: { ...report, reclaimBlocked: true } } : { action: 'busy_guard', report };
+  }
+  let guardInfo: ResultsStats | undefined;
+  try {
+    guardInfo = await guard.stat();
+    resultsPrivateFile(guardInfo);
+    await guard.writeFile(resultsLockMetadata());
+    await guard.sync();
+    // Re-judge the same generation under the guard; anything else is a live successor.
+    const again = await resultsObserveLock(lockPath, legacyStaleMs);
+    if (!again) return { action: 'gone' };
+    if (!again.stale || !resultsSameGeneration(observed.info, again.info)) return { action: 'live', report: again.report };
+    await resultsCheckDirectories(directories);
+    try {
+      const current = await resultsFs.lstat(lockPath);
+      if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
+      await resultsFs.unlink(lockPath);
+    } catch (error) {
+      // The judged lock vanished on its own (its owner released it): the store is free.
+      if (resultsSafeMissing(error)) return { action: 'gone' };
+      throw error;
+    }
+    await resultsSyncDirectory(dir, directories);
+    return { action: 'reclaimed', report: again.report };
+  } finally {
+    try {
+      const current = await resultsFs.lstat(guardPath);
+      if (guardInfo && resultsSame(guardInfo, current)) await resultsFs.unlink(guardPath);
+    } catch { /* guard release is best effort; a leftover guard fails closed as reclaim_blocked */ }
+    await guard.close();
+  }
 }
 export async function readPrivateResultFile(file: string, maxBytes: number): Promise<Buffer> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 16 * 1024 * 1024) resultsFail('resource_limit');
@@ -567,7 +706,7 @@ function resultsDecodeSegment(body: Buffer, plugin: ResultsPlugin, maxRecordByte
     const id = resultsPattern(record.id, resultsId);
     if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
     const { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...outcome } = record;
-    const canonical = { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...resultsProject(outcome) };
+    const canonical = { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...resultsProject(outcome, plugin) };
     if (JSON.stringify(canonical) !== line) resultsFail('store_corrupt');
     decoded.push({ id, observedAt, record: canonical });
   }
@@ -582,13 +721,16 @@ function resultsFailure(error: unknown): ResultsAppend {
 /** Append metadata only. A partial publication is deliberately not repaired or adopted. */
 export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: PluginOutcome, deps: ResultsDependencies = {}): Promise<ResultsAppend> {
   let projected: Record<string, unknown>;
-  try { resultsEnum(plugin, resultsPlugins); projected = resultsProject(outcome); }
+  try { resultsEnum(plugin, resultsPlugins); projected = resultsProject(outcome, plugin); }
   catch { return { persisted: false, reason: 'invalid_metadata' }; }
   const maxRecordBytes = deps.maxRecordBytes ?? 4096;
   const maxSegmentBytes = deps.maxSegmentBytes ?? 1024 * 1024;
   const maxSegments = deps.maxSegments ?? 8;
   const lockTimeoutMs = deps.lockTimeoutMs ?? 100;
-  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100) return { persisted: false, reason: 'invalid_limits' };
+  // Floor of one second: a just-created lock is empty until its metadata write lands, so an
+  // age bound shorter than that window could judge a live writer's fresh lock as legacy-stale.
+  const legacyStaleMs = deps.legacyStaleMs ?? RESULTS_LEGACY_STALE_MS;
+  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1000 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
   const id = resultsUUID();
   const body = JSON.stringify({ schemaVersion: 1, plugin, id, observedAt: new Date().toISOString(), ...projected }) + '\n';
   const size = Buffer.byteLength(body);
@@ -596,9 +738,14 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
   const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
   const dir = resultsJoin(base, plugin, 'journal', 'v1');
   const lockPath = resultsJoin(dir, '.append.lock');
+  const guardPath = resultsJoin(base, plugin, 'journal', '.append.reclaim.lock');
   let directories: ResultsDirectory[] = [];
   let lock: ResultsFileHandle | undefined;
   let lockInfo: ResultsStats | undefined;
+  let lockReport: ResultsLockInfo | undefined;
+  let reclaim: ResultsAppend['reclaim'];
+  let reclaimAttempted = false;
+  let lockLost = false;
   let result: ResultsAppend = { persisted: false, reason: 'store_unavailable' };
   try {
     directories = await resultsDirectories(dir, true, base);
@@ -610,6 +757,15 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         try { await resultsProbeBusyLock(lockPath); }
         catch (checkError) { if ((checkError as NodeJS.ErrnoException).code !== 'ENOENT') throw checkError; }
+        // At most one stale judgment, and at most one unlink, per append.
+        if (!reclaimAttempted) {
+          reclaimAttempted = true;
+          const outcome = await resultsReclaimStaleLock(dir, lockPath, guardPath, directories, legacyStaleMs);
+          lockReport = outcome.report;
+          if (outcome.action === 'blocked_guard') reclaim = 'blocked_guard';
+          if (outcome.action === 'reclaimed') { reclaim = 'reclaimed'; continue; }
+          if (outcome.action === 'gone') continue;
+        }
         if (resultsClock.now() >= deadline) resultsFail('store_busy');
         await new Promise(resolve => setTimeout(resolve, Math.min(5, Math.max(0, deadline - resultsClock.now()))));
       }
@@ -617,7 +773,10 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     lockInfo = await lock.stat(); resultsPrivateFile(lockInfo);
     await resultsCheckFile(lockPath, lockInfo);
     await resultsCheckDirectories(directories);
+    // Owner metadata lets a later waiter tell a dead holder from a live one.
+    await lock.writeFile(resultsLockMetadata());
     await lock.sync();
+    await resultsCheckFile(lockPath, lockInfo);
     const names: string[] = [];
     const listing = await resultsFs.opendir(dir);
     for await (const entry of listing) {
@@ -644,6 +803,8 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
         activeBody = bytes;
       }
     }
+    // Holder-side recheck before the first mutation: never write after losing the lock name.
+    await resultsCheckFile(lockPath, lockInfo);
     const retired: { segment: ResultsSegment; info: ResultsStats }[] = [];
     const active = inventory.segments.at(-1);
     if (active && active.bytes + size <= maxSegmentBytes) {
@@ -704,14 +865,29 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     if (lock) {
       try {
         await resultsCheckDirectories(directories);
-        const current = await resultsFs.lstat(lockPath); resultsPrivateFile(current);
-        if (!lockInfo || !resultsSame(lockInfo, current) || !resultsSame(lockInfo, await lock.stat())) resultsFail('unsafe_path');
-        await resultsFs.unlink(lockPath);
-        await resultsSyncDirectory(dir, directories);
-      } catch (error) { result = resultsFailure(error); }
-      try { await lock.close(); } catch { result = { persisted: false, reason: 'store_unavailable' }; }
+        // One retry on the held handle: a transient stat failure right after the O_EXCL acquire
+        // must not be mistaken for a lost name (which would strand this process's own lock).
+        if (!lockInfo) { try { lockInfo = await lock.stat(); } catch { /* judged below */ } }
+        let current: ResultsStats | undefined;
+        try { current = await resultsFs.lstat(lockPath); }
+        catch (error) { if (!resultsSafeMissing(error)) throw error; }
+        if (!current || !lockInfo || !resultsSame(lockInfo, current)) {
+          // The name is gone or names another generation: never unlink it. A completed
+          // publication stays persisted; the lost name is reported, not repaired.
+          lockLost = true;
+        } else {
+          resultsPrivateFile(current);
+          if (!resultsSame(lockInfo, await lock.stat())) resultsFail('unsafe_path');
+          await resultsFs.unlink(lockPath);
+          await resultsSyncDirectory(dir, directories);
+        }
+      } catch (error) { if (!result.persisted) result = resultsFailure(error); }
+      try { await lock.close(); } catch { if (!result.persisted) result = { persisted: false, reason: 'store_unavailable' }; }
     }
   }
+  if (lockLost) result = { ...result, lockLost: true };
+  if (reclaim) result = { ...result, reclaim };
+  if (lockReport && !result.persisted && result.reason === 'store_busy') result = { ...result, lock: lockReport };
   return result;
 }
 export type ResultsSnapshotReason = 'store_busy' | 'store_corrupt' | 'unsafe_path' | 'resource_limit' | 'changed_during_read' | 'store_unavailable';
@@ -721,6 +897,8 @@ export type ResultsSnapshot = {
   records: Record<string, unknown>[];
   segments: number;
   bytes: number;
+  /** Present with store_busy: the observed lock (and reclaim guard), judged without mutation. */
+  lock?: ResultsLockInfo;
 };
 type ResultsSnapshotDependencies = { baseDir?: string };
 type ResultsDirectoryIdentity = { path: string; dev: number; ino: number; mode: number };
@@ -738,6 +916,32 @@ function resultsSnapshotFailure(error: unknown): ResultsSnapshot {
 }
 function resultsSafeMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+}
+async function resultsInspectLock(base: string, plugin: string): Promise<ResultsLockInfo | undefined> {
+  const lock = await resultsObserveLock(resultsJoin(base, plugin, 'journal', 'v1', '.append.lock'), RESULTS_LEGACY_STALE_MS);
+  if (!lock) return undefined;
+  let guard: ResultsLockObservation | null = null;
+  try { guard = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS); }
+  catch { guard = null; }
+  if (!guard) return lock.report;
+  return { ...lock.report, guardAgeMs: guard.report.ageMs, guardOwner: guard.report.owner, ...(guard.stale ? { reclaimBlocked: true } : {}) };
+}
+export type ResultsGuardInfo = { ageMs: number; owner: ResultsLockOwner; stale: boolean };
+export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo; guard?: ResultsGuardInfo };
+/**
+ * Read-only lock observation for health reporting. Creates, repairs and deletes nothing. A reclaim
+ * guard is reported even without a held lock, because a leftover stale guard will block the next
+ * reclaim and is the operator's to clear.
+ */
+export async function inspectPluginOutcomeLock(plugin: ResultsPlugin, deps: ResultsSnapshotDependencies = {}): Promise<ResultsLockInspection> {
+  try {
+    resultsEnum(plugin, resultsPlugins);
+    const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
+    const lock = await resultsInspectLock(base, plugin);
+    const held = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS);
+    const guard = held ? { guard: { ageMs: held.report.ageMs, owner: held.report.owner, stale: held.stale } } : {};
+    return lock ? { status: 'held', lock, ...guard } : { status: 'none', ...guard };
+  } catch { return { status: 'unavailable' }; }
 }
 /**
  * One bounded optimistic snapshot attempt. Never creates, repairs, deletes or
@@ -771,7 +975,9 @@ export async function readPluginOutcomeSnapshot(plugin: ResultsPlugin, deps: Res
       const lockPath = resultsJoin(dir, '.append.lock');
       const lockInfo = await resultsFs.lstat(lockPath);
       resultsPrivateFile(lockInfo);
-      resultsFail('store_busy');
+      // Readers never reclaim: they report who holds the lock so a stuck store is visible.
+      const lock = await resultsInspectLock(base, plugin);
+      return { status: 'unavailable', reason: 'store_busy', records: [], segments: 0, bytes: 0, ...(lock ? { lock } : {}) };
     }
     if (names.includes('.inventory.pending')) resultsFail('store_corrupt');
     const markerPath = resultsJoin(dir, 'inventory.json');
@@ -986,8 +1192,12 @@ export interface DecisionConfig {
 	stateOverrideIgnored: boolean;
 	memoryMaxKeys: number;
 	memoryMaxEvents: number;
+	/** Layer that supplied the credential, never its value. */
+	credentialSource: CredentialSource;
 }
 export type AdvisorConfig = DecisionConfig;
+/** env = process env, plugin_file = jev-advisor/.env, shared_env = allowlisted names from ~/.gjc/agent/.env. */
+export type CredentialSource = "env" | "plugin_file" | "shared_env" | "keyless" | "none";
 export type AdvisorMode = "shadow" | "hint" | "enforce";
 type Env = Record<string, string | undefined>;
 
@@ -998,6 +1208,89 @@ export function tierRank(tier: string): number {
 
 export function pluginEnvFile(): string {
 	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", ".env");
+}
+
+/** Tracked, non-secret baseline settings (agent-config). Only SETTINGS_KEYS are read from it. */
+export function pluginSettingsFile(): string {
+	return path.join(os.homedir(), ".gjc", "agent", "jev-advisor", "settings.env");
+}
+
+/** The host credential source of truth. Only credential key names are ever taken from it. */
+export function sharedEnvFile(): string {
+	return path.join(os.homedir(), ".gjc", "agent", ".env");
+}
+
+export const SETTINGS_KEYS = [
+	"JEV_ADVISOR_MODE",
+	"JEV_ADVISOR_MIN_CONFIDENCE",
+	"JEV_ADVISOR_MIN_INTERVAL_MS",
+	"JEV_ADVISOR_PROVIDER",
+	"JEV_ADVISOR_MODEL",
+	"JEV_ADVISOR_TIMEOUT_MS",
+	"JEV_ADVISOR_MEMORY",
+	"JEV_ADVISOR_MEMORY_MAX_KEYS",
+	"JEV_ADVISOR_MEMORY_MAX_EVENTS",
+] as const;
+const SHARED_ENV_MAX_BYTES = 16 * 1024;
+const CONFIG_FILE_MAX_BYTES = 64 * 1024;
+
+type ConfigFileRead = { status: "read"; text: string } | { status: "absent" | "unsafe" | "unreadable" };
+/**
+ * Bounded read of one configuration file. The open is non-blocking and never follows a symlink,
+ * so a FIFO or device in place of the file cannot hang session start or a tool call; anything
+ * but a regular file within maxBytes (and, when ownerOnly, owned by this uid without group/other
+ * bits) is refused before a byte is read.
+ */
+function readConfigFile(file: string, maxBytes: number, ownerOnly: boolean): ConfigFileRead {
+	let fd: number;
+	try {
+		fd = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return { status: code === "ENOENT" ? "absent" : code === "ELOOP" ? "unsafe" : "unreadable" };
+	}
+	try {
+		const info = fstatSync(fd);
+		if (!info.isFile() || info.size > maxBytes) return { status: "unsafe" };
+		if (ownerOnly && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) return { status: "unsafe" };
+		const buffer = Buffer.alloc(info.size);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const read = readSync(fd, buffer, offset, buffer.length - offset, offset);
+			if (!read) break;
+			offset += read;
+		}
+		return { status: "read", text: buffer.subarray(0, offset).toString("utf8") };
+	} catch {
+		return { status: "unreadable" };
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function loadSettingsEnv(): Env {
+	const read = readConfigFile(pluginSettingsFile(), CONFIG_FILE_MAX_BYTES, false);
+	return read.status === "read" ? parseEnvFile(read.text) : {};
+}
+
+/** Read state of the tracked settings file, reported by describe-config so an absent baseline is visible. */
+export function settingsFileStatus(file = pluginSettingsFile()): "read" | "absent" | "unsafe" | "unreadable" {
+	return readConfigFile(file, CONFIG_FILE_MAX_BYTES, false).status;
+}
+
+export type SharedEnvStatus = "read" | "absent" | "unsafe" | "unreadable" | "not_needed";
+/**
+ * Read only the allowlisted credential names from the shared SOT. The file must be a regular,
+ * non-symlinked, owner-only (no group/other bits) file of this uid within 16 KiB; anything else
+ * is skipped, never repaired. Values of other keys are discarded immediately.
+ */
+export function readSharedCredentials(names: readonly string[], file = sharedEnvFile()): { status: SharedEnvStatus; env: Env } {
+	const read = readConfigFile(file, SHARED_ENV_MAX_BYTES, true);
+	if (read.status !== "read") return { status: read.status, env: {} };
+	const parsed = parseEnvFile(read.text);
+	const env: Env = {};
+	for (const name of names) if (parsed[name]) env[name] = parsed[name];
+	return { status: "read", env };
 }
 
 /** Result-state base; the v2 store is derived without reading or migrating legacy data. */
@@ -1014,11 +1307,8 @@ export function version2StateFile(base: string): string {
 }
 
 function loadPluginEnv(): Env {
-	try {
-		return parseEnvFile(readFileSync(pluginEnvFile(), "utf8"));
-	} catch {
-		return {};
-	}
+	const read = readConfigFile(pluginEnvFile(), CONFIG_FILE_MAX_BYTES, false);
+	return read.status === "read" ? parseEnvFile(read.text) : {};
 }
 
 const CHECK_CRITERIA: Record<CheckVerdict, string> = {
@@ -1202,11 +1492,30 @@ export function parseEnvFile(text: string): Env {
 	return out;
 }
 
+type SharedCredentialLoader = (names: readonly string[]) => { status: SharedEnvStatus; env: Env };
+
+/**
+ * Configuration precedence: layer first, then within a layer JEV_ADVISOR_API_KEY before the
+ * provider's own key names. Layers: L1 process env, L2 ~/.gjc/agent/jev-advisor/.env (host
+ * override), L3 ~/.gjc/agent/jev-advisor/settings.env (tracked non-secret baseline, SETTINGS_KEYS
+ * only, never credentials), L4 ~/.gjc/agent/.env (credential names only, read lazily and only
+ * when no upper layer supplies a credential). A lower layer never overrides a key an upper layer
+ * defines, so an L4 JEV_ADVISOR_API_KEY cannot beat an L1 OPENROUTER_API_KEY.
+ */
 export function readConfig(
 	env: Env = (globalThis as { process?: { env: Env } }).process?.env ?? {},
 	fileEnv: Env = loadPluginEnv(),
+	settingsEnv: Env = loadSettingsEnv(),
+	sharedCredentials: SharedCredentialLoader = names => readSharedCredentials(names),
 ): AdvisorConfig {
-	const merged: Env = { ...fileEnv };
+	return resolveConfig(env, fileEnv, settingsEnv, sharedCredentials).config;
+}
+
+function resolveConfig(env: Env, fileEnv: Env, settingsEnv: Env, sharedCredentials: SharedCredentialLoader) {
+	const settingsIgnoredKeys = Object.keys(settingsEnv).filter(key => !(SETTINGS_KEYS as readonly string[]).includes(key)).sort();
+	const merged: Env = {};
+	for (const key of SETTINGS_KEYS) if (settingsEnv[key] !== undefined) merged[key] = settingsEnv[key];
+	for (const [key, value] of Object.entries(fileEnv)) merged[key] = value;
 	for (const [key, value] of Object.entries(env)) if (value !== undefined) merged[key] = value;
 	const provider = String(merged.JEV_ADVISOR_PROVIDER ?? "jev").trim().toLowerCase();
 	const modeRaw = String(merged.JEV_ADVISOR_MODE ?? "shadow").trim().toLowerCase();
@@ -1215,11 +1524,12 @@ export function readConfig(
 	const intervalRaw = Number(merged.JEV_ADVISOR_MIN_INTERVAL_MS);
 	const confidenceRaw = Number(merged.JEV_ADVISOR_MIN_CONFIDENCE);
 	const memoryRaw = String(merged.JEV_ADVISOR_MEMORY ?? "").trim().toLowerCase();
-	return {
+	const credential = resolveCredential(provider, [["env", env], ["plugin_file", fileEnv]], sharedCredentials);
+	const config: AdvisorConfig = {
 		provider,
 		mode,
 		endpoint: trim(merged.JEV_ADVISOR_ENDPOINT) || trim(PROVIDERS[provider]?.endpoint),
-		apiKey: resolveApiKey(merged, provider),
+		apiKey: credential.apiKey,
 		model: trim(merged.JEV_ADVISOR_MODEL) || trim(PROVIDERS[provider]?.model) || DEFAULTS.model,
 		timeoutMs: Math.min(positiveNumber(merged.JEV_ADVISOR_TIMEOUT_MS, DEFAULTS.timeoutMs), INVOCATION_BUDGET_MS),
 		minIntervalMs: Number.isFinite(intervalRaw) && intervalRaw >= 0 ? intervalRaw : DEFAULTS.minIntervalMs,
@@ -1230,14 +1540,87 @@ export function readConfig(
 		stateOverrideIgnored: Boolean(trim(merged.JEV_ADVISOR_STATE)),
 		memoryMaxKeys: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_KEYS, DEFAULTS.memoryMaxKeys, MAX_GROUPS),
 		memoryMaxEvents: nonNegativeInteger(merged.JEV_ADVISOR_MEMORY_MAX_EVENTS, DEFAULTS.memoryMaxEvents, MAX_TASKS_PER_GROUP),
+		credentialSource: PROVIDERS[provider]?.keyless ? "keyless" : credential.source,
+	};
+	const layersUsed = [
+		...(SETTINGS_KEYS.some(key => env[key] !== undefined) || credential.source === "env" ? ["env"] : []),
+		...(Object.keys(fileEnv).length ? ["plugin_file"] : []),
+		...(SETTINGS_KEYS.some(key => settingsEnv[key] !== undefined) ? ["settings"] : []),
+		...(credential.source === "shared_env" ? ["shared_env"] : []),
+	];
+	return { config, layersUsed, settingsIgnoredKeys, sharedEnvStatus: credential.sharedEnvStatus };
+}
+
+/** Names allowed from the shared credential file: every provider key name plus the explicit override. */
+export function sharedCredentialNames(): string[] {
+	return ["JEV_ADVISOR_API_KEY", ...new Set(Object.values(PROVIDER_KEY_ENV).flat())];
+}
+
+function resolveCredential(provider: string, upper: [CredentialSource, Env][], shared: SharedCredentialLoader): { apiKey: string; source: CredentialSource; sharedEnvStatus: SharedEnvStatus } {
+	const pick = (layer: Env): string => {
+		const explicit = (layer.JEV_ADVISOR_API_KEY ?? "").trim();
+		if (explicit) return explicit;
+		for (const name of providerKeyEnv(provider)) {
+			const value = (layer[name] ?? "").trim();
+			if (value) return value;
+		}
+		return "";
+	};
+	for (const [source, layer] of upper) {
+		const apiKey = pick(layer);
+		if (apiKey) return { apiKey, source, sharedEnvStatus: "not_needed" };
+	}
+	if (PROVIDERS[provider]?.keyless) return { apiKey: "", source: "keyless", sharedEnvStatus: "not_needed" };
+	const loaded = shared(sharedCredentialNames());
+	const apiKey = pick(loaded.env);
+	return apiKey ? { apiKey, source: "shared_env", sharedEnvStatus: loaded.status } : { apiKey: "", source: "none", sharedEnvStatus: loaded.status };
+}
+
+export interface EffectiveConfig {
+	provider: string;
+	model: string;
+	mode: AdvisorMode;
+	minConfidence: number;
+	minIntervalMs: number;
+	configured: boolean;
+	credentialSource: CredentialSource;
+	sharedEnvStatus: SharedEnvStatus;
+	/** State of ~/.gjc/agent/jev-advisor/settings.env (the tracked baseline). */
+	settingsStatus: "read" | "absent" | "unsafe" | "unreadable";
+	layersUsed: string[];
+	settingsIgnoredKeys: string[];
+}
+
+/** Secret-free description of the effective configuration: names and layers, never values. */
+export function describeEffectiveConfig(
+	env: Env = (globalThis as { process?: { env: Env } }).process?.env ?? {},
+	fileEnv: Env = loadPluginEnv(),
+	settingsEnv: Env = loadSettingsEnv(),
+	sharedCredentials: SharedCredentialLoader = names => readSharedCredentials(names),
+	settingsState: EffectiveConfig["settingsStatus"] = settingsFileStatus(),
+): EffectiveConfig {
+	const resolved = resolveConfig(env, fileEnv, settingsEnv, sharedCredentials);
+	const cfg = resolved.config;
+	return {
+		provider: cfg.provider,
+		model: cfg.model,
+		mode: cfg.mode,
+		minConfidence: cfg.minConfidence,
+		minIntervalMs: cfg.minIntervalMs,
+		configured: isConfigured(cfg),
+		credentialSource: cfg.credentialSource,
+		sharedEnvStatus: resolved.sharedEnvStatus,
+		settingsStatus: settingsState,
+		layersUsed: resolved.layersUsed,
+		settingsIgnoredKeys: resolved.settingsIgnoredKeys,
 	};
 }
 
 /**
- * Credential variables per provider, highest precedence first. A provider never borrows another
- * provider's key: sending an OpenRouter token to api.typesafe.ai (or an OpenAI key to a gateway)
- * only produces a 401 far from the misconfiguration that caused it. `JEV_ADVISOR_API_KEY` is the
- * explicit override and outranks every entry here.
+ * Credential variables per provider, highest precedence first within one layer. A provider never
+ * borrows another provider's key: sending an OpenRouter token to api.typesafe.ai (or an OpenAI key
+ * to a gateway) only produces a 401 far from the misconfiguration that caused it. Within a layer
+ * JEV_ADVISOR_API_KEY comes before these names; across layers the upper layer wins (readConfig).
  */
 const PROVIDER_KEY_ENV: Record<string, readonly string[]> = {
 	jev: ["OPENROUTER_API_KEY"],
@@ -1248,16 +1631,6 @@ const PROVIDER_KEY_ENV: Record<string, readonly string[]> = {
 
 export function providerKeyEnv(provider: string): readonly string[] {
 	return PROVIDER_KEY_ENV[provider] ?? [];
-}
-
-function resolveApiKey(merged: Env, provider: string): string {
-	const explicit = (merged.JEV_ADVISOR_API_KEY ?? "").trim();
-	if (explicit) return explicit;
-	for (const name of providerKeyEnv(provider)) {
-		const value = (merged[name] ?? "").trim();
-		if (value) return value;
-	}
-	return "";
 }
 
 export function isConfigured(cfg: AdvisorConfig): boolean {
@@ -2663,6 +3036,64 @@ export interface CorrelationSource {
 	metrics: CalibrationReport | null;
 }
 
+/** jev-telemetry check records joined to jev-advisor check records by toolCallDigest. */
+export interface TelemetryMetrics {
+	records: number;
+	/** null when the jev-advisor journal could not be read, so the join is unknown rather than zero. */
+	joined: number | null;
+	unjoined: number | null;
+	byStatus: MetricsFrequency; byReason: MetricsFrequency;
+	byProvider: MetricsFrequency; byModel: MetricsFrequency; byHttpStatus: MetricsFrequency;
+	latencyMs: MetricsDuration;
+	/** truncated: the journal is at its retained-segment bound, so older sessions may be gone. */
+	sessions: { distinct: number; truncated: boolean };
+	/** Sums are null unless at least one record carried provider-reported usage. */
+	usage: { records: number; measured: number; promptTokens: number | null; completionTokens: number | null; totalTokens: number | null; costMicroUsd: number | null };
+}
+
+export function aggregateTelemetryMetrics(records: Record<string, unknown>[], checkDigests: Set<string> | null): TelemetryMetrics {
+	const report: TelemetryMetrics = {
+		records: 0, joined: checkDigests ? 0 : null, unjoined: checkDigests ? 0 : null,
+		byStatus: metricsFreq(), byReason: metricsFreq(), byProvider: metricsFreq(), byModel: metricsFreq(), byHttpStatus: metricsFreq(),
+		latencyMs: metricsDuration(),
+		sessions: { distinct: 0, truncated: false },
+		usage: { records: 0, measured: 0, promptTokens: null, completionTokens: null, totalTokens: null, costMicroUsd: null },
+	};
+	const sessions = new Set<string>();
+	const add = (key: "promptTokens" | "completionTokens" | "totalTokens" | "costMicroUsd", value: unknown) => {
+		if (typeof value !== "number" || !Number.isSafeInteger(value)) return;
+		const next = (report.usage[key] ?? 0) + value;
+		if (next > Number.MAX_SAFE_INTEGER) throw new Error("resource_limit");
+		report.usage[key] = next;
+	};
+	for (const record of records) {
+		if (record.operation !== "check" || !isRecord(record.check)) continue;
+		const check = record.check;
+		report.records++;
+		if (checkDigests) {
+			if (typeof record.toolCallDigest === "string" && checkDigests.has(record.toolCallDigest)) report.joined!++;
+			else report.unjoined!++;
+		}
+		metricsBump(report.byStatus, String(check.status));
+		if (check.reason !== undefined) metricsBump(report.byReason, String(check.reason));
+		if (check.provider !== undefined) metricsBump(report.byProvider, String(check.provider));
+		if (check.model !== undefined) metricsBump(report.byModel, String(check.model));
+		if (check.httpStatus !== undefined) metricsBump(report.byHttpStatus, String(check.httpStatus));
+		if (typeof record.durationMs === "number") metricsDurationAdd(report.latencyMs, record.durationMs);
+		if (typeof check.sessionKey === "string") sessions.add(check.sessionKey);
+		if (isRecord(check.usage)) {
+			report.usage.records++;
+			report.usage.measured++;
+			add("promptTokens", check.usage.promptTokens);
+			add("completionTokens", check.usage.completionTokens);
+			add("totalTokens", check.usage.totalTokens);
+			add("costMicroUsd", check.usage.costMicroUsd);
+		}
+	}
+	report.sessions.distinct = sessions.size;
+	return report;
+}
+
 export interface PluginMetricsReport {
 	schemaVersion: 1;
 	report: "plugin_metrics";
@@ -2677,6 +3108,12 @@ export interface PluginMetricsReport {
 		"ui-regression": JournalSource<RunStatusMetrics>;
 	};
 	correlation: CorrelationSource;
+	/** Record-scope check telemetry (jev-telemetry journal). Report-scope measures below stay null. */
+	telemetry: JournalSource<TelemetryMetrics>;
+	/** Present when the jev-advisor journal is held by a lock: owner and age, judged without mutation. */
+	jevLock?: ResultsLockInfo;
+	/** Present when a reclaim guard exists, even without a held lock; a stale one blocks the next reclaim. */
+	jevGuard?: { ageMs: number; owner: string; stale: boolean };
 	unavailableMeasures: {
 		pluginOverheadMs: null; providerLatencyMs: null; assessmentLatencyMs: null;
 		endToEndInvocationMs: null; providerCost: null; tokenUsage: null;
@@ -3031,11 +3468,15 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 		"verification-receipts": null as unknown as JournalSource<RunStatusMetrics>,
 		"ui-regression": null as unknown as JournalSource<RunStatusMetrics>,
 	};
+	let checkDigests: Set<string> | null = null;
+	let jevLock: ResultsLockInfo | undefined;
 	for (const plugin of ["jev-advisor", "verification-receipts", "ui-regression"] as const) {
 		const sourceStartedAt = new Date();
 		const snapshot = await readPluginOutcomeSnapshot(plugin);
 		const completedAt = new Date();
 		if (plugin === "jev-advisor") {
+			if (snapshot.status === "ok") checkDigests = new Set(snapshot.records.filter(record => record.operation === "check" && typeof record.toolCallDigest === "string").map(record => record.toolCallDigest as string));
+			jevLock = snapshot.lock;
 			const source = aggregateJournalSnapshot(snapshot, aggregateJevMetrics);
 			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
 		} else {
@@ -3043,6 +3484,12 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 			plugins[plugin] = journalSourceEnvelope(sourceStartedAt, completedAt, source.snapshot, source.metrics);
 		}
 	}
+	const jevGuard = (await inspectPluginOutcomeLock("jev-advisor")).guard;
+	const telemetryStartedAt = new Date();
+	const telemetrySnapshot = await readPluginOutcomeSnapshot("jev-telemetry");
+	const telemetrySource = aggregateJournalSnapshot(telemetrySnapshot, records => aggregateTelemetryMetrics(records, checkDigests));
+	if (telemetrySource.metrics) telemetrySource.metrics.sessions.truncated = telemetrySnapshot.segments >= 8;
+	const telemetry = journalSourceEnvelope(telemetryStartedAt, new Date(), telemetrySource.snapshot, telemetrySource.metrics);
 	const stateStartedAt = new Date();
 	const stateRead = readEvidenceV2(version2StateFile(pluginStateFile()));
 	const stateCompletedAt = new Date();
@@ -3063,6 +3510,11 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 	const limitations: string[] = [...METRICS_BASE_LIMITATIONS];
 	if (statuses.includes("missing")) limitations.push("source_missing");
 	if (statuses.includes("unavailable")) limitations.push("source_unavailable");
+	// The telemetry journal is reported beside the four historical sources; its own state is a
+	// limitation rather than a change to the envelope status those sources define.
+	if (telemetry.status === "missing") limitations.push("telemetry_source_missing");
+	if (telemetry.status === "unavailable") limitations.push("telemetry_source_unavailable");
+	limitations.push("telemetry_usage_only_when_provider_reports_it", "telemetry_join_limited_by_independent_retention", "report_scope_vs_record_scope");
 	return {
 		schemaVersion: 1,
 		report: "plugin_metrics",
@@ -3073,6 +3525,9 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 		status,
 		plugins,
 		correlation,
+		telemetry,
+		...(jevLock ? { jevLock } : {}),
+		...(jevGuard ? { jevGuard } : {}),
 		unavailableMeasures: {
 			pluginOverheadMs: null, providerLatencyMs: null, assessmentLatencyMs: null,
 			endToEndInvocationMs: null, providerCost: null, tokenUsage: null,
@@ -3080,6 +3535,60 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 		},
 		limitations,
 	};
+}
+
+const HEALTH_RECENT_CHECKS = 20;
+
+/**
+ * One advisory session_start line, or null when the advisor is healthy. Inputs are the effective
+ * configuration (names/layers only), the jev-advisor journal snapshot and its lock observation;
+ * nothing here calls a provider, writes a file, or prints a credential value.
+ */
+export function buildHealthLine(input: {
+	config: EffectiveConfig;
+	snapshot: { status: string; reason: string | null; records: Record<string, unknown>[]; lock?: ResultsLockInfo };
+	/** A reclaim guard observed without mutation; a stale one blocks the next automatic reclaim. */
+	guard?: { ageMs: number; owner: string; stale: boolean };
+	bridgeEnabled?: boolean;
+}): string | null {
+	const parts: string[] = [];
+	const cfg = input.config;
+	if (cfg.provider !== "off" && !cfg.configured) {
+		const names = ["JEV_ADVISOR_API_KEY", ...providerKeyEnv(cfg.provider)].join("|");
+		parts.push(`unconfigured (${cfg.provider} credential missing: ${names}; shared .env ${cfg.sharedEnvStatus})`);
+	}
+	const snapshot = input.snapshot;
+	if (snapshot.status === "unavailable") {
+		const lock = snapshot.lock;
+		if (snapshot.reason === "store_busy" && lock?.reclaimBlocked) parts.push(`reclaim_blocked (lockAgeMs=${lock.ageMs}, owner=${lock.owner}, guardAgeMs=${lock.guardAgeMs}, guardOwner=${lock.guardOwner})`);
+		else if (snapshot.reason === "store_busy" && lock && (lock.owner !== "live" || lock.ageMs >= 60_000)) parts.push(`journal store_busy (lockAgeMs=${lock.ageMs}, owner=${lock.owner})`);
+		else if (snapshot.reason !== "store_busy") parts.push(`journal ${snapshot.reason ?? "unavailable"}`);
+	}
+	if (input.guard?.stale && !snapshot.lock?.reclaimBlocked) parts.push(`reclaim guard left (guardAgeMs=${input.guard.ageMs}, guardOwner=${input.guard.owner})`);
+	if (snapshot.status === "ok") {
+		const checks = snapshot.records.filter(record => record.operation === "check" && isRecord(record.check)).slice(-HEALTH_RECENT_CHECKS);
+		const failed = checks.filter(record => (record.check as Record<string, unknown>).status === "no_decision");
+		if (checks.length >= 3 && failed.length * 2 >= checks.length) {
+			const reasons: Record<string, number> = {};
+			for (const record of failed) {
+				const reason = String((record.check as Record<string, unknown>).reason ?? "unknown");
+				reasons[reason] = (reasons[reason] ?? 0) + 1;
+			}
+			const detail = Object.entries(reasons).sort((a, b) => b[1] - a[1]).map(([reason, count]) => `${reason} ${count}`).join(", ");
+			parts.push(`recent jev_check no_decision ${failed.length}/${checks.length} (${detail})`);
+		}
+	}
+	if (!parts.length) return null;
+	if (input.bridgeEnabled) parts.push("bash bridge on");
+	return `jev-advisor health: ${parts.join("; ")}`;
+}
+
+/** Gather the health line inputs read-only; one bounded snapshot, no provider. */
+export async function collectHealthLine(env: Env = (globalThis as { process?: { env: Env } }).process?.env ?? {}): Promise<string | null> {
+	const config = describeEffectiveConfig(env);
+	const snapshot = await readPluginOutcomeSnapshot("jev-advisor");
+	const inspection = await inspectPluginOutcomeLock("jev-advisor");
+	return buildHealthLine({ config, snapshot, guard: inspection.guard, bridgeEnabled: env.JEV_BASH_BRIDGE === "1" });
 }
 
 export function readSessionId(ctx: unknown): string | null {
@@ -3354,17 +3863,56 @@ export async function askDecisionModel(
 	return parseDecision(final, result.style === "systemone" ? "provider_choice" : "self_reported");
 }
 
+/** Provider-reported usage, integers only; absent means unmeasured (never zero-filled). */
+export interface CheckUsage { promptTokens?: number; completionTokens?: number; totalTokens?: number; costMicroUsd?: number }
+
+/**
+ * Read `usage` from a provider response when it reports one. Token counts accept the OpenAI
+ * (`prompt_tokens`/`completion_tokens`) and input/output spellings; `cost` is USD and is stored in
+ * micro-dollars. Anything non-finite or negative is dropped rather than coerced.
+ */
+export function extractProviderUsage(data: unknown): CheckUsage | undefined {
+	if (!isRecord(data) || !isRecord(data.usage)) return undefined;
+	const usage = data.usage;
+	const count = (...names: string[]) => {
+		for (const name of names) {
+			const value = usage[name];
+			if (typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 1e12) return Math.round(value);
+		}
+		return undefined;
+	};
+	const out: CheckUsage = {};
+	const prompt = count("prompt_tokens", "input_tokens");
+	const completion = count("completion_tokens", "output_tokens");
+	const total = count("total_tokens");
+	if (prompt !== undefined) out.promptTokens = prompt;
+	if (completion !== undefined) out.completionTokens = completion;
+	if (total !== undefined) out.totalTokens = total;
+	const cost = usage.cost;
+	if (typeof cost === "number" && Number.isFinite(cost) && cost >= 0 && cost <= 1e6) out.costMicroUsd = Math.round(cost * 1e6);
+	return Object.keys(out).length ? out : undefined;
+}
+
+/** Per-call observations the check surface journals to jev-telemetry; filled by askCheckModel. */
+export interface CheckObservation { httpStatus?: number; usage?: CheckUsage }
+
 export async function askCheckModel(
 	cfg: AdvisorConfig,
 	check: CheckInput,
 	fetchImpl: FetchLike | undefined,
 	signal?: AbortSignal,
 	timeoutLimitMs = cfg.timeoutMs,
+	observation?: CheckObservation,
 ): Promise<CheckAdvice> {
 	const result = await requestDecision(cfg, "check", check, fetchImpl, signal, timeoutLimitMs);
-	if (result.status === "no_decision") return noCheckDecision(result.reason, result.httpStatus);
+	if (result.status === "no_decision") {
+		if (observation && result.httpStatus !== undefined) observation.httpStatus = result.httpStatus;
+		return noCheckDecision(result.reason, result.httpStatus);
+	}
 	let data: unknown;
 	try { data = JSON.parse(result.text); } catch { return noCheckDecision("invalid_response"); }
+	const usage = extractProviderUsage(data);
+	if (observation && usage) observation.usage = usage;
 	const final = result.style === "systemone" ? extractSystemoneCheckFinal(data) : extractChatFinal(data);
 	if (!final) return noCheckDecision("invalid_response");
 	return parseCheckDecision(final, result.style === "systemone" ? "provider_choice" : "self_reported");
@@ -3859,8 +4407,11 @@ export function widgetShouldClear(
 	return true;
 }
 
-// Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /
-// OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).
+// Keyless build. Configuration precedence: layer first, then within a layer JEV_ADVISOR_API_KEY
+// before the provider's own key names. L1 process env, L2 ~/.gjc/agent/jev-advisor/.env,
+// L3 ~/.gjc/agent/jev-advisor/settings.env (non-secret settings only), L4 ~/.gjc/agent/.env
+// (credential names only, read only when no upper layer has one). JEV_ADVISOR_PROVIDER=ollaya
+// needs no key.
 
 // Explicit task advice and an offline correlation report; both journal sanitized outcomes.
 export default function jevAdvise(pi: {

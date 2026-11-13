@@ -1,7 +1,7 @@
 import { constants as resultsConstants, promises as resultsFs } from 'node:fs';
 import type { Stats as ResultsStats } from 'node:fs';
 import type { FileHandle as ResultsFileHandle } from 'node:fs/promises';
-import { homedir as resultsHomedir } from 'node:os';
+import { homedir as resultsHomedir, hostname as resultsHostname } from 'node:os';
 import { dirname as resultsDirname, join as resultsJoin, parse as resultsParse, resolve as resultsResolve, sep as resultsSep } from 'node:path';
 import { createHash as resultsHash, randomUUID as resultsUUID } from 'node:crypto';
 import { performance as resultsClock } from 'node:perf_hooks';
@@ -17,7 +17,7 @@ export type PluginOutcome = {
   execution?: { status: string; reason: string; counts?: Record<string, number> | null; assertions?: { step: number; id: string; kind: string; status: string }[]; cleanup?: string };
   assessment?: { status: string; reason: string; answers?: { coverage_alignment: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> }; boundary_evidence: { type: 'choice'; choice: string; confidence?: number; probabilities?: Partial<Record<string, number>> } } };
   advice?: { status: string; tier?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
-  check?: { status: string; verdict?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string };
+  check?: { status: string; verdict?: string; confidence?: number; confidenceKind?: string; probabilities?: Record<string, number>; reason?: string; provider?: string; model?: string; httpStatus?: number; sessionKey?: string; usage?: ResultsUsage };
   taskAdvice?: { index:number; status:string; tier?:string; confidence?:number; basis?:string; reason?:string }[];
   evidenceObservations?: {completed:number;failed:number;cancelled:number;stored:number;unavailable:number};
   receiptStorage?: { persisted: boolean; reason: string; count?: number; bytes?: number; nearCapacity?: boolean };
@@ -26,12 +26,20 @@ export type PluginOutcome = {
   loop?: { status: 'clean' | 'gaps' | 'blocked'; openGates: number; resolvedGates: number; scannedSessionFiles: number; scanTruncated: boolean; silentPending: number; gapKinds: LoopGapKind[] };
   rrsi?: { action: RrsiAction; episodes?: number; attempts?: number; imported?: number; policies?: number; storage: 'ok' | 'missing' | 'unavailable' | 'invalid' };
 };
+/** Provider-reported usage only; an absent object means unmeasured, never zero. Only the jev-telemetry namespace accepts it. */
+export type ResultsUsage = { promptTokens?: number; completionTokens?: number; totalTokens?: number; costMicroUsd?: number };
 export type RrsiAction = 'capture' | 'import' | 'dream' | 'status' | 'cohort';
 export type LoopGapKind = 'no_receipt_after_gate' | 'receipt_not_passed' | 'receipt_no_tests' | 'receipt_incomplete' | 'receipt_stale' | 'receipt_changed_during_run' | 'receipt_freshness_unavailable' | 'changed_test_uncovered' | 'state_unavailable' | 'not_a_repository';
-type ResultsPlugin = 'jev-advisor' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan' | 'rrsi';
-type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number };
-type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number };
-const resultsPlugins = ['jev-advisor', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
+type ResultsPlugin = 'jev-advisor' | 'jev-telemetry' | 'verification-receipts' | 'ui-regression' | 'wiki' | 'rea' | 'backplan' | 'rrsi';
+/** Who holds a journal lock, judged without mutation: live/dead from this host's pid table, foreign_host when the lock names another host, unknown for a legacy lock without owner metadata. */
+export type ResultsLockOwner = 'live' | 'dead' | 'foreign_host' | 'unknown';
+export type ResultsLockInfo = { ageMs: number; owner: ResultsLockOwner; guardAgeMs?: number; guardOwner?: ResultsLockOwner; reclaimBlocked?: boolean };
+/** Response-only fields (`lock`, `reclaim`, `lockLost`) are never journaled. */
+type ResultsAppend = { persisted: boolean; reason: string; id?: string; rotated?: number; retainedSegments?: number; lock?: ResultsLockInfo; reclaim?: 'reclaimed' | 'blocked_guard'; lockLost?: boolean };
+type ResultsDependencies = { baseDir?: string; maxRecordBytes?: number; maxSegmentBytes?: number; maxSegments?: number; lockTimeoutMs?: number; legacyStaleMs?: number };
+// jev-telemetry is jev-advisor's extended check telemetry. It is a separate journal so that
+// already-running bundles, whose strict decoder rejects unknown check keys, never read it.
+const resultsPlugins = ['jev-advisor', 'jev-telemetry', 'verification-receipts', 'ui-regression', 'wiki', 'rea', 'backplan', 'rrsi'];
 const resultsOperations = ['run', 'status', 'advise', 'calibration', 'check', 'task_advice', 'task_launch', 'subagent_terminal', 'wiki_query', 'wiki_propose', 'rea_readiness', 'backplan_check', 'gate_emitted', 'loop_run', 'capture', 'import', 'dream', 'cohort'];
 const resultsRrsiActions = ['capture', 'import', 'dream', 'status', 'cohort'];
 const resultsGapKinds = ['no_receipt_after_gate', 'receipt_not_passed', 'receipt_no_tests', 'receipt_incomplete', 'receipt_stale', 'receipt_changed_during_run', 'receipt_freshness_unavailable', 'changed_test_uncovered', 'state_unavailable', 'not_a_repository'];
@@ -125,8 +133,11 @@ function resultsAdvice(value:unknown):Record<string,unknown> {
   return advice;
 }
 const resultsCheckVerdicts = ['correct', 'incorrect', 'unsure'];
-function resultsCheck(value: unknown): Record<string, unknown> {
-  const c = resultsObject(value, ['status', 'verdict', 'confidence', 'confidenceKind', 'probabilities', 'reason'], ['status']);
+const resultsCheckKeys = ['status', 'verdict', 'confidence', 'confidenceKind', 'probabilities', 'reason'];
+const resultsTelemetryKeys = ['provider', 'model', 'httpStatus', 'sessionKey', 'usage'];
+const resultsUsageKeys = ['promptTokens', 'completionTokens', 'totalTokens', 'costMicroUsd'];
+function resultsCheck(value: unknown, telemetry = false): Record<string, unknown> {
+  const c = resultsObject(value, telemetry ? [...resultsCheckKeys, ...resultsTelemetryKeys] : resultsCheckKeys, ['status']);
   const check: Record<string, unknown> = { status: resultsEnum(c.status, ['decision', 'no_decision']) };
   if (c.verdict !== undefined) check.verdict = resultsEnum(c.verdict, resultsCheckVerdicts);
   if (c.confidence !== undefined) check.confidence = resultsProbability(c.confidence);
@@ -136,6 +147,20 @@ function resultsCheck(value: unknown): Record<string, unknown> {
     check.probabilities = Object.fromEntries(Object.entries(probabilities).map(([verdict, probability]) => [verdict, resultsProbability(probability)]));
   }
   if (c.reason !== undefined) check.reason = resultsEnum(c.reason, resultsAdviceReasons);
+  if (c.provider !== undefined) check.provider = resultsPattern(c.provider, /^[a-z0-9][a-z0-9-]{0,39}$/);
+  if (c.model !== undefined) check.model = resultsPattern(c.model, /^[A-Za-z0-9][A-Za-z0-9._/-]{0,63}$/);
+  if (c.httpStatus !== undefined) {
+    const status = resultsInteger(c.httpStatus, 599);
+    if (status < 100) resultsFail('invalid_metadata');
+    check.httpStatus = status;
+  }
+  if (c.sessionKey !== undefined) check.sessionKey = resultsPattern(c.sessionKey, /^[a-f0-9]{16}$/);
+  if (c.usage !== undefined) {
+    const u = resultsObject(c.usage, resultsUsageKeys);
+    const usage = Object.fromEntries(resultsUsageKeys.filter(key => u[key] !== undefined).map(key => [key, resultsInteger(u[key], 1e12)]));
+    if (!Object.keys(usage).length) resultsFail('invalid_metadata');
+    check.usage = usage;
+  }
   return check;
 }
 function resultsGate(value: unknown): Record<string, unknown> {
@@ -166,8 +191,11 @@ function resultsLoop(value: unknown): Record<string, unknown> {
   };
   return loop;
 }
-function resultsProject(value: unknown): Record<string, unknown> {
+function resultsProject(value: unknown, plugin: string): Record<string, unknown> {
   const raw = resultsObject(value, ['operation', 'repositoryDigest', 'receiptId', 'toolCallDigest', 'durationMs', 'freshness', 'stateOverrideIgnored', 'execution', 'assessment', 'advice', 'check', 'taskAdvice', 'evidenceObservations', 'receiptStorage', 'evidenceStorage', 'gate', 'loop', 'rrsi'], ['operation']);
+  const telemetry = plugin === 'jev-telemetry';
+  // The telemetry namespace carries exactly one shape: a check joined to its jev-advisor record.
+  if (telemetry && (raw.operation !== 'check' || raw.check === undefined || raw.toolCallDigest === undefined || Object.keys(raw).some(key => !['operation', 'toolCallDigest', 'durationMs', 'check'].includes(key)))) resultsFail('invalid_metadata');
   const output: Record<string, unknown> = { operation: resultsEnum(raw.operation, resultsOperations) };
   for (const key of ['repositoryDigest', 'receiptId']) if (raw[key] !== undefined) output[key] = raw[key] === null ? null : resultsPattern(raw[key], key === 'receiptId' ? resultsId : resultsHex);
   if (raw.toolCallDigest !== undefined) output.toolCallDigest = resultsPattern(raw.toolCallDigest, resultsHex);
@@ -204,7 +232,7 @@ function resultsProject(value: unknown): Record<string, unknown> {
     output.assessment = assessment;
   }
   if (raw.advice !== undefined) output.advice = resultsAdvice(raw.advice);
-  if (raw.check !== undefined) output.check = resultsCheck(raw.check);
+  if (raw.check !== undefined) output.check = resultsCheck(raw.check, telemetry);
   if (raw.taskAdvice !== undefined) {
     const seen = new Set<number>();
     output.taskAdvice = resultsArray(raw.taskAdvice,32).map(value=>{
@@ -315,7 +343,7 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
   await resultsCheckDirectories(directories);
   const before = await resultsFs.lstat(file);
   resultsPrivateFile(before);
-  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW);
+  const handle = await resultsFs.open(file, flags | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try {
     const opened = await handle.stat();
     resultsPrivateFile(opened);
@@ -334,9 +362,120 @@ async function resultsOpenChecked(file: string, flags: number, directories: Resu
 // (symlink, foreign owner, wrong mode, extra links) still fail closed.
 async function resultsProbeBusyLock(file: string): Promise<void> {
   resultsPrivateFile(await resultsFs.lstat(file), true);
-  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW);
+  // Non-blocking like every other lock open: a FIFO swapped in after the lstat fails closed.
+  const handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK);
   try { resultsPrivateFile(await handle.stat(), true); }
   finally { await handle.close(); }
+}
+
+// Stale-lock recovery. A writer records {v,pid,host,createdAt,nonce} in its lock right after the
+// O_EXCL create. A waiter may remove a lock only when (a) the owner pid on this host is dead
+// (ESRCH), or (b) a lock without valid metadata (legacy bundles write none) or naming another
+// host is older than legacyStaleMs and its pid, if any, is not alive here. Removal happens only
+// inside the single-flight reclaim guard (journal/.append.reclaim.lock, outside journal/v1), after
+// re-judging the same inode, with exactly one unlink and no restore. A stale guard is never taken
+// over: it fails closed as reclaim_blocked, because POSIX offers no compare-and-unlink and two
+// takeovers could produce two guard holders. A live or EPERM pid is never reclaimed; pid reuse
+// therefore errs toward store_busy, never toward a second writer.
+const RESULTS_LEGACY_STALE_MS = 600_000;
+type ResultsLockMeta = { pid: number; host: string };
+type ResultsLockObservation = { info: ResultsStats; meta: ResultsLockMeta | null; stale: boolean; report: ResultsLockInfo };
+function resultsLockMetadata(): string {
+  return JSON.stringify({ v: 1, pid: process.pid, host: resultsHostname(), createdAt: Date.now(), nonce: resultsUUID() });
+}
+function resultsParseLockMeta(text: string): ResultsLockMeta | null {
+  try {
+    const raw = JSON.parse(text);
+    if (!raw || typeof raw !== 'object' || raw.v !== 1 || !Number.isSafeInteger(raw.pid) || raw.pid <= 0 || typeof raw.host !== 'string' || !raw.host || raw.host.length > 255) return null;
+    return { pid: raw.pid, host: raw.host };
+  } catch { return null; }
+}
+function resultsPidAlive(pid: number): boolean {
+  if (pid === process.pid) return true;
+  try { process.kill(pid, 0); return true; }
+  catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH'; }
+}
+function resultsJudgeLock(meta: ResultsLockMeta | null, ageMs: number, legacyStaleMs: number): { stale: boolean; owner: ResultsLockOwner } {
+  if (meta && meta.host === resultsHostname()) {
+    const alive = resultsPidAlive(meta.pid);
+    return { stale: !alive, owner: alive ? 'live' : 'dead' };
+  }
+  if (meta) return { stale: ageMs >= legacyStaleMs && !resultsPidAlive(meta.pid), owner: 'foreign_host' };
+  return { stale: ageMs >= legacyStaleMs, owner: 'unknown' };
+}
+/** Read-only observation of one lock file; null when it no longer exists. Unsafe files fail closed. */
+async function resultsObserveLock(file: string, legacyStaleMs: number): Promise<ResultsLockObservation | null> {
+  let info: ResultsStats;
+  try { info = await resultsFs.lstat(file); }
+  catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
+  resultsPrivateFile(info);
+  let text = '';
+  let handle: ResultsFileHandle;
+  // Non-blocking: a FIFO swapped in after the lstat must not hang the waiter.
+  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK); }
+  catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
+  try {
+    const opened = await handle.stat();
+    if (opened.nlink === 0) return null;
+    resultsPrivateFile(opened);
+    if (!resultsSame(info, opened)) return null;
+    const buffer = Buffer.alloc(512);
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+    text = buffer.subarray(0, bytesRead).toString('utf8');
+  } finally { await handle.close(); }
+  const meta = resultsParseLockMeta(text);
+  const ageMs = Math.max(0, Math.round(Date.now() - info.mtimeMs));
+  const judged = resultsJudgeLock(meta, ageMs, legacyStaleMs);
+  return { info, meta, stale: judged.stale, report: { ageMs, owner: judged.owner } };
+}
+function resultsSameGeneration(a: ResultsStats, b: ResultsStats): boolean {
+  return a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+}
+type ResultsReclaim = { action: 'reclaimed' | 'live' | 'gone' | 'busy_guard' | 'blocked_guard'; report?: ResultsLockInfo };
+async function resultsReclaimStaleLock(dir: string, lockPath: string, guardPath: string, directories: ResultsDirectory[], legacyStaleMs: number): Promise<ResultsReclaim> {
+  const observed = await resultsObserveLock(lockPath, legacyStaleMs);
+  if (!observed) return { action: 'gone' };
+  if (!observed.stale) return { action: 'live', report: observed.report };
+  let guard: ResultsFileHandle;
+  try {
+    await resultsCheckDirectories(directories);
+    guard = await resultsFs.open(guardPath, resultsConstants.O_WRONLY | resultsConstants.O_CREAT | resultsConstants.O_EXCL | resultsConstants.O_NOFOLLOW, 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    const held = await resultsObserveLock(guardPath, legacyStaleMs);
+    if (!held) return { action: 'busy_guard', report: observed.report };
+    const report = { ...observed.report, guardAgeMs: held.report.ageMs, guardOwner: held.report.owner };
+    return held.stale ? { action: 'blocked_guard', report: { ...report, reclaimBlocked: true } } : { action: 'busy_guard', report };
+  }
+  let guardInfo: ResultsStats | undefined;
+  try {
+    guardInfo = await guard.stat();
+    resultsPrivateFile(guardInfo);
+    await guard.writeFile(resultsLockMetadata());
+    await guard.sync();
+    // Re-judge the same generation under the guard; anything else is a live successor.
+    const again = await resultsObserveLock(lockPath, legacyStaleMs);
+    if (!again) return { action: 'gone' };
+    if (!again.stale || !resultsSameGeneration(observed.info, again.info)) return { action: 'live', report: again.report };
+    await resultsCheckDirectories(directories);
+    try {
+      const current = await resultsFs.lstat(lockPath);
+      if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
+      await resultsFs.unlink(lockPath);
+    } catch (error) {
+      // The judged lock vanished on its own (its owner released it): the store is free.
+      if (resultsSafeMissing(error)) return { action: 'gone' };
+      throw error;
+    }
+    await resultsSyncDirectory(dir, directories);
+    return { action: 'reclaimed', report: again.report };
+  } finally {
+    try {
+      const current = await resultsFs.lstat(guardPath);
+      if (guardInfo && resultsSame(guardInfo, current)) await resultsFs.unlink(guardPath);
+    } catch { /* guard release is best effort; a leftover guard fails closed as reclaim_blocked */ }
+    await guard.close();
+  }
 }
 export async function readPrivateResultFile(file: string, maxBytes: number): Promise<Buffer> {
   if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > 16 * 1024 * 1024) resultsFail('resource_limit');
@@ -418,7 +557,7 @@ function resultsDecodeSegment(body: Buffer, plugin: ResultsPlugin, maxRecordByte
     const id = resultsPattern(record.id, resultsId);
     if (typeof record.observedAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(record.observedAt) || !Number.isFinite(Date.parse(record.observedAt))) resultsFail('store_corrupt');
     const { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...outcome } = record;
-    const canonical = { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...resultsProject(outcome) };
+    const canonical = { schemaVersion, plugin: storedPlugin, id: storedId, observedAt, ...resultsProject(outcome, plugin) };
     if (JSON.stringify(canonical) !== line) resultsFail('store_corrupt');
     decoded.push({ id, observedAt, record: canonical });
   }
@@ -433,13 +572,16 @@ function resultsFailure(error: unknown): ResultsAppend {
 /** Append metadata only. A partial publication is deliberately not repaired or adopted. */
 export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: PluginOutcome, deps: ResultsDependencies = {}): Promise<ResultsAppend> {
   let projected: Record<string, unknown>;
-  try { resultsEnum(plugin, resultsPlugins); projected = resultsProject(outcome); }
+  try { resultsEnum(plugin, resultsPlugins); projected = resultsProject(outcome, plugin); }
   catch { return { persisted: false, reason: 'invalid_metadata' }; }
   const maxRecordBytes = deps.maxRecordBytes ?? 4096;
   const maxSegmentBytes = deps.maxSegmentBytes ?? 1024 * 1024;
   const maxSegments = deps.maxSegments ?? 8;
   const lockTimeoutMs = deps.lockTimeoutMs ?? 100;
-  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100) return { persisted: false, reason: 'invalid_limits' };
+  // Floor of one second: a just-created lock is empty until its metadata write lands, so an
+  // age bound shorter than that window could judge a live writer's fresh lock as legacy-stale.
+  const legacyStaleMs = deps.legacyStaleMs ?? RESULTS_LEGACY_STALE_MS;
+  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1000 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
   const id = resultsUUID();
   const body = JSON.stringify({ schemaVersion: 1, plugin, id, observedAt: new Date().toISOString(), ...projected }) + '\n';
   const size = Buffer.byteLength(body);
@@ -447,9 +589,14 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
   const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
   const dir = resultsJoin(base, plugin, 'journal', 'v1');
   const lockPath = resultsJoin(dir, '.append.lock');
+  const guardPath = resultsJoin(base, plugin, 'journal', '.append.reclaim.lock');
   let directories: ResultsDirectory[] = [];
   let lock: ResultsFileHandle | undefined;
   let lockInfo: ResultsStats | undefined;
+  let lockReport: ResultsLockInfo | undefined;
+  let reclaim: ResultsAppend['reclaim'];
+  let reclaimAttempted = false;
+  let lockLost = false;
   let result: ResultsAppend = { persisted: false, reason: 'store_unavailable' };
   try {
     directories = await resultsDirectories(dir, true, base);
@@ -461,6 +608,15 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         try { await resultsProbeBusyLock(lockPath); }
         catch (checkError) { if ((checkError as NodeJS.ErrnoException).code !== 'ENOENT') throw checkError; }
+        // At most one stale judgment, and at most one unlink, per append.
+        if (!reclaimAttempted) {
+          reclaimAttempted = true;
+          const outcome = await resultsReclaimStaleLock(dir, lockPath, guardPath, directories, legacyStaleMs);
+          lockReport = outcome.report;
+          if (outcome.action === 'blocked_guard') reclaim = 'blocked_guard';
+          if (outcome.action === 'reclaimed') { reclaim = 'reclaimed'; continue; }
+          if (outcome.action === 'gone') continue;
+        }
         if (resultsClock.now() >= deadline) resultsFail('store_busy');
         await new Promise(resolve => setTimeout(resolve, Math.min(5, Math.max(0, deadline - resultsClock.now()))));
       }
@@ -468,7 +624,10 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     lockInfo = await lock.stat(); resultsPrivateFile(lockInfo);
     await resultsCheckFile(lockPath, lockInfo);
     await resultsCheckDirectories(directories);
+    // Owner metadata lets a later waiter tell a dead holder from a live one.
+    await lock.writeFile(resultsLockMetadata());
     await lock.sync();
+    await resultsCheckFile(lockPath, lockInfo);
     const names: string[] = [];
     const listing = await resultsFs.opendir(dir);
     for await (const entry of listing) {
@@ -495,6 +654,8 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
         activeBody = bytes;
       }
     }
+    // Holder-side recheck before the first mutation: never write after losing the lock name.
+    await resultsCheckFile(lockPath, lockInfo);
     const retired: { segment: ResultsSegment; info: ResultsStats }[] = [];
     const active = inventory.segments.at(-1);
     if (active && active.bytes + size <= maxSegmentBytes) {
@@ -555,14 +716,29 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
     if (lock) {
       try {
         await resultsCheckDirectories(directories);
-        const current = await resultsFs.lstat(lockPath); resultsPrivateFile(current);
-        if (!lockInfo || !resultsSame(lockInfo, current) || !resultsSame(lockInfo, await lock.stat())) resultsFail('unsafe_path');
-        await resultsFs.unlink(lockPath);
-        await resultsSyncDirectory(dir, directories);
-      } catch (error) { result = resultsFailure(error); }
-      try { await lock.close(); } catch { result = { persisted: false, reason: 'store_unavailable' }; }
+        // One retry on the held handle: a transient stat failure right after the O_EXCL acquire
+        // must not be mistaken for a lost name (which would strand this process's own lock).
+        if (!lockInfo) { try { lockInfo = await lock.stat(); } catch { /* judged below */ } }
+        let current: ResultsStats | undefined;
+        try { current = await resultsFs.lstat(lockPath); }
+        catch (error) { if (!resultsSafeMissing(error)) throw error; }
+        if (!current || !lockInfo || !resultsSame(lockInfo, current)) {
+          // The name is gone or names another generation: never unlink it. A completed
+          // publication stays persisted; the lost name is reported, not repaired.
+          lockLost = true;
+        } else {
+          resultsPrivateFile(current);
+          if (!resultsSame(lockInfo, await lock.stat())) resultsFail('unsafe_path');
+          await resultsFs.unlink(lockPath);
+          await resultsSyncDirectory(dir, directories);
+        }
+      } catch (error) { if (!result.persisted) result = resultsFailure(error); }
+      try { await lock.close(); } catch { if (!result.persisted) result = { persisted: false, reason: 'store_unavailable' }; }
     }
   }
+  if (lockLost) result = { ...result, lockLost: true };
+  if (reclaim) result = { ...result, reclaim };
+  if (lockReport && !result.persisted && result.reason === 'store_busy') result = { ...result, lock: lockReport };
   return result;
 }
 export type ResultsSnapshotReason = 'store_busy' | 'store_corrupt' | 'unsafe_path' | 'resource_limit' | 'changed_during_read' | 'store_unavailable';
@@ -572,6 +748,8 @@ export type ResultsSnapshot = {
   records: Record<string, unknown>[];
   segments: number;
   bytes: number;
+  /** Present with store_busy: the observed lock (and reclaim guard), judged without mutation. */
+  lock?: ResultsLockInfo;
 };
 type ResultsSnapshotDependencies = { baseDir?: string };
 type ResultsDirectoryIdentity = { path: string; dev: number; ino: number; mode: number };
@@ -589,6 +767,32 @@ function resultsSnapshotFailure(error: unknown): ResultsSnapshot {
 }
 function resultsSafeMissing(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ENOENT';
+}
+async function resultsInspectLock(base: string, plugin: string): Promise<ResultsLockInfo | undefined> {
+  const lock = await resultsObserveLock(resultsJoin(base, plugin, 'journal', 'v1', '.append.lock'), RESULTS_LEGACY_STALE_MS);
+  if (!lock) return undefined;
+  let guard: ResultsLockObservation | null = null;
+  try { guard = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS); }
+  catch { guard = null; }
+  if (!guard) return lock.report;
+  return { ...lock.report, guardAgeMs: guard.report.ageMs, guardOwner: guard.report.owner, ...(guard.stale ? { reclaimBlocked: true } : {}) };
+}
+export type ResultsGuardInfo = { ageMs: number; owner: ResultsLockOwner; stale: boolean };
+export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo; guard?: ResultsGuardInfo };
+/**
+ * Read-only lock observation for health reporting. Creates, repairs and deletes nothing. A reclaim
+ * guard is reported even without a held lock, because a leftover stale guard will block the next
+ * reclaim and is the operator's to clear.
+ */
+export async function inspectPluginOutcomeLock(plugin: ResultsPlugin, deps: ResultsSnapshotDependencies = {}): Promise<ResultsLockInspection> {
+  try {
+    resultsEnum(plugin, resultsPlugins);
+    const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
+    const lock = await resultsInspectLock(base, plugin);
+    const held = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS);
+    const guard = held ? { guard: { ageMs: held.report.ageMs, owner: held.report.owner, stale: held.stale } } : {};
+    return lock ? { status: 'held', lock, ...guard } : { status: 'none', ...guard };
+  } catch { return { status: 'unavailable' }; }
 }
 /**
  * One bounded optimistic snapshot attempt. Never creates, repairs, deletes or
@@ -622,7 +826,9 @@ export async function readPluginOutcomeSnapshot(plugin: ResultsPlugin, deps: Res
       const lockPath = resultsJoin(dir, '.append.lock');
       const lockInfo = await resultsFs.lstat(lockPath);
       resultsPrivateFile(lockInfo);
-      resultsFail('store_busy');
+      // Readers never reclaim: they report who holds the lock so a stuck store is visible.
+      const lock = await resultsInspectLock(base, plugin);
+      return { status: 'unavailable', reason: 'store_busy', records: [], segments: 0, bytes: 0, ...(lock ? { lock } : {}) };
     }
     if (names.includes('.inventory.pending')) resultsFail('store_corrupt');
     const markerPath = resultsJoin(dir, 'inventory.json');

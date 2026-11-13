@@ -69,7 +69,16 @@ here is a measured outcome.
 4. **Bash is observe-only with `coverage_gap`.** `bash_observe` allows every
    bash call and reports `coverage_gap` rather than a verdict. A mutation
    performed inside bash is therefore outside the evaluation: it is not
-   classified, not blocked and not journaled.
+   classified and not blocked. Amendment (JJO-2327): with the opt-in
+   `JEV_BASH_BRIDGE=1` bridge, bash calls are counted and a destructive
+   pattern match (pattern ids only) produces at most three advisory notices per
+   session that the RULES `jev_check` obligation applies; cumulative counts are
+   journaled as `bash_coverage` events (no command text, no state). This is
+   measurement of the coverage gap, not evaluation: it never blocks, never
+   rewrites and never feeds a verdict. With the bridge off (the default) bash
+   is still neither classified nor journaled. The before-tool hook also
+   publishes the authority it already computed as one `ui.setStatus` line,
+   only when it changes; it carries no user text or paths and alters no rule.
 5. **Four-stage recovery with a declared completion criterion.**
    - Step 1 `recordCorrection` (`correction_recorded`) pins the recovery
      identity (digest over the latest user entry id, change semantics, scope
@@ -224,7 +233,9 @@ here is a measured outcome.
   global switch for the pre-tool surface; per-session or per-repository
   scoping does not exist.
 - **Bash enforcement** needs a target parser and its own acceptance cases
-  first. Until then `bash_observe` stays `coverage_gap`.
+  first. Until then `bash_observe` stays `coverage_gap`; the opt-in bridge only
+  counts it (`bash_coverage`), which old alignment readers drop as an unknown
+  kind.
 - **No consumer reads the alignment journal yet.** `plugin_metrics` and the
   `rrsi` projection do not include it; adding it is a separate decision with
   its own caps and its own non-causal statement.

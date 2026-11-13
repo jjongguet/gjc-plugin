@@ -35,7 +35,7 @@ and confidence is not a probability of task success.
   state is untouched. A verdict is an advisory decision-model opinion, not
   verification evidence, correctness proof or acceptance of quality.
 - **`plugin_metrics`:** explicitly request one offline descriptive aggregate of
-  all three plugins' retained journals and Jev's retained v2 correlation state.
+  all three plugins' retained journals, the jev-telemetry journal and Jev's retained v2 correlation state.
   Accepts exactly `{}`; strictly read-only — creates nothing, appends nothing,
   acquires no lock, performs no repair, loads no credentials and uses no
   network, and appends no journal record of its own. Missing sources are not
@@ -125,13 +125,33 @@ accurate) and costs roughly 1,080 input tokens for one 512 px image.
 
 ## Configuration
 
-Tier/check configuration lives outside the replaceable installation tree in
-`~/.gjc/agent/jev-advisor/.env`. Process environment overrides same-named file
-values. `JEV_ADVISOR_API_KEY` is an explicit override for any provider; without
-it each provider reads only its own variable (`OPENROUTER_API_KEY` for `jev` and
-`openrouter`, `TYPESAFE_API_KEY` for `typesafe-jev`). A provider never falls back
-to another provider's credential, so a missing key surfaces as `unconfigured`
-rather than as a 401 from the wrong service.
+Tier/check configuration lives outside the replaceable installation tree.
+Configuration precedence: layer first, then within a layer JEV_ADVISOR_API_KEY
+before the provider's own key names.
+
+| Layer | Source | Supplies |
+| --- | --- | --- |
+| L1 | process environment | any key |
+| L2 | `~/.gjc/agent/jev-advisor/.env` | any key (host override) |
+| L3 | `~/.gjc/agent/jev-advisor/settings.env` | only `JEV_ADVISOR_MODE`, `JEV_ADVISOR_MIN_CONFIDENCE`, `JEV_ADVISOR_MIN_INTERVAL_MS`, `JEV_ADVISOR_PROVIDER`, `JEV_ADVISOR_MODEL`, `JEV_ADVISOR_TIMEOUT_MS`, `JEV_ADVISOR_MEMORY*`; other keys (credentials, endpoint) are ignored and listed by name |
+| L4 | `~/.gjc/agent/.env` | only credential names (`JEV_ADVISOR_API_KEY`, `OPENROUTER_API_KEY`, `TYPESAFE_API_KEY`), read only when no upper layer has a credential and only when the file is a regular, non-symlinked, owner-only file of at most 16 KiB |
+
+L2 and L3 are read only when they are regular, non-symlinked files of at most
+64 KiB (opened non-blocking, so a FIFO cannot hang a session); anything else is
+skipped as if absent. `--describe-config` (see `scripts/e2e-installed.mjs`)
+reports `settingsStatus` (`read`, `absent`, `unsafe`, `unreadable`) for L3 and
+`sharedEnvStatus` for L4, so a missing or refused baseline is visible.
+
+A lower layer never overrides a key an upper layer defines, so an L4
+`JEV_ADVISOR_API_KEY` cannot beat an L1 `OPENROUTER_API_KEY`. Each provider
+reads only its own variable (`OPENROUTER_API_KEY` for `jev` and `openrouter`,
+`TYPESAFE_API_KEY` for `typesafe-jev`) besides `JEV_ADVISOR_API_KEY`; a provider
+never falls back to another provider's credential, so a missing key surfaces as
+`unconfigured` rather than as a 401 from the wrong service. L4 is what lets a
+session running under another GJC agent profile (for example a gateway broker
+profile without its own `.env`) resolve the host credential without a copy.
+`jev_check` responses report `credentialSource` (`env`, `plugin_file`,
+`shared_env`, `keyless`, `none`), never the value.
 No tier key and no keyless provider means zero tier/check network calls or correlation-state writes.
 `JEV_ADVISOR_PROVIDER=off` disables provider advice and correlation writes; local
 outcome journaling still records disabled/unconfigured operations. An explicit offline report still works.
@@ -159,6 +179,58 @@ chmod 600 ~/.gjc/agent/jev-advisor/.env
 
 Goal-alignment settings and the semantic credential `OPENGATEWAY_API_KEY` are
 process-only; they are not loaded from the tier/check `.env` file.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `JEV_HEALTH_LINE` | `notify` | `off` disables the session_start health line; `stderr` writes it to stderr instead of `ui.notify` |
+| `JEV_BASH_BRIDGE` | unset (off) | `1` enables the advisory destructive-bash bridge |
+
+## Advisory checkpoints
+
+None of these calls a provider, costs anything, or blocks a tool call.
+
+- **session_start health line** (`hooks/jev-advisor-session-start.ts`). Silent
+  when healthy. Otherwise one line naming the cause: `unconfigured` with the
+  provider's credential names and the shared `.env` status, `journal
+  store_busy` with the lock age and owner, `reclaim_blocked` with the guard age
+  and owner, another journal reason, or a recent `jev_check` no-decision ratio
+  of at least half over the last 20 checks with reasons.
+- **Alignment authority status.** The before-tool alignment hook publishes the
+  authority it already computed as one `ui.setStatus("jev-alignment-authority", …)`
+  line (entry digest, constraint kinds, target count, criterion kind, release
+  mode), only when it changes. No user text, no paths, no journal record, no
+  change to any decision.
+- **Destructive-bash bridge** (off by default). With `JEV_BASH_BRIDGE=1` bash
+  calls are counted; a command matching a destructive pattern (`rm -rf`, force
+  push, branch delete, `git worktree remove`, `git reset --hard`, `git clean
+  -f`, migration rollback, `lane-finish`/`lane-retire`) triggers at most three
+  `ui.notify` reminders per session that the RULES `jev_check` obligation
+  applies. Cumulative `bash_coverage` counts (pattern ids only, never command
+  text) go to the alignment journal at each reminder and once at session
+  shutdown. With the bridge off the bash path returns before classification.
+
+## Check telemetry
+
+Each `jev_check` writes two records. The `jev-advisor` record keeps the shape
+every released decoder accepts and now carries the top-level `durationMs`. A
+joined `jev-telemetry` record (same `toolCallDigest`) adds `provider`, `model`,
+`httpStatus` on provider failures, `sessionKey` (first 16 hex of the session id
+sha256) and `usage` (`promptTokens`, `completionTokens`, `totalTokens`,
+`costMicroUsd`) only when the provider reports it; an absent `usage` means
+unmeasured, never zero. A telemetry write failure is reported as
+`telemetryStorage` and never changes the check. `plugin_metrics.telemetry`
+aggregates the join (records, joined/unjoined, by provider/model/HTTP status,
+latency, `sessions.distinct` and `sessions.truncated` — true when the telemetry
+journal is at its retained-segment bound, so older sessions may be gone —
+and usage sums or `null`). The envelope `status` still covers only the four
+historical sources; a missing or unreadable telemetry journal is named by the
+`telemetry_source_missing` / `telemetry_source_unavailable` limitations, and
+the join is bounded by the two journals' independent retention
+(`telemetry_join_limited_by_independent_retention`). The report-wide
+`unavailableMeasures` stay `null` because they describe report-scope
+measurement. `jevLock` appears when the jev-advisor journal is held by a lock
+and `jevGuard` when a reclaim guard exists (a stale one blocks the next
+automatic reclaim and is the operator's to clear).
 
 `JEV_ADVISOR_MEMORY_HEAD_CHARS` is no longer used: v2 stores no assignment heads.
 Existing configuration and legacy memory are not changed or migrated.
@@ -353,6 +425,7 @@ src/result.adapter.ts       Provider-free task/subagent receipt observer
 src/tool.adapter.ts         Explicit advice and offline report
 src/check.adapter.ts        Explicit one-shot artifact check
 src/metrics.adapter.ts      Thin read-only plugin_metrics tool adapter
+src/session-start.adapter.ts Provider-free session_start health line
 scripts/build.mjs           Keyless embedding of shared results, core and adapters
 hooks/jev-advisor.ts         Generated pre-call surface
 hooks/jev-advisor-alignment.ts         Generated alignment before-tool surface
@@ -362,6 +435,7 @@ hooks/jev-advisor-result.ts  Generated result surface, two manifest targets
 tools/jev-advise.ts          Generated explicit-tool surface
 tools/jev-check.ts           Generated explicit check surface
 tools/plugin-metrics.ts      Generated read-only metrics surface
+hooks/jev-advisor-session-start.ts Generated session_start health surface
 ```
 
 Installed surfaces are self-contained because the installer copies only
@@ -478,7 +552,7 @@ live-provider quality or installed-entry E2E evidence.
 | `aligned_write_within_requested_scope` | aligned | evaluated | no (stage-2 admissible) |
 | `uncertain_authority_ambiguous` | uncertain | coverage_gap | no |
 | `read_allow` | allow | evaluated | no |
-| `bash_observe` | allow | coverage_gap | no |
+| `bash_observe` | allow | coverage_gap (counted by the opt-in bridge) | no |
 | `unknown_authority` | uncertain | coverage_gap | no |
 
 - **Authority.** Only host session user entries are authority. Assistant turns,
