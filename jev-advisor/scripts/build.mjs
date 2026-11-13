@@ -6,10 +6,8 @@
  *   node scripts/build.mjs   →  hooks/, tools/ at the plugin root
  *
  * ALWAYS keyless: the generated surfaces are committed for one-command
- * distribution, so the repo tree can never contain a key. Activation is a
- * single channel by design — the file ~/.gjc/agent/jev-advisor/.env (or
- * exported env vars, which win over the file). Keyless providers (ollaya)
- * need nothing.
+ * distribution, so the repo tree can never contain a key. Configuration is
+ * layered (see keysBlock); keyless providers (ollaya) need nothing.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -26,6 +24,7 @@ const surfaces = [
 	{ cores: ["lib/decision.ts"], adapter: "src/check.adapter.ts", out: "tools/jev-check.ts" },
 	{ cores: ["lib/decision.ts"], adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
 	{ cores: ["lib/decision.ts"], adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
+	{ cores: ["lib/decision.ts"], adapter: "src/session-start.adapter.ts", out: "hooks/jev-advisor-session-start.ts" },
 	// Blocking remains deterministic. Only the before-hook includes the opt-in
 	// semantic consumer, with its wire schema inlined for one-file distribution.
 	// The journal store is a second keyless core so the three surfaces share one
@@ -43,7 +42,11 @@ const banner = [
 ].join("\n");
 
 const keysBlock =
-	"\n// Keyless build. Activation: ~/.gjc/agent/jev-advisor/.env or JEV_ADVISOR_API_KEY /\n// OPENROUTER_API_KEY env (env wins over the file), or JEV_ADVISOR_PROVIDER=ollaya (local, no key).\n";
+	"\n// Keyless build. Configuration precedence: layer first, then within a layer JEV_ADVISOR_API_KEY\n" +
+	"// before the provider's own key names. L1 process env, L2 ~/.gjc/agent/jev-advisor/.env,\n" +
+	"// L3 ~/.gjc/agent/jev-advisor/settings.env (non-secret settings only), L4 ~/.gjc/agent/.env\n" +
+	"// (credential names only, read only when no upper layer has one). JEV_ADVISOR_PROVIDER=ollaya\n" +
+	"// needs no key.\n";
 
 const check = process.argv.includes("--check");
 const stripLocalImports = text =>

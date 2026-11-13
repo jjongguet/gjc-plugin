@@ -1,7 +1,7 @@
 {
   "kind": "gajae-code-plugin",
   "name": "jev-advisor",
-  "version": "0.0.17",
+  "version": "0.0.18",
   "hooks": [
     {
       "name": "jev-task-advisor",
@@ -42,6 +42,11 @@
       "name": "jev-goal-alignment-shutdown",
       "event": "session_shutdown",
       "path": "hooks/jev-advisor-alignment-shutdown.ts"
+    },
+    {
+      "name": "jev-advisor-session-start",
+      "event": "session_start",
+      "path": "hooks/jev-advisor-session-start.ts"
     }
   ],
   "tools": [

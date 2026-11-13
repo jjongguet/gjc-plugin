@@ -613,7 +613,10 @@ export type AlignmentState = {
 	updatedAt: number;
 };
 
-export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded";
+export type AlignmentEventKind = "correction" | "admit" | "observe" | "complete" | "unverified" | "block" | "shutdown" | "hook_error" | "latency_exceeded" | "bash_coverage";
+
+/** Cumulative per-session bash bridge counts; pattern ids only, never command text. */
+export type BashCoverage = { bashCalls: number; destructive: number; notices: number; patterns: Record<string, number> };
 
 export type AlignmentCounts = {
 	corrections: number;
@@ -635,6 +638,7 @@ export type AlignmentEvent = {
 	retryCount?: number;
 	stopRecommended?: boolean;
 	counts?: AlignmentCounts;
+	bashCoverage?: BashCoverage;
 };
 
 export type Transition = {
@@ -829,7 +833,7 @@ export const ALIGNMENT_LIMITS = {
 	retentionMs: 7 * 24 * 60 * 60 * 1000,
 } as const;
 
-const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown", "hook_error", "latency_exceeded"]);
+const EVENT_KINDS = new Set<string>(["correction", "admit", "observe", "complete", "unverified", "block", "shutdown", "hook_error", "latency_exceeded", "bash_coverage"]);
 const RECOVERY_STATUSES = new Set<string>(["correction_recorded", "aligned_admitted", "result_observed", "recovered", "recovery_unverified"]);
 
 function fresh(at: number, now: number): boolean {
@@ -1012,6 +1016,48 @@ export async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T)
 	} finally {
 		if (timer !== undefined) clearTimeout(timer);
 	}
+}
+
+/**
+ * Destructive-bash patterns for the advisory bridge (RULES: run jev_check once before an
+ * irreversible or shared-resource command). Detection only ever yields pattern ids; it never
+ * blocks, rewrites or stores the command.
+ */
+export const DESTRUCTIVE_BASH_PATTERNS: readonly { id: string; pattern: RegExp }[] = [
+	{ id: "rm_recursive_force", pattern: /\brm\s+(?:-[A-Za-z]*(?:r[A-Za-z]*f|f[A-Za-z]*r)[A-Za-z]*|-[A-Za-z]*[rR][A-Za-z]*\s+-[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*\s+-[A-Za-z]*[rR][A-Za-z]*|--recursive\b[^\n;|&]*--force\b|--force\b[^\n;|&]*--recursive\b)/ },
+	{ id: "git_force_push", pattern: /\bgit\s+push\b[^\n;|&]*(?:\s--force(?:-with-lease)?\b|\s-f\b|\s\+\S+)/ },
+	{ id: "git_branch_delete", pattern: /\bgit\s+(?:branch\s+(?:-[A-Za-z]*[dD]\b|--delete\b)|push\b[^\n;|&]*\s(?:--delete\b|:[^\s]+))/ },
+	{ id: "git_worktree_remove", pattern: /\bgit\s+worktree\s+(?:remove|prune)\b/ },
+	{ id: "git_reset_hard", pattern: /\bgit\s+reset\s+[^\n;|&]*--hard\b/ },
+	{ id: "git_clean_force", pattern: /\bgit\s+clean\s+-[A-Za-z]*f/ },
+	{ id: "migration_rollback", pattern: /\b(?:migrate|migration|migrations)\b[^\n;|&]*\b(?:down|rollback|revert|reset)\b/i },
+	{ id: "lane_retire", pattern: /\blane-(?:finish|retire)\b/ },
+];
+
+/** Pattern ids matched by one bash command, in table order; [] for non-strings. */
+export function detectDestructiveBash(command: unknown): string[] {
+	if (typeof command !== "string" || !command) return [];
+	const text = command.length > 16384 ? command.slice(0, 16384) : command;
+	return DESTRUCTIVE_BASH_PATTERNS.filter(entry => entry.pattern.test(text)).map(entry => entry.id);
+}
+
+/** One cumulative bash_coverage record (counts and pattern ids only). */
+export function recordBashCoverage(input: { coverage: BashCoverage; now: number }): AlignmentEvent {
+	const { bashCalls, destructive, notices, patterns } = input.coverage;
+	return { v: 1, kind: "bash_coverage", at: input.now, recoveryId: null, state: null, bashCoverage: { bashCalls, destructive, notices, patterns: { ...patterns } } };
+}
+
+/**
+ * One status line describing the authority the deterministic rules already computed: entry
+ * digest, constraint kinds, target count, criterion kind and release mode. It never includes
+ * user text or target paths, and it does not widen or alter any decision.
+ */
+export function formatAuthorityLine(authority: Authority | null): string {
+	if (!authority) return "jev alignment authority: none";
+	const kinds: Record<string, number> = {};
+	for (const constraint of authority.constraints) kinds[constraint.kind] = (kinds[constraint.kind] ?? 0) + 1;
+	const constraints = Object.keys(kinds).length ? Object.entries(kinds).map(([kind, count]) => (count > 1 ? `${kind}x${count}` : kind)).join(",") : "none";
+	return `jev alignment authority: entry ${digestText(authority.latestUserEntryId).slice(0, 8)} constraints=${constraints} targets=${authority.targets.length} criterion=${authority.criterion?.kind ?? "none"} release=${authority.release}${authority.authorityTruncated ? " truncated" : ""}`;
 }
 
 /** Deterministic evaluation exceeded its latency budget: allow and record it. */
@@ -1372,6 +1418,66 @@ function alignmentMode(): AlignmentMode {
 /** In-process retry counters used only while the journal store is unavailable. */
 const alignmentDegradedRetries = new Map<string, number>();
 
+/**
+ * Destructive-bash advisory bridge (default OFF; JEV_BASH_BRIDGE=1 enables it). When off the
+ * bash path returns before classification, so behaviour is unchanged. When on it only counts
+ * bash calls, notifies at most ALIGNMENT_BRIDGE_MAX_NOTICES times per session that the RULES
+ * jev_check obligation applies, and journals cumulative bash_coverage counts (pattern ids only,
+ * never command text). It never blocks, rewrites or delays a call.
+ */
+const ALIGNMENT_BRIDGE_MAX_NOTICES = 3;
+const ALIGNMENT_BRIDGE_SLOT = "gjc.jev-advisor.bash-bridge";
+const ALIGNMENT_BRIDGE_MAX_SESSIONS = 32;
+
+function alignmentBridgeEnabled(): boolean {
+	try { return String(process.env.JEV_BASH_BRIDGE ?? "").trim() === "1"; } catch { return false; }
+}
+
+/** Per-session coverage shared with the shutdown surface through one namespaced global slot. */
+function alignmentBridgeCoverage(sessionKey: string): BashCoverage {
+	const root = globalThis as Record<string, unknown>;
+	let slot = root[ALIGNMENT_BRIDGE_SLOT] as Map<string, BashCoverage> | undefined;
+	if (!(slot instanceof Map)) { slot = new Map(); root[ALIGNMENT_BRIDGE_SLOT] = slot; }
+	let coverage = slot.get(sessionKey);
+	if (!coverage) {
+		if (slot.size >= ALIGNMENT_BRIDGE_MAX_SESSIONS) slot.delete(slot.keys().next().value as string);
+		coverage = { bashCalls: 0, destructive: 0, notices: 0, patterns: {} };
+		slot.set(sessionKey, coverage);
+	}
+	return coverage;
+}
+
+async function alignmentBashBridge(call: Record<string, any>, ctx: unknown, storeBudgetMs: number): Promise<void> {
+	const coverage = alignmentBridgeCoverage(journalSessionKey(ctx));
+	coverage.bashCalls++;
+	const input = alignmentAsRecord(call.input);
+	const ids = detectDestructiveBash(input?.command ?? input?.cmd ?? input?.script);
+	if (!ids.length) return;
+	coverage.destructive++;
+	for (const id of ids) coverage.patterns[id] = (coverage.patterns[id] ?? 0) + 1;
+	if (coverage.notices >= ALIGNMENT_BRIDGE_MAX_NOTICES) return;
+	coverage.notices++;
+	const ui = alignmentAsRecord(alignmentAsRecord(ctx)?.ui);
+	if (typeof ui?.notify === "function") {
+		ui.notify(`jev-advisor bridge: destructive bash (${ids.join(", ")}). RULES asks for one jev_check before running it; advisory only, nothing is blocked (${coverage.notices}/${ALIGNMENT_BRIDGE_MAX_NOTICES}).`, "warning");
+	}
+	await appendJournalStore(ctx, [recordBashCoverage({ coverage, now: Date.now() })], Date.now(), storeBudgetMs);
+}
+
+/** Last authority line published per session; the status is set only when it changes. */
+const alignmentAuthorityLines = new Map<string, string>();
+
+function alignmentPublishAuthority(ctx: unknown, authority: Authority | null): void {
+	const ui = alignmentAsRecord(alignmentAsRecord(ctx)?.ui);
+	if (typeof ui?.setStatus !== "function") return;
+	const key = journalSessionKey(ctx);
+	const line = formatAuthorityLine(authority);
+	if (alignmentAuthorityLines.get(key) === line) return;
+	if (alignmentAuthorityLines.size >= ALIGNMENT_BRIDGE_MAX_SESSIONS) alignmentAuthorityLines.delete(alignmentAuthorityLines.keys().next().value as string);
+	alignmentAuthorityLines.set(key, line);
+	ui.setStatus("jev-alignment-authority", line);
+}
+
 export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
 }) {
@@ -1388,12 +1494,18 @@ export default function register(api: {
 			const call = alignmentAsRecord(event);
 			if (!call || call.type !== "tool_call") return undefined;
 			const actionClass = alignmentClassifyAction(call.toolName);
+			// bash_observe is never blocked; with the opt-in bridge it is only counted and noticed.
+			if (actionClass === "bash" && alignmentBridgeEnabled()) {
+				try { await alignmentBashBridge(call, ctx, storeBudgetMs); } catch { /* advisory only */ }
+				return undefined;
+			}
 			// read_allow / bash_observe: never blocked, never journaled.
 			if (actionClass !== "write") return undefined;
 			const startedAt = Date.now();
 			const now = startedAt;
 			const branchEntries = alignmentReadBranch(ctx);
 			const authority = collectAuthority(branchEntries, { windowSize: 12 });
+			try { alignmentPublishAuthority(ctx, authority); } catch { /* status is advisory only */ }
 			const { paths, complete } = alignmentWritePaths(call.input);
 			semanticInput = { branchEntries, targetPaths: complete ? paths : null };
 			const targetDigest = paths.length === 1 ? digestTarget(paths[0]) : paths.length > 1 ? digestText(paths.join("\n")) : null;

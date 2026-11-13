@@ -1,7 +1,18 @@
 // Goal-alignment session-shutdown surface. Flushes the unresolved recovery
 // counts once per recovery id; a repeated shutdown appends nothing.
-import { recordHookError, recordShutdown } from "../lib/alignment";
-import { appendJournalStore, journalStoreBudgetMs, loadJournalStore } from "../lib/alignment-journal";
+import { recordBashCoverage, recordHookError, recordShutdown, type BashCoverage } from "../lib/alignment";
+import { appendJournalStore, journalSessionKey, journalStoreBudgetMs, loadJournalStore } from "../lib/alignment-journal";
+
+/** The opt-in bash bridge's per-session counts (written by the before-tool surface). */
+function shutdownBridgeCoverage(ctx: unknown): BashCoverage | null {
+	const slot = (globalThis as Record<string, unknown>)["gjc.jev-advisor.bash-bridge"];
+	if (!(slot instanceof Map)) return null;
+	const key = journalSessionKey(ctx);
+	const coverage = slot.get(key) as BashCoverage | undefined;
+	if (!coverage || coverage.bashCalls === 0) return null;
+	slot.delete(key);
+	return coverage;
+}
 
 export default function register(api: {
 	on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => void;
@@ -12,6 +23,8 @@ export default function register(api: {
 		const storeBudgetMs = journalStoreBudgetMs();
 		try {
 			const now = Date.now();
+			const coverage = shutdownBridgeCoverage(ctx);
+			if (coverage) await appendJournalStore(ctx, [recordBashCoverage({ coverage, now })], now, storeBudgetMs);
 			const { snapshot } = await loadJournalStore(ctx, now, storeBudgetMs);
 			const state = snapshot.latest;
 			if (!state || state.step >= 4) return undefined;
