@@ -208,7 +208,8 @@ test('busy locks are never stolen or modified and return within a bounded wait',
   await fs.writeFile(file, 'OWNED_LOCK', { mode: 0o600 });
   const before = await fs.lstat(file);
   const start = performance.now();
-  expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 10 })).toEqual({ persisted: false, reason: 'store_busy' });
+  const busy = await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 10 });
+  expect(busy).toEqual({ persisted: false, reason: 'store_busy', lock: { ageMs: expect.any(Number), owner: 'unknown' } });
   expect(performance.now() - start).toBeLessThan(2000);
   expect(await fs.readFile(file, 'utf8')).toBe('OWNED_LOCK'); expect((await fs.lstat(file)).ino).toBe(before.ino);
   expect((await records(journal)).length).toBe(1);
@@ -244,7 +245,7 @@ test('a lock generation replaced during the bounded wait is contention, not subs
     return original(...args);
   }) as typeof fs.open);
   try {
-    expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 20 })).toEqual({ persisted: false, reason: 'store_busy' });
+    expect(await appendPluginOutcome('verification-receipts', outcome, { baseDir, lockTimeoutMs: 20 })).toMatchObject({ persisted: false, reason: 'store_busy' });
   } finally { probe.mockRestore(); }
   expect(await fs.readFile(lockPath, 'utf8')).toBe('FOREIGN_2');
   expect(await missing(next)).toBe(true);
