@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const resultsCore = await readFile(path.join(pluginRoot, "../shared/lib/results.ts"), "utf8");
 const decisionContract = await readFile(path.join(pluginRoot, "../shared/lib/decision-contract.ts"), "utf8");
+const semanticSpec = await readFile(path.join(pluginRoot, "semantic.openapi.json"), "utf8");
 
 const surfaces = [
 	{ cores: ["lib/decision.ts"], adapter: "src/hook.adapter.ts", out: "hooks/jev-advisor.ts" },
@@ -25,10 +26,11 @@ const surfaces = [
 	{ cores: ["lib/decision.ts"], adapter: "src/check.adapter.ts", out: "tools/jev-check.ts" },
 	{ cores: ["lib/decision.ts"], adapter: "src/result.adapter.ts", out: "hooks/jev-advisor-result.ts" },
 	{ cores: ["lib/decision.ts"], adapter: "src/metrics.adapter.ts", out: "tools/plugin-metrics.ts" },
-	// Goal alignment: deterministic and keyless, so no provider prelude is inlined.
+	// Blocking remains deterministic. Only the before-hook includes the opt-in
+	// semantic consumer, with its wire schema inlined for one-file distribution.
 	// The journal store is a second keyless core so the three surfaces share one
 	// bounded read/append path instead of three drifting copies.
-	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false },
+	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts", "lib/semantic.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false, semantic: true },
 	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-observe.adapter.ts", out: "hooks/jev-advisor-alignment-observe.ts", shared: false },
 	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-shutdown.adapter.ts", out: "hooks/jev-advisor-alignment-shutdown.ts", shared: false },
 ];
@@ -60,6 +62,7 @@ for (const surface of surfaces) {
 	const file = path.join(pluginRoot, surface.out);
 	const parts = [header];
 	if (surface.shared !== false) parts.push(decisionContract.trimEnd(), resultsCore.trimEnd());
+	if (surface.semantic) parts.push(`const semanticSpec = ${semanticSpec.trimEnd()};`);
 	for (const text of core) parts.push(text.trimEnd());
 	if (surface.shared !== false) parts.push(keysBlock);
 	parts.push(adapter.trimStart());

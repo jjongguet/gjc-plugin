@@ -1,5 +1,6 @@
-// Goal-alignment before-tool surface. Deterministic only: no provider call, no
-// credential or config read. Only write-class calls are evaluated because reads
+// Goal-alignment before-tool surface. Only deterministic rules may block.
+// Optional semantic advice runs afterwards and cannot alter their result.
+// Only write-class calls are evaluated because reads
 // and bash must never be blocked; the journal is best effort, so a storage
 // failure degrades to in-process counters and can never cause or suppress a block.
 import { existsSync } from "node:fs";
@@ -19,6 +20,7 @@ import {
 	type Observation,
 } from "../lib/alignment";
 import { appendJournalStore, journalStoreBudgetMs, loadJournalStore } from "../lib/alignment-journal";
+import { askSemanticAdvice, semanticOutboundEnabled, SEMANTIC_MODEL, type SemanticInput } from "../lib/semantic";
 
 const ALIGNMENT_WRITE_TOOLS = new Set([
 	"write",
@@ -70,6 +72,7 @@ export default function register(api: {
 		// off is a true kill switch: no evaluation, no journal, no block.
 		if (mode === "off") return undefined;
 		let blockReason: string | null = null;
+		let semanticInput: SemanticInput | null = null;
 		// One store budget for this call's read and appends: a hung store degrades
 		// to "unavailable"/"not stored" instead of delaying the verdict.
 		const storeBudgetMs = journalStoreBudgetMs();
@@ -81,8 +84,10 @@ export default function register(api: {
 			if (actionClass !== "write") return undefined;
 			const startedAt = Date.now();
 			const now = startedAt;
-			const authority = alignmentReadAuthority(ctx);
-			const paths = alignmentWritePaths(call.input);
+			const branchEntries = alignmentReadBranch(ctx);
+			const authority = collectAuthority(branchEntries, { windowSize: 12 });
+			const { paths, complete } = alignmentWritePaths(call.input);
+			semanticInput = { branchEntries, targetPaths: complete ? paths : null };
 			const targetDigest = paths.length === 1 ? digestTarget(paths[0]) : paths.length > 1 ? digestText(paths.join("\n")) : null;
 			// A multi-target write is evaluated per path so one forbidden target
 			// still blocks; only single-target writes can be stage-2 admitted.
@@ -140,6 +145,22 @@ export default function register(api: {
 			}
 			return undefined;
 		}
+		// This is outside deterministic evaluation, storage and latency accounting.
+		// No semantic score is consumed as a block, admission or release signal.
+		try {
+			if (semanticInput && semanticOutboundEnabled()) {
+				const advice = await askSemanticAdvice(semanticInput);
+				const ui = alignmentAsRecord(alignmentAsRecord(ctx)?.ui);
+				if (typeof ui?.setStatus === "function") {
+					const summary = advice.status === "decision"
+						? { model: SEMANTIC_MODEL, status: advice.status, choice: advice.choice, confidence: advice.confidence, probabilities: advice.probabilities }
+						: { model: SEMANTIC_MODEL, status: advice.status, reason: advice.reason };
+					ui.setStatus("jev-alignment-semantic", JSON.stringify(summary));
+				}
+			}
+		} catch {
+			// Provider, configuration and UI failures cannot suppress or create blocks.
+		}
 		// shadow journals the same block record but never enforces it.
 		return mode === "deterministic" && blockReason ? { block: true, reason: blockReason } : undefined;
 	});
@@ -164,28 +185,41 @@ function alignmentClassifyAction(toolName: unknown): ActionClass | null {
 }
 
 /** Bounded, normalised write targets of one tool input. */
-function alignmentWritePaths(input: unknown): string[] {
+function alignmentWritePaths(input: unknown): { paths: string[]; complete: boolean } {
 	const record = alignmentAsRecord(input);
-	if (!record) return [];
+	if (!record) return { paths: [], complete: false };
 	const found = new Set<string>();
+	let complete = true;
 	const add = (value: unknown) => {
-		if (typeof value !== "string") return;
+		if (typeof value !== "string") { complete = false; return; }
+		// Separator normalization must not disguise a raw URL as a file target.
+		if (value.includes("://")) complete = false;
 		const token = normalizeTarget(value);
-		if (token) found.add(token);
+		if (!token) { complete = false; return; }
+		found.add(token);
 	};
-	for (const key of ["filePath", "file_path", "path", "notebook_path", "notebookPath", "target"]) add(record[key]);
+	for (const key of ["filePath", "file_path", "path", "notebook_path", "notebookPath", "target"]) {
+		if (Object.prototype.hasOwnProperty.call(record, key)) add(record[key]);
+	}
 	if (Array.isArray(record.files)) for (const value of record.files) add(value);
+	else if (record.files !== undefined) complete = false;
+	if ((record.patch !== undefined && typeof record.patch !== "string") || (record.diff !== undefined && typeof record.diff !== "string")) complete = false;
 	const patch = typeof record.patch === "string" ? record.patch : typeof record.diff === "string" ? record.diff : "";
 	if (patch) {
-		for (const line of patch.split("\n").slice(0, 400)) {
+		const lines = patch.split("\n");
+		if (lines.length > 400) complete = false;
+		for (const line of lines.slice(0, 400)) {
 			const trimmed = line.trim();
 			const update = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/.exec(trimmed);
 			if (update) add(update[1]);
 			const git = /^diff --git a\/(\S+) b\/(\S+)/.exec(trimmed);
 			if (git) add(git[2]);
+			if ((trimmed.startsWith("diff --git ") && (!git || git[1] !== git[2])) || trimmed.startsWith("*** Move to:")) complete = false;
 		}
 	}
-	return [...found].slice(0, 16);
+	if (found.size > 16) complete = false;
+	// Preserve the existing deterministic window, but never advise on a partial action.
+	return { paths: [...found].slice(0, 16), complete };
 }
 
 function alignmentToolCallDigest(value: unknown): string | null {
@@ -195,14 +229,14 @@ function alignmentToolCallDigest(value: unknown): string | null {
 }
 
 /** Host user entries are the only authority; a missing facade yields none. */
-function alignmentReadAuthority(ctx: unknown): Authority | null {
+function alignmentReadBranch(ctx: unknown): unknown {
 	const record = alignmentAsRecord(ctx);
 	const manager = record ? alignmentAsRecord(record.sessionManager) : null;
 	if (!manager || typeof manager.getBranch !== "function") return null;
 	try {
 		const branch = manager.getBranch.call(manager);
 		const entries = Array.isArray(branch) ? branch : alignmentAsRecord(branch)?.entries;
-		return collectAuthority(entries, { windowSize: 12 });
+		return entries;
 	} catch {
 		return null;
 	}

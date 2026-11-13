@@ -122,9 +122,27 @@ here is a measured outcome.
    `shadow` evaluates and journals but never blocks; `deterministic` may block
    write-class drift. `JEV_ADVISOR_MODE` governs tier advice
    (`shadow|hint|enforce`) and is never read by the alignment path. Semantic
-   (model-based) enforcement does not exist in this layer: `lib/alignment.ts`
-   is pure, the adapters make no provider call, and no credential or
-   configuration file is read.
+   (model-based) enforcement does not exist: `lib/alignment.ts` is pure and the
+   deterministic verdict is finalized before any optional provider await.
+9. **Semantic advisory is an independent, explicit outbound opt-in.** Only
+   `JEV_ALIGNMENT_SEND_AUTHORITY_TEXT=true` enables `lib/semantic.ts` in the
+   before-hook; default false makes zero outbound calls, without reading a
+   credential. The only route is OpenGateway `sionic-ai/jev-omni` at
+   `https://apis.opengateway.ai/v1/decisions`, authenticated by process
+   `OPENGATEWAY_API_KEY`. There is no credential-file read, alternate key,
+   endpoint/model override or retry. `semantic.openapi.json` owns the wire
+   schema and prompt and is consumed directly/inlined by the builder.
+   Missing configuration yields `no_decision/unconfigured`. Failures, invalid
+   numeric values and probability-sum anomalies yield `no_decision`; raw scores
+   are never clamped or normalized. The whole request/response is bounded to
+   8s, 128 KiB request and 64 KiB response. Incomplete authority and invalid
+   targets are rejected before outbound; only the same bounded host-user
+   window and proposed write targets may be sent, never file contents or
+   assistant/tool output. Semantic advice is metadata-only UI status, not a
+   journal record, block, permission, release or stage-2 admission. Neither
+   advice nor its provider/UI failure changes a deterministic result. The
+   operator must establish the task's approved budget/call cap/current ledger
+   before enabling live calls; offline fixtures do not measure model quality.
 
 ## Drivers
 
@@ -157,7 +175,9 @@ here is a measured outcome.
   configuration, credentials and the network. The alignment path has to stay
   pure and keyless so it still blocks when the advisor is unconfigured or
   offline. `scripts/build.mjs` therefore builds the alignment surfaces with
-  `shared: false` — no decision contract, results core or key block inlined.
+  `shared: false` — no tier-advisor decision contract, results core or key
+  block inlined. The before-hook alone includes the independent opt-in semantic
+  consumer; this does not move provider availability into the blocking rules.
 - **Block bash too.** Rejected for now: bash input has no bounded target
   parser, so a block would rest on guesses. `bash_observe` reports
   `coverage_gap` instead of pretending coverage.
@@ -173,7 +193,7 @@ here is a measured outcome.
   `scripts/verify.ts` can exercise authority collection, the rule table and
   the transition chain without a provider, a key or a real session.
 - Reusing `jev-advisor` keeps one install order, one journal root and one
-  upgrade path, and the alignment surfaces stay keyless.
+  upgrade path, and blocking stays keyless even with opt-in advice configured.
 
 ## Consequences
 
@@ -196,10 +216,10 @@ here is a measured outcome.
 
 ## Follow-ups
 
-- **Semantic (model-based) evaluation is not implemented and stays disabled.**
-  It would need a typed decision contract, an explicit confidence gate and its
-  own acceptance cases before it could influence a verdict; none of that
-  exists here.
+- **Semantic enforcement remains excluded.** Advice defaults to outbound off;
+  even a configured provider and a valid high-confidence response cannot
+  influence a verdict. Budgeted live-provider evaluation and installed-entry
+  E2E are separate from the shipped offline wire/fixture acceptance tests.
 - **A shipped mode switch is now `JEV_ALIGNMENT_MODE`.** It is a single
   global switch for the pre-tool surface; per-session or per-repository
   scoping does not exist.
@@ -215,6 +235,8 @@ here is a measured outcome.
   recovery transitions, journal limits.
 - `jev-advisor/lib/alignment-journal.ts` — the one bounded journal read/append
   path shared by the three surfaces.
+- `jev-advisor/semantic.openapi.json` and `jev-advisor/lib/semantic.ts` — fixed
+  wire schema/prompt and opt-in OpenGateway advisory transport, respectively.
 - `jev-advisor/src/alignment.adapter.ts` — before-tool surface, mode
   resolution, degraded retry counters.
 - `jev-advisor/src/alignment-observe.adapter.ts` — result binding, criterion
@@ -224,8 +246,8 @@ here is a measured outcome.
   generated, do not edit.
 - `jev-advisor/gajae-plugin.json` — `jev-goal-alignment`,
   `jev-goal-alignment-observe`, `jev-goal-alignment-shutdown`.
-- `jev-advisor/scripts/verify.ts` — AC-A1/AC-A2 cases, mode resolution and
-  degraded-storage cases.
+- `jev-advisor/scripts/verify.ts` — AC-A1/AC-A2/AC-A3 cases, mode resolution,
+  degraded storage and offline semantic wire/failure/non-enforcement cases.
 
 The quality-evidence side of this work is a separate decision:
 [ADR 0003](0003-quality-trial-evidence-boundary.md).
