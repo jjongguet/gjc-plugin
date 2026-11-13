@@ -127,7 +127,7 @@ Installing and using a plugin needs only `gjc` (verified with 0.18.12). Building
 | `verification-receipts` | 3 tools, 4 hooks | Node.js on `PATH` for the test runner | Yes. An optional Jev key adds warning-only adequacy notes. |
 | `ui-regression` | 2 tools | The `aside` CLI with a connected profile and an explicit account; a page you serve on loopback | Runs drive a browser; `ui_regression_status` is offline. |
 | `backplan` | 1 tool, loose skill | Nothing for the tool. Rendered issue bodies use Korean section headings; the optional skill registers issues through the maintainer's Linear MCP and trace helper. | Yes |
-| `jev-advisor` | 3 tools, 6 hooks | `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` for advice and checks | Without a key, advice is an explicit no-decision; `plugin_metrics` is offline. |
+| `jev-advisor` | 3 tools, 7 hooks | `JEV_ADVISOR_API_KEY` or `OPENROUTER_API_KEY` for advice and checks | Without a key, advice is an explicit no-decision; `plugin_metrics` is offline. |
 | `rrsi` | 1 tool, 1 hook | Nothing | Yes |
 | `rea` | 1 tool, loose skill | Node.js `^22.19 \|\| ^24.11 \|\| >=26` or Bun; the first `npx` call downloads `rea-agents` | `rea_readiness` is offline; the CLI fetch uses the network. |
 | `egm` | 1 tool; EGM's 7 skills and 10 reviewer personas come from GJC's native marketplace install | `gjc` 0.20.0 or newer and `git` | `egm_readiness` is offline and writes nothing; installing EGM clones the pinned tag from GitHub. |
@@ -135,7 +135,7 @@ Installing and using a plugin needs only `gjc` (verified with 0.18.12). Building
 | `wiki` | 2 tools | A personal-wiki checkout with `scripts/wiki.py`, located by `WIKI_ROOT` (default `$HOME/jjongguet/personal-wiki`) | Local only |
 | `aside-memory` | 1 tool | The `aside` CLI and an explicit numeric account | Network through Aside; no key |
 
-Credentials live outside the replaceable installation tree, in `~/.gjc/agent/jev-advisor/.env` or the process environment (`JEV_ADVISOR_API_KEY` wins over `OPENROUTER_API_KEY`; process values win over the file). Never put credentials in source or result records.
+Credentials live outside the replaceable installation tree: the process environment, `~/.gjc/agent/jev-advisor/.env`, or (credential names only, when no upper layer has one) `~/.gjc/agent/.env`. Configuration precedence: layer first, then within a layer `JEV_ADVISOR_API_KEY` before the provider's own key names; non-secret defaults can come from the tracked `~/.gjc/agent/jev-advisor/settings.env` (see `jev-advisor/README.md`). Never put credentials in source or result records.
 
 ## Troubleshooting
 

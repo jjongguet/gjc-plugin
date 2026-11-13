@@ -2,6 +2,20 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.28] - 2026-11-14
+
+Plugins: jev-advisor 0.0.18 · verification-receipts 0.0.12 · ui-regression 0.0.11 · wiki 0.0.9 · rea 0.0.8 · backplan 0.0.12 · rrsi 0.0.7 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1
+
+### Fixed
+
+- **shared journal (all journaling plugins)**: a writer that died while holding `journal/v1/.append.lock` left the lock forever, so every later append and every snapshot read returned `store_busy` (measured on one host: the jev-advisor journal stopped on 2026-11-05 with an empty orphaned lock; JJO-2327). Writers now record `{v,pid,host,createdAt,nonce}` in the lock, and a waiter removes a lock only when its same-host owner pid is dead, or when a lock without metadata (or from another host) is older than 10 minutes and its pid is not alive here. Removal runs once inside a single-flight reclaim guard (`journal/.append.reclaim.lock`, outside `v1`) after re-judging the same inode; a stale guard is never taken over and reports `reclaim_blocked`. Readers never remove a lock and now report its `ageMs`/`owner`. A publication whose lock name was lost stays persisted (`lockLost`) and never unlinks a successor.
+- **jev-advisor**: sessions running under another GJC agent profile (a gateway broker profile without its own `.env`) returned `unconfigured` for every `jev_check` because only the process env and `jev-advisor/.env` were consulted (JJO-2327). Configuration now resolves layer first: process env, `jev-advisor/.env`, the tracked non-secret `jev-advisor/settings.env` (allowlisted settings only), then credential names only from `~/.gjc/agent/.env` (read lazily, owner-only regular file ≤ 16 KiB). Within a layer `JEV_ADVISOR_API_KEY` comes before the provider's own names; an upper layer always wins. `jev_check` reports `credentialSource`.
+
+### Added
+
+- **jev-advisor**: `jev_check` records its latency (`durationMs`) in the released-compatible jev-advisor record and a joined `jev-telemetry` record with provider, model, HTTP status on failures, a session key digest and provider-reported usage; `plugin_metrics` aggregates the join (`telemetry`) and reports `jevLock`. The separate namespace keeps already-running bundles, whose strict decoder rejects unknown check keys, unaffected; a cross-version test runs the released v0.0.27 module as a fixture.
+- **jev-advisor**: advisory checkpoints that call no provider and block nothing — a `session_start` health line (silent when healthy; names `unconfigured`, `store_busy`, `reclaim_blocked` or a recent no-decision ratio; `JEV_HEALTH_LINE=off|notify|stderr`), a one-line alignment authority status, and a default-off destructive-bash bridge (`JEV_BASH_BRIDGE=1`, at most three notices per session, `bash_coverage` counts with pattern ids only). `jev-advisor/scripts/e2e-installed.mjs` is an operator E2E for installed profiles.
+
 ## [0.0.27] - 2026-11-12
 
 Plugins: jev-advisor 0.0.16 · verification-receipts 0.0.11 · ui-regression 0.0.10 · wiki 0.0.8 · rea 0.0.7 · backplan 0.0.11 · rrsi 0.0.6 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1

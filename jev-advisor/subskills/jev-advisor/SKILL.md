@@ -62,7 +62,7 @@ outcomes are never injected into advisories and no `prior` suffix exists in v2.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `JEV_ADVISOR_PROVIDER` | `jev` | `jev` = TypeSafe Jev on OpenRouter via `/api/alpha/decisions`; `openrouter` = chat; `typesafe-jev` = hosted systemone; `ollaya` = keyless local server; `off` disables provider/correlation, not local journaling |
-| `JEV_ADVISOR_API_KEY` | — | Environment overrides same-named file values in `~/.gjc/agent/jev-advisor/.env`; the merged plugin key takes priority over `OPENROUTER_API_KEY`. Credentials survive upgrades and are never result records |
+| `JEV_ADVISOR_API_KEY` | — | Layer first (process env, then `~/.gjc/agent/jev-advisor/.env`, then credential names only from `~/.gjc/agent/.env`), and within a layer this key comes before `OPENROUTER_API_KEY`. Non-secret defaults may come from `~/.gjc/agent/jev-advisor/settings.env`. Credentials survive upgrades and are never result records |
 | `JEV_ADVISOR_MODEL` | per provider (`typesafe/jev-1.14`; `openai/gpt-5-mini` for openrouter chat; `laya` for ollaya) | decision model id |
 | `JEV_ADVISOR_MODE` | `shadow` | `shadow` / `hint` / `enforce` |
 | `JEV_ADVISOR_MIN_CONFIDENCE` | `0.6` | per-task confidence threshold for explicit weaker-tier enforcement |
