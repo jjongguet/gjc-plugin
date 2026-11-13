@@ -195,7 +195,7 @@ function isUserEntry(entry: Record<string, any>): boolean {
 }
 
 /** Bounded text of one host user entry, or null when it carries no authority. */
-function entryText(entry: Record<string, any>): string | null {
+function entryText(entry: Record<string, any>, maxChars = MAX_ENTRY_TEXT): string | null {
 	if (!isUserEntry(entry)) return null;
 	const chunks: string[] = [];
 	const push = (value: unknown) => {
@@ -227,11 +227,33 @@ function entryText(entry: Record<string, any>): string | null {
 		}
 	}
 	const joined = chunks.join("\n").trim();
-	return joined ? joined.slice(0, MAX_ENTRY_TEXT) : null;
+	return joined ? joined.slice(0, maxChars) : null;
 }
 
 function entryIdentity(entry: Record<string, any>, text: string, ordinal: number): string {
 	return boundedId(entry.id) ?? `anon-${ordinal}-${digestText(text).slice(0, 12)}`;
+}
+
+/** The same host-only window for deterministic rules and opt-in advisory. */
+export function collectAuthorityWindow(branchEntries: unknown, options: { windowSize?: number } = {}) {
+	const list = Array.isArray(branchEntries) ? branchEntries : [];
+	const windowSize = Math.min(64, Math.max(1, Math.trunc(Number(options.windowSize) || WINDOW_SIZE)));
+	const entries: { id: string; text: string }[] = [];
+	let textTruncated = false;
+	let scanned = 0;
+	let cursor = list.length - 1;
+	for (; cursor >= 0 && scanned < MAX_SCAN_ENTRIES && entries.length < windowSize; cursor--) {
+		scanned++;
+		const entry = asRecord(list[cursor]);
+		if (!entry) continue;
+		const raw = entryText(entry, MAX_ENTRY_TEXT + 1);
+		if (raw === null) continue;
+		textTruncated ||= raw.length > MAX_ENTRY_TEXT;
+		const text = raw.slice(0, MAX_ENTRY_TEXT);
+		entries.push({ id: entryIdentity(entry, text, cursor), text });
+	}
+	entries.reverse();
+	return { entries, windowSize, authorityTruncated: cursor >= 0, textTruncated };
 }
 
 /**
@@ -249,24 +271,10 @@ function entryIdentity(entry: Record<string, any>, text: string, ordinal: number
  *  - a forbidden target clears only on an explicit release.
  */
 export function collectAuthority(branchEntries: unknown, options: { windowSize?: number } = {}): Authority | null {
-	const list = Array.isArray(branchEntries) ? branchEntries : [];
-	const windowSize = Math.min(64, Math.max(1, Math.trunc(Number(options.windowSize) || WINDOW_SIZE)));
-	const entries: { id: string; text: string }[] = [];
-	let scanned = 0;
-	let cursor = list.length - 1;
-	for (; cursor >= 0 && scanned < MAX_SCAN_ENTRIES && entries.length < windowSize; cursor--) {
-		scanned++;
-		const entry = asRecord(list[cursor]);
-		if (!entry) continue;
-		const text = entryText(entry);
-		if (text === null) continue;
-		entries.push({ id: entryIdentity(entry, text, cursor), text });
-	}
+	const { entries, windowSize, authorityTruncated } = collectAuthorityWindow(branchEntries, options);
 	// Unscanned entries remain when the window or the scan cap stopped us early:
 	// the authority view is incomplete and must not be read as "no constraint".
-	const authorityTruncated = cursor >= 0;
 	if (entries.length === 0) return null;
-	entries.reverse();
 
 	let latestUserEntryId = entries[entries.length - 1].id;
 	let changeSemantics: ChangeSemantics = "unknown";
@@ -918,7 +926,7 @@ export type SemanticEnvelope = {
 	confidence: number | null;
 	/** Raw probabilities, preserved verbatim (no clamping or normalisation). */
 	probabilities: Record<string, number> | null;
-	/** True only when the caller opted in AND the envelope validated. */
+	/** The caller opted in; validation alone does not prove a request occurred. */
 	outbound: boolean;
 	/** Sum of the probabilities, reported so a 1.0001 payload stays visible. */
 	probabilitySum: number | null;
@@ -938,11 +946,12 @@ export function validateSemanticEnvelope(input: {
 	confidence?: unknown;
 	probabilities?: unknown;
 	labels: readonly string[];
-	tolerance?: number;
 }): SemanticEnvelope {
 	if (input.sendAuthorityText !== true)
 		return { status: "outbound_suppressed", confidence: null, probabilities: null, outbound: false, probabilitySum: null };
 	const confidence = typeof input.confidence === "number" && Number.isFinite(input.confidence) ? input.confidence : null;
+	if (confidence === null || confidence < 0 || confidence > 1 || input.labels.length === 0 || new Set(input.labels).size !== input.labels.length)
+		return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
 	const raw = asRecord(input.probabilities);
 	if (!raw) return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
 	const probabilities: Record<string, number> = {};
@@ -955,8 +964,7 @@ export function validateSemanticEnvelope(input: {
 	if (input.labels.some(label => probabilities[label] === undefined))
 		return { status: "invalid_response", confidence, probabilities: null, outbound: true, probabilitySum: null };
 	const probabilitySum = Object.values(probabilities).reduce((total, value) => total + value, 0);
-	const tolerance = typeof input.tolerance === "number" && input.tolerance > 0 ? input.tolerance : 1e-6;
-	if (Math.abs(probabilitySum - 1) > tolerance)
+	if (Math.abs(probabilitySum - 1) > 1e-6)
 		return { status: "precision_anomaly", confidence, probabilities, outbound: true, probabilitySum };
 	return { status: "ok", confidence, probabilities, outbound: true, probabilitySum };
 }

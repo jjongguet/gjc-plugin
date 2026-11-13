@@ -93,7 +93,7 @@ Systemone choice confidence and chat self-reported confidence have different
 semantics. Neither is independent correctness evidence. Validate any enforcement
 policy independently; a confidence threshold alone does not establish safety.
 
-## Providers
+## Providers (tier/check advice)
 
 | Provider | Endpoint | Default model | Key variable |
 | --- | --- | --- | --- |
@@ -125,14 +125,14 @@ accurate) and costs roughly 1,080 input tokens for one 512 px image.
 
 ## Configuration
 
-Configuration lives outside the replaceable installation tree in
+Tier/check configuration lives outside the replaceable installation tree in
 `~/.gjc/agent/jev-advisor/.env`. Process environment overrides same-named file
 values. `JEV_ADVISOR_API_KEY` is an explicit override for any provider; without
 it each provider reads only its own variable (`OPENROUTER_API_KEY` for `jev` and
 `openrouter`, `TYPESAFE_API_KEY` for `typesafe-jev`). A provider never falls back
 to another provider's credential, so a missing key surfaces as `unconfigured`
 rather than as a 401 from the wrong service.
-No key and no keyless provider means zero hook network calls or correlation-state writes.
+No tier key and no keyless provider means zero tier/check network calls or correlation-state writes.
 `JEV_ADVISOR_PROVIDER=off` disables provider advice and correlation writes; local
 outcome journaling still records disabled/unconfigured operations. An explicit offline report still works.
 
@@ -155,6 +155,10 @@ chmod 600 ~/.gjc/agent/jev-advisor/.env
 | `JEV_ADVISOR_MEMORY_MAX_KEYS` | `200` | Retained semantic groups, hard ceiling 200 |
 | `JEV_ADVISOR_MEMORY_MAX_EVENTS` | `10` | Task records per group, hard ceiling 10 |
 | `JEV_ALIGNMENT_MODE` | `shadow` | `off`, `shadow`, `deterministic` for the goal-alignment hook; unrelated to `JEV_ADVISOR_MODE` |
+| `JEV_ALIGNMENT_SEND_AUTHORITY_TEXT` | `false` | Process-only literal `true` opts in to separate OpenGateway semantic advice; never enforcement |
+
+Goal-alignment settings and the semantic credential `OPENGATEWAY_API_KEY` are
+process-only; they are not loaded from the tier/check `.env` file.
 
 `JEV_ADVISOR_MEMORY_HEAD_CHARS` is no longer used: v2 stores no assignment heads.
 Existing configuration and legacy memory are not changed or migrated.
@@ -427,9 +431,9 @@ remain unknown. The plugin does not scrape private histories or install itself.
 ## Goal alignment (write-class authority boundary)
 
 `lib/alignment.ts` plus `src/alignment{,-observe,-shutdown}.adapter.ts` add a
-deterministic, keyless surface over the session's own user entries: it makes no
-provider call, reads no credential or configuration file, and is independent of
-tier advice. The full boundary, including the rejected alternatives, is
+deterministic, keyless blocking surface over the session's own user entries,
+independent of tier advice. Optional `lib/semantic.ts` advice runs after the
+deterministic decision and cannot change it. The full boundary is
 [ADR 0002](../docs/adr/0002-goal-alignment-authority-boundary.md).
 
 - **Modes** (`JEV_ALIGNMENT_MODE`, resolved per tool call). `shadow` is the
@@ -439,8 +443,31 @@ may block the three drift rules; it is explicit opt-in for dogfood and
 end-to-end checks, not a default. `off` is a kill switch: no evaluation, no
 journal, no block. `JEV_ADVISOR_MODE` (`shadow` / `hint` / `enforce`) belongs to
 tier advice and is never read by this path — the two switches are unrelated.
-- **Semantic enforcement is not implemented.** There is no model-based
-alignment mode and no semantic setting; the layer is deterministic only.
+- **Semantic advice, never enforcement.** The default
+`JEV_ALIGNMENT_SEND_AUTHORITY_TEXT` is unset/false: outbound is exactly zero,
+including when a key exists. Only the literal value `true` opts in. The before
+hook then sends the bounded host-user window and proposed write targets (not
+file contents, assistant/tool entries or journal history) to
+`POST https://apis.opengateway.ai/v1/decisions`, model `sionic-ai/jev-omni`.
+The only credential is the process variable `OPENGATEWAY_API_KEY`; there is no
+credential-file read, OpenAI/OpenRouter fallback, endpoint override or retry.
+The request/response and fixed prompt are defined in `semantic.openapi.json`,
+which the consumer reads and the builder inlines. Missing credentials yield
+`no_decision/unconfigured`; transport, HTTP and parsing failures yield
+`no_decision`. One request, including response consumption, has an 8s deadline
+and 128 KiB request / 64 KiB response caps. Truncated/missing authority and
+unparseable targets are rejected before outbound. Read/bash/off calls never
+invoke semantic advice. Enabling outbound is an operator action requiring the
+task's approved budget, call cap and current cost ledger before live use.
+- **Numeric preservation.** Advice consumes only a valid choice, finite
+confidence/probabilities in `[0,1]` and all three probabilities summing to
+`1±1e-6`. Values are not clamped, rounded or renormalized. A
+`precision_anomaly` is `no_decision`, preserving the raw envelope for the
+caller but never exposing a consumable choice. Metadata-only UI status shows
+the decision or fixed failure reason; semantic output is not journaled and
+never becomes a block, recovery admission or permission. A provider/UI failure
+cannot suppress a deterministic block. Offline wire/fixture tests are not
+live-provider quality or installed-entry E2E evidence.
 - **Rule ids** (`evaluateAction`, first match wins):
 
 | Rule id | Verdict | Coverage | Blocks |
