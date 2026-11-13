@@ -3,11 +3,26 @@ import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from
 import path from "node:path";
 import { buildProbeEnvironment, probeIsolation, runtimeReadRoots, SEATBELT_BIN } from "../lib/isolation-runtime.mjs";
 import { digest } from "./pilot-oracle.mjs";
+import { MODEL } from "./recording-proxy.mjs";
 
 /** Lossless public task content; artifact identity stays in parent receipts. */
 export function taskPrompt(task, feedback = null) {
   const text = `${task.raw}\nconfidenceKind=${task.confidenceKind}\n${task.contract}\n${task.outputContract}`;
   return feedback ? `${text}\nPrevious output: ${feedback.output}\nPublic schema errors: ${JSON.stringify(feedback.errors)}` : text;
+}
+
+/** The native model configuration: the approved transport, never a provider key. */
+export function pilotModelsConfig(baseUrl) {
+  return [
+    "providers:", "  harness-pilot:",
+    `    baseUrl: ${JSON.stringify(baseUrl)}`,
+    "    api: openai-completions", "    auth: apiKey", "    apiKey: local-pilot-placeholder-not-a-provider-key",
+    "    models:", `      - id: ${MODEL}`, "        name: DeepSeek V4.1 Flash Eco via OpenGateway",
+    "        api: openai-completions", "        reasoning: false", "        input: [text]",
+    "        contextWindow: 1000000", "        maxTokens: 300",
+    "        cost:", "          input: 0.03", "          output: 0.12",
+    "          cacheRead: 0.0006", "          cacheWrite: 0", "",
+  ].join("\n");
 }
 
 /** Scratch-only configuration; no inherited auth, plugin registry, hooks or session ids. */
@@ -28,16 +43,7 @@ export function prepareCell({ root, arm, task, ruleText, proxy, gjcBin, userHome
   }
   if (arm === "B2") writeFileSync(path.join(agent, "RULES.md"), ruleText, { mode: 0o600 });
   // This is the native model configuration, not a prompt append or upstream key.
-  writeFileSync(path.join(agent, "models.yml"), [
-    "providers:", "  harness-pilot:",
-    `    baseUrl: ${JSON.stringify(proxy.url)}`,
-    "    api: openai-completions", "    auth: apiKey", "    apiKey: local-pilot-placeholder-not-a-provider-key",
-    "    models:", "      - id: gpt-4.1-mini", "        name: Bounded pilot transport",
-    "        api: openai-completions", "        reasoning: false", "        input: [text]",
-    "        contextWindow: 1000000", "        maxTokens: 300",
-    "        cost:", "          input: 0.4", "          output: 1.6",
-    "          cacheRead: 0.1", "          cacheWrite: 0", "",
-  ].join("\n"), { mode: 0o600 });
+  writeFileSync(path.join(agent, "models.yml"), pilotModelsConfig(proxy.url), { mode: 0o600 });
   const env = buildProbeEnvironment({
     PATH: "/usr/bin:/bin:/opt/homebrew/bin",
     HOME: home, TMPDIR: temporary, XDG_CONFIG_HOME: path.join(home, ".config"), XDG_DATA_HOME: path.join(home, ".local", "share"), XDG_STATE_HOME: path.join(home, ".local", "state"), XDG_CACHE_HOME: path.join(home, ".cache"),
@@ -68,7 +74,7 @@ export async function runNativeAttempt({ cell, isolation, token, prompt, timeout
   if (digest(readFileSync(isolation.profilePath, "utf8")) !== isolation.receipt.profileDigest) throw new Error("probe_profile_changed");
   const envDigest = digest(JSON.stringify(Object.keys(cell.env).sort().map((key) => [key, cell.env[key]])));
   if (envDigest !== isolation.receipt.envBinding.digest) throw new Error("probe_environment_changed");
-  const args = ["-f", isolation.profilePath, cell.gjcBin, "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--no-tools", "--model", "harness-pilot/gpt-4.1-mini", "--api-key", token, "--thinking", "off", "--system-prompt", "Return JSON per task contract. No tools.", prompt];
+  const args = ["-f", isolation.profilePath, cell.gjcBin, "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--no-tools", "--model", `harness-pilot/${MODEL}`, "--api-key", token, "--thinking", "off", "--system-prompt", "Return JSON per task contract. No tools.", prompt];
   return await new Promise((resolve) => {
     const started = Date.now();
     let stdout = "";

@@ -1,0 +1,31 @@
+{
+  "schema": "harness2.transfer-development.v1",
+  "split": "development",
+  "scope": "Offline decision-ask CLI contract fault injection; not model efficacy or another B0/B1/B2 pilot",
+  "candidate": "Strict finite complete probability vector, [0,1], inclusive sum tolerance 0.000001 plus four binary ulps",
+  "repeats": 2,
+  "selection": "No selection, retries, exclusions, tuning or holdout payloads; every planned case counts",
+  "adoptionRule": "All cases must match the literal expected exit; no valid act/abstain regression; one intercepted request per execution; zero network access",
+  "cost": { "paidCalls": 0, "incrementalUsd": 0, "priorConservativeUsd": "0.570588361", "pilotCapUsd": 1, "taskCapUsd": 5 },
+  "cases": [
+    { "id": "valid-act", "probabilities": { "yes": 0.8, "no": 0.2 }, "confidence": 0.6, "expectedExit": 0 },
+    { "id": "valid-abstain", "probabilities": { "yes": 0.8, "no": 0.2 }, "confidence": 0.599999, "expectedExit": 3 },
+    { "id": "confidence-one", "probabilities": { "yes": 1, "no": 0 }, "confidence": 1, "expectedExit": 0 },
+    { "id": "confidence-zero", "probabilities": { "yes": 0.5, "no": 0.5 }, "confidence": 0, "expectedExit": 3 },
+    { "id": "inclusive-sum-boundary", "probabilities": { "yes": 0.500001, "no": 0.5 }, "confidence": 0.8, "expectedExit": 0 },
+    { "id": "inside-sum-boundary", "probabilities": { "yes": 0.5000004, "no": 0.5 }, "confidence": 0.8, "expectedExit": 0 },
+    { "id": "outside-sum-boundary", "probabilities": { "yes": 0.500002, "no": 0.5 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "negative-probability", "probabilities": { "yes": -0.1, "no": 1.1 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "over-one-probability", "probabilities": { "yes": 1.1, "no": 0 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "under-summed", "probabilities": { "yes": 0.4, "no": 0.4 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "over-summed", "probabilities": { "yes": 0.8, "no": 0.8 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "zero-vector", "probabilities": { "yes": 0, "no": 0 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "extra-label", "probabilities": { "yes": 0.8, "no": 0.2, "other": 0 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "missing-label", "probabilities": { "yes": 1 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "array-vector", "probabilities": [0.8, 0.2], "confidence": 0.8, "expectedExit": 5 },
+    { "id": "null-value", "probabilities": { "yes": null, "no": 1 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "numeric-string", "probabilities": { "yes": "0.8", "no": 0.2 }, "confidence": 0.8, "expectedExit": 5 },
+    { "id": "invalid-confidence", "probabilities": { "yes": 0.8, "no": 0.2 }, "confidence": 1.1, "expectedExit": 5 },
+    { "id": "invalid-choice", "probabilities": { "yes": 0.8, "no": 0.2 }, "confidence": 0.8, "choice": "other", "expectedExit": 5 }
+  ]
+}

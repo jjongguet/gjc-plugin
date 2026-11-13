@@ -2,10 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { publicDecision, compareDecision, historicalBoundaryControls } from "../../m1/pilot-oracle.mjs";
-import { createReservationLedger, normalizeRequest, startRecordingProxy, UPSTREAM, MODEL } from "../../m1/recording-proxy.mjs";
+import { createReservationLedger, normalizeRequest, startRecordingProxy, UPSTREAM, MODEL, PROVIDER, upstreamIdentity } from "../../m1/recording-proxy.mjs";
+import { pilotModelsConfig } from "../../m1/native-pilot.mjs";
 
 const ruleText = "NATIVE_RULE_BEGIN\nValidate the public contract.\nNATIVE_RULE_END\n";
-const body = (rule = false) => ({ model: "gpt-4.1-mini", max_tokens: 300, messages: [{ role: "system", content: rule ? ruleText.trim() : "JSON only" }, { role: "user", content: "Classify the public artifact" }], stream: true });
+const body = (rule = false) => ({ model: MODEL, max_tokens: 300, messages: [{ role: "system", content: rule ? ruleText.trim() : "JSON only" }, { role: "user", content: "Classify the public artifact" }], stream: true });
 const oracle = JSON.parse(readFileSync(new URL("../fixtures/pilot/oracle/decision-probability-boundary-dev10.json", import.meta.url)));
 const budget = (onEvent = () => {}, extra = {}) => createReservationLedger({ capUsd: 1, taskCapUsd: 5, priorSpentUsd: 0, priorReservedUsd: 0, priorUnresolvedUsd: 0, cleanupUsd: 0, inputPrice: 0.0000004, outputPrice: 0.0000016, onEvent, ...extra });
 const send = (proxy, token, payload, extra = {}) => fetch(`${proxy.url}/chat/completions`, { method: "POST", signal: extra.signal, headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...extra.headers }, body: JSON.stringify(payload) });
@@ -32,16 +33,76 @@ test("normalization bounds all composed content and refuses tools, overflow and 
   for (const [patch, reason] of [[{ max_tokens: 301 }, "output_bound_mismatch"], [{ model: "other" }, "model_mismatch"], [{ tools: [{}] }, "unexpected_tools_or_continuation"], [{ messages: [{ role: "system", content: "x".repeat(3000) }] }, "input_bound_exceeded"]]) assert.throws(() => normalizeRequest({ ...body(), ...patch }, "/v1/chat/completions"), new RegExp(reason));
 });
 
-test("reservation is written before dispatch and unknown charges stay reserved", () => {
+test("the retired OpenRouter/OpenAI pin is rejected at the transport boundary", async () => {
+  assert.equal(UPSTREAM, "https://apis.opengateway.ai/v1/chat/completions");
+  assert.equal(MODEL, "deepseek/deepseek-v4.1-flash-eco");
+  for (const retired of ["gpt-4.1-mini", "openai/gpt-4.1-mini"]) {
+    assert.throws(() => normalizeRequest({ ...body(), model: retired }, "/v1/chat/completions"), /model_mismatch/);
+    assert.equal(upstreamIdentity({ id: "gen-test-only", model: retired, provider: "OpenAI" }).ok, false);
+  }
+  let outbound = 0;
+  const proxy = await startRecordingProxy({ ruleText, fetchImpl: () => { outbound += 1; } });
+  try {
+    const response = await send(proxy, proxy.armSlot("retired", "B0"), { ...body(), model: "openai/gpt-4.1-mini" });
+    assert.equal(response.status, 400);
+    assert.match(await response.text(), /model_mismatch/);
+    assert.equal(outbound, 0);
+  } finally { await proxy.close(); }
+});
+
+test("OpenGateway identity requires the model id and validates a present provider", () => {
+  assert.deepEqual(upstreamIdentity({ id: "gen-test-only", model: MODEL }), { ok: true, provider: null });
+  assert.deepEqual(upstreamIdentity({ id: "gen-test-only", model: MODEL, provider: PROVIDER }), { ok: true, provider: PROVIDER });
+  for (const drift of [{ id: "gen-test-only", model: MODEL, provider: "openai" }, { id: "gen-test-only", model: "deepseek/other", provider: PROVIDER }, { id: "bad id", model: MODEL }, { id: "gen-test-only" }, null]) assert.equal(upstreamIdentity(drift).ok, false, JSON.stringify(drift));
+});
+
+test("the native models.yml pins the approved model and per-million catalog costs", () => {
+  const yaml = pilotModelsConfig("http://127.0.0.1:1234/v1");
+  for (const line of [`- id: ${MODEL}`, 'baseUrl: "http://127.0.0.1:1234/v1"', "contextWindow: 1000000", "maxTokens: 300", "input: 0.03", "output: 0.12", "cacheRead: 0.0006", "apiKey: local-pilot-placeholder-not-a-provider-key"]) assert.ok(yaml.includes(line), line);
+  assert.equal(/gpt-4\.1-mini|openrouter|openai\//i.test(yaml), false, "the retired pin is gone");
+});
+
+test("reservation is written before dispatch and an unpriced charge is computed, never zero", () => {
   const events = [];
   const ledger = budget((e) => events.push(e));
   ledger.reserve("one");
   assert.equal(events[0].kind, "reserved");
   assert.equal(ledger.snapshot().calls, 1);
   assert.ok(ledger.snapshot().reservedUsd > 0);
-  assert.throws(() => ledger.settle("one", {}), /usage_missing/);
-  assert.ok(ledger.snapshot().reservedUsd > 0);
-  assert.throws(() => ledger.reserve("two"), /unknown_usage/);
+  const computed = ledger.settle("one", { prompt_tokens: 1000, completion_tokens: 100 });
+  assert.equal(computed.basis, "computed_tokens");
+  assert.equal(computed.measured, false);
+  assert.ok(Math.abs(computed.usd - (1000 * 0.0000004 + 100 * 0.0000016)) < 1e-15);
+  assert.equal(ledger.snapshot().measuredUsd, 0);
+  assert.ok(Math.abs(ledger.snapshot().computedUsd - computed.usd) < 1e-15);
+  assert.equal(ledger.snapshot().blocked, false);
+  ledger.reserve("two");
+  const bound = ledger.settle("two", {});
+  assert.equal(bound.basis, "computed_bound");
+  assert.ok(Math.abs(bound.usd - (3000 * 0.0000004 + 300 * 0.0000016)) < 1e-15);
+  assert.equal(ledger.snapshot().blocked, false);
+});
+
+test("partial token counts cannot hide a reported provider overrun", () => {
+  for (const usage of [
+    { prompt_tokens: 4000 },
+    { prompt_tokens: 4000, completion_tokens: null },
+    { prompt_tokens: 4000, completion_tokens: "unknown" },
+    { completion_tokens: 400 },
+    { prompt_tokens: null, completion_tokens: 400 },
+    { prompt_tokens: "unknown", completion_tokens: 400 },
+  ]) {
+    const events = [];
+    const ledger = budget((event) => events.push(event));
+    ledger.reserve("overrun");
+    assert.throws(() => ledger.settle("overrun", usage), /provider_bound_exceeded/);
+    const settlement = events.at(-1).usage;
+    assert.equal(settlement.input, usage.prompt_tokens === 4000 ? 4000 : 3000);
+    assert.equal(settlement.output, usage.completion_tokens === 400 ? 400 : 300);
+    assert.equal(settlement.basis, "computed_bound");
+    assert.equal(ledger.snapshot().blocked, true);
+    assert.throws(() => ledger.reserve("next"), /unknown_usage/);
+  }
 });
 
 test("task prior spend and call ceilings cannot be reset per attempt", () => {
@@ -115,19 +176,43 @@ test("mock live transport pins route/model/cap, strips child credentials and rec
     const request = JSON.parse(options.body);
     assert.equal(request.model, MODEL);
     assert.equal(request.max_tokens, 300);
-    assert.equal(request.provider.allow_fallbacks, false);
+    assert.deepEqual(request.usage, { include: true }, "the gateway is asked for a priced usage record");
+    assert.equal(request.reasoning_effort, "none", "reasoning tokens must not consume the 300-token cell budget");
+    assert.equal(request.provider, undefined, "no OpenRouter-only provider routing is sent");
     assert.equal(ledger.snapshot().calls, 1, "reservation exists before fetch");
-    return Response.json({ id: "gen-test-only", model: MODEL, provider: "OpenAI", usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] });
+    return Response.json({ id: "gen-test-only", model: MODEL, provider: PROVIDER, usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] });
   } });
   try {
     const response = await send(proxy, proxy.armSlot("live-one", "B0"), body());
     assert.equal(response.status, 200);
     await response.text();
     assert.equal(calls, 1);
-    assert.deepEqual(proxy.rows[0].usage, { usd: 0.0001, input: 100, output: 10 });
+    assert.deepEqual(proxy.rows[0].usage, { usd: 0.0001, input: 100, output: 10, basis: "measured", measured: true });
+    assert.equal(proxy.rows[0].provider, PROVIDER);
+    assert.equal(proxy.rows[0].model, MODEL);
     assert.equal(ledger.snapshot().reservedUsd, 0);
     assert.equal(ledger.snapshot().spentUsd, 0.0001);
   } finally { await proxy.close(); }
+});
+
+test("an OpenGateway response without a provider field is accepted; provider or model drift fails closed", async () => {
+  const accepted = await startRecordingProxy({ mode: "live", ruleText, apiKey: "fake-parent-key", ledger: budget(), fetchImpl: async () => Response.json({ id: "gen-gateway-one", object: "chat.completion", model: MODEL, usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":true,"tier":"fast"}' } }] }) });
+  try {
+    const response = await send(accepted, accepted.armSlot("gateway-omitted", "B0"), body());
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(accepted.rows[0].provider, null);
+    assert.equal(accepted.rows[0].model, MODEL);
+  } finally { await accepted.close(); }
+  for (const drift of [{ model: MODEL, provider: "openai" }, { model: "openai/gpt-4.1-mini", provider: PROVIDER }]) {
+    const proxy = await startRecordingProxy({ mode: "live", ruleText, apiKey: "fake-parent-key", ledger: budget(), fetchImpl: async () => Response.json({ id: "gen-gateway-drift", usage: { cost: 0.0001, prompt_tokens: 100, completion_tokens: 10 }, choices: [{ finish_reason: "stop", message: { content: "x" } }], ...drift }) });
+    try {
+      const response = await send(proxy, proxy.armSlot("gateway-drift", "B0"), body());
+      assert.equal(response.status, 400);
+      assert.match(await response.text(), /upstream_identity_mismatch/);
+      assert.equal(proxy.rows[0].error, "upstream_identity_mismatch");
+    } finally { await proxy.close(); }
+  }
 });
 
 test("transport errors retain reservations and forbid a new slot", async () => {
@@ -139,6 +224,24 @@ test("transport errors retain reservations and forbid a new slot", async () => {
     assert.equal(ledger.snapshot().blocked, true);
     assert.ok(ledger.snapshot().reservedUsd > 0);
     assert.throws(() => proxy.armSlot("retry", "B0"), /proxy_stopped/);
+  } finally { await proxy.close(); }
+});
+
+test("a response without a billed cost is priced from its tokens and keeps the provider request id", async () => {
+  const ledger = budget();
+  const proxy = await startRecordingProxy({ mode: "live", ruleText, apiKey: "fake-parent-key", ledger, fetchImpl: async () => Response.json({ id: "gen-billing-recovery", object: "chat.completion", model: MODEL, usage: { prompt_tokens: 2000, completion_tokens: 120 }, choices: [{ finish_reason: "stop", message: { content: '{"accept":false}' } }] }) });
+  try {
+    const response = await send(proxy, proxy.armSlot("billing", "B0"), body());
+    assert.equal(response.status, 200);
+    await response.text();
+    assert.equal(proxy.rows[0].providerRequestId, "gen-billing-recovery");
+    assert.deepEqual(proxy.rows[0].usageFields, ["completion_tokens", "prompt_tokens"]);
+    assert.equal(proxy.rows[0].usage.basis, "computed_tokens");
+    assert.ok(Math.abs(proxy.rows[0].usage.usd - (2000 * 0.0000004 + 120 * 0.0000016)) < 1e-15);
+    assert.equal(ledger.snapshot().measuredUsd, 0);
+    assert.ok(ledger.snapshot().computedUsd > 0);
+    assert.equal(ledger.snapshot().reservedUsd, 0);
+    assert.equal(ledger.snapshot().blocked, false);
   } finally { await proxy.close(); }
 });
 
