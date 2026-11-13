@@ -84,10 +84,12 @@ export function createReservationLedger({ capUsd, taskCapUsd, priorSpentUsd, pri
       // the provider-reported token counts at the approved rates, and recorded as computed.
       // When even the token counts are absent the full reserved bound is charged instead of
       // leaving the call unmeasured; a charge is never silently zero.
-      const tokens = usage && Number.isSafeInteger(usage.prompt_tokens) && usage.prompt_tokens >= 0 && Number.isSafeInteger(usage.completion_tokens) && usage.completion_tokens >= 0;
+      const inputKnown = Number.isSafeInteger(usage?.prompt_tokens) && usage.prompt_tokens >= 0;
+      const outputKnown = Number.isSafeInteger(usage?.completion_tokens) && usage.completion_tokens >= 0;
+      const tokens = inputKnown && outputKnown;
       const billed = usage && Number.isFinite(usage.cost) && usage.cost >= 0;
-      const input = tokens ? usage.prompt_tokens : 3000;
-      const output = tokens ? usage.completion_tokens : 300;
+      const input = inputKnown ? usage.prompt_tokens : 3000;
+      const output = outputKnown ? usage.completion_tokens : 300;
       const usd = billed ? usage.cost : input * inputPrice + output * outputPrice;
       const basis = billed ? "measured" : tokens ? "computed_tokens" : "computed_bound";
       spent += usd;

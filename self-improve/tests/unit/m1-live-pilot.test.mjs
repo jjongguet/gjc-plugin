@@ -83,6 +83,28 @@ test("reservation is written before dispatch and an unpriced charge is computed,
   assert.equal(ledger.snapshot().blocked, false);
 });
 
+test("partial token counts cannot hide a reported provider overrun", () => {
+  for (const usage of [
+    { prompt_tokens: 4000 },
+    { prompt_tokens: 4000, completion_tokens: null },
+    { prompt_tokens: 4000, completion_tokens: "unknown" },
+    { completion_tokens: 400 },
+    { prompt_tokens: null, completion_tokens: 400 },
+    { prompt_tokens: "unknown", completion_tokens: 400 },
+  ]) {
+    const events = [];
+    const ledger = budget((event) => events.push(event));
+    ledger.reserve("overrun");
+    assert.throws(() => ledger.settle("overrun", usage), /provider_bound_exceeded/);
+    const settlement = events.at(-1).usage;
+    assert.equal(settlement.input, usage.prompt_tokens === 4000 ? 4000 : 3000);
+    assert.equal(settlement.output, usage.completion_tokens === 400 ? 400 : 300);
+    assert.equal(settlement.basis, "computed_bound");
+    assert.equal(ledger.snapshot().blocked, true);
+    assert.throws(() => ledger.reserve("next"), /unknown_usage/);
+  }
+});
+
 test("task prior spend and call ceilings cannot be reset per attempt", () => {
   assert.throws(() => budget(() => {}, { priorSpentUsd: null }), /unknown_price_or_usage/);
   assert.throws(() => budget(() => {}, { priorSpentUsd: 5 }).reserve("one"), /cap_exceeded/);
