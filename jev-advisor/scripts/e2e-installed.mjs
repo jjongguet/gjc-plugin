@@ -11,15 +11,16 @@
 //
 //   JEV_E2E_REAL=1 bun jev-advisor/scripts/e2e-installed.mjs [--agent-dir DIR] [--gjc CMD...] [--health stderr] [--rrsi-import] [--expect-settings]
 //
-// The pass gate requires an observed (not absent) installed registry left unchanged, no new session
-// files (the child runs --no-session), the tracked settings baseline present and unchanged when
+// The pass gate requires an observed (not absent) installed registry left unchanged, no session
+// file written by this run (the child runs --no-session; files are attributed by a run nonce in the
+// prompt because other live sessions on the host keep writing), the tracked settings baseline present and unchanged when
 // --expect-settings is given, and an rrsi import reporting status ok when --rrsi-import is given.
 //   bun jev-advisor/scripts/e2e-installed.mjs --describe-config [--agent-dir DIR] [--env K=V ...]
 //
 // --gjc takes the launcher as one string split on spaces, e.g. "bun /path/gjc.js" for a pinned
 // gateway runtime. Exit: 0 decision observed, 1 check failed, 2 refused or prerequisite missing.
 import { spawn, spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -63,8 +64,21 @@ const journalLines = plugin => {
 const before = { legacy: new Set(journalLines("jev-advisor")), telemetry: new Set(journalLines("jev-telemetry")) };
 // Side-effect snapshot: installed registry, tracked settings baseline and session store size.
 const digestOf = file => { try { return createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 16); } catch { return null; } };
-const countFiles = dir => { let n = 0; const walk = d => { let names; try { names = readdirSync(d); } catch { return; } for (const name of names) { const p = path.join(d, name); let st; try { st = statSync(p); } catch { continue; } if (st.isDirectory()) walk(p); else n++; } }; walk(dir); return n; };
+const walkFiles = (dir, visit) => { const walk = d => { let names; try { names = readdirSync(d); } catch { return; } for (const name of names) { const p = path.join(d, name); let st; try { st = statSync(p); } catch { continue; } if (st.isDirectory()) walk(p); else visit(p, st); } }; walk(dir); };
+const countFiles = dir => { let n = 0; walkFiles(dir, () => { n++; }); return n; };
 const sideEffects = () => ({ registry: digestOf(path.join(agentDir, "gjc-plugins", "registry.json")), settings: digestOf(path.join(home, ".gjc", "agent", "jev-advisor", "settings.env")), sessionFiles: countFiles(path.join(agentDir, "sessions")) });
+// The run nonce goes into the prompt, so a session file written by THIS child (despite --no-session)
+// can be told apart from files other live sessions on the same host write meanwhile.
+const runNonce = `jev-e2e-${randomUUID()}`;
+const runStartedAtMs = Date.now();
+const ownSessionFiles = () => {
+	const own = [];
+	walkFiles(path.join(agentDir, "sessions"), (file, st) => {
+		if (st.mtimeMs < runStartedAtMs - 1000 || st.size > 64 * 1024 * 1024) return;
+		try { if (readFileSync(file, "utf8").includes(runNonce)) own.push(path.relative(agentDir, file)); } catch { /* unreadable: not ours to judge */ }
+	});
+	return own;
+};
 const sideBefore = sideEffects();
 
 function lastToolOutput(data) {
@@ -128,7 +142,7 @@ const env = childEnv({ OPENAI_BASE_URL: `http://127.0.0.1:${server.address().por
 const startedAt = Date.now();
 const result = await new Promise(resolve => {
 	let stdout = ""; let stderr = "";
-	const child = spawn(launcher[0], [...launcher.slice(1), "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", toolNames.join(","), "Run the listed tools once each, as directed."], { cwd: os.tmpdir(), env, detached: true });
+	const child = spawn(launcher[0], [...launcher.slice(1), "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", toolNames.join(","), `Run the listed tools once each, as directed. (${runNonce})`], { cwd: os.tmpdir(), env, detached: true });
 	const timer = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 180000);
 	child.stdout.on("data", chunk => (stdout += chunk));
 	child.stderr.on("data", chunk => (stderr += chunk));
@@ -141,6 +155,7 @@ const telemetry = added("jev-telemetry", before.telemetry);
 const check = state.check ?? null;
 const healthLines = result.stderr.split("\n").filter(line => line.startsWith("jev-advisor health:"));
 const sideAfter = sideEffects();
+const ownSessions = ownSessionFiles();
 const rrsi = state.rrsi === undefined ? null : (() => { const text = String(state.rrsi); const status = /store_busy/.test(text) ? "store_busy" : /"status"\s*:\s*"(ok|unavailable|missing|invalid)"/.exec(text)?.[1] ?? "unparsed"; return { status, storeBusy: /store_busy/.test(text), excerpt: text.slice(0, 240) }; })();
 const report = {
 	schemaVersion: 1,
@@ -171,11 +186,13 @@ const report = {
 		registryUnchanged: sideBefore.registry !== null && sideBefore.registry === sideAfter.registry,
 		settingsPresent: sideBefore.settings !== null,
 		settingsUnchanged: sideBefore.settings === sideAfter.settings,
+		// Host-wide delta includes other live sessions; ownSessionFiles is the attributable count.
 		sessionFilesDelta: sideAfter.sessionFiles - sideBefore.sessionFiles,
+		ownSessionFiles: ownSessions.length,
 	},
 };
 console.log(JSON.stringify(report, null, 2));
-const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok" && report.sideEffects.registryUnchanged && report.sideEffects.settingsUnchanged && report.sideEffects.sessionFilesDelta === 0
+const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok" && report.sideEffects.registryUnchanged && report.sideEffects.settingsUnchanged && report.sideEffects.ownSessionFiles === 0
 	&& (!args.includes("--expect-settings") || report.sideEffects.settingsPresent)
 	&& (!args.includes("--rrsi-import") || rrsi?.status === "ok");
 if (!ok) console.error(`e2e-installed: not passed${result.code !== 0 ? `; gjc exit ${result.code}: ${result.stderr.slice(0, 300)}` : ""}`);
