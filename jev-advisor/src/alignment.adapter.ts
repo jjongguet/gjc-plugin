@@ -78,7 +78,8 @@ const alignmentDegradedRetries = new Map<string, number>();
  * never command text). It never blocks, rewrites or delays a call.
  */
 const ALIGNMENT_BRIDGE_MAX_NOTICES = 3;
-const ALIGNMENT_BRIDGE_SLOT = "gjc.jev-advisor.bash-bridge";
+/** Shared with the shutdown surface (a separate generated module in the same realm). */
+const ALIGNMENT_BRIDGE_SLOT = Symbol.for("gjc.jev-advisor.bash-bridge");
 const ALIGNMENT_BRIDGE_MAX_SESSIONS = 32;
 
 function alignmentBridgeEnabled(): boolean {
@@ -87,7 +88,7 @@ function alignmentBridgeEnabled(): boolean {
 
 /** Per-session coverage shared with the shutdown surface through one namespaced global slot. */
 function alignmentBridgeCoverage(sessionKey: string): BashCoverage {
-	const root = globalThis as Record<string, unknown>;
+	const root = globalThis as Record<symbol, unknown>;
 	let slot = root[ALIGNMENT_BRIDGE_SLOT] as Map<string, BashCoverage> | undefined;
 	if (!(slot instanceof Map)) { slot = new Map(); root[ALIGNMENT_BRIDGE_SLOT] = slot; }
 	let coverage = slot.get(sessionKey);

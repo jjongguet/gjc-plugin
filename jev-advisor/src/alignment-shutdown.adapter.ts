@@ -5,7 +5,7 @@ import { appendJournalStore, journalSessionKey, journalStoreBudgetMs, loadJourna
 
 /** The opt-in bash bridge's per-session counts (written by the before-tool surface). */
 function shutdownBridgeCoverage(ctx: unknown): BashCoverage | null {
-	const slot = (globalThis as Record<string, unknown>)["gjc.jev-advisor.bash-bridge"];
+	const slot = (globalThis as Record<symbol, unknown>)[Symbol.for("gjc.jev-advisor.bash-bridge")];
 	if (!(slot instanceof Map)) return null;
 	const key = journalSessionKey(ctx);
 	const coverage = slot.get(key) as BashCoverage | undefined;

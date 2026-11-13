@@ -77,7 +77,7 @@ test('a live owner is never reclaimed: own pid, foreign live child, EPERM pid 1,
   ] as const) {
     const { baseDir, journal, lockPath, guardPath } = await fixture();
     const before = await plantLock(baseDir, lockPath, body, 3_600_000);
-    const result = await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10, legacyStaleMs: 1 });
+    const result = await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10, legacyStaleMs: 1000 });
     expect({ label, ...result }).toEqual({ label, persisted: false, reason: 'store_busy', lock: { ageMs: expect.any(Number), owner } });
     expect(await fs.readFile(lockPath, 'utf8')).toBe(body);
     expect((await fs.lstat(lockPath)).ino).toBe(before.ino);
@@ -97,7 +97,9 @@ test('a young legacy lock and an old lock below the bound are contention, not st
 test('a legacy empty stale lock is reclaimed exactly once under concurrent in-process waiters', async () => {
   const { baseDir, journal, lockPath, guardPath } = await fixture();
   await plantLock(baseDir, lockPath, '', 3_600_000);
-  const results = await Promise.all(Array.from({ length: 6 }, (_, durationMs) => appendPluginOutcome('jev-advisor', { ...check, durationMs }, { baseDir, legacyStaleMs: 1 })));
+  // Default age bound: the planted lock is an hour old, while every successor lock is fresh, so a
+  // waiter can never judge a live successor's still-empty lock as legacy-stale.
+  const results = await Promise.all(Array.from({ length: 6 }, (_, durationMs) => appendPluginOutcome('jev-advisor', { ...check, durationMs }, { baseDir })));
   expect(results.some(result => result.persisted)).toBe(true);
   for (const result of results) expect(['stored', 'store_busy']).toContain(result.reason);
   expect(results.filter(result => result.reclaim === 'reclaimed').length).toBe(1);
@@ -109,7 +111,7 @@ test('a legacy empty stale lock is reclaimed exactly once under concurrent in-pr
 
 async function appendInChildren(baseDir: string, count: number) {
   const script = `import { appendPluginOutcome } from ${JSON.stringify(resultsModule)};\n` +
-    `const result = await appendPluginOutcome('jev-advisor', { operation: 'check', toolCallDigest: '${'b'.repeat(64)}', durationMs: Number(process.argv[2]), check: { status: 'no_decision', reason: 'unconfigured' } }, { baseDir: ${JSON.stringify(baseDir)}, legacyStaleMs: 1 });\n` +
+    `const result = await appendPluginOutcome('jev-advisor', { operation: 'check', toolCallDigest: '${'b'.repeat(64)}', durationMs: Number(process.argv[2]), check: { status: 'no_decision', reason: 'unconfigured' } }, { baseDir: ${JSON.stringify(baseDir)} });\n` +
     `process.stdout.write(JSON.stringify(result));\n`;
   const file = path.join(path.dirname(baseDir), 'child.ts');
   await fs.writeFile(file, script);
@@ -136,6 +138,38 @@ test('multi-process waiters reclaim a legacy stale lock and a dead-pid lock exac
   }
 });
 
+test('the legacy age bound cannot be set below one second', async () => {
+  const { baseDir } = await fixture();
+  for (const legacyStaleMs of [0, 1, 999]) expect(await appendPluginOutcome('jev-advisor', check, { baseDir, legacyStaleMs })).toEqual({ persisted: false, reason: 'invalid_limits' });
+  expect((await appendPluginOutcome('jev-advisor', check, { baseDir, legacyStaleMs: 1000 })).persisted).toBe(true);
+});
+
+test('a judged lock that its owner releases inside the guard is treated as free, not as a failure', async () => {
+  const { baseDir, journal, lockPath } = await fixture();
+  await plantLock(baseDir, lockPath, '', 3_600_000);
+  const original = fs.unlink;
+  let raced = false;
+  const spy = spyOn(fs, 'unlink').mockImplementation((async (...args: Parameters<typeof fs.unlink>) => {
+    if (!raced && String(args[0]) === lockPath) { raced = true; await original(lockPath); }
+    return original(...args);
+  }) as typeof fs.unlink);
+  let result;
+  try { result = await appendPluginOutcome('jev-advisor', check, { baseDir }); }
+  finally { spy.mockRestore(); }
+  expect(raced).toBe(true);
+  expect(result).toMatchObject({ persisted: true, reason: 'stored' });
+  expect(result.reclaim).toBeUndefined();
+  expect((await journalLines(journal)).length).toBe(2);
+});
+
+test('a leftover stale guard without a held lock is still visible to the read-only inspection', async () => {
+  const { baseDir, guardPath } = await fixture();
+  expect((await appendPluginOutcome('jev-advisor', check, { baseDir })).persisted).toBe(true);
+  await fs.writeFile(guardPath, meta(deadPid()), { mode: 0o600 });
+  expect(await inspectPluginOutcomeLock('jev-advisor', { baseDir })).toEqual({ status: 'none', guard: { ageMs: expect.any(Number), owner: 'dead', stale: true } });
+  expect(await missing(guardPath)).toBe(false);
+});
+
 test('a dead-pid lock is reclaimed immediately without waiting for the legacy age bound', async () => {
   const { baseDir, journal, lockPath } = await fixture();
   await plantLock(baseDir, lockPath, meta(deadPid()), 2_000);
@@ -149,7 +183,7 @@ test('a stale reclaim guard fails closed: no takeover, no reclaim, no second wri
   const lockBefore = await plantLock(baseDir, lockPath, '', 3_600_000);
   await fs.writeFile(guardPath, meta(deadPid()), { mode: 0o600 });
   const guardBefore = await fs.lstat(guardPath);
-  const local = await Promise.all(Array.from({ length: 4 }, () => appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10, legacyStaleMs: 1 })));
+  const local = await Promise.all(Array.from({ length: 4 }, () => appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10 })));
   const remote = await appendInChildren(baseDir, 3);
   for (const result of [...local, ...remote]) {
     expect(result).toMatchObject({ persisted: false, reason: 'store_busy', reclaim: 'blocked_guard', lock: { owner: 'unknown', guardOwner: 'dead', reclaimBlocked: true } });
@@ -178,7 +212,7 @@ test('a successor lock that replaces the judged stale lock before the guard is n
     return original(...args);
   }) as typeof fs.open);
   let result;
-  try { result = await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10, legacyStaleMs: 1 }); }
+  try { result = await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10 }); }
   finally { spy.mockRestore(); }
   expect(injected).toBe(true);
   expect(result).toMatchObject({ persisted: false, reason: 'store_busy', lock: { owner: 'live' } });
@@ -221,7 +255,7 @@ test('an unsafe stale lock fails closed and is never removed', async () => {
   const { baseDir, lockPath } = await fixture();
   await plantLock(baseDir, lockPath, '', 3_600_000);
   await fs.chmod(lockPath, 0o644);
-  expect(await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10, legacyStaleMs: 1 })).toEqual({ persisted: false, reason: 'unsafe_path' });
+  expect(await appendPluginOutcome('jev-advisor', check, { baseDir, lockTimeoutMs: 10 })).toEqual({ persisted: false, reason: 'unsafe_path' });
   expect(await missing(lockPath)).toBe(false);
 });
 

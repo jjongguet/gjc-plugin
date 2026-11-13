@@ -559,7 +559,8 @@ async function resultsObserveLock(file: string, legacyStaleMs: number): Promise<
   resultsPrivateFile(info);
   let text = '';
   let handle: ResultsFileHandle;
-  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW); }
+  // Non-blocking: a FIFO swapped in after the lstat must not hang the waiter.
+  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK); }
   catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
   try {
     const opened = await handle.stat();
@@ -605,9 +606,15 @@ async function resultsReclaimStaleLock(dir: string, lockPath: string, guardPath:
     if (!again) return { action: 'gone' };
     if (!again.stale || !resultsSameGeneration(observed.info, again.info)) return { action: 'live', report: again.report };
     await resultsCheckDirectories(directories);
-    const current = await resultsFs.lstat(lockPath);
-    if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
-    await resultsFs.unlink(lockPath);
+    try {
+      const current = await resultsFs.lstat(lockPath);
+      if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
+      await resultsFs.unlink(lockPath);
+    } catch (error) {
+      // The judged lock vanished on its own (its owner released it): the store is free.
+      if (resultsSafeMissing(error)) return { action: 'gone' };
+      throw error;
+    }
     await resultsSyncDirectory(dir, directories);
     return { action: 'reclaimed', report: again.report };
   } finally {
@@ -719,8 +726,10 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
   const maxSegmentBytes = deps.maxSegmentBytes ?? 1024 * 1024;
   const maxSegments = deps.maxSegments ?? 8;
   const lockTimeoutMs = deps.lockTimeoutMs ?? 100;
+  // Floor of one second: a just-created lock is empty until its metadata write lands, so an
+  // age bound shorter than that window could judge a live writer's fresh lock as legacy-stale.
   const legacyStaleMs = deps.legacyStaleMs ?? RESULTS_LEGACY_STALE_MS;
-  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
+  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1000 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
   const id = resultsUUID();
   const body = JSON.stringify({ schemaVersion: 1, plugin, id, observedAt: new Date().toISOString(), ...projected }) + '\n';
   const size = Buffer.byteLength(body);
@@ -913,14 +922,21 @@ async function resultsInspectLock(base: string, plugin: string): Promise<Results
   if (!guard) return lock.report;
   return { ...lock.report, guardAgeMs: guard.report.ageMs, guardOwner: guard.report.owner, ...(guard.stale ? { reclaimBlocked: true } : {}) };
 }
-export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo };
-/** Read-only lock observation for health reporting. Creates, repairs and deletes nothing. */
+export type ResultsGuardInfo = { ageMs: number; owner: ResultsLockOwner; stale: boolean };
+export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo; guard?: ResultsGuardInfo };
+/**
+ * Read-only lock observation for health reporting. Creates, repairs and deletes nothing. A reclaim
+ * guard is reported even without a held lock, because a leftover stale guard will block the next
+ * reclaim and is the operator's to clear.
+ */
 export async function inspectPluginOutcomeLock(plugin: ResultsPlugin, deps: ResultsSnapshotDependencies = {}): Promise<ResultsLockInspection> {
   try {
     resultsEnum(plugin, resultsPlugins);
     const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
     const lock = await resultsInspectLock(base, plugin);
-    return lock ? { status: 'held', lock } : { status: 'none' };
+    const held = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS);
+    const guard = held ? { guard: { ageMs: held.report.ageMs, owner: held.report.owner, stale: held.stale } } : {};
+    return lock ? { status: 'held', lock, ...guard } : { status: 'none', ...guard };
   } catch { return { status: 'unavailable' }; }
 }
 /**
@@ -1212,13 +1228,50 @@ export const SETTINGS_KEYS = [
 	"JEV_ADVISOR_MEMORY_MAX_EVENTS",
 ] as const;
 const SHARED_ENV_MAX_BYTES = 16 * 1024;
+const CONFIG_FILE_MAX_BYTES = 64 * 1024;
+
+type ConfigFileRead = { status: "read"; text: string } | { status: "absent" | "unsafe" | "unreadable" };
+/**
+ * Bounded read of one configuration file. The open is non-blocking and never follows a symlink,
+ * so a FIFO or device in place of the file cannot hang session start or a tool call; anything
+ * but a regular file within maxBytes (and, when ownerOnly, owned by this uid without group/other
+ * bits) is refused before a byte is read.
+ */
+function readConfigFile(file: string, maxBytes: number, ownerOnly: boolean): ConfigFileRead {
+	let fd: number;
+	try {
+		fd = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+	} catch (error) {
+		const code = (error as NodeJS.ErrnoException).code;
+		return { status: code === "ENOENT" ? "absent" : code === "ELOOP" ? "unsafe" : "unreadable" };
+	}
+	try {
+		const info = fstatSync(fd);
+		if (!info.isFile() || info.size > maxBytes) return { status: "unsafe" };
+		if (ownerOnly && (info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0)) return { status: "unsafe" };
+		const buffer = Buffer.alloc(info.size);
+		let offset = 0;
+		while (offset < buffer.length) {
+			const read = readSync(fd, buffer, offset, buffer.length - offset, offset);
+			if (!read) break;
+			offset += read;
+		}
+		return { status: "read", text: buffer.subarray(0, offset).toString("utf8") };
+	} catch {
+		return { status: "unreadable" };
+	} finally {
+		closeSync(fd);
+	}
+}
 
 function loadSettingsEnv(): Env {
-	try {
-		return parseEnvFile(readFileSync(pluginSettingsFile(), "utf8"));
-	} catch {
-		return {};
-	}
+	const read = readConfigFile(pluginSettingsFile(), CONFIG_FILE_MAX_BYTES, false);
+	return read.status === "read" ? parseEnvFile(read.text) : {};
+}
+
+/** Read state of the tracked settings file, reported by describe-config so an absent baseline is visible. */
+export function settingsFileStatus(file = pluginSettingsFile()): "read" | "absent" | "unsafe" | "unreadable" {
+	return readConfigFile(file, CONFIG_FILE_MAX_BYTES, false).status;
 }
 
 export type SharedEnvStatus = "read" | "absent" | "unsafe" | "unreadable" | "not_needed";
@@ -1228,32 +1281,12 @@ export type SharedEnvStatus = "read" | "absent" | "unsafe" | "unreadable" | "not
  * is skipped, never repaired. Values of other keys are discarded immediately.
  */
 export function readSharedCredentials(names: readonly string[], file = sharedEnvFile()): { status: SharedEnvStatus; env: Env } {
-	let fd: number;
-	try {
-		fd = openSync(file, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW);
-	} catch (error) {
-		const code = (error as NodeJS.ErrnoException).code;
-		return { status: code === "ENOENT" ? "absent" : code === "ELOOP" ? "unsafe" : "unreadable", env: {} };
-	}
-	try {
-		const info = fstatSync(fd);
-		if (!info.isFile() || info.uid !== process.getuid?.() || (info.mode & 0o077) !== 0 || info.size > SHARED_ENV_MAX_BYTES) return { status: "unsafe", env: {} };
-		const buffer = Buffer.alloc(info.size);
-		let offset = 0;
-		while (offset < buffer.length) {
-			const read = readSync(fd, buffer, offset, buffer.length - offset, offset);
-			if (!read) break;
-			offset += read;
-		}
-		const parsed = parseEnvFile(buffer.subarray(0, offset).toString("utf8"));
-		const env: Env = {};
-		for (const name of names) if (parsed[name]) env[name] = parsed[name];
-		return { status: "read", env };
-	} catch {
-		return { status: "unreadable", env: {} };
-	} finally {
-		closeSync(fd);
-	}
+	const read = readConfigFile(file, SHARED_ENV_MAX_BYTES, true);
+	if (read.status !== "read") return { status: read.status, env: {} };
+	const parsed = parseEnvFile(read.text);
+	const env: Env = {};
+	for (const name of names) if (parsed[name]) env[name] = parsed[name];
+	return { status: "read", env };
 }
 
 /** Result-state base; the v2 store is derived without reading or migrating legacy data. */
@@ -1270,11 +1303,8 @@ export function version2StateFile(base: string): string {
 }
 
 function loadPluginEnv(): Env {
-	try {
-		return parseEnvFile(readFileSync(pluginEnvFile(), "utf8"));
-	} catch {
-		return {};
-	}
+	const read = readConfigFile(pluginEnvFile(), CONFIG_FILE_MAX_BYTES, false);
+	return read.status === "read" ? parseEnvFile(read.text) : {};
 }
 
 const CHECK_CRITERIA: Record<CheckVerdict, string> = {
@@ -1551,6 +1581,8 @@ export interface EffectiveConfig {
 	configured: boolean;
 	credentialSource: CredentialSource;
 	sharedEnvStatus: SharedEnvStatus;
+	/** State of ~/.gjc/agent/jev-advisor/settings.env (the tracked baseline). */
+	settingsStatus: "read" | "absent" | "unsafe" | "unreadable";
 	layersUsed: string[];
 	settingsIgnoredKeys: string[];
 }
@@ -1561,6 +1593,7 @@ export function describeEffectiveConfig(
 	fileEnv: Env = loadPluginEnv(),
 	settingsEnv: Env = loadSettingsEnv(),
 	sharedCredentials: SharedCredentialLoader = names => readSharedCredentials(names),
+	settingsState: EffectiveConfig["settingsStatus"] = settingsFileStatus(),
 ): EffectiveConfig {
 	const resolved = resolveConfig(env, fileEnv, settingsEnv, sharedCredentials);
 	const cfg = resolved.config;
@@ -1573,6 +1606,7 @@ export function describeEffectiveConfig(
 		configured: isConfigured(cfg),
 		credentialSource: cfg.credentialSource,
 		sharedEnvStatus: resolved.sharedEnvStatus,
+		settingsStatus: settingsState,
 		layersUsed: resolved.layersUsed,
 		settingsIgnoredKeys: resolved.settingsIgnoredKeys,
 	};
@@ -3007,7 +3041,8 @@ export interface TelemetryMetrics {
 	byStatus: MetricsFrequency; byReason: MetricsFrequency;
 	byProvider: MetricsFrequency; byModel: MetricsFrequency; byHttpStatus: MetricsFrequency;
 	latencyMs: MetricsDuration;
-	sessions: { distinct: number };
+	/** truncated: the journal is at its retained-segment bound, so older sessions may be gone. */
+	sessions: { distinct: number; truncated: boolean };
 	/** Sums are null unless at least one record carried provider-reported usage. */
 	usage: { records: number; measured: number; promptTokens: number | null; completionTokens: number | null; totalTokens: number | null; costMicroUsd: number | null };
 }
@@ -3017,7 +3052,7 @@ export function aggregateTelemetryMetrics(records: Record<string, unknown>[], ch
 		records: 0, joined: checkDigests ? 0 : null, unjoined: checkDigests ? 0 : null,
 		byStatus: metricsFreq(), byReason: metricsFreq(), byProvider: metricsFreq(), byModel: metricsFreq(), byHttpStatus: metricsFreq(),
 		latencyMs: metricsDuration(),
-		sessions: { distinct: 0 },
+		sessions: { distinct: 0, truncated: false },
 		usage: { records: 0, measured: 0, promptTokens: null, completionTokens: null, totalTokens: null, costMicroUsd: null },
 	};
 	const sessions = new Set<string>();
@@ -3446,6 +3481,7 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 	const telemetryStartedAt = new Date();
 	const telemetrySnapshot = await readPluginOutcomeSnapshot("jev-telemetry");
 	const telemetrySource = aggregateJournalSnapshot(telemetrySnapshot, records => aggregateTelemetryMetrics(records, checkDigests));
+	if (telemetrySource.metrics) telemetrySource.metrics.sessions.truncated = telemetrySnapshot.segments >= 8;
 	const telemetry = journalSourceEnvelope(telemetryStartedAt, new Date(), telemetrySource.snapshot, telemetrySource.metrics);
 	const stateStartedAt = new Date();
 	const stateRead = readEvidenceV2(version2StateFile(pluginStateFile()));
@@ -3467,7 +3503,11 @@ export async function buildPluginMetricsReport(): Promise<PluginMetricsReport> {
 	const limitations: string[] = [...METRICS_BASE_LIMITATIONS];
 	if (statuses.includes("missing")) limitations.push("source_missing");
 	if (statuses.includes("unavailable")) limitations.push("source_unavailable");
-	limitations.push("telemetry_usage_only_when_provider_reports_it", "report_scope_vs_record_scope");
+	// The telemetry journal is reported beside the four historical sources; its own state is a
+	// limitation rather than a change to the envelope status those sources define.
+	if (telemetry.status === "missing") limitations.push("telemetry_source_missing");
+	if (telemetry.status === "unavailable") limitations.push("telemetry_source_unavailable");
+	limitations.push("telemetry_usage_only_when_provider_reports_it", "telemetry_join_limited_by_independent_retention", "report_scope_vs_record_scope");
 	return {
 		schemaVersion: 1,
 		report: "plugin_metrics",
@@ -3499,6 +3539,8 @@ const HEALTH_RECENT_CHECKS = 20;
 export function buildHealthLine(input: {
 	config: EffectiveConfig;
 	snapshot: { status: string; reason: string | null; records: Record<string, unknown>[]; lock?: ResultsLockInfo };
+	/** A reclaim guard observed without mutation; a stale one blocks the next automatic reclaim. */
+	guard?: { ageMs: number; owner: string; stale: boolean };
 	bridgeEnabled?: boolean;
 }): string | null {
 	const parts: string[] = [];
@@ -3514,6 +3556,7 @@ export function buildHealthLine(input: {
 		else if (snapshot.reason === "store_busy" && lock && (lock.owner !== "live" || lock.ageMs >= 60_000)) parts.push(`journal store_busy (lockAgeMs=${lock.ageMs}, owner=${lock.owner})`);
 		else if (snapshot.reason !== "store_busy") parts.push(`journal ${snapshot.reason ?? "unavailable"}`);
 	}
+	if (input.guard?.stale && !snapshot.lock?.reclaimBlocked) parts.push(`reclaim guard left (guardAgeMs=${input.guard.ageMs}, guardOwner=${input.guard.owner})`);
 	if (snapshot.status === "ok") {
 		const checks = snapshot.records.filter(record => record.operation === "check" && isRecord(record.check)).slice(-HEALTH_RECENT_CHECKS);
 		const failed = checks.filter(record => (record.check as Record<string, unknown>).status === "no_decision");
@@ -3536,8 +3579,8 @@ export function buildHealthLine(input: {
 export async function collectHealthLine(env: Env = (globalThis as { process?: { env: Env } }).process?.env ?? {}): Promise<string | null> {
 	const config = describeEffectiveConfig(env);
 	const snapshot = await readPluginOutcomeSnapshot("jev-advisor");
-	const lock = snapshot.lock ?? (snapshot.status === "unavailable" && snapshot.reason === "store_busy" ? (await inspectPluginOutcomeLock("jev-advisor")).lock : undefined);
-	return buildHealthLine({ config, snapshot: { ...snapshot, ...(lock ? { lock } : {}) }, bridgeEnabled: env.JEV_BASH_BRIDGE === "1" });
+	const inspection = await inspectPluginOutcomeLock("jev-advisor");
+	return buildHealthLine({ config, snapshot, guard: inspection.guard, bridgeEnabled: env.JEV_BASH_BRIDGE === "1" });
 }
 
 export function readSessionId(ctx: unknown): string | null {

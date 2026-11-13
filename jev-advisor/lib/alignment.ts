@@ -918,7 +918,7 @@ export async function withDeadline<T>(work: Promise<T>, ms: number, fallback: T)
  * blocks, rewrites or stores the command.
  */
 export const DESTRUCTIVE_BASH_PATTERNS: readonly { id: string; pattern: RegExp }[] = [
-	{ id: "rm_recursive_force", pattern: /\brm\s+(?:-[A-Za-z]*(?:r[A-Za-z]*f|f[A-Za-z]*r)[A-Za-z]*|-[A-Za-z]*[rR][A-Za-z]*\s+-[A-Za-z]*f[A-Za-z]*|-[A-Za-z]*f[A-Za-z]*\s+-[A-Za-z]*[rR][A-Za-z]*|--recursive\b[^\n;|&]*--force\b|--force\b[^\n;|&]*--recursive\b)/ },
+	{ id: "rm_recursive_force", pattern: /\brm\s+(?:-[A-Za-z]{0,8}[rR][A-Za-z]{0,8}f|-[A-Za-z]{0,8}f[A-Za-z]{0,8}[rR]|-[A-Za-z]{0,8}[rR][A-Za-z]{0,8}\s+-[A-Za-z]{0,8}f|-[A-Za-z]{0,8}f[A-Za-z]{0,8}\s+-[A-Za-z]{0,8}[rR]|--recursive\s+(?:\S+\s+){0,4}--force\b|--force\s+(?:\S+\s+){0,4}--recursive\b)/ },
 	{ id: "git_force_push", pattern: /\bgit\s+push\b[^\n;|&]*(?:\s--force(?:-with-lease)?\b|\s-f\b|\s\+\S+)/ },
 	{ id: "git_branch_delete", pattern: /\bgit\s+(?:branch\s+(?:-[A-Za-z]*[dD]\b|--delete\b)|push\b[^\n;|&]*\s(?:--delete\b|:[^\s]+))/ },
 	{ id: "git_worktree_remove", pattern: /\bgit\s+worktree\s+(?:remove|prune)\b/ },
@@ -931,7 +931,8 @@ export const DESTRUCTIVE_BASH_PATTERNS: readonly { id: string; pattern: RegExp }
 /** Pattern ids matched by one bash command, in table order; [] for non-strings. */
 export function detectDestructiveBash(command: unknown): string[] {
 	if (typeof command !== "string" || !command) return [];
-	const text = command.length > 16384 ? command.slice(0, 16384) : command;
+	// Bounded input and bounded quantifiers keep detection linear on the tool-call path.
+	const text = command.length > 4096 ? command.slice(0, 4096) : command;
 	return DESTRUCTIVE_BASH_PATTERNS.filter(entry => entry.pattern.test(text)).map(entry => entry.id);
 }
 

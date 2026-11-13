@@ -2183,7 +2183,7 @@ async function runSuite(root: string) {
 		assert.equal(result.correlation.status, "missing"); assert.equal(result.correlation.metrics, null);
 		assert.equal(result.correlation.window, "retained_v2_metadata");
 		assert.ok(result.limitations.slice(0, 18).join(",") === "retained_not_lifetime,unrecorded_invocations_unknown,independent_source_snapshots,wall_clock_not_event_authority,run_observations_not_unique_executions,status_not_reexecution,terminal_sightings_not_unique_jobs,correlation_window_independent,unknown_identity_and_unobserved_terminals,receipt_duration_excludes_storage_assessment_journal,hook_duration_excludes_journal,provider_assessment_latency_unmeasured,end_to_end_and_isolated_overhead_unmeasured,historical_version_unidentified,smoke_real_workload_unidentified,counts_not_coverage,assessment_not_quality,causal_effect_unmeasured");
-		assert.deepEqual(result.limitations.slice(18), ["source_missing", "telemetry_usage_only_when_provider_reports_it", "report_scope_vs_record_scope"]);
+		assert.deepEqual(result.limitations.slice(18), ["source_missing", "telemetry_source_missing", "telemetry_usage_only_when_provider_reports_it", "telemetry_join_limited_by_independent_retention", "report_scope_vs_record_scope"]);
 		assert.equal(result.telemetry.status, "missing"); assert.equal(result.telemetry.metrics, null);
 		assert.equal(result.jevLock, undefined);
 		for (const key of ["pluginOverheadMs", "providerLatencyMs", "assessmentLatencyMs", "endToEndInvocationMs", "providerCost", "tokenUsage", "quality", "accuracy", "causalRoi"]) assert.equal(result.unavailableMeasures[key], null);
@@ -2655,8 +2655,9 @@ async function runSuite(root: string) {
 		assert.deepEqual([c.mode, c.minConfidence, c.minIntervalMs, c.apiKey, c.endpoint], ["hint", 0.8, 0, "", core.PROVIDERS.jev.endpoint], "settings.env supplies only allowlisted non-secret keys");
 		c = core.readConfig({ JEV_ADVISOR_MODE: "shadow" }, { JEV_ADVISOR_MIN_CONFIDENCE: "0.7" }, settings, sharedLayer({}));
 		assert.deepEqual([c.mode, c.minConfidence, c.minIntervalMs], ["shadow", 0.7, 0], "upper layers win per key");
-		const described = core.describeEffectiveConfig({}, {}, settings, sharedLayer({ OPENROUTER_API_KEY: runtimeCanary }));
-		assert.deepEqual(described, { provider: "jev", model: "typesafe/jev-1.14", mode: "hint", minConfidence: 0.8, minIntervalMs: 0, configured: true, credentialSource: "shared_env", sharedEnvStatus: "read", layersUsed: ["settings", "shared_env"], settingsIgnoredKeys: ["JEV_ADVISOR_ENDPOINT", "OPENROUTER_API_KEY"] });
+		const described = core.describeEffectiveConfig({}, {}, settings, sharedLayer({ OPENROUTER_API_KEY: runtimeCanary }), "read");
+		assert.deepEqual(described, { provider: "jev", model: "typesafe/jev-1.14", mode: "hint", minConfidence: 0.8, minIntervalMs: 0, configured: true, credentialSource: "shared_env", sharedEnvStatus: "read", settingsStatus: "read", layersUsed: ["settings", "shared_env"], settingsIgnoredKeys: ["JEV_ADVISOR_ENDPOINT", "OPENROUTER_API_KEY"] });
+		assert.equal(core.describeEffectiveConfig({}, {}, {}, sharedLayer({})).settingsStatus, "absent", "a missing tracked baseline is visible");
 		assert.ok(!JSON.stringify(described).includes(runtimeCanary), "describe-config never carries a credential value");
 	});
 	await check("JJO-2327 shared credential file is read only when owner-only, regular and small, and only for allowlisted names", () => {
@@ -2675,6 +2676,14 @@ async function runSuite(root: string) {
 		const big = path.join(dir, "big.env"); writeFileSync(big, "X=" + "y".repeat(17 * 1024), { mode: 0o600 });
 		assert.equal(core.readSharedCredentials(names, big).status, "unsafe");
 		assert.equal(core.readSharedCredentials(names, path.join(dir, "absent.env")).status, "absent");
+		// A FIFO without a writer must be refused without blocking (Codex review, PR #65).
+		const fifo = path.join(dir, "fifo.env");
+		assert.equal(spawnSync("mkfifo", ["-m", "600", fifo]).status, 0);
+		const started = performance.now();
+		assert.deepEqual(core.readSharedCredentials(names, fifo), { status: "unsafe", env: {} });
+		assert.ok(performance.now() - started < 1000, "a writer-less FIFO never blocks the read");
+		const describedFifo = core.describeEffectiveConfig({}, {}, {}, (list: readonly string[]) => core.readSharedCredentials(list, fifo));
+		assert.deepEqual([describedFifo.configured, describedFifo.sharedEnvStatus], [false, "unsafe"]);
 	});
 	const metricsSurface = () => (async () => (await import(pathToFileURL(path.join(plugin, "tools/plugin-metrics.ts")).href)).default({ typebox: { Type: { Object: (x: any) => x, String: (x: any) => x, Optional: (x: any) => x, Array: (x: any) => x } } }))();
 	await check("JJO-2327 jev_check journals a released-decoder-compatible record plus a joined jev-telemetry record", async () => {
@@ -2708,8 +2717,12 @@ async function runSuite(root: string) {
 		assert.deepEqual([tele.records[2].check.httpStatus, tele.records[2].check.reason], [503, "provider_error"]);
 		const metrics = JSON.parse(text(await (await metricsSurface()).execute("tele-metrics", {})));
 		assert.equal(metrics.telemetry.status, "ok");
-		assert.deepEqual({ records: metrics.telemetry.metrics.records, joined: metrics.telemetry.metrics.joined, unjoined: metrics.telemetry.metrics.unjoined, byProvider: metrics.telemetry.metrics.byProvider, byHttpStatus: metrics.telemetry.metrics.byHttpStatus, sessions: metrics.telemetry.metrics.sessions, measured: metrics.telemetry.metrics.latencyMs.measured }, { records: 3, joined: 3, unjoined: 0, byProvider: { jev: 3 }, byHttpStatus: { 503: 1 }, sessions: { distinct: 1 }, measured: 3 });
+		assert.deepEqual({ records: metrics.telemetry.metrics.records, joined: metrics.telemetry.metrics.joined, unjoined: metrics.telemetry.metrics.unjoined, byProvider: metrics.telemetry.metrics.byProvider, byHttpStatus: metrics.telemetry.metrics.byHttpStatus, sessions: metrics.telemetry.metrics.sessions, measured: metrics.telemetry.metrics.latencyMs.measured }, { records: 3, joined: 3, unjoined: 0, byProvider: { jev: 3 }, byHttpStatus: { 503: 1 }, sessions: { distinct: 1, truncated: false }, measured: 3 });
 		assert.deepEqual(metrics.telemetry.metrics.usage, { records: 1, measured: 1, promptTokens: 1200, completionTokens: 3, totalTokens: 1203, costMicroUsd: 50 });
+		assert.equal(metrics.telemetry.metrics.sessions.truncated, false);
+		assert.ok(!metrics.limitations.includes("telemetry_source_missing") && !metrics.limitations.includes("telemetry_source_unavailable"));
+		assert.deepEqual(core.aggregateTelemetryMetrics([{ operation: "check", toolCallDigest: "a".repeat(64), durationMs: 1, check: { status: "decision", provider: "jev" } }], null).usage, { records: 0, measured: 0, promptTokens: null, completionTokens: null, totalTokens: null, costMicroUsd: null }, "no reported usage keeps sums null, never zero");
+		assert.deepEqual([core.aggregateTelemetryMetrics([], null).joined, core.aggregateTelemetryMetrics([], null).unjoined], [null, null], "an unreadable legacy journal makes the join unknown");
 		assert.ok(!JSON.stringify([first, second, third, metrics]).includes("synthetic-key"));
 	});
 	await check("JJO-2327 a telemetry storage failure never fails the check or its legacy record", async () => {
@@ -2723,6 +2736,9 @@ async function runSuite(root: string) {
 		assert.equal(out.journalStorage.persisted, true);
 		assert.equal(out.telemetryStorage.persisted, false);
 		assert.equal(journalRecords().length, 1);
+		const metrics = JSON.parse(text(await (await metricsSurface()).execute("tele-fail-metrics", {})));
+		assert.equal(metrics.telemetry.status, "unavailable");
+		assert.ok(metrics.limitations.includes("telemetry_source_unavailable"), "a telemetry-only failure is a named limitation");
 	});
 	const sessionStartModule = await import(pathToFileURL(path.join(plugin, "hooks/jev-advisor-session-start.ts")).href);
 	const healthHook = (warnings: string[] = []) => { let handler: any; sessionStartModule.default({ on: (event: string, fn: any) => { assert.equal(event, "session_start"); handler = fn; }, logger: { warn: (message: string) => warnings.push(message) } }); return handler; };
@@ -2745,6 +2761,26 @@ async function runSuite(root: string) {
 			const busy = await healthRun();
 			assert.equal(busy.length, 1); assert.match(busy[0], /journal store_busy \(lockAgeMs=\d+, owner=unknown\)/);
 			assert.ok(existsSync(lock), "the health line never reclaims a lock");
+			const metricsBusy = JSON.parse(text(await (await metricsSurface()).execute("busy-metrics", {})));
+			assert.deepEqual(metricsBusy.jevLock, { ageMs: metricsBusy.jevLock.ageMs, owner: "unknown" }, "plugin_metrics reports the held jev lock");
+			const guard = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "journal", ".append.reclaim.lock");
+			writeFileSync(guard, JSON.stringify({ v: 1, pid: 2_147_483_000, host: os.hostname(), createdAt: 0, nonce: "00000000-0000-4000-8000-000000000000" }), { mode: 0o600 });
+			const blocked = await healthRun();
+			assert.equal(blocked.length, 1); assert.match(blocked[0], /^jev-advisor health: reclaim_blocked \(lockAgeMs=\d+, owner=unknown, guardAgeMs=\d+, guardOwner=dead\)$/);
+			rmSync(lock);
+			const guardOnly = await healthRun();
+			assert.equal(guardOnly.length, 1); assert.match(guardOnly[0], /reclaim guard left \(guardAgeMs=\d+, guardOwner=dead\)/);
+			rmSync(guard);
+			writeFileSync(lock, JSON.stringify({ v: 1, pid: process.pid, host: os.hostname(), createdAt: Date.now(), nonce: "00000000-0000-4000-8000-000000000000" }), { mode: 0o600 });
+			assert.deepEqual(await healthRun(), [], "a young lock held by a live owner is ordinary contention: silent");
+			rmSync(lock);
+			const inventory = path.join(process.env.HOME!, ".gjc-plugin", "jev-advisor", "journal", "v1", "inventory.json");
+			const savedInventory = readFileSync(inventory);
+			writeFileSync(inventory, "{not json", { mode: 0o600 });
+			assert.deepEqual(await healthRun(), ["jev-advisor health: journal store_corrupt"]);
+			writeFileSync(inventory, savedInventory, { mode: 0o600 });
+			writeFileSync(lock, "", { mode: 0o600 });
+			fs.utimesSync(lock, old, old);
 			process.env.JEV_HEALTH_LINE = "off";
 			assert.deepEqual(await healthRun(), []);
 			process.env.JEV_HEALTH_LINE = "stderr";

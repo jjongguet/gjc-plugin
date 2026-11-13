@@ -43,7 +43,7 @@ Advisory only by default. The plugin has four surfaces:
    correlation state is untouched. A verdict is an advisory decision-model
    opinion — not verification evidence, correctness proof or acceptance of
    quality.
-4. **`plugin_metrics` tool**: read-only offline aggregate of all three plugins'
+4. **`plugin_metrics` tool**: read-only offline aggregate (including the jev-telemetry join) of all three plugins'
    retained journals and Jev's retained v2 correlation state. Accepts exactly
    `{}` — no paths, filters or config. Never writes, locks, repairs, loads
    credentials or uses the network, and appends no journal record of its own.
@@ -69,6 +69,8 @@ outcomes are never injected into advisories and no `prior` suffix exists in v2.
 | `JEV_ADVISOR_TIMEOUT_MS` | `8000` | decision request timeout |
 | `JEV_ADVISOR_MIN_INTERVAL_MS` | `15000` | rate limit between advisory calls |
 | `JEV_ADVISOR_ENDPOINT` | per provider | override endpoint (code-enforced allowlist: HTTPS origins `openrouter.ai`, `api.typesafe.ai`, plus loopback HTTP for local servers; everything else is refused, no request leaves the machine) |
+| `JEV_HEALTH_LINE` | `notify` | session_start health line: `off`, `notify`, `stderr`; silent when healthy, no provider call |
+| `JEV_BASH_BRIDGE` | unset (off) | `1` enables the advisory destructive-bash bridge (≤3 notices/session, `bash_coverage` counts; silent when `JEV_ALIGNMENT_MODE=off`) |
 | `JEV_ADVISOR_MEMORY` | `on` | disables correlation-state writes, not sanitized outcome journaling; previous outcomes are never injected |
 
 `JEV_ADVISOR_STATE` is retired and ignored with `state_override_ignored`;

@@ -35,7 +35,7 @@ and confidence is not a probability of task success.
   state is untouched. A verdict is an advisory decision-model opinion, not
   verification evidence, correctness proof or acceptance of quality.
 - **`plugin_metrics`:** explicitly request one offline descriptive aggregate of
-  all three plugins' retained journals and Jev's retained v2 correlation state.
+  all three plugins' retained journals, the jev-telemetry journal and Jev's retained v2 correlation state.
   Accepts exactly `{}`; strictly read-only — creates nothing, appends nothing,
   acquires no lock, performs no repair, loads no credentials and uses no
   network, and appends no journal record of its own. Missing sources are not

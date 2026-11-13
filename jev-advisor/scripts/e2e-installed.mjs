@@ -9,13 +9,14 @@
 // from the plugin's layered resolution; `--describe-config` prints the installed resolution
 // (names and layers, never values) under that same environment without calling anything.
 //
-//   JEV_E2E_REAL=1 bun jev-advisor/scripts/e2e-installed.mjs [--agent-dir DIR] [--gjc CMD...] [--health stderr]
+//   JEV_E2E_REAL=1 bun jev-advisor/scripts/e2e-installed.mjs [--agent-dir DIR] [--gjc CMD...] [--health stderr] [--rrsi-import]
 //   bun jev-advisor/scripts/e2e-installed.mjs --describe-config [--agent-dir DIR] [--env K=V ...]
 //
 // --gjc takes the launcher as one string split on spaces, e.g. "bun /path/gjc.js" for a pinned
 // gateway runtime. Exit: 0 decision observed, 1 check failed, 2 refused or prerequisite missing.
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
@@ -56,6 +57,11 @@ const journalLines = plugin => {
 	return readdirSync(dir).filter(name => name.endsWith(".jsonl")).sort().flatMap(name => readFileSync(path.join(dir, name), "utf8").split("\n").filter(Boolean));
 };
 const before = { legacy: new Set(journalLines("jev-advisor")), telemetry: new Set(journalLines("jev-telemetry")) };
+// Side-effect snapshot: installed registry, tracked settings baseline and session store size.
+const digestOf = file => { try { return createHash("sha256").update(readFileSync(file)).digest("hex").slice(0, 16); } catch { return null; } };
+const countFiles = dir => { let n = 0; const walk = d => { let names; try { names = readdirSync(d); } catch { return; } for (const name of names) { const p = path.join(d, name); let st; try { st = statSync(p); } catch { continue; } if (st.isDirectory()) walk(p); else n++; } }; walk(dir); return n; };
+const sideEffects = () => ({ registry: digestOf(path.join(agentDir, "gjc-plugins", "registry.json")), settings: digestOf(path.join(home, ".gjc", "agent", "jev-advisor", "settings.env")), sessionFiles: countFiles(path.join(agentDir, "sessions")) });
+const sideBefore = sideEffects();
 
 function lastToolOutput(data) {
 	const items = [...(data.messages ?? data.input ?? [])].reverse();
@@ -70,7 +76,9 @@ const state = { step: 0 };
 const plan = [
 	{ name: "jev_check", arguments: { question: "Does the artifact state that two plus two equals four?", artifact: "Arithmetic note: 2 + 2 = 4." } },
 	{ name: "plugin_metrics", arguments: {} },
+	...(args.includes("--rrsi-import") ? [{ name: "rrsi", arguments: { action: "import" } }] : []),
 ];
+const toolNames = plan.map(call => call.name);
 const server = http.createServer(async (req, res) => {
 	try {
 		if (req.method === "GET" && req.url === "/v1/models") { res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify({ object: "list", data: [{ id: "gpt-4o", object: "model", owned_by: "local" }] })); return; }
@@ -79,9 +87,10 @@ const server = http.createServer(async (req, res) => {
 		const data = JSON.parse(body);
 		if (state.step === 0) {
 			const offered = (data.tools ?? []).map(tool => tool.function?.name ?? tool.name);
-			for (const name of ["jev_check", "plugin_metrics"]) if (!offered.includes(name)) throw new Error(`${name} not offered`);
+			for (const name of toolNames) if (!offered.includes(name)) throw new Error(`${name} not offered`);
 		} else if (state.step === 1) state.check = firstJson(lastToolOutput(data));
 		else if (state.step === 2) state.metrics = firstJson(lastToolOutput(data));
+		else if (state.step === 3) state.rrsi = lastToolOutput(data);
 		const call = plan[state.step];
 		const id = `e2e_${state.step}`;
 		state.step += 1;
@@ -115,7 +124,7 @@ const env = childEnv({ OPENAI_BASE_URL: `http://127.0.0.1:${server.address().por
 const startedAt = Date.now();
 const result = await new Promise(resolve => {
 	let stdout = ""; let stderr = "";
-	const child = spawn(launcher[0], [...launcher.slice(1), "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", "jev_check,plugin_metrics", "Run jev_check once, then plugin_metrics, as directed."], { cwd: os.tmpdir(), env, detached: true });
+	const child = spawn(launcher[0], [...launcher.slice(1), "--print", "--no-session", "--no-title", "--no-mcp", "--no-lsp", "--no-pty", "--model", "openai/gpt-4o", "--thinking", "off", "--tools", toolNames.join(","), "Run the listed tools once each, as directed."], { cwd: os.tmpdir(), env, detached: true });
 	const timer = setTimeout(() => { try { process.kill(-child.pid, "SIGKILL"); } catch {} }, 180000);
 	child.stdout.on("data", chunk => (stdout += chunk));
 	child.stderr.on("data", chunk => (stderr += chunk));
@@ -127,6 +136,8 @@ const legacy = added("jev-advisor", before.legacy).filter(record => record.opera
 const telemetry = added("jev-telemetry", before.telemetry);
 const check = state.check ?? null;
 const healthLines = result.stderr.split("\n").filter(line => line.startsWith("jev-advisor health:"));
+const sideAfter = sideEffects();
+const rrsi = state.rrsi === undefined ? null : (() => { const text = String(state.rrsi); const status = /store_busy/.test(text) ? "store_busy" : /"status"\s*:\s*"(ok|unavailable|missing|invalid)"/.exec(text)?.[1] ?? "unparsed"; return { status, storeBusy: /store_busy/.test(text), excerpt: text.slice(0, 240) }; })();
 const report = {
 	schemaVersion: 1,
 	kind: "jev-advisor-installed-e2e",
@@ -148,8 +159,10 @@ const report = {
 	},
 	metrics: state.metrics && { status: state.metrics.status, jevAdvisor: state.metrics.plugins?.["jev-advisor"]?.status ?? null, telemetry: state.metrics.telemetry && { status: state.metrics.telemetry.status, records: state.metrics.telemetry.metrics?.records ?? null, joined: state.metrics.telemetry.metrics?.joined ?? null, usage: state.metrics.telemetry.metrics?.usage ?? null, byProvider: state.metrics.telemetry.metrics?.byProvider ?? null }, jevLock: state.metrics.jevLock ?? null },
 	healthLines,
+	rrsi: rrsi ?? { skipped: "rrsi import not requested (--rrsi-import)" },
+	sideEffects: { before: sideBefore, after: sideAfter, registryUnchanged: sideBefore.registry === sideAfter.registry, settingsUnchanged: sideBefore.settings === sideAfter.settings, sessionFilesDelta: sideAfter.sessionFiles - sideBefore.sessionFiles },
 };
 console.log(JSON.stringify(report, null, 2));
-const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok";
+const ok = result.code === 0 && !state.error && check?.status === "decision" && telemetry.length >= 1 && legacy.length === 1 && report.metrics?.telemetry?.status === "ok" && report.sideEffects.registryUnchanged && report.sideEffects.settingsUnchanged && (!rrsi || !rrsi.storeBusy);
 if (!ok) console.error(`e2e-installed: not passed${result.code !== 0 ? `; gjc exit ${result.code}: ${result.stderr.slice(0, 300)}` : ""}`);
 process.exitCode = ok ? 0 : 1;

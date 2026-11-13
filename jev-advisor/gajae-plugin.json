@@ -58,12 +58,12 @@
     {
       "name": "jev_check",
       "path": "tools/jev-check.ts",
-      "description": "Ask the decision model to check one artifact against one check question; returns a strict correct/incorrect/unsure verdict with confidence and journals a sanitized check outcome. Not verification evidence; no enforcement or correlation-state writes."
+      "description": "Ask the decision model to check one artifact against one check question; returns a strict correct/incorrect/unsure verdict with confidence, latency, the credential layer name and provider-reported usage, and journals a sanitized check outcome plus a joined jev-telemetry record. Not verification evidence; no enforcement or correlation-state writes."
     },
     {
       "name": "plugin_metrics",
       "path": "tools/plugin-metrics.ts",
-      "description": "One bounded offline aggregate report of the three plugins' retained sanitized journals and Jev's retained v2 correlation state. Strictly read-only: creates nothing, appends nothing, no provider or tests. Missing is not zero; unmeasured is null; descriptive monitoring only, never proof of routing accuracy, task quality or causal benefit."
+      "description": "One bounded offline aggregate report of the three plugins' retained sanitized journals, Jev's jev_check telemetry journal and Jev's retained v2 correlation state. Strictly read-only: creates nothing, appends nothing, no provider or tests. Missing is not zero; unmeasured is null; descriptive monitoring only, never proof of routing accuracy, task quality or causal benefit."
     }
   ]
 }

@@ -416,7 +416,8 @@ async function resultsObserveLock(file: string, legacyStaleMs: number): Promise<
   resultsPrivateFile(info);
   let text = '';
   let handle: ResultsFileHandle;
-  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW); }
+  // Non-blocking: a FIFO swapped in after the lstat must not hang the waiter.
+  try { handle = await resultsFs.open(file, resultsConstants.O_RDONLY | resultsConstants.O_NOFOLLOW | resultsConstants.O_NONBLOCK); }
   catch (error) { if (resultsSafeMissing(error)) return null; throw error; }
   try {
     const opened = await handle.stat();
@@ -462,9 +463,15 @@ async function resultsReclaimStaleLock(dir: string, lockPath: string, guardPath:
     if (!again) return { action: 'gone' };
     if (!again.stale || !resultsSameGeneration(observed.info, again.info)) return { action: 'live', report: again.report };
     await resultsCheckDirectories(directories);
-    const current = await resultsFs.lstat(lockPath);
-    if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
-    await resultsFs.unlink(lockPath);
+    try {
+      const current = await resultsFs.lstat(lockPath);
+      if (!resultsSameGeneration(again.info, current)) return { action: 'live', report: again.report };
+      await resultsFs.unlink(lockPath);
+    } catch (error) {
+      // The judged lock vanished on its own (its owner released it): the store is free.
+      if (resultsSafeMissing(error)) return { action: 'gone' };
+      throw error;
+    }
     await resultsSyncDirectory(dir, directories);
     return { action: 'reclaimed', report: again.report };
   } finally {
@@ -576,8 +583,10 @@ export async function appendPluginOutcome(plugin: ResultsPlugin, outcome: Plugin
   const maxSegmentBytes = deps.maxSegmentBytes ?? 1024 * 1024;
   const maxSegments = deps.maxSegments ?? 8;
   const lockTimeoutMs = deps.lockTimeoutMs ?? 100;
+  // Floor of one second: a just-created lock is empty until its metadata write lands, so an
+  // age bound shorter than that window could judge a live writer's fresh lock as legacy-stale.
   const legacyStaleMs = deps.legacyStaleMs ?? RESULTS_LEGACY_STALE_MS;
-  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
+  if (!Number.isSafeInteger(maxRecordBytes) || maxRecordBytes < 1 || maxRecordBytes > 4096 || !Number.isSafeInteger(maxSegmentBytes) || maxSegmentBytes < 1 || maxSegmentBytes > 1024 * 1024 || !Number.isSafeInteger(maxSegments) || maxSegments < 1 || maxSegments > 8 || !Number.isSafeInteger(lockTimeoutMs) || lockTimeoutMs < 0 || lockTimeoutMs > 100 || !Number.isSafeInteger(legacyStaleMs) || legacyStaleMs < 1000 || legacyStaleMs > 86_400_000) return { persisted: false, reason: 'invalid_limits' };
   const id = resultsUUID();
   const body = JSON.stringify({ schemaVersion: 1, plugin, id, observedAt: new Date().toISOString(), ...projected }) + '\n';
   const size = Buffer.byteLength(body);
@@ -770,14 +779,21 @@ async function resultsInspectLock(base: string, plugin: string): Promise<Results
   if (!guard) return lock.report;
   return { ...lock.report, guardAgeMs: guard.report.ageMs, guardOwner: guard.report.owner, ...(guard.stale ? { reclaimBlocked: true } : {}) };
 }
-export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo };
-/** Read-only lock observation for health reporting. Creates, repairs and deletes nothing. */
+export type ResultsGuardInfo = { ageMs: number; owner: ResultsLockOwner; stale: boolean };
+export type ResultsLockInspection = { status: 'none' | 'held' | 'unavailable'; lock?: ResultsLockInfo; guard?: ResultsGuardInfo };
+/**
+ * Read-only lock observation for health reporting. Creates, repairs and deletes nothing. A reclaim
+ * guard is reported even without a held lock, because a leftover stale guard will block the next
+ * reclaim and is the operator's to clear.
+ */
 export async function inspectPluginOutcomeLock(plugin: ResultsPlugin, deps: ResultsSnapshotDependencies = {}): Promise<ResultsLockInspection> {
   try {
     resultsEnum(plugin, resultsPlugins);
     const base = resultsResolve(deps.baseDir ?? pluginResultsRoot());
     const lock = await resultsInspectLock(base, plugin);
-    return lock ? { status: 'held', lock } : { status: 'none' };
+    const held = await resultsObserveLock(resultsJoin(base, plugin, 'journal', '.append.reclaim.lock'), RESULTS_LEGACY_STALE_MS);
+    const guard = held ? { guard: { ageMs: held.report.ageMs, owner: held.report.owner, stale: held.stale } } : {};
+    return lock ? { status: 'held', lock, ...guard } : { status: 'none', ...guard };
   } catch { return { status: 'unavailable' }; }
 }
 /**
