@@ -1743,6 +1743,34 @@ async function runSuite(root: string) {
 		assert.equal(fetchCalls, before);
 		env(); delete process.env.JEV_ALIGNMENT_MODE;
 	});
+	await check("JJO-663 generated hook rejects incomplete action targets before outbound", async () => {
+		env({ ...semanticEnv, JEV_ALIGNMENT_MODE: "deterministic" });
+		const paths = Array.from({ length: 17 }, (_, i) => `src/file-${i}.ts`);
+		const inputs = [
+			{ files: paths },
+			{ patch: paths.map(value => `*** Update File: ${value}`).join("\n") },
+			{ files: ["src/demo.ts", "https://invalid/"] },
+			{ files: ["src/demo.ts", null] },
+			{ path: "src/demo.ts", patch: "line\n".repeat(401) },
+			{ patch: "*** Update File: src/demo.ts\n*** Move to: src/renamed.ts" },
+			{ patch: "diff --git a/src/old.ts b/src/renamed.ts" },
+		];
+		const before = fetchCalls;
+		for (const input of inputs) for (const forbidden of [false, true]) {
+			const statuses: string[] = [];
+			const ctx = { ...alignmentContext([alignmentUser("incomplete-targets", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`.")]), ui: { setStatus(_key: string, value: string) { statuses.push(value); } } };
+			const got = await alignmentBefore[0].handler({ type: "tool_call", toolName: "apply_patch", toolCallId: "incomplete-targets", input }, ctx);
+			assert.equal(got?.block === true, forbidden, "semantic rejection cannot change the deterministic verdict");
+			assert.deepEqual(JSON.parse(statuses[0]), { model: "sionic-ai/jev-omni", status: "no_decision", reason: "invalid_input" });
+			assert.equal(fetchCalls, before, "no incomplete target list leaves the hook");
+		}
+		responder = () => new Response(JSON.stringify(semanticAnswer()));
+		const ctx = alignmentContext([alignmentUser("complete-targets", "Implement `src/demo.ts`.")]);
+		await alignmentBefore[0].handler({ type: "tool_call", toolName: "apply_patch", toolCallId: "complete-targets", input: { files: paths.slice(0, 16) } }, ctx);
+		assert.equal(fetchCalls, before + 1, "the complete 16-target boundary still reaches the transport");
+		responder = undefined;
+		env(); delete process.env.JEV_ALIGNMENT_MODE;
+	});
 
 	await check("AC-A1 alignment shadow: metadata-only journal never blocks", async () => {
 		env();

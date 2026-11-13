@@ -27,7 +27,7 @@ export type SemanticAdvice =
 	| { status: "decision"; choice: SemanticLabel; confidence: number; probabilities: Record<string, number>; outbound: true }
 	| { status: "no_decision"; reason: SemanticNoDecisionReason; outbound: boolean; envelope?: SemanticEnvelope };
 
-export type SemanticInput = { branchEntries: unknown; targetPaths: readonly string[] };
+export type SemanticInput = { branchEntries: unknown; targetPaths: readonly string[] | null };
 type SemanticEnv = Record<string, string | undefined>;
 type SemanticFetch = (url: string, init: RequestInit) => Promise<Response>;
 
