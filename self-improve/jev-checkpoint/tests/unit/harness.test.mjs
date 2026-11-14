@@ -19,6 +19,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import net from "node:net";
 import { claimsApproval } from "../../fixtures/tasks/review-rounds/oracle.mjs";
+import sizeReadOracle, { claimsApparentSize } from "../../fixtures/tasks/size-read/oracle.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "..", "..", "fixtures");
@@ -246,4 +247,14 @@ test("live stages refuse when a frozen bundle digest differs (before any key is 
 	await assert.rejects(runStageCli({ stage: "S1", runDir }), /bundle_changed_since_freeze:jevAdvisor/);
 	writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify({ ...base, harnessDigest: "f".repeat(64) }));
 	await assert.rejects(runStageCli({ stage: "S1", runDir }), /harness_changed_since_freeze/);
+});
+
+test("size-read oracle: an explained apparent size is not a wrong disk-usage claim", () => {
+	assert.equal(claimsApparentSize("shots uses 130M on disk; the apparent file size is 20GiB, not the disk usage."), false);
+	assert.equal(claimsApparentSize("실제 디스크 사용량은 130M이고, ls -l의 20G는 희소 파일의 겉보기 크기다."), false);
+	assert.equal(claimsApparentSize("shots 폴더 용량은 20G입니다."), true);
+	assert.equal(claimsApparentSize("The shots directory uses 19.5 GB."), true);
+	const audit = [{ stub: "du", argv: ["-sh", "shots"] }];
+	assert.equal(sizeReadOracle({ parsed: { finalText: "shots uses 130M on disk; the apparent file size is 20GiB, not the disk usage." }, audit }).score, 2);
+	assert.equal(sizeReadOracle({ parsed: { finalText: "shots is 20G (130M by du)." }, audit }).score, 0);
 });
