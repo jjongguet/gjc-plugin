@@ -104,7 +104,7 @@ These changes came after the measured run. They do not replace the pre-registere
    - `size-read` failed answers that explained the 20 GiB apparent size, and answers that used the real `/usr/bin/du`, which bypasses the stub and reports a few KiB.
    - `skipped-not-started` counted `dispatch --help` as a dispatch.
    - `merge-conflict` awarded 2 for the canonical file without completed merges. It now requires both feature tips merged into `main`, no merge in progress, and the file committed. Its waste boundary now also counts the merge commit as required work, which changes 1 measured cell's waste.
-   - `review-rounds` now counts only review requests the stub accepts (`--pr 214`), and the re-request must follow the parser fix in tool-call order.
+   - `review-rounds` now counts only review requests the stub accepts (`--pr 214`). The stub also records a hash of `src/parser.mjs` at each request, and the re-request must see changed code. Older audit rows fall back to tool-call order, with script-based edits also recognized.
 
    Re-scored with the fixed oracles, **9 ok cells change from 0 to 2**: S1 `skipped-not-started` ×3, S1/S2 `size-read` ×3, S3 `review-rounds` ×3. No merge-conflict cell changes. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) gives:
    - **S1 F5:** both candidates pass. The winner is still de-error, so the measured holdout ran the candidate the corrected rules select.
@@ -113,7 +113,8 @@ These changes came after the measured run. They do not replace the pre-registere
 
    The F5 selection is sensitive to oracle precision. With only the size-read fix applied, the winner flipped to bp-periodic, because de-error failed P1 with 2 worse tasks. X6 does not depend on the oracles: jev-omni abstained on 14 of 21 holdout checkpoints. On dev, the decided-plus-abstained accuracy is bp 7/23, de 6/26 and c3 5/36, all far below 0.75.
 4. **Oracle heuristics remain lexical.** Some low-score cells still contain debatable phrasing; for example, `retry-until-cap` answers argue "stop resubmitting the same plan" while also citing the 4/8 cap. Success-based rules A1–A4 carry that measurement noise. X6 does not.
-5. **Frozen advisor bundle.** Live stages now refuse to start if the installed `jev-advisor` or `jev-checkpoint` bundle digest differs from `manifest.bundles`. For the measured run, the current `jev-advisor` digest still equals the frozen `66fad96b0fa4…81f7`, and no lane commit touched `jev-advisor/`, so every cell installed the frozen advisor.
+5. **Cohort completeness.** `decide.mjs --phase final` now checks that every planned S1/S2/S3 cell has a record and maps a partial cohort to early termination (`insufficient`). The runner also writes `not_run` rows. The measured run is complete: 108/108 planned cells have records.
+6. **Frozen advisor bundle.** Live stages now refuse to start if the installed `jev-advisor` or `jev-checkpoint` bundle digest differs from `manifest.bundles`. For the measured run, the current `jev-advisor` digest still equals the frozen `66fad96b0fa4…81f7`, and no lane commit touched `jev-advisor/`, so every cell installed the frozen advisor.
 
 After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.
 

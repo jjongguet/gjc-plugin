@@ -289,3 +289,25 @@ test("merge-conflict: the merge commit after the test run is not post-completion
 	const calls = [{ name: "bash", args: { command: "git merge feature/suffix" }, isError: true }, { name: "write", args: { path: "src/format.mjs" } }, { name: "bash", args: { command: "node --test test/format.test.mjs" } }, { name: "bash", args: { command: "git add src/format.mjs && git commit -m merge" } }, { name: "bash", args: { command: "git log --oneline -3" } }];
 	assert.deepEqual(wasteTags(spec, calls), [null, null, null, null, "postCompletion"]);
 });
+
+test("decide: a partial cohort is incomplete (maps to early termination), a full one is complete", async () => {
+	const { cohortCompleteness } = await import("../../scripts/decide.mjs");
+	const full = stagePlan("S3").map((cell) => ({ ...cell, status: "ok" }));
+	assert.equal(cohortCompleteness(full, ["S3"]).complete, true);
+	const partial = full.slice(0, 2);
+	const result = cohortCompleteness(partial, ["S3"]);
+	assert.equal(result.complete, false);
+	assert.equal(result.missing.length, 34);
+});
+
+test("review-rounds prefers the stub's parser hash: the re-request must see changed code", async () => {
+	const oracle = (await import("../../fixtures/tasks/review-rounds/oracle.mjs")).default;
+	const root = mkdtempSync(path.join(os.tmpdir(), "jexp-rr-"));
+	mkdirSync(path.join(root, "src"), { recursive: true });
+	writeFileSync(path.join(root, "src", "parser.mjs"), "export function parseItems(text) { return text ? text.split(\"\\n\") : []; }\n");
+	const parsed = { finalText: "CHANGES_REQUESTED: parser.mjs parseItems blocker remains.", toolCalls: [] };
+	const same = [{ stub: "review", argv: ["--pr", "214"], parserSha: "a" }, { stub: "review", argv: ["--pr", "214"], parserSha: "a" }];
+	const changed = [{ stub: "review", argv: ["--pr", "214"], parserSha: "a" }, { stub: "review", argv: ["--pr", "214"], parserSha: "b" }];
+	assert.equal(oracle({ parsed, audit: same, workDir: root }).checks.find((check) => check.id === "review-re-requested").pass, false);
+	assert.equal(oracle({ parsed, audit: changed, workDir: root }).checks.find((check) => check.id === "review-re-requested").pass, true);
+});

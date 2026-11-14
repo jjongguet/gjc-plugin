@@ -13,6 +13,7 @@ import { fileURLToPath } from "node:url";
 import { analyzeFinal, analyzeS1, POWER_GATE, ruleTableDigest } from "../lib/analyze.mjs";
 import { nRequired } from "../lib/power.mjs";
 import { spendTable, priorSpend } from "../lib/ledger-journal.mjs";
+import { stagePlan } from "../lib/stage-plans.mjs";
 import { analyzerDigest, harnessDigest } from "../lib/digest.mjs";
 
 const readJsonl = (file) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
@@ -57,6 +58,18 @@ export function armTable(records, w) {
 	return lines.join("\n");
 }
 
+/**
+ * Every planned (task, condition, repeat) of the given stages must have a record;
+ * an interrupted stage that left neither stop.json nor not_run rows is still
+ * incomplete and maps to early termination, never to a definitive verdict.
+ */
+export function cohortCompleteness(records, stages) {
+	const have = new Set(records.map((record) => `${record.stage}|${record.taskId}|${record.condition}|${record.repeat}`));
+	const missing = [];
+	for (const stage of stages) for (const cell of stagePlan(stage)) if (!have.has(`${stage}|${cell.taskId}|${cell.condition}|${cell.repeat}`)) missing.push({ stage, taskId: cell.taskId, condition: cell.condition, repeat: cell.repeat });
+	return { complete: missing.length === 0, missing };
+}
+
 function arg(name, fallback = null) {
 	const index = process.argv.indexOf(`--${name}`);
 	return index >= 0 ? process.argv[index + 1] : fallback;
@@ -95,7 +108,10 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 		} else {
 			const fz = read(runDir, "fz-freeze.json");
 			// X2's dev half compares the same mechanism that became Fz.
-			analysis = analyzeFinal({ records, j0, devCondition: fz.fzCondition, termination: stopped ? { terminated: true, reason: "global_stop" } : null });
+			const cohort = cohortCompleteness(records, ["S1", ...(decision.runS2 ? ["S2"] : []), "S3"]);
+			const termination = stopped ? { terminated: true, reason: "global_stop" } : !cohort.complete ? { terminated: true, reason: "incomplete_cohort" } : null;
+			analysis = analyzeFinal({ records, j0, devCondition: fz.fzCondition, termination });
+			analysis.cohort = { complete: cohort.complete, missing: cohort.missing.length };
 			analysis.powerGate = POWER_GATE;
 		}
 		const devBaseline = records.filter((record) => record.stage === "S1" && record.condition === "a1-off" && record.status === "ok").map((record) => record.wasteTurns);

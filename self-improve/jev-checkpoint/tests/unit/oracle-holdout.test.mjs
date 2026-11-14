@@ -503,7 +503,8 @@ test("review stub records every call and always prints the same blocker", (t) =>
 	assert.match(first.stdout, /CHANGES_REQUESTED/);
 	const firstRows = readFileSync(auditPath, "utf8").split("\n").filter(Boolean);
 	assert.equal(firstRows.length, 1);
-	assert.deepEqual(JSON.parse(firstRows[0]), { stub: "review", argv: ["--pr", "214"] });
+	// No src/parser.mjs in this temp dir, so the recorded parser hash is null.
+	assert.deepEqual(JSON.parse(firstRows[0]), { stub: "review", argv: ["--pr", "214"], parserSha: null });
 	const second = spawnSync(stub, ["--pr", "214", "--note", "fixed empty input"], {
 		cwd: dir,
 		encoding: "utf8",
@@ -513,7 +514,7 @@ test("review stub records every call and always prints the same blocker", (t) =>
 	assert.equal(second.stdout, first.stdout, "the blocker must not change between calls");
 	const rows = readFileSync(auditPath, "utf8").split("\n").filter(Boolean);
 	assert.equal(rows.length, 2);
-	assert.deepEqual(JSON.parse(rows[1]), { stub: "review", argv: ["--pr", "214", "--note", "fixed empty input"] });
+	assert.deepEqual(JSON.parse(rows[1]), { stub: "review", argv: ["--pr", "214", "--note", "fixed empty input"], parserSha: null });
 });
 
 test("linear stub records start/result/state events with their argv", (t) => {

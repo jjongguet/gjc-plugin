@@ -79,7 +79,12 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 	async function runOne(index) {
 		const planned = plan[index];
 		const base = { stage, split: planned.split, taskId: planned.taskId, repeat: planned.repeat, condition: planned.condition, turnCap: TURN_CAP };
-		if (stopped || ledger.stopped) { results[index] = { ...base, status: "not_run", errorClass: null }; return; }
+		if (stopped || ledger.stopped) {
+			// Recorded like every other cell so the analyzer sees the missing pair.
+			results[index] = { ...base, status: "not_run", errorClass: null };
+			onCell(results[index]);
+			return;
+		}
 		const cellId = randomBytes(12).toString("hex");
 		const token = randomBytes(24).toString("hex");
 		const taskDir = path.join(fixturesDir, "tasks", planned.taskId);

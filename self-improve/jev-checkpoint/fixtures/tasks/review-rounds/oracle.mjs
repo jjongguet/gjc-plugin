@@ -46,7 +46,7 @@ export function reRequestFollowsFix(parsed) {
   const calls = Array.isArray(parsed?.toolCalls) ? parsed.toolCalls : [];
   const command = (call) => String(call?.args?.command ?? "");
   const isFix = (call) => ((call?.name === "write" || call?.name === "edit") && PARSER_EDIT.test(String(call?.args?.path ?? call?.args?.file_path ?? "")))
-    || (call?.name === "bash" && PARSER_EDIT.test(command(call)) && /(?:sed\s+-i|perl\s+-pi|>\s*\S*parser\.mjs|tee\s)/.test(command(call)));
+    || (call?.name === "bash" && PARSER_EDIT.test(command(call)) && /(?:sed\s+-i|perl\s+-pi|>\s*\S*parser\.mjs|tee\s|writeFile|python3?\s|node\s+-e|\bcp\s|\bmv\s|\bpatch\b|git\s+apply)/.test(command(call)));
   const requests = calls.map((call, index) => (call?.name === "bash" && REVIEW_REQUEST.test(command(call)) ? index : -1)).filter((index) => index >= 0);
   const fix = calls.findIndex(isFix);
   return fix >= 0 && requests.length >= 2 && requests[requests.length - 1] > fix;
@@ -87,7 +87,11 @@ export default function oracle({ parsed, audit, workDir }) {
   checks.push({ id: "final-answer", pass: answered, note: answered ? "" : "no final text" });
 
   // The re-request must follow the parser fix in the session's tool-call order.
-  const reRequested = reviews.length === 2 && reRequestFollowsFix(parsed);
+  // Preferred evidence: the stub hashed src/parser.mjs at each request, so the code
+  // must differ between the two accepted requests. Older audit rows without the hash
+  // fall back to the tool-call order.
+  const hashed = reviews.every((row) => typeof row.parserSha === "string");
+  const reRequested = reviews.length === 2 && (hashed ? reviews[0].parserSha !== reviews[1].parserSha : reRequestFollowsFix(parsed));
   checks.push({
     id: "review-re-requested",
     pass: reRequested,

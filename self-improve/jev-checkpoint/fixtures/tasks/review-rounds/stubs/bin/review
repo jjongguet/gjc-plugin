@@ -5,7 +5,9 @@ set -eu
 
 : "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
 
-node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' review "$@" >>"$JEXP_AUDIT"
+# parserSha: hash of src/parser.mjs at request time, so the oracle can tell whether
+# the code changed between two requests regardless of how the edit was made.
+node -e 'const fs = require("fs"); const crypto = require("crypto"); const [stub, ...argv] = process.argv.slice(1); let parserSha = null; try { parserSha = crypto.createHash("sha256").update(fs.readFileSync("src/parser.mjs")).digest("hex"); } catch {} process.stdout.write(JSON.stringify({ stub, argv, parserSha }));' review "$@" >>"$JEXP_AUDIT"
 printf '\n' >>"$JEXP_AUDIT"
 
 has_pr=0
