@@ -273,6 +273,20 @@ export function validateAll(receipts) {
 }
 
 /**
+ * Evidence digest for a receipt: the scorer's digest when the cell was scored. A
+ * cell that failed before scoring (setup, isolation, scorer) attests its failure
+ * record instead, so its receipt is an honest `failed` outcome rather than a
+ * fabricated oracle result. An `ok` cell must have been scored.
+ */
+export function failureAwareEvidence(cell) {
+  if (DIGEST.test(cell.oracleDigest ?? "")) return cell.oracleDigest;
+  if (cell.status === "failed") {
+    return sha256(canonicalJson({ attestation: "failed_before_scoring", cellId: cell.cellId ?? null, stage: cell.stage, taskId: cell.taskId, condition: cell.condition, repeat: cell.repeat, errorClass: cell.errorClass ?? null }));
+  }
+  return cell.oracleDigest;
+}
+
+/**
  * AC14/AC18 producer: one `gjc.quality_trial.v2` receipt per executed cell of
  * each paid stage, re-validated as a batch. Throws unless every receipt is
  * valid and no execution key conflicts, so a run can never report a cohort the
@@ -283,7 +297,7 @@ export function stageReceipts({ records, manifest, readiness, stageTimes, manife
     producer: { id: "jexp-runner", kind: "harness" },
     executor: { id: "gjc-cell-session" },
     harness: { sourceDigest: manifest.harnessDigest, harnessDigest: manifest.harnessDigest, manifestDigest, version: manifest.manifestId },
-    oracle: { kind: "arm-blind-oracle", verifierId: "jexp-score-cell", evidenceDigestFor: (cell) => cell.oracleDigest },
+    oracle: { kind: "arm-blind-oracle", verifierId: "jexp-score-cell", evidenceDigestFor: failureAwareEvidence },
     createdAt: (cell) => stageTimes[cell.stage],
     sourceHead: readiness.originMain,
   };

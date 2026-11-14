@@ -224,3 +224,19 @@ test("the proxy checkpoint state limit equals the plugin's state cap", () => {
 	const core = readFileSync(path.join(ROOT, "plugin", "src", "core.ts"), "utf8");
 	assert.equal(Number(/export const MAX_STATE_BYTES = (\d+);/.exec(core)?.[1]), CHECKPOINT_STATE_LIMIT);
 });
+
+test("a cell that failed before scoring gets a failure attestation receipt; an unscored ok cell is refused", () => {
+	const manifest = { harnessDigest: "a".repeat(64), manifestId: "jjo2329-test" };
+	const readiness = { originMain: "5f0652e8f50c16795f303357acb62570c782daa0" };
+	const stageTimes = { S1: "2026-11-14T10:00:00Z" };
+	let n = 0;
+	const records = stagePlan("S1").map((planned) => ({ ...cell({}), ...planned, stage: "S1", cellId: `c${n}`, oracleDigest: (n++).toString(16).padStart(64, "0") }));
+	records[0] = { ...records[0], status: "failed", errorClass: "setup", success: 0, score: 0, oracleDigest: undefined };
+	const out = stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) });
+	assert.equal(out.S1.validation.valid, 54);
+	const failed = out.S1.receipts.find((receipt) => receipt.trialId.endsWith(`${records[0].taskId}.r${records[0].repeat}`) && receipt.condition === records[0].condition);
+	assert.equal(failed.outcome, "failed");
+	assert.equal(failed.errorClass, "setup");
+	records[0] = { ...records[0], status: "ok", success: 1, score: 2 };
+	assert.throws(() => stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) }), /oracle evidence digest/);
+});
