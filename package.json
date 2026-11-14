@@ -42,6 +42,7 @@
     "test:memory-dream": "bun memory-dream/scripts/verify.ts",
     "egm:smoke": "node egm/scripts/smoke-native.mjs",
     "test:self-improve": "node self-improve/scripts/verify-unit.mjs && node self-improve/scripts/verify-integration.mjs",
+    "test:jev-checkpoint": "node self-improve/jev-checkpoint/scripts/verify.mjs",
     "test:supervisor": "node --test supervisor/tests/*.test.mjs",
     "test:nightly-review": "node --test nightly-review/tests/*.test.mjs",
     "nightly:once": "node nightly-review/bin/nightly-review.mjs once",

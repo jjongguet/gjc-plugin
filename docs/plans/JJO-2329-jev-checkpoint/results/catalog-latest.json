@@ -1,0 +1,49 @@
+{
+  "schema": "jexp.catalog_receipt.v1",
+  "observedAt": "2026-11-14T09:59:03.888Z",
+  "rawDigest": "a0cd29558a7130a9aa034788a569fa9081271ed689b7f79a361f4e17c9cb8409",
+  "entries": {
+    "deepseek/deepseek-v4.1-flash-eco": {
+      "source": "https://apis.opengateway.ai/v1/models",
+      "model": "deepseek/deepseek-v4.1-flash-eco",
+      "provider": "sionic-ai",
+      "unit": "per_token",
+      "listInputPricePerToken": 3e-7,
+      "observedInputPricePerToken": 3e-8,
+      "listOutputPricePerToken": 0.0000012,
+      "observedOutputPricePerToken": 1.2e-7,
+      "discountPercent": 90,
+      "discountSource": "catalog_field",
+      "status": "active",
+      "observedAt": "2026-11-14T09:59:03.888Z"
+    },
+    "sionic-ai/jev-omni": {
+      "source": "https://apis.opengateway.ai/v1/models",
+      "model": "sionic-ai/jev-omni",
+      "provider": "sionic-ai",
+      "unit": "per_token",
+      "listInputPricePerToken": 1.26e-7,
+      "observedInputPricePerToken": 6.3e-9,
+      "listOutputPricePerToken": 0,
+      "observedOutputPricePerToken": 0,
+      "discountPercent": 95,
+      "discountSource": "catalog_field",
+      "status": "active",
+      "observedAt": "2026-11-14T09:59:03.888Z"
+    },
+    "sionic-ai/decider-4b": {
+      "source": "https://apis.opengateway.ai/v1/models",
+      "model": "sionic-ai/decider-4b",
+      "provider": "sionic-ai",
+      "unit": "per_token",
+      "listInputPricePerToken": 4.2e-8,
+      "observedInputPricePerToken": 2.1e-9,
+      "listOutputPricePerToken": 0,
+      "observedOutputPricePerToken": 0,
+      "discountPercent": 95,
+      "discountSource": "catalog_field",
+      "status": "active",
+      "observedAt": "2026-11-14T09:59:03.888Z"
+    }
+  }
+}

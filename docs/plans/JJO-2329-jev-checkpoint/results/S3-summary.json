@@ -1,0 +1,28 @@
+{
+  "stage": "S3",
+  "label": "S3",
+  "live": true,
+  "cells": 36,
+  "wallMs": 292041,
+  "stopped": false,
+  "upstreamCalls": 340,
+  "decisionTransportCalls": 21,
+  "ledger": {
+    "spentUsd": 0.48713342479999927,
+    "reservedUsd": 0,
+    "priorSpentUsd": 0.3599877391999997,
+    "cleanupUsd": 0,
+    "hardStopUsd": 4,
+    "stopped": false,
+    "byBasis": {
+      "billed": 0,
+      "observed_catalog": 0.0000718956,
+      "computed_tokens": 0.12707378999999996,
+      "computed_bound": 0
+    }
+  },
+  "statusCounts": {
+    "ok": 34,
+    "failed/cell_cap": 2
+  }
+}

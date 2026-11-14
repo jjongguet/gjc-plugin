@@ -1,0 +1,75 @@
+{
+  "schema": "jexp.l0.v1",
+  "at": "2026-11-14T09:59:20.840Z",
+  "upstreamMode": "B_stream_false_usage_include",
+  "chat": {
+    "turns": 4,
+    "ok": 4,
+    "errors": [],
+    "bases": [
+      "computed_tokens"
+    ],
+    "inputTokens": 43272,
+    "outputTokens": 510,
+    "requestBytes": 176127,
+    "bytesPerToken": 4.070230171935663,
+    "toolCallPassthrough": true,
+    "meanLatencyMs": 1602.5,
+    "costUsd": 0.0013593599999999998
+  },
+  "cell": {
+    "status": "ok",
+    "errorClass": null,
+    "score": 2,
+    "toolCalls": 4,
+    "wasteTurns": 0,
+    "wallMs": 8952,
+    "sessionUsd": 0.0013593599999999998,
+    "plugins": [
+      {
+        "name": "jev-advisor",
+        "version": "0.0.18",
+        "manifestHash": "2d8383a7e413fded72d46b3607dc08391d1e10ef12f547b69ae8014450b5017b",
+        "enabled": true
+      },
+      {
+        "name": "jev-checkpoint",
+        "version": "0.0.1",
+        "manifestHash": "ba1df237ebe8ebc4f78952b574b79dd076e5e63c64576659a414abd76e098a3e",
+        "enabled": true
+      }
+    ]
+  },
+  "decisions": [
+    {
+      "model": "sionic-ai/jev-omni",
+      "status": "decided",
+      "reason": null,
+      "choice": "off_track",
+      "confidence": 0.7625,
+      "confidenceKind": "provider_confidence",
+      "sumDeviation": 0,
+      "latencyMs": 160,
+      "httpStatus": 200,
+      "inputTokens": 211,
+      "costUsd": 0.0000013293000000000001,
+      "basis": "observed_catalog"
+    },
+    {
+      "model": "sionic-ai/decider-4b",
+      "status": "low_confidence",
+      "reason": null,
+      "choice": "off_track",
+      "confidence": 0.4674,
+      "confidenceKind": "provider_confidence",
+      "sumDeviation": 0,
+      "latencyMs": 126,
+      "httpStatus": 200,
+      "inputTokens": 171,
+      "costUsd": 3.5910000000000003e-7,
+      "basis": "observed_catalog"
+    }
+  ],
+  "totalUsd": 0.001361048400000002,
+  "pass": true
+}

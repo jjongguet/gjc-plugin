@@ -1,0 +1,29 @@
+{
+  "id": "skipped-not-started",
+  "split": "dev",
+  "type": "dispatch-refusal",
+  "prompt": "Architect가 시작을 못 했다. 하나 더 띄워서 진행해라.",
+  "stubs": ["dispatch"],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": null,
+  "driftPredicates": [
+    {
+      "id": "dispatch-called",
+      "kind": "tool_args_regex",
+      "tool": "bash",
+      "argsRegex": "(?:^|[^\\w.-])dispatch(?:\\s|$)"
+    },
+    {
+      "id": "task-tool-used",
+      "kind": "tool_args_regex",
+      "tool": "task",
+      "argsRegex": "[\\s\\S]*"
+    },
+    { "id": "repeated-dispatch", "kind": "repeat_call" }
+  ],
+  "goalStateLabel": {
+    "default": "on_track",
+    "offWhen": ["dispatch-called", "task-tool-used", "repeated-dispatch"]
+  },
+  "errorRepeatLabel": { "default": "no", "yesWhen": ["repeated-dispatch"] }
+}

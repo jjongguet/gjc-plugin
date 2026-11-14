@@ -1,0 +1,254 @@
+{
+  "schema": "jexp.s1_decision.v1",
+  "at": "2026-11-14T10:19:29.915Z",
+  "winner": "de-error",
+  "winnerReason": "waste_reduction",
+  "winnerTrigger": "error",
+  "runS2": true,
+  "stopped": false,
+  "analysis": {
+    "stage": "S1",
+    "baseline": {
+      "condition": "a1-off",
+      "tasks": 6
+    },
+    "candidates": [
+      {
+        "condition": "bp-periodic",
+        "pairs": 6,
+        "worseTasks": 0,
+        "worseTaskIds": [],
+        "ceilingCollapse": [],
+        "triggerRate": 0.7777777777777778,
+        "ignoredAdviceRate": 0,
+        "costRatio": {
+          "ratioOfMeans": 0.9452267311372546,
+          "meanOfRatios": 1.0050350441599296,
+          "upper": 1.0838800130165196,
+          "lower": 0.8522042503637709
+        },
+        "waste": {
+          "median": -0.16666666666666663,
+          "lower": -2.008333333333326,
+          "upper": 0.13333333333333336,
+          "zeroBaseline": 1
+        },
+        "wasteMedianAbs": 1.5,
+        "absorbedWasteTurns": -2,
+        "jevUsd": 0.00012040560000000001,
+        "sessionUsd": 0.08592732,
+        "jevUsdPerAbsorbedTurn": null,
+        "passes": {
+          "P1": true,
+          "P2": true,
+          "P3": true,
+          "P4": true
+        },
+        "passed": true
+      },
+      {
+        "condition": "de-error",
+        "pairs": 6,
+        "worseTasks": 1,
+        "worseTaskIds": [
+          "lane-start-base"
+        ],
+        "ceilingCollapse": [],
+        "triggerRate": 0.7777777777777778,
+        "ignoredAdviceRate": 0,
+        "costRatio": {
+          "ratioOfMeans": 0.9347535607162388,
+          "meanOfRatios": 0.9753985287201784,
+          "upper": 1.1268330389938668,
+          "lower": 0.7485272146912016
+        },
+        "waste": {
+          "median": 0,
+          "lower": -1.5,
+          "upper": 0.4,
+          "zeroBaseline": 1
+        },
+        "wasteMedianAbs": 1.1666666666666665,
+        "absorbedWasteTurns": -1.0000000000000004,
+        "jevUsd": 0.0000952434,
+        "sessionUsd": 0.08497524,
+        "jevUsdPerAbsorbedTurn": null,
+        "passes": {
+          "P1": true,
+          "P2": true,
+          "P3": true,
+          "P4": true
+        },
+        "passed": true
+      }
+    ],
+    "winner": "de-error",
+    "winnerReason": "waste_reduction",
+    "winnerDetail": {
+      "condition": "de-error",
+      "pairs": 6,
+      "worseTasks": 1,
+      "worseTaskIds": [
+        "lane-start-base"
+      ],
+      "ceilingCollapse": [],
+      "triggerRate": 0.7777777777777778,
+      "ignoredAdviceRate": 0,
+      "costRatio": {
+        "ratioOfMeans": 0.9347535607162388,
+        "meanOfRatios": 0.9753985287201784,
+        "upper": 1.1268330389938668,
+        "lower": 0.7485272146912016
+      },
+      "waste": {
+        "median": 0,
+        "lower": -1.5,
+        "upper": 0.4,
+        "zeroBaseline": 1
+      },
+      "wasteMedianAbs": 1.1666666666666665,
+      "absorbedWasteTurns": -1.0000000000000004,
+      "jevUsd": 0.0000952434,
+      "sessionUsd": 0.08497524,
+      "jevUsdPerAbsorbedTurn": null,
+      "passes": {
+        "P1": true,
+        "P2": true,
+        "P3": true,
+        "P4": true
+      },
+      "passed": true
+    },
+    "tieBreaks": [],
+    "c3ToFz": {
+      "evaluated": false,
+      "becomeFz": false,
+      "reason": "no_c3_records"
+    },
+    "p1Gate": {
+      "agreementErrorRate": 0.2222222222222222,
+      "bothWrongHighConfidence": 0,
+      "agreementThreshold": 0.1,
+      "bothWrongThreshold": 0.03333333333333333,
+      "open": true,
+      "c3Adoptable": false,
+      "basis": {
+        "agreementOpen": true,
+        "bothWrongOpen": false
+      }
+    },
+    "rules": {
+      "P1:bp-periodic": {
+        "id": "P1",
+        "condition": "bp-periodic",
+        "passed": true,
+        "detail": {
+          "worseTasks": 0,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9452267311372546,
+          "wasteMedian": -0.16666666666666663
+        }
+      },
+      "P2:bp-periodic": {
+        "id": "P2",
+        "condition": "bp-periodic",
+        "passed": true,
+        "detail": {
+          "worseTasks": 0,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9452267311372546,
+          "wasteMedian": -0.16666666666666663
+        }
+      },
+      "P3:bp-periodic": {
+        "id": "P3",
+        "condition": "bp-periodic",
+        "passed": true,
+        "detail": {
+          "worseTasks": 0,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9452267311372546,
+          "wasteMedian": -0.16666666666666663
+        }
+      },
+      "P4:bp-periodic": {
+        "id": "P4",
+        "condition": "bp-periodic",
+        "passed": true,
+        "detail": {
+          "worseTasks": 0,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9452267311372546,
+          "wasteMedian": -0.16666666666666663
+        }
+      },
+      "P1:de-error": {
+        "id": "P1",
+        "condition": "de-error",
+        "passed": true,
+        "detail": {
+          "worseTasks": 1,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9347535607162388,
+          "wasteMedian": 0
+        }
+      },
+      "P2:de-error": {
+        "id": "P2",
+        "condition": "de-error",
+        "passed": true,
+        "detail": {
+          "worseTasks": 1,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9347535607162388,
+          "wasteMedian": 0
+        }
+      },
+      "P3:de-error": {
+        "id": "P3",
+        "condition": "de-error",
+        "passed": true,
+        "detail": {
+          "worseTasks": 1,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9347535607162388,
+          "wasteMedian": 0
+        }
+      },
+      "P4:de-error": {
+        "id": "P4",
+        "condition": "de-error",
+        "passed": true,
+        "detail": {
+          "worseTasks": 1,
+          "triggerRate": 0.7777777777777778,
+          "ignoredAdviceRate": 0,
+          "costRatio": 0.9347535607162388,
+          "wasteMedian": 0
+        }
+      }
+    },
+    "observations": [],
+    "imputed": {
+      "cells": 54,
+      "error_cells": 13,
+      "waste_error_imputed": 0,
+      "cost_reserved": 0,
+      "cost_unmeasured": 0,
+      "not_run": 0
+    },
+    "saturation": {
+      "baselineAtCeiling": false,
+      "treatmentAtCeiling": false,
+      "superiorityIndeterminate": false,
+      "note": null
+    }
+  }
+}

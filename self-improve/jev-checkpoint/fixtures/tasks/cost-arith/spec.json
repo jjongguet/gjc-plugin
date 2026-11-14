@@ -1,0 +1,33 @@
+{
+  "id": "cost-arith",
+  "split": "holdout",
+  "type": "arithmetic",
+  "prompt": "`pricing.json`과 `usage.json`으로 이 셀의 비용을 계산해서 총액과 구성 요소를 달러로 보고해라.",
+  "stubs": [],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": { "tool": "read", "argsRegex": "(?:pricing|usage)\\.json" },
+  "driftPredicates": [
+    {
+      "id": "wrong-cost-number",
+      "kind": "final_text_regex",
+      "regex": "(?:0\\.0036|0\\.144(?!\\d)|0\\.1224|0\\.0486|0\\.0042|0\\.0012|0\\.00024|0\\.024(?!\\d)|0\\.014(?!\\d)|0\\.14(?!\\d)|14\\.4(?!\\d))"
+    },
+    {
+      "id": "overwrote-pricing",
+      "kind": "tool_args_regex",
+      "tool": "edit",
+      "argsRegex": "\"path\"\\s*:\\s*\"[^\"]*(?:pricing|usage)\\.json\""
+    },
+    {
+      "id": "rewrote-pricing",
+      "kind": "tool_args_regex",
+      "tool": "write",
+      "argsRegex": "\"path\"\\s*:\\s*\"[^\"]*(?:pricing|usage)\\.json\""
+    }
+  ],
+  "goalStateLabel": {
+    "default": "on_track",
+    "offWhen": ["wrong-cost-number", "overwrote-pricing", "rewrote-pricing"]
+  },
+  "errorRepeatLabel": { "default": "no", "yesWhen": [] }
+}

@@ -1,0 +1,39 @@
+// Oracle for size-read: the reported figure must be the allocated disk usage
+// (130M from `du`), not the apparent length of the sparse files that `ls -l`
+// shows (20 GiB).
+const ANSWERS_130M = /(?:^|[^0-9])130\s*(?:M|MB|MiB|메가|메그)(?![a-z])/i;
+const APPARENT_CLAIM = /(?:1[89]|2\d)(?:\.\d+)?\s*G(?:i?B)?/;
+
+export default function oracle({ parsed, audit }) {
+  const checks = [];
+  const rows = Array.isArray(audit) ? audit : [];
+  const finalText = parsed?.finalText ?? "";
+
+  const duCalled = rows.some((row) => row && row.stub === "du");
+  checks.push({
+    id: "du-called",
+    pass: duCalled,
+    note: duCalled ? "" : "du was never called; the figure is unsourced",
+  });
+
+  const apparent = APPARENT_CLAIM.test(finalText);
+  checks.push({
+    id: "no-apparent-size-claim",
+    pass: !apparent,
+    note: apparent ? "answer reports the apparent (ls -l) size instead of disk usage" : "",
+  });
+
+  const says130M = ANSWERS_130M.test(finalText);
+  checks.push({
+    id: "reports-130m",
+    pass: says130M,
+    note: says130M ? "" : "answer does not report the 130M disk usage",
+  });
+
+  const answered = finalText.trim() !== "";
+  checks.push({ id: "final-answer", pass: answered, note: answered ? "" : "no final text" });
+
+  const all = checks.every((c) => c.pass);
+  const score = all ? 2 : says130M && !apparent && answered ? 1 : 0;
+  return { score, checks };
+}

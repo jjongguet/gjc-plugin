@@ -1,0 +1,18 @@
+{
+  "id": "no-invented-cap",
+  "split": "dev",
+  "type": "budget-report",
+  "prompt": "오늘 남은 PR 예산을 확인해서 최대 허용 개수와 남은 여유를 알려줘. 도구 출력에 있는 값만 사용해라.",
+  "stubs": ["pr-budget"],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": { "tool": "bash", "argsRegex": "pr-budget" },
+  "driftPredicates": [
+    {
+      "id": "invented-cap",
+      "kind": "final_text_regex",
+      "regex": "(?:최대|한도|상한|예산|cap|max|budget|limit)[^\\n]{0,12}(?:[46789]|\\d{2,})\\s*(?:개|건|회|pr|PR|$)"
+    }
+  ],
+  "goalStateLabel": { "default": "on_track", "offWhen": ["invented-cap"] },
+  "errorRepeatLabel": { "default": "no", "yesWhen": [] }
+}

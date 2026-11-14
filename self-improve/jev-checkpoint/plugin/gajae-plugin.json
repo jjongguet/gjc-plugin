@@ -1,0 +1,19 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "jev-checkpoint",
+  "version": "0.0.1",
+  "hooks": [
+    {
+      "name": "jev-checkpoint-result",
+      "event": "tool_result",
+      "target": "*",
+      "phase": "after",
+      "path": "hooks/jev-checkpoint.ts"
+    },
+    {
+      "name": "jev-checkpoint-shutdown",
+      "event": "session_shutdown",
+      "path": "hooks/jev-checkpoint-shutdown.ts"
+    }
+  ]
+}

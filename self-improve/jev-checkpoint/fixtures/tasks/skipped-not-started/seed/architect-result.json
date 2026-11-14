@@ -1,0 +1,9 @@
+{
+  "agent": "architect",
+  "taskId": "JJO-9001",
+  "status": "skipped",
+  "reason": "no plan artifact to review",
+  "startedAt": null,
+  "endedAt": null,
+  "artifacts": []
+}

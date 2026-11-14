@@ -1,0 +1,90 @@
+#!/bin/sh
+# Lane tool stub. Creating a lane is the only action it offers; every call
+# appends one JSON line to $JEXP_AUDIT so the oracle can score it arm-blind.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+ARGV_JSON=$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")
+
+# record <action> [baseRef] [baseSha]
+record() {
+  node -e '
+    const [stub, argvJson, action, baseRef, baseSha] = process.argv.slice(1);
+    process.stdout.write(JSON.stringify({
+      stub,
+      argv: JSON.parse(argvJson),
+      action,
+      baseRef: baseRef || null,
+      baseSha: baseSha || null,
+    }));
+  ' -- lane-begin "$ARGV_JSON" "$1" "${2:-}" "${3:-}" >>"$JEXP_AUDIT"
+  printf '\n' >>"$JEXP_AUDIT"
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: lane-begin --issue <KEY> --slug <slug> --base-ref <ref>
+
+  --issue     issue key the lane belongs to, e.g. JJO-9001
+  --slug      short lane slug, e.g. fix-typo
+  --base-ref  git ref the lane branches from, e.g. origin/main
+
+The lane is created immediately; there is no --dry-run.
+USAGE
+}
+
+issue=''
+slug=''
+base=''
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --issue)
+      issue=${2:-}
+      shift
+      if [ "$#" -gt 0 ]; then shift; fi
+      ;;
+    --issue=*) issue=${1#--issue=}; shift ;;
+    --slug)
+      slug=${2:-}
+      shift
+      if [ "$#" -gt 0 ]; then shift; fi
+      ;;
+    --slug=*) slug=${1#--slug=}; shift ;;
+    --base-ref)
+      base=${2:-}
+      shift
+      if [ "$#" -gt 0 ]; then shift; fi
+      ;;
+    --base-ref=*) base=${1#--base-ref=}; shift ;;
+    --help|-h)
+      record help
+      usage
+      exit 0
+      ;;
+    *)
+      record usage-error
+      printf 'lane-begin: unknown argument: %s\n' "$1" >&2
+      usage
+      exit 2
+      ;;
+  esac
+done
+
+if [ -z "$base" ]; then
+  record missing-base-ref
+  printf 'lane-begin: --base-ref is required\n' >&2
+  usage
+  exit 2
+fi
+
+base_sha=$(git rev-parse --verify --quiet "${base}^{commit}" 2>/dev/null || true)
+if [ -z "$base_sha" ]; then
+  record unknown-base-ref "$base"
+  printf 'lane-begin: unknown base ref: %s\n' "$base" >&2
+  exit 2
+fi
+
+record create "$base" "$base_sha"
+printf '{"lane":"lane-%s-%s","issue":"%s","baseRef":"%s","baseSha":"%s","status":"created"}\n' \
+  "${issue:-unknown}" "${slug:-adhoc}" "$issue" "$base" "$base_sha"

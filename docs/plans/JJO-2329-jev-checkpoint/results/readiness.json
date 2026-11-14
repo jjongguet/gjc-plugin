@@ -1,0 +1,15 @@
+{
+  "schema": "jexp.readiness.v1",
+  "checkedAt": "2026-11-14T09:59:03.664Z",
+  "originMain": "5f0652e8f50c16795f303357acb62570c782daa0",
+  "pr65MergeAncestor": true,
+  "pr66MergeAncestor": true,
+  "packageVersion": "0.0.28",
+  "releaseTag": "v0.0.28",
+  "releaseTagCommit": "db17b79909015ff56d589faf7851b929461d970f",
+  "releaseSurface": "tag_tree",
+  "releaseTree": "ddd10a638b506b58e2dddb5788255e96e95330ef",
+  "releaseJevAdvisorTree": "c75fcca465dce1d88b4694e915923bbfb3fa4d6d",
+  "laneJevAdvisorTree": "ead44e9751d3d4648bd92ab5905faae8bac20f8e",
+  "pass": true
+}

@@ -1,0 +1,195 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { mkdtempSync, readFileSync, existsSync } from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { createLedger } from "../../lib/accounting.mjs";
+import { priorSpend } from "../../lib/ledger-journal.mjs";
+import { startProxy } from "../../lib/proxy.mjs";
+import { createScriptedChat, createScriptedDecision, scriptedEnvelope } from "../../lib/scripted.mjs";
+import { parseTranscript } from "../../lib/transcript.mjs";
+import { cellMetrics, wasteTags } from "../../lib/metrics.mjs";
+import { normalizeBody } from "../../lib/normalize.mjs";
+import { DEV_TASKS, HOLDOUT_TASKS, stagePlan } from "../../lib/stage-plans.mjs";
+import { assertFresh, catalogReceipt } from "../../lib/catalog.mjs";
+import { describeKey, keyLeaked } from "../../lib/keys.mjs";
+import { checkpointConfigFor } from "../../lib/runner.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const FIXTURES = path.join(HERE, "..", "..", "fixtures");
+const QUESTIONS = { goal_state: { wordingId: "W2", criteriaOrder: null }, error_repeat: { wordingId: "W2", criteriaOrder: null }, ensembleRule: "primary_override" };
+const CELL_A = "aaaaaaaaaaaaaaaaaaaaaaaa";
+const CELL_B = "bbbbbbbbbbbbbbbbbbbbbbbb";
+
+test("ledger: hard stop is inclusive at 4.00, journals stop.json, and refuses everything after", () => {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "jexp-ledger-"));
+	const journalPath = path.join(dir, "ledger.jsonl");
+	const stopPath = path.join(dir, "stop.json");
+	const ledger = createLedger({ hardStopUsd: 4, priorSpentUsd: 3.9, journalPath, stopPath });
+	ledger.reserve({ id: "r1", cellId: "c", kind: "chat", reserveUsd: 0.09 });
+	ledger.settle("r1", { computedUsd: 0.05 });
+	assert.throws(() => ledger.reserve({ id: "r2", cellId: "c", kind: "chat", reserveUsd: 0.05 }), /budget_stop/); // 3.95 + 0.05 = 4.00 → stop
+	assert.ok(existsSync(stopPath));
+	assert.throws(() => ledger.reserve({ id: "r3", cellId: "c", kind: "chat", reserveUsd: 0.0001 }), /budget_stop/);
+	const under = createLedger({ hardStopUsd: 4, priorSpentUsd: 3.9 });
+	under.reserve({ id: "x", cellId: "c", kind: "chat", reserveUsd: 0.0999 });
+	assert.equal(under.stopped, null);
+	assert.ok(Math.abs(priorSpend(journalPath) - 0.05) < 1e-12);
+});
+
+test("ledger: unknown charges are never zero; a dangling reservation counts at full value", () => {
+	const dir = mkdtempSync(path.join(os.tmpdir(), "jexp-ledger-"));
+	const journalPath = path.join(dir, "ledger.jsonl");
+	const ledger = createLedger({ journalPath });
+	ledger.reserve({ id: "a", cellId: "c", kind: "decision", reserveUsd: 0.001 });
+	assert.deepEqual(ledger.unresolved("a"), { usd: 0.001, basis: "computed_bound" });
+	ledger.reserve({ id: "b", cellId: "c", kind: "decision", reserveUsd: 0.002 });
+	assert.ok(Math.abs(priorSpend(journalPath) - 0.003) < 1e-12);
+	ledger.settle("b", { billedUsd: 0.0001, computedUsd: 0.5 });
+	assert.equal(ledger.snapshot().byBasis.billed, 0.0001);
+	assert.throws(() => ledger.reserve({ id: "a", cellId: "c", kind: "decision", reserveUsd: 0.001 }), /duplicate_request/);
+});
+
+test("ledger: a per-cell cap fails only that cell", () => {
+	const ledger = createLedger({});
+	ledger.configureCell("one", { usdCap: 0.01, turnCap: 2 });
+	ledger.configureCell("two", { usdCap: 1, turnCap: 16 });
+	assert.throws(() => ledger.reserve({ id: "1", cellId: "one", kind: "chat", reserveUsd: 0.02, turn: true }), /cell_cap/);
+	assert.throws(() => ledger.reserve({ id: "2", cellId: "one", kind: "chat", reserveUsd: 0.001, turn: true }), /cell_cap/);
+	ledger.reserve({ id: "3", cellId: "two", kind: "chat", reserveUsd: 0.02, turn: true });
+	assert.equal(ledger.stopped, null);
+});
+
+async function post(url, body, headers = {}) {
+	const response = await fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+	return { status: response.status, text: await response.text() };
+}
+
+test("proxy (scripted): attributes rows by cell, re-emits tool calls as SSE, and enforces mode/model/caps", async () => {
+	const ledger = createLedger({});
+	const proxy = await startProxy({ mode: "scripted", ledger, questionConfig: QUESTIONS, scriptedChat: createScriptedChat(), scriptedDecision: createScriptedDecision() });
+	try {
+		const a = proxy.registerCell({ cellId: CELL_A, token: "tok-a", checkpoint: { mode: "error", trigger: "error" }, usdCap: 1, turnCap: 16, meta: { taskId: "no-invented-cap" } });
+		const b = proxy.registerCell({ cellId: CELL_B, token: "tok-b", checkpoint: { mode: "off", trigger: "periodic" }, usdCap: 1, turnCap: 16, meta: { taskId: "no-invented-cap" } });
+		const chatBody = { model: "deepseek/deepseek-v4.1-flash-eco", messages: [{ role: "user", content: "hi" }], stream: true };
+		assert.equal((await post(`${a.baseUrl}/chat/completions`, chatBody, { authorization: "Bearer wrong" })).status, 401);
+		const sse = await post(`${a.baseUrl}/chat/completions`, chatBody, { authorization: "Bearer tok-a" });
+		assert.equal(sse.status, 200);
+		assert.match(sse.text, /"tool_calls":\[\{"index":0,"id":"call_1","type":"function"/);
+		assert.match(sse.text, /data: \[DONE\]/);
+		const advice = await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 2, models: ["sionic-ai/jev-omni"], state: "Goal: x" });
+		assert.equal(advice.status, 200);
+		assert.match(JSON.parse(advice.text).advice, /^\[jev-checkpoint\] label=yes/);
+		assert.equal((await post(b.checkpointUrl, { mode: "off", family: "goal_state", callIndex: 1, models: [] })).status, 403);
+		assert.equal(JSON.parse((await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 3, models: ["typesafe/jev-1.14"], state: "Goal: x" })).text).reason, "route_not_allowed");
+		assert.equal(JSON.parse((await post(a.checkpointUrl, { mode: "error", family: "goal_state", trigger: "error", callIndex: 3, models: ["sionic-ai/jev-omni"], state: "Goal: x" })).text).reason, "family_mismatch");
+		const second = await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 4, models: ["sionic-ai/jev-omni"], state: "Goal: x" });
+		assert.equal(second.status, 200);
+		assert.equal(JSON.parse((await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 5, models: ["sionic-ai/jev-omni"], state: "Goal: x" })).text).reason, "request_cap");
+		assert.equal(proxy.upstreamCalls, 0);
+		assert.ok(proxy.rows.every((row) => row.kind === "error" || row.kind === "refused" || [CELL_A, CELL_B].includes(row.cellId)));
+	} finally {
+		await proxy.close();
+	}
+	await assert.rejects(startProxy({ mode: "scripted", ledger: createLedger({}), questionConfig: QUESTIONS, scriptedChat: createScriptedChat(), scriptedDecision: createScriptedDecision(), keys: { opengateway: "x" } }), /scripted_credentials_forbidden/);
+	await assert.rejects(startProxy({ mode: "live", ledger: createLedger({}), questionConfig: QUESTIONS }), /live_key_missing/);
+});
+
+test("proxy (scripted): a global stop refuses every route with zero upstream", async () => {
+	const ledger = createLedger({ hardStopUsd: 0.00001 });
+	const proxy = await startProxy({ mode: "scripted", ledger, questionConfig: QUESTIONS, scriptedChat: createScriptedChat(), scriptedDecision: createScriptedDecision() });
+	try {
+		const a = proxy.registerCell({ cellId: CELL_A, token: "tok", checkpoint: { mode: "periodic", trigger: "periodic" }, usdCap: 1, turnCap: 16, meta: { taskId: "no-invented-cap" } });
+		const first = await post(`${a.baseUrl}/chat/completions`, { model: "deepseek/deepseek-v4.1-flash-eco", messages: [{ role: "user", content: "hi" }] }, { authorization: "Bearer tok" });
+		assert.equal(first.status, 503);
+		assert.ok(ledger.stopped);
+		assert.equal((await post(a.checkpointUrl, { mode: "periodic" })).status, 503);
+		assert.equal(proxy.upstreamCalls, 0);
+	} finally {
+		await proxy.close();
+	}
+});
+
+test("transcript: advice folded into an error result is separated from the result text", () => {
+	const lines = [
+		{ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "read", arguments: { path: "x" } }], usage: { input: 10, output: 2, cost: { total: 0.1 } } } },
+		{ type: "message_end", message: { role: "toolResult", toolCallId: "c1", isError: true, content: [{ type: "text", text: "Path 'x' not found\n[jev-checkpoint] label=yes signal=0.80 — retry differently" }] } },
+		{ type: "message_end", message: { role: "assistant", content: [{ type: "toolCall", id: "c2", name: "bash", arguments: { command: "ls" } }] } },
+		{ type: "message_end", message: { role: "toolResult", toolCallId: "c2", content: [{ type: "text", text: "a" }, { type: "text", text: "[jev-checkpoint] label=off_track signal=0.90 — x" }] } },
+		{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "done" }] } },
+		{ type: "agent_end", messages: [] },
+	];
+	const parsed = parseTranscript(lines.map((line) => JSON.stringify(line)).join("\n"));
+	assert.equal(parsed.toolCalls[0].resultText, "Path 'x' not found");
+	assert.equal(parsed.toolCalls[0].advice.label, "yes");
+	assert.equal(parsed.toolCalls[1].advice.label, "off_track");
+	assert.equal(parsed.finalText, "done");
+	assert.equal(parsed.ended, true);
+	assert.equal(parsed.usage.costUsd, 0.1);
+	assert.throws(() => parseTranscript("{not json"), /transcript_invalid_json/);
+});
+
+test("metrics: waste categories are mutually exclusive with fixed priority", () => {
+	const call = (name, args, isError = false) => ({ name, args, isError });
+	const calls = [call("read", { path: "a" }, true), call("read", { path: "a" }, true), call("bash", { command: "pr-budget" }), call("bash", { command: "echo after" })];
+	const spec = { lastRequiredCall: { tool: "bash", argsRegex: "pr-budget" }, allowedTaskCalls: 0 };
+	assert.deepEqual(wasteTags(spec, calls), [null, "repeatRead", null, "postCompletion"]);
+	const parsed = { toolCalls: calls.map((entry, index) => ({ ...entry, index, advice: null })), turns: 5 };
+	const metrics = cellMetrics({ parsed, spec: { ...spec, driftPredicates: [], goalStateLabel: { default: "on_track", offWhen: [] } }, chatRows: [{ inputTokens: 100, outputTokens: 10, costUsd: 0.01, requestBytes: 400 }], checkpointRows: [{ family: "goal_state", callIndex: 2, branch: "single", label: "off_track" }, { family: "goal_state", callIndex: 3, branch: "abstain", label: null, reason: "unnormalized_probabilities" }] });
+	assert.equal(metrics.wasteTurns, 2);
+	assert.equal(metrics.falseStop, 1);
+	assert.deepEqual(metrics.noDecision, { unnormalized_probabilities: 1 });
+	assert.equal(metrics.labelChecks, 2);
+	assert.equal(metrics.labelCorrect, 0);
+});
+
+test("normalize: declared tokens erase cell-specific values only", () => {
+	const root = "/private/tmp/jexp/cells/abc";
+	const a = normalizeBody({ messages: [{ role: "system", content: `cwd ${root}/mount/work at 2026-11-14T09:03:34.552Z port 127.0.0.1:5555 id 01a1d94c-3c98-75f1-a101-984ab3960d19 sha 5f0652e8f50c` }] }, { root, cellId: "abc", port: 5555 });
+	const b = normalizeBody({ messages: [{ role: "system", content: `cwd /private/tmp/jexp/cells/def/mount/work at 2026-11-15T10:00:00.000Z port 127.0.0.1:6666 id 11111111-2222-3333-4444-555555555555 sha 1234567890ab` }] }, { root: "/private/tmp/jexp/cells/def", cellId: "def", port: 6666 });
+	assert.equal(a, b);
+	const c = normalizeBody({ messages: [{ role: "system", content: "different text" }] }, { root });
+	assert.notEqual(a, c);
+});
+
+test("stage plans: frozen split constants match the fixtures and dev stages never name a holdout task", () => {
+	for (const id of [...DEV_TASKS, ...HOLDOUT_TASKS]) {
+		const spec = JSON.parse(readFileSync(path.join(FIXTURES, "tasks", id, "spec.json"), "utf8"));
+		assert.equal(spec.id, id);
+		assert.equal(spec.split, DEV_TASKS.includes(id) ? "dev" : "holdout");
+	}
+	const counts = Object.fromEntries(["S0", "S0b", "S1", "S2", "S3"].map((stage) => [stage, stagePlan(stage).length]));
+	assert.deepEqual(counts, { S0: 18, S0b: 12, S1: 54, S2: 18, S3: 36 });
+	for (const stage of ["S0", "S0b", "S1", "S2"]) assert.ok(stagePlan(stage).every((cell) => !HOLDOUT_TASKS.includes(cell.taskId)));
+	assert.ok(stagePlan("S3").every((cell) => HOLDOUT_TASKS.includes(cell.taskId)));
+	assert.equal(checkpointConfigFor("a0-release"), null);
+	assert.deepEqual(checkpointConfigFor("a1-off"), { mode: "off" });
+	assert.throws(() => checkpointConfigFor("fz-frozen"), /frozen_config_missing/);
+});
+
+test("catalog: list and observed prices are recorded per token and staleness refuses", () => {
+	const raw = JSON.stringify({ data: [
+		{ id: "deepseek/deepseek-v4.1-flash-eco", providers: [{ id: "sionic-ai" }], pricing: { prompt: "0.00000003", completion: "0.00000012", list: { prompt: "0.0000003", completion: "0.0000012" }, discount_percent: "90" } },
+		{ id: "sionic-ai/jev-omni", providers: [{ id: "sionic-ai" }], pricing: { prompt: "0.0000000063", completion: "0", list: { prompt: "0.000000126", completion: "0" }, discount_percent: "95" } },
+		{ id: "sionic-ai/decider-4b", providers: [{ id: "sionic-ai" }], pricing: { prompt: "0.0000000021", completion: "0", list: { prompt: "0.000000042", completion: "0" }, discount_percent: "95" } },
+	] });
+	const receipt = catalogReceipt(raw, "2026-11-14T09:00:00.000Z");
+	assert.equal(receipt.entries["sionic-ai/jev-omni"].observedInputPricePerToken, 6.3e-9);
+	assert.equal(receipt.entries["sionic-ai/jev-omni"].listInputPricePerToken, 1.26e-7);
+	assert.ok(assertFresh(receipt, Date.parse("2026-11-14T20:00:00Z")));
+	assert.throws(() => assertFresh(receipt, Date.parse("2026-11-15T09:00:01Z")), /catalog_stale/);
+	assert.throws(() => catalogReceipt(JSON.stringify({ data: [] })), /catalog_entry_missing/);
+});
+
+test("keys: only presence/length are reportable; leak scan works in process", () => {
+	assert.deepEqual(describeKey("abc"), { present: true, bytes: 3 });
+	assert.equal(keyLeaked("sk-secret", [Buffer.from("x sk-secret y")]), true);
+	assert.equal(keyLeaked("sk-secret", [Buffer.from("clean")]), false);
+});
+
+test("scripted decisions: overrides reach the unnormalized path", async () => {
+	const decide = createScriptedDecision(({ model }) => (model === "sionic-ai/decider-4b" ? scriptedEnvelope("decision", "off_track", { on_track: 0.1, off_track: 0.902 }, 0.8) : null));
+	const reply = await decide({ model: "sionic-ai/decider-4b", body: { questions: { decision: {} } }, family: "goal_state" });
+	assert.equal(reply.json.answers.decision.probabilities.off_track, 0.902);
+});

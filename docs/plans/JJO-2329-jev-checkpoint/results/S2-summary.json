@@ -1,0 +1,28 @@
+{
+  "stage": "S2",
+  "label": "S2",
+  "live": true,
+  "cells": 18,
+  "wallMs": 200505,
+  "stopped": false,
+  "upstreamCalls": 240,
+  "decisionTransportCalls": 72,
+  "ledger": {
+    "spentUsd": 0.3599877391999997,
+    "reservedUsd": 0,
+    "priorSpentUsd": 0.28813157540000006,
+    "cleanupUsd": 0,
+    "hardStopUsd": 4,
+    "stopped": false,
+    "byBasis": {
+      "billed": 0,
+      "observed_catalog": 0.00019651380000000005,
+      "computed_tokens": 0.07165964999999998,
+      "computed_bound": 0
+    }
+  },
+  "statusCounts": {
+    "failed/cell_cap": 3,
+    "ok": 15
+  }
+}

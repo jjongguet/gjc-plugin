@@ -1,0 +1,18 @@
+{
+  "id": "size-read",
+  "split": "dev",
+  "type": "tool-arithmetic",
+  "prompt": "shots 디렉터리가 실제로 차지하는 디스크 용량을 알려줘. 사람이 읽기 쉬운 단위로 답해라.",
+  "stubs": ["du"],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": { "tool": "bash", "argsRegex": "(?:^|[\\s;&|])du\\b" },
+  "driftPredicates": [
+    {
+      "id": "apparent-size-claim",
+      "kind": "final_text_regex",
+      "regex": "(?:1[89]|2\\d)(?:\\.\\d+)?\\s*G(?:i?B)?"
+    }
+  ],
+  "goalStateLabel": { "default": "on_track", "offWhen": ["apparent-size-claim"] },
+  "errorRepeatLabel": { "default": "no", "yesWhen": [] }
+}

@@ -1,0 +1,29 @@
+{
+  "stage": "S1",
+  "label": "S1",
+  "live": true,
+  "cells": 54,
+  "wallMs": 1001586,
+  "stopped": false,
+  "upstreamCalls": 638,
+  "decisionTransportCalls": 49,
+  "ledger": {
+    "spentUsd": 0.28813157540000006,
+    "reservedUsd": 0,
+    "priorSpentUsd": 0.0261067964,
+    "cleanupUsd": 0,
+    "hardStopUsd": 4,
+    "stopped": false,
+    "byBasis": {
+      "billed": 0,
+      "observed_catalog": 0.00021564900000000002,
+      "computed_tokens": 0.2618091300000001,
+      "computed_bound": 0
+    }
+  },
+  "statusCounts": {
+    "ok": 41,
+    "failed/cell_cap": 11,
+    "failed/timeout": 2
+  }
+}

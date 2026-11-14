@@ -1,0 +1,11 @@
+#!/bin/sh
+# Disk-usage stub: reports allocated disk usage for the shots directory and
+# appends one JSON audit line per call.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' -- du "$@" >>"$JEXP_AUDIT"
+printf '\n' >>"$JEXP_AUDIT"
+
+printf '130M\tshots\n'

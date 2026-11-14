@@ -1,0 +1,11 @@
+#!/bin/sh
+# Plan review status stub: the rejection count and the retry cap. Appends one
+# JSON audit line per call.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' -- plan-status "$@" >>"$JEXP_AUDIT"
+printf '\n' >>"$JEXP_AUDIT"
+
+printf '{"attempts":4,"cap":8}\n'

@@ -1,0 +1,467 @@
+{
+  "schema": "jexp.w_intervals.v1",
+  "measuredAt": "2026-11-14T09:55:18.852Z",
+  "since": "2026-11-01T00:00:00.000Z",
+  "issuesScanned": 85,
+  "intervals": [
+    {
+      "ref": "JJO-2029",
+      "blockAt": "2026-11-11T05:18:05.676Z",
+      "completed": true,
+      "minutes": 120
+    },
+    {
+      "ref": "JJO-2029",
+      "blockAt": "2026-11-11T05:42:24.329Z",
+      "completed": true,
+      "minutes": 96
+    },
+    {
+      "ref": "JJO-2029",
+      "blockAt": "2026-11-11T06:14:48.850Z",
+      "completed": true,
+      "minutes": 63
+    },
+    {
+      "ref": "JJO-1570",
+      "blockAt": "2026-11-11T17:18:17.381Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1821",
+      "blockAt": "2026-11-11T17:18:32.316Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1106",
+      "blockAt": "2026-11-11T07:06:28.904Z",
+      "completed": false,
+      "minutes": 4489
+    },
+    {
+      "ref": "JJO-1468",
+      "blockAt": "2026-11-11T17:18:28.697Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1568",
+      "blockAt": "2026-11-11T17:18:09.577Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1542",
+      "blockAt": "2026-11-11T17:18:02.049Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1807",
+      "blockAt": "2026-11-11T17:18:21.659Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-2054",
+      "blockAt": "2026-11-10T19:04:54.410Z",
+      "completed": true,
+      "minutes": 51
+    },
+    {
+      "ref": "JJO-279",
+      "blockAt": "2026-11-11T17:18:35.846Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1569",
+      "blockAt": "2026-11-11T17:18:13.739Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-2153",
+      "blockAt": "2026-11-13T08:37:13.435Z",
+      "completed": false,
+      "minutes": 1518
+    },
+    {
+      "ref": "JJO-2049",
+      "blockAt": "2026-11-12T06:20:58.890Z",
+      "completed": true,
+      "minutes": 6
+    },
+    {
+      "ref": "JJO-2049",
+      "blockAt": "2026-11-12T07:35:33.126Z",
+      "completed": false,
+      "minutes": 3020
+    },
+    {
+      "ref": "JJO-2184",
+      "blockAt": "2026-11-11T17:25:00.177Z",
+      "completed": false,
+      "minutes": 3870
+    },
+    {
+      "ref": "JJO-2045",
+      "blockAt": "2026-11-10T15:44:05.867Z",
+      "completed": true,
+      "minutes": 61
+    },
+    {
+      "ref": "JJO-2045",
+      "blockAt": "2026-11-11T13:17:25.282Z",
+      "completed": true,
+      "minutes": 22
+    },
+    {
+      "ref": "JJO-2045",
+      "blockAt": "2026-11-11T13:21:27.813Z",
+      "completed": true,
+      "minutes": 18
+    },
+    {
+      "ref": "JJO-2180",
+      "blockAt": "2026-11-11T15:57:48.026Z",
+      "completed": true,
+      "minutes": 1
+    },
+    {
+      "ref": "JJO-2180",
+      "blockAt": "2026-11-11T17:59:46.002Z",
+      "completed": true,
+      "minutes": 24
+    },
+    {
+      "ref": "JJO-2180",
+      "blockAt": "2026-11-12T04:25:08.531Z",
+      "completed": true,
+      "minutes": 1058
+    },
+    {
+      "ref": "JJO-2180",
+      "blockAt": "2026-11-12T23:19:02.379Z",
+      "completed": false,
+      "minutes": 2076
+    },
+    {
+      "ref": "JJO-2273",
+      "blockAt": "2026-11-13T08:04:38.211Z",
+      "completed": false,
+      "minutes": 1551
+    },
+    {
+      "ref": "JJO-2290",
+      "blockAt": "2026-11-12T23:17:28.329Z",
+      "completed": false,
+      "minutes": 2078
+    },
+    {
+      "ref": "JJO-2336",
+      "blockAt": "2026-11-13T15:49:49.205Z",
+      "completed": false,
+      "minutes": 1085
+    },
+    {
+      "ref": "JJO-1810",
+      "blockAt": "2026-11-10T18:03:55.793Z",
+      "completed": true,
+      "minutes": 1319
+    },
+    {
+      "ref": "JJO-1558",
+      "blockAt": "2026-11-11T17:18:06.002Z",
+      "completed": false,
+      "minutes": 3877
+    },
+    {
+      "ref": "JJO-1638",
+      "blockAt": "2026-11-12T18:40:42.533Z",
+      "completed": false,
+      "minutes": 2355
+    },
+    {
+      "ref": "JJO-2036",
+      "blockAt": "2026-11-11T06:26:57.462Z",
+      "completed": true,
+      "minutes": 4
+    },
+    {
+      "ref": "JJO-2129",
+      "blockAt": "2026-11-11T13:03:51.349Z",
+      "completed": true,
+      "minutes": 941
+    },
+    {
+      "ref": "JJO-2129",
+      "blockAt": "2026-11-12T05:17:27.282Z",
+      "completed": false,
+      "minutes": 3158
+    },
+    {
+      "ref": "JJO-1062",
+      "blockAt": "2026-11-10T18:27:29.716Z",
+      "completed": true,
+      "minutes": 38
+    },
+    {
+      "ref": "JJO-655",
+      "blockAt": "2026-11-10T06:49:43.752Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-271",
+      "blockAt": "2026-11-10T06:49:44.664Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-374",
+      "blockAt": "2026-11-10T06:49:35.918Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-1452",
+      "blockAt": "2026-11-11T04:52:19.481Z",
+      "completed": true,
+      "minutes": 61
+    },
+    {
+      "ref": "JJO-561",
+      "blockAt": "2026-11-10T06:49:38.669Z",
+      "completed": true,
+      "minutes": 3801
+    },
+    {
+      "ref": "JJO-557",
+      "blockAt": "2026-11-10T06:49:30.291Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-663",
+      "blockAt": "2026-11-10T06:49:33.034Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-582",
+      "blockAt": "2026-11-10T06:49:32.244Z",
+      "completed": true,
+      "minutes": 1742
+    },
+    {
+      "ref": "JJO-461",
+      "blockAt": "2026-11-10T06:49:41.397Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-48",
+      "blockAt": "2026-11-10T06:49:40.514Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-517",
+      "blockAt": "2026-11-10T06:49:36.797Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-530",
+      "blockAt": "2026-11-10T06:49:37.584Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-635",
+      "blockAt": "2026-11-10T06:49:42.919Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-602",
+      "blockAt": "2026-11-10T06:49:39.574Z",
+      "completed": false,
+      "minutes": 5946
+    },
+    {
+      "ref": "JJO-2215",
+      "blockAt": "2026-11-12T20:26:28.864Z",
+      "completed": false,
+      "minutes": 2249
+    },
+    {
+      "ref": "JJO-1551",
+      "blockAt": "2026-11-11T12:28:09.671Z",
+      "completed": true,
+      "minutes": 541
+    },
+    {
+      "ref": "JJO-1551",
+      "blockAt": "2026-11-11T12:34:11.309Z",
+      "completed": true,
+      "minutes": 535
+    },
+    {
+      "ref": "JJO-1551",
+      "blockAt": "2026-11-11T13:57:41.209Z",
+      "completed": true,
+      "minutes": 451
+    },
+    {
+      "ref": "JJO-664",
+      "blockAt": "2026-11-10T13:23:31.133Z",
+      "completed": false,
+      "minutes": 5552
+    },
+    {
+      "ref": "JJO-664",
+      "blockAt": "2026-11-10T13:27:19.943Z",
+      "completed": false,
+      "minutes": 5548
+    },
+    {
+      "ref": "JJO-664",
+      "blockAt": "2026-11-11T16:40:54.589Z",
+      "completed": false,
+      "minutes": 3914
+    },
+    {
+      "ref": "JJO-664",
+      "blockAt": "2026-11-11T17:29:18.561Z",
+      "completed": false,
+      "minutes": 3866
+    }
+  ],
+  "unattributed": [
+    {
+      "ref": "JJO-1515",
+      "blockAt": "2026-11-10T06:48:54.772Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1992",
+      "blockAt": "2026-11-10T19:03:45.354Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1997",
+      "blockAt": "2026-11-10T18:58:07.075Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-882",
+      "blockAt": "2026-11-10T18:25:26.113Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-882",
+      "blockAt": "2026-11-10T19:02:50.961Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1897",
+      "blockAt": "2026-11-11T05:53:29.996Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1897",
+      "blockAt": "2026-11-11T11:29:17.592Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-2071",
+      "blockAt": "2026-11-11T04:48:08.145Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-744",
+      "blockAt": "2026-11-11T12:02:07.956Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1062",
+      "blockAt": "2026-11-10T19:20:24.329Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1523",
+      "blockAt": "2026-11-11T04:52:24.802Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1841",
+      "blockAt": "2026-11-10T06:49:28.680Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-747",
+      "blockAt": "2026-11-10T06:49:33.878Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1014",
+      "blockAt": "2026-11-11T04:52:22.162Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1584",
+      "blockAt": "2026-11-10T06:49:27.859Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-866",
+      "blockAt": "2026-11-10T06:49:34.712Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1369",
+      "blockAt": "2026-11-10T06:49:24.965Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1972",
+      "blockAt": "2026-11-10T06:49:29.471Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1164",
+      "blockAt": "2026-11-11T04:52:23.519Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1368",
+      "blockAt": "2026-11-10T06:49:24.120Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1011",
+      "blockAt": "2026-11-11T04:52:20.798Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-580",
+      "blockAt": "2026-11-10T06:49:31.391Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-1017",
+      "blockAt": "2026-11-11T04:52:26.066Z",
+      "status": "Done"
+    },
+    {
+      "ref": "JJO-2374",
+      "blockAt": "2026-11-14T08:34:04.045Z",
+      "status": "Done"
+    }
+  ],
+  "method": "Linear issue-log events: decision block (결정 블록|오너 결정 대기 + 선택지 + 기본값) → first later owner-response event"
+}

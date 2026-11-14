@@ -1,0 +1,19 @@
+#!/bin/sh
+# Linear stub: records lifecycle calls and appends one JSON audit line per call.
+# The audit argv is the record; nothing is persisted anywhere else.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' linear "$@" >>"$JEXP_AUDIT"
+printf '\n' >>"$JEXP_AUDIT"
+
+case "${1:-}" in
+  start|result|state)
+    printf 'ok: %s recorded for %s\n' "$1" "${2:-unknown}"
+    ;;
+  *)
+    printf 'usage: linear start|result|state <issue> [--summary TEXT] [--sha256 HEX] [--to STATE]\n' >&2
+    exit 2
+    ;;
+esac

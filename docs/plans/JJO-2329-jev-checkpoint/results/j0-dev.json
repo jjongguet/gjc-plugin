@@ -1,0 +1,66 @@
+{
+  "schema": "jexp.j0_dev.v1",
+  "labelSheetDigest": "6d6d6ef73e0a570315925adff9f86595f66112be36c95ce879d29f97665d57a2",
+  "requests": 56,
+  "spentUsd": 0.000059707199999987914,
+  "stopped": false,
+  "selection": {
+    "error_repeat": {
+      "wordingId": "W1",
+      "rule": "bar_met",
+      "candidates": [
+        {
+          "wordingId": "W1",
+          "combined": 7,
+          "omni": 3,
+          "unnormalized": 0,
+          "cases": 4
+        },
+        {
+          "wordingId": "W2",
+          "combined": 6,
+          "omni": 3,
+          "unnormalized": 0,
+          "cases": 4
+        },
+        {
+          "wordingId": "W3",
+          "combined": 5,
+          "omni": 3,
+          "unnormalized": 0,
+          "cases": 4
+        }
+      ]
+    },
+    "goal_state": {
+      "wordingId": "W2",
+      "rule": "bar_met",
+      "candidates": [
+        {
+          "wordingId": "W1",
+          "combined": 6,
+          "omni": 4,
+          "unnormalized": 0,
+          "cases": 4
+        },
+        {
+          "wordingId": "W2",
+          "combined": 7,
+          "omni": 4,
+          "unnormalized": 0,
+          "cases": 4
+        },
+        {
+          "wordingId": "W3",
+          "combined": 7,
+          "omni": 4,
+          "unnormalized": 0,
+          "cases": 4
+        }
+      ]
+    }
+  },
+  "noDecision": {
+    "unnormalized_probabilities": 2
+  }
+}

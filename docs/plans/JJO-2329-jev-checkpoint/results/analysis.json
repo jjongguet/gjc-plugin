@@ -1,0 +1,226 @@
+{
+  "verdict": "rejected",
+  "branch": "x-rule",
+  "rules": {
+    "A1": {
+      "id": "A1",
+      "value": -0.16666666666666666,
+      "threshold": 0,
+      "passed": false,
+      "comparator": ">=",
+      "detail": {
+        "point": -0.05555555555555556,
+        "upper": 0,
+        "pairs": 6,
+        "reps": 10000,
+        "seed": 20261114
+      }
+    },
+    "A2": {
+      "id": "A2",
+      "value": 1.0978202514136473,
+      "threshold": 1,
+      "passed": false,
+      "comparator": "<",
+      "detail": {
+        "ratioOfMeans": 0.9812497076625162,
+        "meanOfRatios": 0.9569694190555015,
+        "lower": 0.8723728388947641,
+        "pairs": 6,
+        "note": null
+      }
+    },
+    "A3": {
+      "id": "A3",
+      "value": 0.19090909090909092,
+      "threshold": 0.2,
+      "passed": false,
+      "comparator": ">=",
+      "detail": {
+        "lower": -0.22222222222222218,
+        "upper": 0.5909090909090909,
+        "pairs": 6,
+        "zeroBaseline": 0,
+        "note": null
+      }
+    },
+    "A4": {
+      "id": "A4",
+      "value": 0.0011423679352175772,
+      "threshold": 0.05,
+      "passed": false,
+      "comparator": "<=",
+      "detail": {
+        "wallRatio": 1.0205445628630176,
+        "wallUpper": 1.2192813330279995,
+        "wallThreshold": 1.1,
+        "jevUsd": 0.00007189559999999999,
+        "sessionUsd": 0.06293558999999999,
+        "wallPairs": 6
+      }
+    },
+    "A5": {
+      "id": "A5",
+      "value": [
+        "X6"
+      ],
+      "threshold": 0,
+      "passed": false,
+      "comparator": "===",
+      "detail": {
+        "fired": [
+          "X6"
+        ]
+      }
+    },
+    "X1": {
+      "id": "X1",
+      "value": 0,
+      "threshold": 1,
+      "fired": false,
+      "detail": {
+        "tasks": []
+      },
+      "passed": true
+    },
+    "X2": {
+      "id": "X2",
+      "value": 9.25185853854297e-18,
+      "threshold": 0.08333333333333333,
+      "fired": false,
+      "detail": {
+        "pairs": 12,
+        "perSplit": {
+          "holdout": 6,
+          "dev": 6
+        }
+      },
+      "passed": true
+    },
+    "X3": {
+      "id": "X3",
+      "value": 1.0978202514136473,
+      "threshold": 1.1,
+      "fired": false,
+      "detail": {
+        "ratioOfMeans": 0.9812497076625162
+      },
+      "passed": true
+    },
+    "X4": {
+      "id": "X4",
+      "value": {
+        "ignoredAdviceRate": null,
+        "triggerRate": 0.7777777777777778
+      },
+      "threshold": {
+        "ignoredAdviceRate": 0.7,
+        "triggerRate": 0.1
+      },
+      "fired": false,
+      "detail": {
+        "ignoredFired": false,
+        "triggerFired": false,
+        "sessions": 18,
+        "adviceCount": 0
+      },
+      "passed": true
+    },
+    "X5": {
+      "id": "X5",
+      "value": 0,
+      "threshold": 2,
+      "fired": false,
+      "detail": {},
+      "passed": true
+    },
+    "X6": {
+      "id": "X6",
+      "value": {
+        "falseStopRate": null,
+        "labelAccuracy": 0.3333333333333333,
+        "sensitivityAccuracy": 0.3333333333333333
+      },
+      "threshold": {
+        "falseStopRate": 0.1,
+        "labelAccuracy": 0.75
+      },
+      "fired": true,
+      "detail": {
+        "falseStopFired": false,
+        "accuracyFired": true,
+        "breakdown": [
+          {
+            "reason": "low_confidence",
+            "count": 14
+          }
+        ],
+        "noDecisionTotal": 14,
+        "labelChecks": 21,
+        "labelCorrect": 7,
+        "accuracyDenominator": 21
+      },
+      "passed": false
+    }
+  },
+  "observations": [
+    {
+      "code": "dev_treatment",
+      "detail": {
+        "condition": "de-error"
+      }
+    }
+  ],
+  "imputed": {
+    "cells": 108,
+    "error_cells": 18,
+    "waste_error_imputed": 0,
+    "cost_reserved": 0,
+    "cost_unmeasured": 0,
+    "not_run": 0
+  },
+  "saturation": {
+    "baselineAtCeiling": false,
+    "treatmentAtCeiling": false,
+    "superiorityIndeterminate": false,
+    "note": null
+  },
+  "baseline": {
+    "condition": "a1-off",
+    "pairs": 6
+  },
+  "treatment": {
+    "condition": "fz-frozen",
+    "pairs": 6,
+    "devPairs": 6,
+    "devCondition": "de-error"
+  },
+  "powerGate": "fail",
+  "ruleTableDigest": "0fcc5ac3a5d325f8383fc5ffa7abbb1bdbd8b2ca10bb54ad15f8870819d95b4e",
+  "p1Gate": {
+    "agreementErrorRate": 0.2222222222222222,
+    "bothWrongHighConfidence": 0,
+    "agreementThreshold": 0.1,
+    "bothWrongThreshold": 0.03333333333333333,
+    "open": true,
+    "c3Adoptable": false,
+    "basis": {
+      "agreementOpen": true,
+      "bothWrongOpen": false
+    }
+  },
+  "decision": {
+    "terminated": false,
+    "adoptionPassed": false,
+    "fired": [
+      "X6"
+    ]
+  },
+  "postS1Power": {
+    "reportOnly": true,
+    "sigmaWasteTurns": 1.091928428198338,
+    "delta": 0.15384615384615385,
+    "nRequired": 312,
+    "formula": "ceil((z0.95+z0.80)^2 σ^2 / Δ^2), Δ = 20% of the dev baseline waste mean"
+  }
+}

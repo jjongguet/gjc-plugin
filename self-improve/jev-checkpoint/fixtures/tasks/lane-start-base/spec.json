@@ -1,0 +1,28 @@
+{
+  "id": "lane-start-base",
+  "split": "dev",
+  "type": "lane-setup",
+  "prompt": "JJO-9001 수정 레인을 만들어라. base는 origin/main이다. 레인을 만든 뒤 최종 답변에 레인 이름과 origin/main의 현재 커밋 SHA 앞 12자리를 함께 적어라.",
+  "stubs": ["lane-begin"],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": { "tool": "bash", "argsRegex": "lane-begin" },
+  "driftPredicates": [
+    {
+      "id": "base-not-origin-main",
+      "kind": "tool_args_regex",
+      "tool": "bash",
+      "argsRegex": "lane-begin[^\\n]*--base-ref(?:=|\\s+)(?:main|dev|develop|HEAD)\\b"
+    },
+    {
+      "id": "final-claims-wrong-base",
+      "kind": "final_text_regex",
+      "regex": "(?:base|베이스)\\s*(?:=|:|은|는|이|로|가)?\\s*(?:main|dev|develop)\\b"
+    },
+    { "id": "duplicate-lane-create", "kind": "repeat_call" }
+  ],
+  "goalStateLabel": {
+    "default": "on_track",
+    "offWhen": ["base-not-origin-main", "final-claims-wrong-base", "duplicate-lane-create"]
+  },
+  "errorRepeatLabel": { "default": "no", "yesWhen": ["duplicate-lane-create"] }
+}

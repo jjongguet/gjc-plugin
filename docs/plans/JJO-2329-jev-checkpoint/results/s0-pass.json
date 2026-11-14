@@ -1,0 +1,110 @@
+{
+  "schema": "jexp.s0_pass.v1",
+  "pass": true,
+  "checks": [
+    {
+      "id": "s0_18_of_18_ok",
+      "pass": true,
+      "statusCounts": {
+        "ok": 18
+      }
+    },
+    {
+      "id": "s0_scores_scripted",
+      "pass": true
+    },
+    {
+      "id": "s0_upstream_zero",
+      "pass": true,
+      "upstreamCalls": 0
+    },
+    {
+      "id": "s0_isolation_pass",
+      "pass": true
+    },
+    {
+      "id": "s0_off_no_checkpoint",
+      "pass": true
+    },
+    {
+      "id": "s0_periodic_fires_and_appends",
+      "pass": true
+    },
+    {
+      "id": "s0_error_fires_and_appends",
+      "pass": true
+    },
+    {
+      "id": "s0_goal_from_branch",
+      "pass": true
+    },
+    {
+      "id": "s0_plugins_loaded",
+      "pass": true
+    },
+    {
+      "id": "s0_tools_include_jev_check",
+      "pass": true
+    },
+    {
+      "id": "s0_no_key_in_child",
+      "pass": true
+    },
+    {
+      "id": "s0_no_live_children",
+      "pass": true
+    },
+    {
+      "id": "s0_normalization_controls",
+      "pass": true
+    },
+    {
+      "id": "drill1_cell_cap_isolated",
+      "pass": true,
+      "statusCounts": {
+        "failed/cell_cap": 1,
+        "ok": 2
+      }
+    },
+    {
+      "id": "drill2_global_stop",
+      "pass": true,
+      "terminatedStatuses": [
+        "failed/global_stop",
+        "failed/global_stop",
+        "failed/global_stop",
+        "not_run/null",
+        "not_run/null",
+        "not_run/null"
+      ],
+      "verdict": "insufficient → 현행 유지"
+    },
+    {
+      "id": "drill3_allowlist",
+      "pass": true
+    },
+    {
+      "id": "drill4_ensemble",
+      "pass": true
+    },
+    {
+      "id": "drill5_unnormalized_boundary",
+      "pass": true,
+      "aReasons": [
+        "decided",
+        "decided"
+      ],
+      "bReasons": [
+        "unnormalized_probabilities",
+        "unnormalized_probabilities"
+      ]
+    },
+    {
+      "id": "drill6_turn_cap",
+      "pass": true
+    }
+  ],
+  "upstreamCalls": 0,
+  "harnessDigest": "e48dbecc254b4d5dfc019b808e3739ba699cd8752ebbb40a076562d1a794c55b",
+  "createdAt": "2026-11-14T09:57:54.047Z"
+}
