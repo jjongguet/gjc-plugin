@@ -129,7 +129,7 @@ export function freeze(runDir) {
 		bundles: { jevAdvisor: bundleDigest(BUNDLES.jevAdvisor).digest, jevCheckpoint: bundleDigest(BUNDLES.jevCheckpoint).digest },
 		readiness: { originMain: readiness.originMain, releaseTree: readiness.releaseTree, releaseSurface: readiness.releaseSurface },
 		catalog: { observedAt: catalogReceipt.observedAt, rawDigest: catalogReceipt.rawDigest, entries: catalogReceipt.entries },
-		l0: { bytesPerToken, upstreamMode: l0.upstreamMode },
+		l0: { bytesPerToken: l0.chat.bytesPerToken, upstreamMode: l0.upstreamMode },
 		questions,
 		questionDigests: { goal_state: questionDigest({ family: "goal_state", wordingId: wording.goal_state }), error_repeat: questionDigest({ family: "error_repeat", wordingId: wording.error_repeat }) },
 		criteriaOrderDigest: sha256(JSON.stringify({ goal_state: questions.goal_state.criteriaOrder, error_repeat: questions.error_repeat.criteriaOrder, destructive: FAMILIES.destructive.canonicalOrder })),

@@ -13,7 +13,9 @@ import { harnessDigest, requireS0Harness } from "../../lib/digest.mjs";
 import { ensembleSensitivity } from "../../lib/judge.mjs";
 import { stageReceipts } from "../../lib/receipts.mjs";
 import { stagePlan } from "../../lib/stage-plans.mjs";
-import { monteCarloWithDigest, projectCost, projectionPrice } from "../../scripts/freeze.mjs";
+import { freeze, monteCarloWithDigest, projectCost, projectionPrice } from "../../scripts/freeze.mjs";
+import { loadCases } from "../../lib/judge.mjs";
+import { FIXTURES_DIR } from "../../scripts/stage.mjs";
 import { stageFinishedAt, writeStageReceipts } from "../../scripts/decide.mjs";
 import { requireCompleteW } from "../../scripts/j0.mjs";
 import { BUNDLES, runStageCli } from "../../scripts/stage.mjs";
@@ -177,8 +179,11 @@ test("J0-test refuses a missing or incomplete W receipt (checked before any spen
 	assert.throws(() => requireCompleteW(runDir), /w_intervals_incomplete/);
 	writeFileSync(path.join(runDir, "w-intervals.json"), JSON.stringify({ complete: true, intervals: [] }));
 	assert.equal(requireCompleteW(runDir).complete, true);
+	// Anchored on the call site in the test phase, not the declaration.
 	const source = readFileSync(path.join(ROOT, "scripts", "j0.mjs"), "utf8");
-	assert.ok(source.indexOf("requireCompleteW(runDir)") < source.lastIndexOf("await runPlan("), "the W check precedes the paid J0-test run");
+	const testPhase = source.slice(source.indexOf('const dev = JSON.parse(readFileSync(path.join(runDir, "j0-dev.json")'));
+	const call = testPhase.indexOf("estimateW(requireCompleteW(runDir)");
+	assert.ok(call > 0 && call < testPhase.indexOf("await runPlan("), "the W check precedes the paid J0-test run");
 });
 
 test("X5 signal 2: fires at >= 0.10 of session tokens, not below, and counts unmeasured usage", () => {
@@ -239,4 +244,32 @@ test("a cell that failed before scoring gets a failure attestation receipt; an u
 	assert.equal(failed.errorClass, "setup");
 	records[0] = { ...records[0], status: "ok", success: 1, score: 2 };
 	assert.throws(() => stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) }), /oracle evidence digest/);
+});
+
+test("freeze() builds a manifest end to end from bound receipts and refuses an unbound one", () => {
+	const runDir = tmp("jexp-freeze-e2e-");
+	const current = harnessDigest().digest;
+	const put = (name, value) => writeFileSync(path.join(runDir, name), typeof value === "string" ? value : JSON.stringify(value));
+	put("s0-pass.json", { pass: true, harnessDigest: current });
+	put("s0b-inertness.json", { pass: true, harnessDigest: current });
+	put("readiness.json", { pass: true, originMain: "5f0652e8f50c16795f303357acb62570c782daa0", releaseTree: "ddd10a63", releaseSurface: "tag_tree" });
+	const catalog = JSON.parse(readFileSync(path.join(ROOT, "..", "..", "docs", "plans", "JJO-2329-jev-checkpoint", "results", "catalog-latest.json"), "utf8"));
+	put("catalog-latest.json", { ...catalog, observedAt: new Date().toISOString() });
+	put("ledger-l0.json", { pass: true, harnessDigest: current, chat: { bytesPerToken: 4.07 }, upstreamMode: "B_stream_false_usage_include" });
+	put("j0-dev.json", { harnessDigest: current, selection: { error_repeat: { wordingId: "W1" }, goal_state: { wordingId: "W2" } } });
+	put("j0-test.json", { harnessDigest: current, w: { estimated: true, medianMinutes: 63 } });
+	put("j0-labels.json", { harnessDigest: current, labelSheetDigest: "d".repeat(64) });
+	const trialCase = loadCases(FIXTURES_DIR).find((entry) => entry.split === "test" && entry.family !== "destructive");
+	const answer = { caseId: trialCase.id, order: "canonical", repeat: 1, status: "decided", choice: trialCase.label, confidence: 0.9 };
+	put("j0-test-rows.jsonl", `${JSON.stringify({ ...answer, model: "sionic-ai/jev-omni" })}\n${JSON.stringify({ ...answer, model: "sionic-ai/decider-4b" })}\n`);
+	mkdirSync(path.join(runDir, "S0"));
+	put("S0/proxy-rows.jsonl", `${JSON.stringify({ kind: "chat", cellId: "c1", requestBytes: 40000 })}\n${JSON.stringify({ kind: "chat", cellId: "c2", requestBytes: 60000 })}\n`);
+	const manifest = freeze(runDir);
+	assert.equal(manifest.harnessDigest, current);
+	assert.equal(manifest.l0.bytesPerToken, 4.07);
+	assert.ok(Number.isFinite(manifest.cost.projectedUsd) && manifest.cost.projectedUsd <= 3.4);
+	assert.match(manifest.power.monteCarloA3.digest, /^[a-f0-9]{64}$/);
+	assert.equal(manifest.j0.p1Gate.c3Adoptable, true);
+	put("j0-test.json", { harnessDigest: "0".repeat(64), w: {} });
+	assert.throws(() => freeze(runDir), /receipt_not_bound_to_harness:j0-test\.json/);
 });
