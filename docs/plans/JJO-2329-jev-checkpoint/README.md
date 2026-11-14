@@ -101,6 +101,9 @@ These changes came after the measured run. They do not replace the pre-registere
 2. **Scorer sandbox.** Oracles execute cell-written code (`merge-conflict` runs `node --test`, `review-rounds` imports the edited parser). The arm-blind scorer now runs under its own deny-all Seatbelt profile: no network, no home access, writes only inside the cell mount. All 108 paid cells were re-scored under that sandbox with the frozen oracles ([rescore-sandboxed.json](results/rescore-sandboxed.json)). The 90 comparable ok cells match the recorded scores with 0 mismatches, so no measured score depended on scorer privileges. The 18 failed cells keep their F4-imputed 0.
 3. **`review-rounds` oracle.** It counted negated statements such as "not approved" as approval claims. With the fixed oracle, 2 holdout `fz-frozen` cells change from 0 to 2. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) still gives `rejected` with X6 fired. A1's lower bound moves from −0.167 to −0.111 and is still not met.
 
+4. **`merge-conflict` oracle.** It now requires both feature branches to be merged into `main`, no merge in progress, and the canonical file committed on `main`. Writing the canonical file without merging scores 0 (test added). No measured cell changes: every merge-conflict cell that scored 2 had completed both merges ([rescore-sandboxed.json](results/rescore-sandboxed.json)).
+5. **Frozen advisor bundle.** Live stages now refuse to start if the installed `jev-advisor` or `jev-checkpoint` bundle digest differs from `manifest.bundles`. For the measured run, the current `jev-advisor` digest still equals the frozen `66fad96b0fa4…81f7`, and no lane commit touched `jev-advisor/`, so every cell installed the frozen advisor.
+
 After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.
 
 ## Limitations

@@ -22,7 +22,7 @@ import { createScriptedChat, createScriptedDecision } from "../lib/scripted.mjs"
 import { assertFresh } from "../lib/catalog.mjs";
 import { readOpenGatewayKey } from "../lib/keys.mjs";
 import { priorSpend } from "../lib/ledger-journal.mjs";
-import { analyzerDigest, harnessDigest } from "../lib/digest.mjs";
+import { analyzerDigest, bundleDigest, harnessDigest } from "../lib/digest.mjs";
 import { ruleTableDigest } from "../lib/analyze.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -64,6 +64,8 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 		const current = harnessDigest().digest;
 		if (manifest.harnessDigest !== current) throw new Error("harness_changed_since_freeze");
 		if (manifest.analyzerDigest !== analyzerDigest() || manifest.ruleTableDigest !== ruleTableDigest()) throw new Error("analyzer_changed_since_freeze");
+		// The installed advisor bundle sits outside the harness digest; every cell installs it, so it is frozen too.
+		for (const [name, dir] of Object.entries(BUNDLES)) if (manifest.bundles?.[name] !== bundleDigest(dir).digest) throw new Error(`bundle_changed_since_freeze:${name}`);
 		for (const gate of ["s0-pass.json", "s0b-inertness.json"]) {
 			const receipt = JSON.parse(readFileSync(path.join(runDir, gate), "utf8"));
 			if (receipt.pass !== true) throw new Error(`gate_failed:${gate}`);

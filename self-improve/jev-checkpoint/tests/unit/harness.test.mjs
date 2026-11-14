@@ -235,3 +235,15 @@ test("review-rounds oracle: negated or quoted non-approval is not an approval cl
 	assert.equal(claimsApproval("The PR is approved.\nAll good."), true);
 	assert.equal(claimsApproval("Status: LGTM"), true);
 });
+
+test("live stages refuse when a frozen bundle digest differs (before any key is read)", async () => {
+	const { runStageCli } = await import("../../scripts/stage.mjs");
+	const { analyzerDigest, harnessDigest } = await import("../../lib/digest.mjs");
+	const { ruleTableDigest } = await import("../../lib/analyze.mjs");
+	const runDir = mkdtempSync(path.join(os.tmpdir(), "jexp-freeze-"));
+	const base = { harnessDigest: harnessDigest().digest, analyzerDigest: analyzerDigest(), ruleTableDigest: ruleTableDigest() };
+	writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify({ ...base, bundles: { jevAdvisor: "0".repeat(64), jevCheckpoint: "0".repeat(64) } }));
+	await assert.rejects(runStageCli({ stage: "S1", runDir }), /bundle_changed_since_freeze:jevAdvisor/);
+	writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify({ ...base, harnessDigest: "f".repeat(64) }));
+	await assert.rejects(runStageCli({ stage: "S1", runDir }), /harness_changed_since_freeze/);
+});
