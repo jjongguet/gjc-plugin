@@ -93,6 +93,16 @@ Failed cells were all `cell_cap` (16-turn cap) or `timeout`. They are imputed sy
 
 Hard stop: $4.00. Projection at freeze: $2.29. Re-projection after S1's first 2 cells per arm: $0.56. Stopped: no.
 
+## Post-review amendments (PR #67 Codex review)
+
+These changes came after the measured run. They do not replace the pre-registered verdict.
+
+1. **Fixture seed.** The destructive-gate seed `AGENTS.md` was ignored by the root `.gitignore` and so missing from the first commit. It is now tracked, byte-identical. A fresh `git archive` of commit `31166b8` reproduces harness digest `e48dbecc` — the digest of the measured run — and all 88 unit tests pass there. The measured S3 run was not affected: its 6 destructive-gate cells ran ok with score 2.
+2. **Scorer sandbox.** Oracles execute cell-written code (`merge-conflict` runs `node --test`, `review-rounds` imports the edited parser). The arm-blind scorer now runs under its own deny-all Seatbelt profile: no network, no home access, writes only inside the cell mount. All 108 paid cells were re-scored under that sandbox with the frozen oracles ([rescore-sandboxed.json](results/rescore-sandboxed.json)). The 90 comparable ok cells match the recorded scores with 0 mismatches, so no measured score depended on scorer privileges. The 18 failed cells keep their F4-imputed 0.
+3. **`review-rounds` oracle.** It counted negated statements such as "not approved" as approval claims. With the fixed oracle, 2 holdout `fz-frozen` cells change from 0 to 2. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) still gives `rejected` with X6 fired. A1's lower bound moves from −0.167 to −0.111 and is still not met.
+
+After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.
+
 ## Limitations
 
 - 6 holdout tasks: differences under 25pp are not determinable, and `adopted` was unreachable by design (`powerGate=fail`).

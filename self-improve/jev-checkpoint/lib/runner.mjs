@@ -7,15 +7,16 @@
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { SEATBELT_BIN, buildSeatbeltProfile, runtimeReadRoots } from "../../lib/isolation-runtime.mjs";
 import { TURN_CAP, prepareCell, proveIsolation, runSession } from "./cell.mjs";
 import { parseTranscript } from "./transcript.mjs";
 import { cellMetrics } from "./metrics.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-export const SCORE_SCRIPT = path.join(HERE, "..", "scripts", "score-cell.mjs");
 export const STOP_POLL_MS = 1000;
 
 const successOf = (score) => (score === 2 ? 1 : score === 1 ? 0.5 : 0);
@@ -32,8 +33,35 @@ export function checkpointConfigFor(condition, frozen = null) {
 	}
 }
 
-export function scoreCell({ taskDir, workDir, transcriptPath, auditPath }) {
-	const out = execFileSync(process.execPath, [SCORE_SCRIPT, taskDir, workDir, transcriptPath, auditPath], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"] });
+export const HARNESS_ROOT = path.resolve(HERE, "..");
+
+/**
+ * Deny-all Seatbelt profile for the arm-blind scorer. Oracles execute
+ * cell-written code (`node --test`, imports of model-edited sources), so the
+ * scorer gets no network, reads only the runtime, the harness, the task fixture
+ * and the cell's own files, and writes only inside the cell mount.
+ */
+export function scorerProfile({ taskDir, mountDir, transcriptPath, harnessRoot = HARNESS_ROOT, userHome = os.homedir() }) {
+	const taskRoot = realpathSync(taskDir);
+	const harness = realpathSync(harnessRoot);
+	const readRoots = [...new Set([...runtimeReadRoots(), "/opt/homebrew/bin", realpathSync(process.execPath), harness, ...(taskRoot.startsWith(`${harness}${path.sep}`) ? [] : [taskRoot]), realpathSync(mountDir), realpathSync(transcriptPath)])].filter(existsSync);
+	const protectedReadRoots = [path.join(userHome, ".gjc"), path.join(userHome, ".ssh"), path.join(userHome, ".gjc-plugin")].filter(existsSync).map((entry) => realpathSync(entry));
+	return buildSeatbeltProfile({ mountDir: realpathSync(mountDir), allowNetworkHosts: [], readRoots, protectedReadRoots });
+}
+
+export function scoreCell({ taskDir: rawTaskDir, workDir: rawWorkDir, transcriptPath: rawTranscript, auditPath: rawAudit, harnessRoot: rawHarness = HARNESS_ROOT }) {
+	if (!existsSync(SEATBELT_BIN)) throw new Error("scorer_sandbox_unavailable");
+	// Seatbelt matches canonical paths only (/tmp is a symlink to /private/tmp).
+	const [taskDir, workDir, transcriptPath, auditPath, harnessRoot] = [rawTaskDir, rawWorkDir, rawTranscript, rawAudit, rawHarness].map((entry) => realpathSync(entry));
+	const mountDir = path.dirname(workDir);
+	const profilePath = path.join(path.dirname(mountDir), "score.sb");
+	writeFileSync(profilePath, scorerProfile({ taskDir, mountDir, transcriptPath, harnessRoot }), { mode: 0o600 });
+	const scratch = path.join(mountDir, "score-tmp");
+	mkdirSync(scratch, { recursive: true, mode: 0o700 });
+	// Homebrew git first: /usr/bin/git is an xcrun shim that needs developer-tool paths the profile does not grant.
+	const env = { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: path.join(mountDir, "home"), TMPDIR: scratch, NO_COLOR: "1", GIT_CONFIG_NOSYSTEM: "1" };
+	const script = path.join(harnessRoot, "scripts", "score-cell.mjs");
+	const out = execFileSync(SEATBELT_BIN, ["-f", profilePath, process.execPath, script, taskDir, workDir, transcriptPath, auditPath], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"], env, cwd: mountDir });
 	return JSON.parse(out);
 }
 

@@ -21,7 +21,7 @@ Each cell is a real `gjc --print --mode json` tool session (`read,bash,edit,writ
 - **Keys:** the child holds no provider key, only a per-cell placeholder token. Only the parent process reads `~/.gjc/agent/policy/secrets/opengateway-key.txt` (and, for J0 only, the OpenRouter key in `~/.gjc/agent/.env`). Values are never printed, logged or written.
 - **Upstream:** the proxy (`lib/proxy.mjs`) forwards chat in mode B (`stream:false` + `usage:{include:true}`) and re-emits the answer as SSE.
 - **Ledger and hard stop:** every request reserves before transport (`lib/accounting.mjs`). The global hard stop is US$4.00, inclusive. When it triggers, the proxy writes `stop.json` and refuses every route with zero upstream calls. The runner then kills the running cells, records them as `failed/global_stop`, and records the rest as `not_run`. A per-cell cap fails only that cell.
-- **Scoring:** a separate arm-blind process (`scripts/score-cell.mjs`) scores each cell against the task's `oracle.mjs`.
+- **Scoring:** a separate arm-blind process (`scripts/score-cell.mjs`) scores each cell against the task's `oracle.mjs`. Oracles execute cell-written code, so the scorer runs under its own deny-all Seatbelt profile (`scorerProfile` in `lib/runner.mjs`): no network, reads limited to the runtime, the harness, the task and the cell, writes only inside the cell mount.
 
 ## Stages and commands
 

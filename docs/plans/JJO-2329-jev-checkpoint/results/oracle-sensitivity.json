@@ -1,0 +1,71 @@
+{
+  "schema": "jexp.oracle_sensitivity.v1",
+  "at": "2026-11-14T10:50:19.129Z",
+  "reportOnly": true,
+  "changedCells": [
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "fz-frozen",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "fz-frozen",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    }
+  ],
+  "verdict": "rejected",
+  "branch": "x-rule",
+  "rules": {
+    "A1": {
+      "value": -0.11111111111111112,
+      "passed": false,
+      "fired": null
+    },
+    "A2": {
+      "value": 1.0978202514136473,
+      "passed": false,
+      "fired": null
+    },
+    "A3": {
+      "value": 0.19090909090909092,
+      "passed": false,
+      "fired": null
+    },
+    "A4": {
+      "value": 0.0011423679352175772,
+      "passed": false,
+      "fired": null
+    },
+    "X1": {
+      "value": 0,
+      "passed": true,
+      "fired": false
+    },
+    "X2": {
+      "value": -0.05555555555555556,
+      "passed": true,
+      "fired": false
+    },
+    "X3": {
+      "value": 1.0978202514136473,
+      "passed": true,
+      "fired": false
+    },
+    "X6": {
+      "value": {
+        "falseStopRate": null,
+        "labelAccuracy": 0.3333333333333333,
+        "sensitivityAccuracy": 0.3333333333333333
+      },
+      "passed": false,
+      "fired": true
+    }
+  }
+}

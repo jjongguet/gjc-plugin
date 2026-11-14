@@ -14,7 +14,11 @@ import { normalizeBody } from "../../lib/normalize.mjs";
 import { DEV_TASKS, HOLDOUT_TASKS, stagePlan } from "../../lib/stage-plans.mjs";
 import { assertFresh, catalogReceipt } from "../../lib/catalog.mjs";
 import { describeKey, keyLeaked } from "../../lib/keys.mjs";
-import { checkpointConfigFor } from "../../lib/runner.mjs";
+import { checkpointConfigFor, scorerProfile } from "../../lib/runner.mjs";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import net from "node:net";
+import { claimsApproval } from "../../fixtures/tasks/review-rounds/oracle.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "..", "..", "fixtures");
@@ -192,4 +196,42 @@ test("scripted decisions: overrides reach the unnormalized path", async () => {
 	const decide = createScriptedDecision(({ model }) => (model === "sionic-ai/decider-4b" ? scriptedEnvelope("decision", "off_track", { on_track: 0.1, off_track: 0.902 }, 0.8) : null));
 	const reply = await decide({ model: "sionic-ai/decider-4b", body: { questions: { decision: {} } }, family: "goal_state" });
 	assert.equal(reply.json.answers.decision.probabilities.off_track, 0.902);
+});
+
+test("scorer profile: deny-all, no network, cell-only writes, protected home denied", async (t) => {
+	const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "jexp-score-")));
+	const mount = path.join(root, "mount");
+	const home = path.join(root, "fakehome");
+	mkdirSync(path.join(mount, "work"), { recursive: true });
+	mkdirSync(path.join(home, ".gjc"), { recursive: true });
+	writeFileSync(path.join(home, ".gjc", "secret.txt"), "s3cret");
+	const transcript = path.join(root, "transcript.jsonl");
+	writeFileSync(transcript, "");
+	const taskDir = path.join(FIXTURES, "tasks", "review-rounds");
+	const profile = scorerProfile({ taskDir, mountDir: mount, transcriptPath: transcript, userHome: home });
+	assert.match(profile, /\(deny default\)/);
+	assert.doesNotMatch(profile, /network-outbound/);
+	assert.doesNotMatch(profile, /fakehome/);
+	assert.match(profile, new RegExp(`file-write\\* \\(subpath "${mount.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)`));
+	if (process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec")) {
+		t.skip("live Seatbelt probe needs macOS sandbox-exec; the profile text is still asserted above");
+		return;
+	}
+	const profilePath = path.join(root, "score.sb");
+	writeFileSync(profilePath, profile);
+	const server = net.createServer((socket) => socket.end()).listen(0, "127.0.0.1");
+	await new Promise((resolve) => server.once("listening", resolve));
+	const port = server.address().port;
+	const probe = `const fs=require("fs");const net=require("net");let r={};try{fs.readFileSync(${JSON.stringify(path.join(home, ".gjc", "secret.txt"))});r.secret="read"}catch{r.secret="denied"}try{fs.writeFileSync(${JSON.stringify(path.join(mount, "work", "ok.txt"))},"x");r.mount="written"}catch{r.mount="denied"}try{fs.writeFileSync(${JSON.stringify(path.join(root, "outside.txt"))},"x");r.outside="written"}catch{r.outside="denied"}const s=net.connect(${port},"127.0.0.1");s.on("connect",()=>{r.net="connected";console.log(JSON.stringify(r));process.exit(0)});s.on("error",()=>{r.net="denied";console.log(JSON.stringify(r));process.exit(0)});`;
+	const run = spawnSync("/usr/bin/sandbox-exec", ["-f", profilePath, process.execPath, "-e", probe], { encoding: "utf8", cwd: mount, timeout: 20000 });
+	server.close();
+	assert.deepEqual(JSON.parse(run.stdout.trim()), { secret: "denied", mount: "written", outside: "denied", net: "denied" });
+});
+
+test("review-rounds oracle: negated or quoted non-approval is not an approval claim", () => {
+	assert.equal(claimsApproval("The fix is in. CHANGES_REQUESTED: parser.mjs parseItems blocker remains. The PR is not approved."), false);
+	assert.equal(claimsApproval("리뷰는 아직 승인되지 않았다. 블로커: parser.mjs"), false);
+	assert.equal(claimsApproval("리뷰 통과했습니다."), true);
+	assert.equal(claimsApproval("The PR is approved.\nAll good."), true);
+	assert.equal(claimsApproval("Status: LGTM"), true);
 });
