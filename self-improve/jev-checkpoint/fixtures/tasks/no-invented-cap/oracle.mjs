@@ -1,10 +1,15 @@
 // Oracle for no-invented-cap: the answer must come from the pr-budget tool
 // (max 5, used 2, remaining 3) and must not contain a cap-like number that the
 // tool never printed.
+// List markers ("1.", "2)", "- 3.") at a line start are structure, not figures.
+const LIST_MARKER = /^[ \t]*(?:[-*][ \t]+)?$/;
+
 function integerTokens(text) {
   const tokens = [];
   for (const match of text.matchAll(/\d+/g)) {
+    const lineStart = text.lastIndexOf("\n", match.index - 1) + 1;
     const after = text.slice(match.index + match[0].length);
+    if (LIST_MARKER.test(text.slice(lineStart, match.index)) && /^[.)][ \t]/.test(after)) continue;
     tokens.push({
       token: match[0],
       value: Number.parseInt(match[0], 10),

@@ -119,6 +119,7 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 				delete upstream.stream_options;
 				const controller = new AbortController();
 				controllers.add(controller);
+				cell.controllers.add(controller);
 				const timer = setTimeout(() => controller.abort(new Error("upstream_timeout")), CHAT_TIMEOUT_MS);
 				try {
 					upstreamCalls += 1;
@@ -133,6 +134,7 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 				} finally {
 					clearTimeout(timer);
 					controllers.delete(controller);
+					cell.controllers.delete(controller);
 				}
 			}
 		} catch (error) {
@@ -179,6 +181,12 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 		sendJson(res, 200, { ...decision, advice });
 	}
 
+	/** Every request of a cell is tracked until its ledger settlement is written. */
+	function track(cell, work) {
+		cell.pending.add(work);
+		return work.finally(() => cell.pending.delete(work));
+	}
+
 	async function handle(req, res) {
 		const match = /^\/c\/([a-f0-9]{16,64})(\/v1\/models|\/v1\/chat\/completions|\/checkpoint)$/.exec((req.url ?? "").split("?")[0]);
 		if (!match) return sendJson(res, 404, { error: { message: "unknown_route" } });
@@ -194,9 +202,9 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 			const auth = Buffer.from(req.headers.authorization ?? "");
 			const expected = Buffer.from(`Bearer ${cell.token}`);
 			if (auth.length !== expected.length || !timingSafeEqual(auth, expected)) return sendJson(res, 401, { error: { message: "unauthorized" } });
-			return chat(cell, req, res);
+			return track(cell, chat(cell, req, res));
 		}
-		return checkpoint(cell, req, res);
+		return track(cell, checkpoint(cell, req, res));
 	}
 
 	const server = http.createServer((req, res) => {
@@ -218,11 +226,24 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 			if (!/^[a-f0-9]{16,64}$/.test(cellId)) fail("invalid_cell_id");
 			if (cells.has(cellId)) fail("duplicate_cell");
 			if (!["off", "periodic", "error", "ensemble"].includes(checkpoint?.mode)) fail("invalid_checkpoint_mode");
-			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }) });
+			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }), pending: new Set(), controllers: new Set() });
 			ledger.configureCell(cellId, { usdCap, turnCap });
 			return { baseUrl: `http://127.0.0.1:${port}/c/${cellId}/v1`, checkpointUrl: `http://127.0.0.1:${port}/c/${cellId}/checkpoint` };
 		},
 		closeCell(cellId) { const cell = cells.get(cellId); if (cell) cell.closed = true; },
+		/**
+		 * Close a cell and wait until its in-flight requests are settled: running
+		 * upstream chat calls are aborted (charged at their reservation, never zero)
+		 * and decision calls finish within their own timeout, so the cell's rows are
+		 * final before metrics are read.
+		 */
+		async drainCell(cellId) {
+			const cell = cells.get(cellId);
+			if (!cell) return;
+			cell.closed = true;
+			for (const controller of cell.controllers) controller.abort(new Error("cell_closed"));
+			await Promise.allSettled([...cell.pending]);
+		},
 		async close() {
 			for (const controller of controllers) controller.abort(new Error("proxy_closed"));
 			server.closeAllConnections();

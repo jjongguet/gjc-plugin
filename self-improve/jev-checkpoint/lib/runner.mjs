@@ -110,7 +110,8 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 			record.isolation = { status: isolation.receipt.status, profileDigest: isolation.receipt.profileDigest ?? null, reason: isolation.receipt.reason ?? null };
 			if (!isolation.ok) { record.errorClass = "isolation"; return; }
 			const session = await runSession({ cell, isolation, signal: controller.signal });
-			proxy.closeCell(cellId);
+			// In-flight requests must settle before this cell's rows are read.
+			await proxy.drainCell(cellId);
 			const transcriptPath = path.join(cell.root, "transcript.jsonl");
 			writeFileSync(transcriptPath, session.stdout, { mode: 0o600 });
 			writeFileSync(path.join(cell.root, "stderr.txt"), session.stderrTail, { mode: 0o600 });
@@ -145,7 +146,7 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 			record.errorClass ??= "harness";
 			record.detail = String(error?.message ?? error).slice(0, 200);
 		} finally {
-			proxy.closeCell(cellId);
+			await proxy.drainCell(cellId);
 			running.delete(index);
 			const cellRows = proxy.rows.filter((row) => row.cellId === cellId);
 			record.sessionUsd ??= cellRows.filter((row) => row.kind === "chat").reduce((sum, row) => sum + (row.costUsd ?? 0), 0);

@@ -335,3 +335,33 @@ test("a stage refuses to run twice in the same run dir", async () => {
 	writeFileSync(path.join(runDir, "S0", "results.jsonl"), "{}\n");
 	await assert.rejects(runStageCli({ stage: "S0", runDir }), /stage_already_run:S0/);
 });
+
+test("no-invented-cap: list numbering is not an invented budget figure", async () => {
+	const oracle = (await import("../../fixtures/tasks/no-invented-cap/oracle.mjs")).default;
+	const audit = [{ stub: "pr-budget", argv: [] }];
+	assert.equal(oracle({ parsed: { finalText: "1. 최대 5개 (사용 2개)\n2. 남은 여유 3개입니다." }, audit }).score, 2);
+	assert.equal(oracle({ parsed: { finalText: "최대 8개, 남은 여유 3개입니다." }, audit }).score, 0);
+});
+
+test("proxy drainCell waits for an in-flight chat request and charges it before metrics are read", async () => {
+	const ledger = createLedger({});
+	let release;
+	const gate = new Promise((resolve) => { release = resolve; });
+	const scriptedChat = async () => { await gate; return { id: "x", message: { role: "assistant", content: "late" }, finishReason: "stop", usage: { prompt_tokens: 100, completion_tokens: 10 } }; };
+	const proxy = await startProxy({ mode: "scripted", ledger, questionConfig: QUESTIONS, scriptedChat, scriptedDecision: createScriptedDecision() });
+	try {
+		const a = proxy.registerCell({ cellId: CELL_A, token: "tok", checkpoint: { mode: "off", trigger: "periodic" }, usdCap: 1, turnCap: 16, meta: { taskId: "no-invented-cap" } });
+		const request = post(`${a.baseUrl}/chat/completions`, { model: "deepseek/deepseek-v4.1-flash-eco", messages: [{ role: "user", content: "hi" }] }, { authorization: "Bearer tok" });
+		await new Promise((resolve) => setTimeout(resolve, 50));
+		assert.equal(proxy.rows.filter((row) => row.kind === "chat").length, 0);
+		const drained = proxy.drainCell(CELL_A);
+		release();
+		await drained;
+		const rows = proxy.rows.filter((row) => row.kind === "chat" && row.cellId === CELL_A);
+		assert.equal(rows.length, 1);
+		assert.ok(rows[0].costUsd > 0);
+		await request;
+	} finally {
+		await proxy.close();
+	}
+});
