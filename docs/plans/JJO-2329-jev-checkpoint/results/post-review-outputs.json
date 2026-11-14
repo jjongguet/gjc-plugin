@@ -1,0 +1,172 @@
+{
+  "schema": "jexp.post_review_outputs.v1",
+  "at": "2026-11-14T12:32:05.163Z",
+  "reportOnly": true,
+  "receipts": {
+    "S1": {
+      "total": 54,
+      "valid": 54,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    },
+    "S2": {
+      "total": 18,
+      "valid": 18,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    },
+    "S3": {
+      "total": 36,
+      "valid": 36,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    }
+  },
+  "ensembleSensitivity": {
+    "frozenRule": "primary_override",
+    "unit": "case × repeat, canonical order, trial families; abstain counts as wrong",
+    "variants": {
+      "primary_override": {
+        "units": 60,
+        "accuracy": {
+          "num": 45,
+          "den": 60,
+          "value": 0.75
+        },
+        "abstainRate": {
+          "num": 3,
+          "den": 60,
+          "value": 0.05
+        },
+        "branches": {
+          "single": 15,
+          "agree": 39,
+          "disagree": 3,
+          "abstain": 3
+        }
+      },
+      "agreement_only": {
+        "units": 60,
+        "accuracy": {
+          "num": 33,
+          "den": 60,
+          "value": 0.55
+        },
+        "abstainRate": {
+          "num": 21,
+          "den": 60,
+          "value": 0.35
+        },
+        "branches": {
+          "abstain": 21,
+          "agree": 39
+        }
+      },
+      "single_primary": {
+        "units": 60,
+        "accuracy": {
+          "num": 42,
+          "den": 60,
+          "value": 0.7
+        },
+        "abstainRate": {
+          "num": 9,
+          "den": 60,
+          "value": 0.15
+        },
+        "branches": {
+          "single": 51,
+          "abstain": 9
+        }
+      },
+      "voter_level_unnormalized": {
+        "units": 60,
+        "accuracy": {
+          "num": 45,
+          "den": 60,
+          "value": 0.75
+        },
+        "abstainRate": {
+          "num": 3,
+          "den": 60,
+          "value": 0.05
+        },
+        "branches": {
+          "single": 15,
+          "agree": 39,
+          "disagree": 3,
+          "abstain": 3
+        }
+      }
+    }
+  },
+  "monteCarloA3": {
+    "seed": 20261114,
+    "rows": [
+      {
+        "q": 0.6,
+        "power": 0.246,
+        "sims": 2000,
+        "bootstrapReps": 200,
+        "n": 6,
+        "effect": 0.25,
+        "threshold": 0.2,
+        "medianOfMedians": 0.25
+      },
+      {
+        "q": 0.7,
+        "power": 0.409,
+        "sims": 2000,
+        "bootstrapReps": 200,
+        "n": 6,
+        "effect": 0.25,
+        "threshold": 0.2,
+        "medianOfMedians": 0.25
+      },
+      {
+        "q": 0.8,
+        "power": 0.662,
+        "sims": 2000,
+        "bootstrapReps": 200,
+        "n": 6,
+        "effect": 0.25,
+        "threshold": 0.2,
+        "medianOfMedians": 0.25
+      },
+      {
+        "q": 0.9,
+        "power": 0.88,
+        "sims": 2000,
+        "bootstrapReps": 200,
+        "n": 6,
+        "effect": 0.25,
+        "threshold": 0.2,
+        "medianOfMedians": 0.25
+      },
+      {
+        "q": 0.95,
+        "power": 0.9665,
+        "sims": 2000,
+        "bootstrapReps": 200,
+        "n": 6,
+        "effect": 0.25,
+        "threshold": 0.2,
+        "medianOfMedians": 0.25
+      }
+    ],
+    "note": "report-only; the frozen POWER_GATE does not read this value",
+    "digest": "353861d557c57a4c3b0e92052d279a386cc883af8a4fe962ec32fcf301d19cd0"
+  },
+  "x6DecidedOnly": {
+    "decided": 7,
+    "correct": 7,
+    "accuracy": 1,
+    "note": "all correct labels are decided ones; the frozen X6 counts abstains as wrong (7/21)"
+  }
+}

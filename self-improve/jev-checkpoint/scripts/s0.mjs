@@ -6,7 +6,7 @@
  * `pass: true` before any paid stage (G0c, G2). No key is read; the proxy has
  * no upstream client.
  */
-import { execFileSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { realpathSync } from "node:fs";
@@ -22,12 +22,12 @@ import { harnessDigest } from "../lib/digest.mjs";
 
 const SECRET_NAME = /(KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL)/i;
 
+/** Live process count, or null when pgrep itself failed (exit 2/3): unknown is never 0. */
 function liveProcesses(marker) {
-	try {
-		return execFileSync("/usr/bin/pgrep", ["-f", marker], { encoding: "utf8" }).split("\n").filter(Boolean).length;
-	} catch {
-		return 0;
-	}
+	const run = spawnSync("/usr/bin/pgrep", ["-f", marker], { encoding: "utf8" });
+	if (run.status === 1) return 0;
+	if (run.status === 0) return run.stdout.split("\n").filter(Boolean).length;
+	return null;
 }
 
 function cellEnvKeysClean(stageDir) {

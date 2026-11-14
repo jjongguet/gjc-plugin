@@ -22,6 +22,7 @@ import { normalizeBody } from "./normalize.mjs";
 
 export const CHAT_BODY_LIMIT = 4 * 1024 * 1024;
 export const CHECKPOINT_BODY_LIMIT = 16 * 1024;
+export const CHECKPOINT_STATE_LIMIT = 2048;
 export const CHAT_TIMEOUT_MS = 120000;
 export const INVOCATION_CAPS = Object.freeze({ periodic: 6, error: 2, ensemble: 6 });
 export const ACTING_THRESHOLD = 0.6;
@@ -149,6 +150,7 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 			billedUsd: Number.isFinite(usage.cost) ? usage.cost : undefined,
 			computedUsd: inputTokens !== null && outputTokens !== null ? inputTokens * chatCompute.input + outputTokens * chatCompute.output : undefined,
 		});
+		cell.toolCallsServed += Array.isArray(answer.message.tool_calls) ? answer.message.tool_calls.length : 0;
 		record({ ...row, status: "ok", inputTokens, outputTokens, costUsd: settled.usd, basis: settled.basis, latencyMs: Date.now() - started, finishReason: answer.finishReason, toolCalls: (answer.message.tool_calls ?? []).length });
 		sendSse(res, { id: answer.id ?? requestId, message: answer.message, finishReason: answer.finishReason, usage: { prompt_tokens: inputTokens ?? 0, completion_tokens: outputTokens ?? 0, total_tokens: (inputTokens ?? 0) + (outputTokens ?? 0) } });
 	}
@@ -165,7 +167,11 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 		if (!Array.isArray(body.models) || body.models.length !== expectedModels.length || body.models.some((model, index) => model !== expectedModels[index])) return refuse("route_not_allowed", 403);
 		const family = cell.checkpoint.trigger === "error" ? "error_repeat" : "goal_state";
 		if (body.family !== family) return refuse("family_mismatch", 403);
-		if (!Number.isSafeInteger(body.callIndex) || body.callIndex < 1) return refuse("invalid_request");
+		// The plugin reports how many tool results it has seen; that can never exceed the
+		// tool calls this proxy actually served to the cell. The state is the plugin's
+		// bounded "Goal: …" summary, nothing else.
+		if (!Number.isSafeInteger(body.callIndex) || body.callIndex < 1 || body.callIndex > cell.toolCallsServed) return refuse("invalid_request");
+		if (typeof body.state !== "string" || !body.state.startsWith("Goal:") || Buffer.byteLength(body.state, "utf8") > CHECKPOINT_STATE_LIMIT) return refuse("invalid_request");
 		if (cell.invocations >= INVOCATION_CAPS[cell.checkpoint.mode]) return refuse("request_cap", 429);
 		cell.invocations += 1;
 		const question = questionConfig[family];
@@ -226,7 +232,7 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 			if (!/^[a-f0-9]{16,64}$/.test(cellId)) fail("invalid_cell_id");
 			if (cells.has(cellId)) fail("duplicate_cell");
 			if (!["off", "periodic", "error", "ensemble"].includes(checkpoint?.mode)) fail("invalid_checkpoint_mode");
-			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }), pending: new Set(), controllers: new Set() });
+			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }), pending: new Set(), controllers: new Set(), toolCallsServed: 0 });
 			ledger.configureCell(cellId, { usdCap, turnCap });
 			return { baseUrl: `http://127.0.0.1:${port}/c/${cellId}/v1`, checkpointUrl: `http://127.0.0.1:${port}/c/${cellId}/checkpoint` };
 		},

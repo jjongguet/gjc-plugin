@@ -1,0 +1,30 @@
+{
+  "schema": "jexp.receipts_validation.v1",
+  "validator": "gjc.quality_trial.v2",
+  "stages": {
+    "S1": {
+      "total": 54,
+      "valid": 54,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    },
+    "S2": {
+      "total": 18,
+      "valid": 18,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    },
+    "S3": {
+      "total": 36,
+      "valid": 36,
+      "duplicates": 0,
+      "conflictingDuplicates": 0,
+      "failures": 0,
+      "skippedNotRun": 0
+    }
+  }
+}

@@ -80,7 +80,7 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 	const journalPath = live ? path.join(runDir, "ledger.jsonl") : path.join(stageDir, "ledger-scripted.jsonl");
 	const stopPath = live ? path.join(runDir, "stop.json") : path.join(stageDir, "stop.json");
 	if (existsSync(stopPath)) throw new Error("global_stop_already_reached");
-	const ledger = createLedger({ hardStopUsd: HARD_STOP_USD, priorSpentUsd: live ? priorSpend(journalPath) + (manifest.priorExternalUsd ?? 0) : 0, journalPath, stopPath, label, ...ledgerOptions });
+	const ledger = createLedger({ hardStopUsd: HARD_STOP_USD, priorSpentUsd: live ? priorSpend(journalPath) + requireFinite(manifest.priorExternalUsd, "manifest.priorExternalUsd") : 0, journalPath, stopPath, label, ...ledgerOptions });
 	const proxy = await startProxy({
 		mode: live ? "live" : "scripted",
 		ledger,
@@ -170,6 +170,11 @@ export function createReprojector({ ledger, stageDir, plannedCells, remainingAft
 		writeFileSync(path.join(stageDir, "reprojection.json"), JSON.stringify(receipt, null, 2), { mode: 0o600 });
 		if (!receipt.pass) ledger.stop("reprojection_over_gate", projected);
 	};
+}
+
+function requireFinite(value, name) {
+	if (typeof value !== "number" || !Number.isFinite(value) || value < 0) throw new Error(`invalid_${name}`);
+	return value;
 }
 
 function arg(name, fallback = null) {

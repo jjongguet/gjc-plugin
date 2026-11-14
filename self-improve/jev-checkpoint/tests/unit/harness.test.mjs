@@ -84,6 +84,10 @@ test("proxy (scripted): attributes rows by cell, re-emits tool calls as SSE, and
 		assert.equal(sse.status, 200);
 		assert.match(sse.text, /"tool_calls":\[\{"index":0,"id":"call_1","type":"function"/);
 		assert.match(sse.text, /data: \[DONE\]/);
+		// A callIndex beyond the tool calls served is refused before any decision.
+		assert.equal(JSON.parse((await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 2, models: ["sionic-ai/jev-omni"], state: "Goal: x" })).text).reason, "invalid_request");
+		for (let turn = 2; turn <= 5; turn++) assert.equal((await post(`${a.baseUrl}/chat/completions`, chatBody, { authorization: "Bearer tok-a" })).status, 200);
+		assert.equal(JSON.parse((await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 2, models: ["sionic-ai/jev-omni"], state: "not a goal state" })).text).reason, "invalid_request");
 		const advice = await post(a.checkpointUrl, { mode: "error", family: "error_repeat", trigger: "error", callIndex: 2, models: ["sionic-ai/jev-omni"], state: "Goal: x" });
 		assert.equal(advice.status, 200);
 		assert.match(JSON.parse(advice.text).advice, /^\[jev-checkpoint\] label=yes/);

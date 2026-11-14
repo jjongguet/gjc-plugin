@@ -25,12 +25,15 @@ import { createDecisionDispatcher } from "../lib/decision-client.mjs";
 import { startProxy } from "../lib/proxy.mjs";
 import { runStage } from "../lib/runner.mjs";
 import { FIXTURES_DIR, LANE_ROOT, SCRIPTED_QUESTIONS, bundlesFor, gjcBinary } from "./stage.mjs";
+import { requireS0Harness } from "../lib/digest.mjs";
 
 export const PR65_MERGE = "db17b79";
 export const PR66_MERGE = "5f0652e";
 export const RELEASE_TAG = "v0.0.28";
 export const PRIOR_EXTERNAL_USD = 0.02;
 export const L0_CAP_USD = 0.05;
+/** jev-advisor paths that are not installed plugin surface (hooks/, tools/, gajae-plugin.json are). */
+export const ADVISOR_NON_RUNTIME = Object.freeze([/^jev-advisor\/scripts\//, /^jev-advisor\/fixtures\//, /^jev-advisor\/README\.md$/, /\.test\.[cm]?[jt]s$/]);
 
 const git = (...args) => execFileSync("git", ["-C", LANE_ROOT, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
 const ancestor = (commit) => { try { execFileSync("git", ["-C", LANE_ROOT, "merge-base", "--is-ancestor", commit, "origin/main"], { stdio: "ignore" }); return true; } catch { return false; } };
@@ -55,11 +58,16 @@ export function readiness() {
 		releaseJevAdvisorTree: git("rev-parse", `${releaseCommit}:jev-advisor`),
 		laneJevAdvisorTree: git("rev-parse", "HEAD:jev-advisor"),
 	};
-	receipt.pass = receipt.pr65MergeAncestor && receipt.pr66MergeAncestor && version === "0.0.28";
+	// The cells install the lane's jev-advisor tree. Any difference from the release tree must be
+	// limited to files that are not part of the installed plugin surface (dev scripts, tests, docs).
+	receipt.advisorDiffFiles = receipt.releaseJevAdvisorTree === receipt.laneJevAdvisorTree ? [] : git("diff", "--name-only", releaseCommit, "HEAD", "--", "jev-advisor").split("\n").filter(Boolean);
+	receipt.advisorDiffRuntimeIrrelevant = receipt.advisorDiffFiles.every((file) => ADVISOR_NON_RUNTIME.some((pattern) => pattern.test(file)));
+	receipt.pass = receipt.pr65MergeAncestor && receipt.pr66MergeAncestor && version === "0.0.28" && receipt.advisorDiffRuntimeIrrelevant;
 	return receipt;
 }
 
 async function l0(runDir) {
+	const harness = requireS0Harness(runDir);
 	const catalog = assertFresh(JSON.parse(readFileSync(path.join(runDir, "catalog-latest.json"), "utf8"))).entries;
 	const key = readOpenGatewayKey();
 	const journalPath = path.join(runDir, "ledger.jsonl");
@@ -103,7 +111,7 @@ async function l0(runDir) {
 	const cellSummary = { status: cell.status, errorClass: cell.errorClass, score: cell.score, toolCalls: cell.toolCalls, wasteTurns: cell.wasteTurns, wallMs: cell.wallMs, sessionUsd: cell.sessionUsd, plugins: cell.plugins };
 	const totalUsd = ledger.snapshot().spentUsd - prior - PRIOR_EXTERNAL_USD;
 	const pass = cell.status === "ok" && chat.ok === chat.turns && chat.toolCallPassthrough && !chat.bases.includes("computed_bound") && chat.bytesPerToken > 0 && decisions.every((row) => row.status !== "no_decision" || row.reason === "unnormalized_probabilities") && totalUsd <= L0_CAP_USD;
-	return { schema: "jexp.l0.v1", at: new Date().toISOString(), upstreamMode: "B_stream_false_usage_include", chat, cell: cellSummary, decisions, totalUsd, pass };
+	return { schema: "jexp.l0.v1", at: new Date().toISOString(), harnessDigest: harness, upstreamMode: "B_stream_false_usage_include", chat, cell: cellSummary, decisions, totalUsd, pass };
 }
 
 function arg(name, fallback = null) {

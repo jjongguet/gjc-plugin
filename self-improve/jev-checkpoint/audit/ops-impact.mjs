@@ -34,11 +34,14 @@ const controller = arg("controller-session", process.env.GJC_SESSION_ID ?? "");
 if (!arg("run-dir") || !Number.isFinite(since) || !out) { process.stderr.write("usage: ops-impact.mjs --run-dir <dir> --since <ISO> --out <file>\n"); process.exit(2); }
 
 const home = os.homedir();
-const MAX_FILE = 16 * 1024 * 1024;
+const MAX_FILE = 512 * 1024 * 1024;
+// Everything the scanner could not inspect is counted: unknown is never a pass.
+const unscanned = { depth: 0, readdir: 0, stat: 0, oversize: 0, read: 0 };
 function* walk(dir, depth = 0) {
-	if (depth > 8 || !existsSync(dir)) return;
+	if (!existsSync(dir)) return;
+	if (depth > 12) { unscanned.depth += 1; return; }
 	let entries;
-	try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+	try { entries = readdirSync(dir, { withFileTypes: true }); } catch { unscanned.readdir += 1; return; }
 	for (const entry of entries) {
 		const full = path.join(dir, entry.name);
 		if (entry.isSymbolicLink()) continue;
@@ -63,13 +66,14 @@ function scan(roots, needles, sinceMs, exclude = null) {
 	for (const root of roots) {
 		for (const file of walk(root)) {
 			let stats;
-			try { stats = statSync(file); } catch { continue; }
-			if (stats.mtimeMs < sinceMs || stats.size > MAX_FILE) continue;
+			try { stats = statSync(file); } catch { unscanned.stat += 1; continue; }
+			if (stats.mtimeMs < sinceMs) continue;
+			if (stats.size > MAX_FILE) { unscanned.oversize += 1; continue; }
 			// The controller session's transcript file and its artifact directory both carry its id.
 			if (exclude && path.relative(root, file).includes(exclude)) continue;
-			scanned += 1;
 			let data;
-			try { data = readFileSync(file); } catch { continue; }
+			try { data = readFileSync(file); } catch { unscanned.read += 1; continue; }
+			scanned += 1;
 			if (buffers.some((needle) => data.indexOf(needle) !== -1)) hits.push(path.relative(home, file));
 		}
 	}
@@ -82,7 +86,8 @@ const ids = cellIds();
 const needles = [runDir, ...ids];
 const roots = [path.join(home, ".gjc", "agent", "sessions"), path.join(home, ".gjc-plugin"), path.join(home, ".gjc", "agent", "gjc-plugins")];
 const markerScan = scan(roots, needles, since, controller || null);
-check("1_no_markers_in_real_state", markerScan.hits.length === 0, { scannedFiles: markerScan.scanned, cells: ids.length, hits: markerScan.hits.slice(0, 20), excludedControllerSession: controller || null });
+const unscannedTotal = Object.values(unscanned).reduce((sum, count) => sum + count, 0);
+check("1_no_markers_in_real_state", markerScan.hits.length === 0 && unscannedTotal === 0 && markerScan.scanned > 0, { unscanned: { ...unscanned }, scannedFiles: markerScan.scanned, cells: ids.length, hits: markerScan.hits.slice(0, 20), excludedControllerSession: controller || null });
 
 const control = mkdtempSync(path.join(os.tmpdir(), "jexp-control-"));
 writeFileSync(path.join(control, "planted.txt"), `x ${ids[0] ?? runDir} y`);
@@ -138,7 +143,9 @@ check("7_no_real_checkpoint_journal", !existsSync(path.join(home, ".gjc-plugin",
 
 const tmux = spawnSync("tmux", ["list-sessions", "-F", "#{session_name}"], { encoding: "utf8" });
 const jexp = (tmux.stdout ?? "").split("\n").filter((name) => name.startsWith("jexp-"));
-check("8_no_jexp_tmux_sessions", jexp.length === 0, { sessions: jexp });
+// A listing (exit 0) or "no server" are observations; any other tmux failure is unknown.
+const tmuxObserved = tmux.status === 0 || /no server running|error connecting to/i.test(tmux.stderr ?? "");
+check("8_no_jexp_tmux_sessions", tmuxObserved && jexp.length === 0, { sessions: jexp, tmuxStatus: tmux.status });
 
 let receipts = 0;
 for (const stage of readdirSync(runDir, { withFileTypes: true })) {

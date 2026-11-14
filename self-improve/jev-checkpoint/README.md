@@ -21,7 +21,7 @@ Each cell is a real `gjc --print --mode json` tool session (`read,bash,edit,writ
 - **Keys:** the child holds no provider key, only a per-cell placeholder token. Only the parent process reads `~/.gjc/agent/policy/secrets/opengateway-key.txt` (and, for J0 only, the OpenRouter key in `~/.gjc/agent/.env`). Values are never printed, logged or written.
 - **Upstream:** the proxy (`lib/proxy.mjs`) forwards chat in mode B (`stream:false` + `usage:{include:true}`) and re-emits the answer as SSE.
 - **Ledger and hard stop:** every request reserves before transport (`lib/accounting.mjs`). The global hard stop is US$4.00, inclusive. When it triggers, the proxy writes `stop.json` and refuses every route with zero upstream calls. The runner then kills the running cells, records them as `failed/global_stop`, and records the rest as `not_run`. A per-cell cap fails only that cell.
-- **Scoring:** a separate arm-blind process (`scripts/score-cell.mjs`) scores each cell against the task's `oracle.mjs`. Oracles execute cell-written code, so the scorer runs under its own deny-all Seatbelt profile (`scorerProfile` in `lib/runner.mjs`): no network, reads limited to the runtime, the harness, the task and the cell, writes only inside the cell mount.
+- **Scoring:** a separate arm-blind process (`scripts/score-cell.mjs`) scores each cell against the task's `oracle.mjs`. Oracles execute cell-written code, so the scorer runs under its own deny-all Seatbelt profile (`scorerProfile` in `lib/runner.mjs`): no network, reads limited to the runtime, the harness, the task and the cell, writes only inside the cell mount. Scoring is asynchronous, so the proxy and the stop watchdog keep running. An unparsable line in the cell-writable audit log fails the cell (`audit-intact`).
 
 ## Stages and commands
 
@@ -32,7 +32,7 @@ node self-improve/jev-checkpoint/scripts/s0.mjs --run-dir $RUN                  
 node self-improve/jev-checkpoint/scripts/prepare.mjs --run-dir $RUN --step readiness
 node self-improve/jev-checkpoint/scripts/prepare.mjs --run-dir $RUN --step catalog
 node self-improve/jev-checkpoint/scripts/prepare.mjs --run-dir $RUN --step l0      # ≤ $0.05, one real live cell + 2 decisions
-node self-improve/jev-checkpoint/scripts/measure-w.mjs --out $RUN/w-intervals.json # owner-wait W from Linear (read-only)
+node self-improve/jev-checkpoint/scripts/measure-w.mjs --out $RUN/w-intervals.json # owner-wait W from Linear (read-only); exits 1 if any issue read fails
 node self-improve/jev-checkpoint/scripts/j0.mjs --run-dir $RUN --phase freeze|dev|test
 node self-improve/jev-checkpoint/scripts/freeze.mjs --run-dir $RUN                 # manifest.json; refuses if projection > $3.40
 node self-improve/jev-checkpoint/scripts/stage.mjs --stage S1 --run-dir $RUN       # 54 cells, ≤ 3 concurrent, re-projection after 2 cells/arm
@@ -40,7 +40,7 @@ node self-improve/jev-checkpoint/scripts/decide.mjs --run-dir $RUN --phase s1   
 node self-improve/jev-checkpoint/scripts/stage.mjs --stage S2 --run-dir $RUN       # 18 cells (only if admitted)
 node self-improve/jev-checkpoint/scripts/decide.mjs --run-dir $RUN --phase fz      # Fz frozen before holdout
 node self-improve/jev-checkpoint/scripts/stage.mjs --stage S3 --run-dir $RUN       # 36 holdout cells
-node self-improve/jev-checkpoint/scripts/decide.mjs --run-dir $RUN --phase final   # analysis.json, arm-table.md, summary.json
+node self-improve/jev-checkpoint/scripts/decide.mjs --run-dir $RUN --phase final   # analysis.json, arm-table.md, summary.json, receipts/ (validated quality_trial.v2)
 node self-improve/jev-checkpoint/audit/ops-impact.mjs --run-dir $RUN --since <ISO> --out $RUN/ops-impact.json
 node self-improve/jev-checkpoint/scripts/report.mjs --run-dir $RUN --out docs/plans/JJO-2329-jev-checkpoint/results
 ```
@@ -50,6 +50,10 @@ Each paid stage runs inside one finite tmux session (`jexp-s1`, `jexp-s2`, `jexp
 ## Freeze and digests
 
 `lib/digest.mjs` hashes `lib/`, `plugin/`, `fixtures/` and `scripts/`. `s0-pass.json`, `s0b-inertness.json` and `manifest.json` each record that digest, and every live stage refuses to run if the current tree differs (`harness_changed_since_freeze`). The analyzer and rule-table digests are checked in the same way.
+
+L0 and J0 run before the manifest, so they require `s0-pass.json` to have passed on the current digest (`requireS0Harness`) and write that digest into their own receipts. `freeze.mjs` refuses any receipt not bound to it.
+
+A stage runs once per run dir (`stage_already_run`). A partial or duplicated S1/S2/S3 cohort maps to early termination (`insufficient`), never to a definitive verdict.
 
 `audit/` and `tests/` sit outside the digest because they never run inside a cell and never change a measurement.
 
@@ -65,4 +69,4 @@ With holdout n=6, a one-sided sign test needs 6/6 tasks, and its power at q=0.8 
 
 ## Tests
 
-`bun run test:jev-checkpoint` (`scripts/verify.mjs`) first runs the plugin bundle sync check, then runs every `tests/unit/*.test.mjs` file. A file that reports zero tests fails.
+`bun run test:jev-checkpoint` (`scripts/verify.mjs`) first runs the plugin bundle sync check, then runs every `tests/unit/*.test.mjs` file. A file fails when any test is skipped, todo, cancelled or failing, and the whole suite fails below 88 executed cases.
