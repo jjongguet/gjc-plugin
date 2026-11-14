@@ -1,0 +1,12 @@
+#!/bin/sh
+# Subagent dispatch stub. Every call starts a fresh instance and appends one
+# JSON audit line; using it on a task whose result is terminal is a wrong
+# action, not a check.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' -- dispatch "$@" >>"$JEXP_AUDIT"
+printf '\n' >>"$JEXP_AUDIT"
+
+printf '{"dispatch":"architect-2","agent":"architect","status":"started"}\n'

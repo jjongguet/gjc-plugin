@@ -1,0 +1,377 @@
+{
+  "schema": "jexp.manifest.v1",
+  "manifestId": "jjo2329-2f9349d7",
+  "frozenAt": "2026-11-14T10:01:01.308Z",
+  "issue": "JJO-2329",
+  "ralplanRun": "01a1d916-909e-7088-bfe4-667fcb63e4ed",
+  "finalPlanSha256": "e9bfbf0dc52e5d6f1be7c6516cff16c148040d5cab6afc805ad360a943dad3e1",
+  "harnessDigest": "e48dbecc254b4d5dfc019b808e3739ba699cd8752ebbb40a076562d1a794c55b",
+  "analyzerDigest": "b941a706e4478be91325ab40d3a2f772b0d9b083a6dd828cdea68036d23b30a4",
+  "ruleTableDigest": "0fcc5ac3a5d325f8383fc5ffa7abbb1bdbd8b2ca10bb54ad15f8870819d95b4e",
+  "bundles": {
+    "jevAdvisor": "66fad96b0fa464305d0527f10b490aca312d0be93db99f27fbb357657a2181f7",
+    "jevCheckpoint": "9c34f0d7e1a51fa87965f4fe8bd89c20cb351790510f8be64c0a9cc2f0dec00f"
+  },
+  "readiness": {
+    "originMain": "5f0652e8f50c16795f303357acb62570c782daa0",
+    "releaseTree": "ddd10a638b506b58e2dddb5788255e96e95330ef",
+    "releaseSurface": "tag_tree"
+  },
+  "catalog": {
+    "observedAt": "2026-11-14T09:59:03.888Z",
+    "rawDigest": "a0cd29558a7130a9aa034788a569fa9081271ed689b7f79a361f4e17c9cb8409",
+    "entries": {
+      "deepseek/deepseek-v4.1-flash-eco": {
+        "source": "https://apis.opengateway.ai/v1/models",
+        "model": "deepseek/deepseek-v4.1-flash-eco",
+        "provider": "sionic-ai",
+        "unit": "per_token",
+        "listInputPricePerToken": 3e-7,
+        "observedInputPricePerToken": 3e-8,
+        "listOutputPricePerToken": 0.0000012,
+        "observedOutputPricePerToken": 1.2e-7,
+        "discountPercent": 90,
+        "discountSource": "catalog_field",
+        "status": "active",
+        "observedAt": "2026-11-14T09:59:03.888Z"
+      },
+      "sionic-ai/jev-omni": {
+        "source": "https://apis.opengateway.ai/v1/models",
+        "model": "sionic-ai/jev-omni",
+        "provider": "sionic-ai",
+        "unit": "per_token",
+        "listInputPricePerToken": 1.26e-7,
+        "observedInputPricePerToken": 6.3e-9,
+        "listOutputPricePerToken": 0,
+        "observedOutputPricePerToken": 0,
+        "discountPercent": 95,
+        "discountSource": "catalog_field",
+        "status": "active",
+        "observedAt": "2026-11-14T09:59:03.888Z"
+      },
+      "sionic-ai/decider-4b": {
+        "source": "https://apis.opengateway.ai/v1/models",
+        "model": "sionic-ai/decider-4b",
+        "provider": "sionic-ai",
+        "unit": "per_token",
+        "listInputPricePerToken": 4.2e-8,
+        "observedInputPricePerToken": 2.1e-9,
+        "listOutputPricePerToken": 0,
+        "observedOutputPricePerToken": 0,
+        "discountPercent": 95,
+        "discountSource": "catalog_field",
+        "status": "active",
+        "observedAt": "2026-11-14T09:59:03.888Z"
+      }
+    }
+  },
+  "l0": {
+    "bytesPerToken": 4.070230171935663,
+    "upstreamMode": "B_stream_false_usage_include"
+  },
+  "questions": {
+    "goal_state": {
+      "wordingId": "W2",
+      "criteriaOrder": [
+        "on_track",
+        "off_track"
+      ]
+    },
+    "error_repeat": {
+      "wordingId": "W1",
+      "criteriaOrder": [
+        "yes",
+        "no"
+      ]
+    },
+    "ensembleRule": "primary_override"
+  },
+  "questionDigests": {
+    "goal_state": "ae875ad617d0a4e358a315191b4b6710749c5f1b8f98b5de165c80c349f4e80f",
+    "error_repeat": "1dbf775de0e9b3a0e38ad749b7412007eb12363061271682c42e63f01de429aa"
+  },
+  "criteriaOrderDigest": "b7568c1f0498c7dfe4012b113cf94b079254d9f1a67e331185d3a2950e8f2cf9",
+  "j0": {
+    "labelSheetDigest": "6d6d6ef73e0a570315925adff9f86595f66112be36c95ce879d29f97665d57a2",
+    "devSelection": {
+      "error_repeat": {
+        "wordingId": "W1",
+        "rule": "bar_met",
+        "candidates": [
+          {
+            "wordingId": "W1",
+            "combined": 7,
+            "omni": 3,
+            "unnormalized": 0,
+            "cases": 4
+          },
+          {
+            "wordingId": "W2",
+            "combined": 6,
+            "omni": 3,
+            "unnormalized": 0,
+            "cases": 4
+          },
+          {
+            "wordingId": "W3",
+            "combined": 5,
+            "omni": 3,
+            "unnormalized": 0,
+            "cases": 4
+          }
+        ]
+      },
+      "goal_state": {
+        "wordingId": "W2",
+        "rule": "bar_met",
+        "candidates": [
+          {
+            "wordingId": "W1",
+            "combined": 6,
+            "omni": 4,
+            "unnormalized": 0,
+            "cases": 4
+          },
+          {
+            "wordingId": "W2",
+            "combined": 7,
+            "omni": 4,
+            "unnormalized": 0,
+            "cases": 4
+          },
+          {
+            "wordingId": "W3",
+            "combined": 7,
+            "omni": 4,
+            "unnormalized": 0,
+            "cases": 4
+          }
+        ]
+      }
+    },
+    "p1Gate": {
+      "units": 60,
+      "pairAgreement": {
+        "num": 54,
+        "den": 60,
+        "value": 0.9
+      },
+      "agreementErrorRate": {
+        "num": 12,
+        "den": 54,
+        "value": 0.2222222222222222
+      },
+      "bothWrongHighConfidence": {
+        "num": 0,
+        "den": 60,
+        "value": 0
+      },
+      "threeWayAgreementErrorRate": {
+        "num": 3,
+        "den": 45,
+        "value": 0.06666666666666667
+      },
+      "errorCorrelationPhi": 0.7333333333333333,
+      "c3Adoptable": false,
+      "scope": "trial families (error_repeat, goal_state), canonical order, unit = case × repeat"
+    },
+    "w": {
+      "estimated": true,
+      "completed": 21,
+      "censored": 35,
+      "medianMinutes": 3158,
+      "p25Minutes": 535,
+      "p75Minutes": 3914,
+      "medianIsLowerBound": true,
+      "completedOnly": {
+        "median": 63,
+        "p25": 24,
+        "p75": 541
+      },
+      "censoredLowerBounds": [
+        {
+          "ref": "JJO-1570",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1821",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1106",
+          "atLeastMinutes": 4489
+        },
+        {
+          "ref": "JJO-1468",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1568",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1542",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1807",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-279",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1569",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-2153",
+          "atLeastMinutes": 1518
+        },
+        {
+          "ref": "JJO-2049",
+          "atLeastMinutes": 3020
+        },
+        {
+          "ref": "JJO-2184",
+          "atLeastMinutes": 3870
+        },
+        {
+          "ref": "JJO-2180",
+          "atLeastMinutes": 2076
+        },
+        {
+          "ref": "JJO-2273",
+          "atLeastMinutes": 1551
+        },
+        {
+          "ref": "JJO-2290",
+          "atLeastMinutes": 2078
+        },
+        {
+          "ref": "JJO-2336",
+          "atLeastMinutes": 1085
+        },
+        {
+          "ref": "JJO-1558",
+          "atLeastMinutes": 3877
+        },
+        {
+          "ref": "JJO-1638",
+          "atLeastMinutes": 2355
+        },
+        {
+          "ref": "JJO-2129",
+          "atLeastMinutes": 3158
+        },
+        {
+          "ref": "JJO-655",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-271",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-374",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-557",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-663",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-461",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-48",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-517",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-530",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-635",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-602",
+          "atLeastMinutes": 5946
+        },
+        {
+          "ref": "JJO-2215",
+          "atLeastMinutes": 2249
+        },
+        {
+          "ref": "JJO-664",
+          "atLeastMinutes": 5552
+        },
+        {
+          "ref": "JJO-664",
+          "atLeastMinutes": 5548
+        },
+        {
+          "ref": "JJO-664",
+          "atLeastMinutes": 3914
+        },
+        {
+          "ref": "JJO-664",
+          "atLeastMinutes": 3866
+        }
+      ]
+    }
+  },
+  "powerGate": "fail",
+  "power": {
+    "holdoutTasks": 6,
+    "signTestPowerAtQ08": 0.2621440000000001,
+    "decisiveRun": {
+      "n": 18,
+      "k": 13,
+      "alpha": 0.04812622070312504,
+      "power": 0.867083665757177,
+      "q": 0.8,
+      "repeats": 3,
+      "arms": {
+        "s1": 3,
+        "s2": 1,
+        "s3": 2
+      },
+      "units": "task",
+      "holdoutTasks": 6,
+      "cells": {
+        "s1": 162,
+        "s2": 54,
+        "s3": 108,
+        "total": 324
+      },
+      "note": "report-only: the frozen POWER_GATE constant does not depend on this size"
+    },
+    "declaredEffectPp": 0.25,
+    "declaration": "12 tasks (holdout 6): differences under 25pp are not determinable; with powerGate=fail `adopted` is unreachable and the verdict is capped at insufficient → 현행 유지"
+  },
+  "cost": {
+    "spentSoFarUsd": 0.0261067964,
+    "priorExternalUsd": 0.02,
+    "meanCellUsd": 0.0038634272360285474,
+    "decisionWorstPerCellUsd": 0.0129024,
+    "paidCells": 108,
+    "projectedUsd": 2.289493473263854,
+    "startGateUsd": 3.4,
+    "hardStopUsd": 4
+  },
+  "cellUsdCap": 0.06,
+  "priorExternalUsd": 0.02,
+  "x5Signal2": "appendRatio = appended advice bytes / chat request bytes ≥ 0.10 (parent design §4.3 signal 2)"
+}

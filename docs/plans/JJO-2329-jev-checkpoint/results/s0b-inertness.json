@@ -1,0 +1,75 @@
+{
+  "schema": "jexp.s0b_inertness.v1",
+  "pass": true,
+  "checks": [
+    {
+      "id": "s0b_12_ok",
+      "pass": true,
+      "statusCounts": {
+        "ok": 12
+      }
+    },
+    {
+      "id": "s0b_normalized_bodies_equal",
+      "pass": true,
+      "comparisons": [
+        {
+          "taskId": "no-invented-cap",
+          "repeat": 1,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        },
+        {
+          "taskId": "retry-until-cap",
+          "repeat": 1,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        },
+        {
+          "taskId": "no-invented-cap",
+          "repeat": 2,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        },
+        {
+          "taskId": "retry-until-cap",
+          "repeat": 2,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        },
+        {
+          "taskId": "no-invented-cap",
+          "repeat": 3,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        },
+        {
+          "taskId": "retry-until-cap",
+          "repeat": 3,
+          "turns": 10,
+          "equal": true,
+          "scoreEqual": true
+        }
+      ]
+    },
+    {
+      "id": "s0b_scores_equal",
+      "pass": true
+    },
+    {
+      "id": "s0b_off_io_zero",
+      "pass": true
+    },
+    {
+      "id": "s0b_upstream_zero",
+      "pass": true
+    }
+  ],
+  "harnessDigest": "e48dbecc254b4d5dfc019b808e3739ba699cd8752ebbb40a076562d1a794c55b",
+  "createdAt": "2026-11-14T09:58:23.018Z"
+}

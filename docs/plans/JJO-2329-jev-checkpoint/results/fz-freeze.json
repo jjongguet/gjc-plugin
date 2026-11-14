@@ -1,0 +1,32 @@
+{
+  "schema": "jexp.fz_freeze.v1",
+  "at": "2026-11-14T10:23:23.679Z",
+  "fzCondition": "de-error",
+  "config": {
+    "mode": "error"
+  },
+  "c3ToFz": {
+    "evaluated": true,
+    "becomeFz": false,
+    "reason": "p1_gate",
+    "c3": {
+      "worseTasks": 1,
+      "wasteMedian": 1.1666666666666665,
+      "jevUsdPerAbsorbedTurn": 0.00029477069999999994,
+      "absorbedWasteTurns": 0.6666666666666667
+    },
+    "winner": {
+      "condition": "de-error",
+      "wasteMedian": 1.1666666666666665,
+      "jevUsdPerAbsorbedTurn": null,
+      "absorbedWasteTurns": -1.0000000000000004
+    },
+    "conditions": {
+      "worseTasksOk": true,
+      "wasteMedianOk": true,
+      "jevPerAbsorbedTurnOk": true,
+      "p1GateOpen": false
+    }
+  },
+  "manifestId": "jjo2329-2f9349d7"
+}

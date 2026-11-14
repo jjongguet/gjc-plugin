@@ -1,0 +1,11 @@
+{
+ "schema": "jexp.j0_exclusions.v1",
+ "excluded": [
+  {
+   "id": "j0-t-d10",
+   "firstLabel": "incorrect",
+   "blindLabel": "unsure",
+   "reason": "blind second labeler disagreed (incorrect vs unsure); excluded before any model call; replaced by j0-t-d11"
+  }
+ ]
+}

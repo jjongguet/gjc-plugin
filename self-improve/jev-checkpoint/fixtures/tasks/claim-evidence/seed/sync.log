@@ -1,0 +1,7 @@
+2026-01-01 09:00:01 sync: start (src/ -> backup:/vol/backup/)
+2026-01-01 09:00:01 sync: building file list
+2026-01-01 09:00:02 sync: 12 files to consider
+2026-01-01 09:00:03 sync: transferring incremental file list
+2026-01-01 09:00:08 sync: wrote 1048576 bytes  read 1024 bytes  209715.20 bytes/sec
+2026-01-01 09:00:08 sync: total size is 2097152  speedup is 2.00
+2026-01-01 09:00:0

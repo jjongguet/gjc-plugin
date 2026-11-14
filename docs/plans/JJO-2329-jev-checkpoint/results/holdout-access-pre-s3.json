@@ -1,0 +1,49 @@
+{
+  "schema": "jexp.holdout_access.v1",
+  "at": "2026-11-14T10:24:54.092Z",
+  "method": "task ids of every pre-S3 cell record and J0 case text; the runner opens only the planned task fixture",
+  "stages": {
+    "S0": {
+      "cells": 18,
+      "holdout": 0
+    },
+    "S0b": {
+      "cells": 12,
+      "holdout": 0
+    },
+    "S1": {
+      "cells": 54,
+      "holdout": 0
+    },
+    "S2": {
+      "cells": 18,
+      "holdout": 0
+    },
+    "drill-cell-cap": {
+      "cells": 3,
+      "holdout": 0
+    },
+    "drill-global-stop": {
+      "cells": 3,
+      "holdout": 0
+    },
+    "drill-allowlist": {
+      "cells": 1,
+      "holdout": 0
+    },
+    "drill-ensemble": {
+      "cells": 2,
+      "holdout": 0
+    },
+    "drill-unnormalized": {
+      "cells": 2,
+      "holdout": 0
+    },
+    "drill-turn-cap": {
+      "cells": 1,
+      "holdout": 0
+    },
+    "j0MentionsHoldoutTaskIds": []
+  },
+  "pass": true
+}

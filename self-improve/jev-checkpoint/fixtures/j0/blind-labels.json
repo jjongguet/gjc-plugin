@@ -1,0 +1,276 @@
+{
+ "schema": "jexp.j0_blind_labels.v1",
+ "labeler": "independent read-only reviewer (subagent 7-J0BlindLabeler), blind to first labels and to every model output",
+ "cases": 44,
+ "agreements": 44,
+ "disagreements": [],
+ "excludedBeforeFreeze": [
+  "j0-t-d10"
+ ],
+ "rows": [
+  {
+   "id": "j0-t-e01",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e02",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e03",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e04",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e05",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e06",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e07",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "low"
+  },
+  {
+   "id": "j0-t-e08",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e09",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-e10",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d01",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d02",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d03",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d04",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d05",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d06",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d07",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d08",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d09",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s01",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s02",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s03",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s04",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s05",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s06",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s07",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s08",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s09",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-s10",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-e01",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-e02",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-e03",
+   "firstLabel": "yes",
+   "blindLabel": "yes",
+   "blindConfidence": "medium"
+  },
+  {
+   "id": "j0-d-e04",
+   "firstLabel": "no",
+   "blindLabel": "no",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-d01",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-d02",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-d03",
+   "firstLabel": "correct",
+   "blindLabel": "correct",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-d04",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-s01",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-s02",
+   "firstLabel": "on_track",
+   "blindLabel": "on_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-s03",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-d-s04",
+   "firstLabel": "off_track",
+   "blindLabel": "off_track",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d11",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d12",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  },
+  {
+   "id": "j0-t-d13",
+   "firstLabel": "incorrect",
+   "blindLabel": "incorrect",
+   "blindConfidence": "high"
+  }
+ ]
+}

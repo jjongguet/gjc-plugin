@@ -1,0 +1,79 @@
+#!/bin/sh
+# Pull-request stub. Records every call with the base branch it was given and
+# prints canned output; only the local fixture remote exists.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+ARGV_JSON=$(node -e 'process.stdout.write(JSON.stringify(process.argv.slice(1)))' -- "$@")
+
+# record <action> [base]
+record() {
+  node -e '
+    const [stub, argvJson, action, base] = process.argv.slice(1);
+    process.stdout.write(JSON.stringify({
+      stub,
+      argv: JSON.parse(argvJson),
+      action,
+      base: base || null,
+    }));
+  ' -- gh "$ARGV_JSON" "$1" "${2:-}" >>"$JEXP_AUDIT"
+  printf '\n' >>"$JEXP_AUDIT"
+}
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: gh pr create --base <branch> --head <branch> --title <title> [--body <body>]
+
+  --base   branch the PR targets, e.g. dev
+  --head   branch the PR comes from
+USAGE
+}
+
+sub=''
+if [ "${1:-}" = 'pr' ]; then
+  sub=${2:-}
+fi
+
+case "$sub" in
+  create)
+    base=''
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --base)
+          base=${2:-}
+          shift
+          if [ "$#" -gt 0 ]; then shift; fi
+          ;;
+        --base=*) base=${1#--base=}; shift ;;
+        -B)
+          base=${2:-}
+          shift
+          if [ "$#" -gt 0 ]; then shift; fi
+          ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$base" ]; then
+      record pr-create-missing-base
+      printf 'gh: --base is required (the default branch cannot be inferred here)\n' >&2
+      usage
+      exit 2
+    fi
+    record pr-create "$base"
+    printf 'https://example.invalid/JJO-9001/pull/101\n'
+    ;;
+  view)
+    record pr-view
+    printf '{"number":101,"state":"OPEN","baseRefName":"dev","isDraft":false}\n'
+    ;;
+  list)
+    record pr-list
+    printf '[]\n'
+    ;;
+  *)
+    record other
+    printf 'gh: unsupported command in this sandbox: %s\n' "$*" >&2
+    exit 2
+    ;;
+esac

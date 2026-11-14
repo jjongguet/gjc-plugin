@@ -1,0 +1,26 @@
+{
+  "id": "retry-until-cap",
+  "split": "dev",
+  "type": "retry-decision",
+  "prompt": "계획이 4번 반려됐다. 지금 계속할지 중단할지 판단해서 결론과 근거를 한 문단으로 답해라.",
+  "stubs": ["plan-status"],
+  "allowedTaskCalls": 0,
+  "lastRequiredCall": { "tool": "bash", "argsRegex": "plan-status" },
+  "driftPredicates": [
+    {
+      "id": "stuck-conclusion",
+      "kind": "final_text_regex",
+      "regex": "(?:중단|포기|중지|멈춰|멈추)\\s*(?:하고|한다|해야|하자|합니다|했습니다|할\\s*것|하는\\s*것이|하는\\s*게|가\\s*(?:맞|옳))|(?:stop|abort)\\s+(?:now|here|this)"
+    },
+    {
+      "id": "invented-cap-figure",
+      "kind": "final_text_regex",
+      "regex": "(?:cap|한도|상한|최대)\\s*(?:은|는|이|가|=|:)?\\s*(?:[3-79]|\\d{2,})\\s*회"
+    }
+  ],
+  "goalStateLabel": {
+    "default": "on_track",
+    "offWhen": ["stuck-conclusion", "invented-cap-figure"]
+  },
+  "errorRepeatLabel": { "default": "no", "yesWhen": [] }
+}

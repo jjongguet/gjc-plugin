@@ -1,0 +1,68 @@
+{
+ "schema": "jexp.ultragoal_summary.v1",
+ "source": ".gjc/_session-<session>/ultragoal/goals.json (copied without path fields)",
+ "sourceSha256": "2f7b6dbab098f15e8b4fd63bcac9d9b7b05b2d725ac1586d79e80b87a9ab093f",
+ "session": "01a1d916-909e-7088-bfe4-667fcb63e4ed",
+ "goals": [
+  {
+   "id": "G001",
+   "title": "G1 R1 확인 + 하네스 코어·allowlist·테스트",
+   "status": "complete"
+  },
+  {
+   "id": "G002",
+   "title": "G2 S0 + S0b ($0)",
+   "status": "complete"
+  },
+  {
+   "id": "G003",
+   "title": "G3 readiness + 카탈로그 + L0",
+   "status": "complete"
+  },
+  {
+   "id": "G004",
+   "title": "G4 J0 판정자 골든셋",
+   "status": "complete"
+  },
+  {
+   "id": "G005",
+   "title": "G5 manifest 동결",
+   "status": "complete"
+  },
+  {
+   "id": "G006",
+   "title": "G6 S1 유료",
+   "status": "complete"
+  },
+  {
+   "id": "G007",
+   "title": "G7 S2 조건부 유료",
+   "status": "complete"
+  },
+  {
+   "id": "G008",
+   "title": "G8 S3 holdout 유료",
+   "status": "complete"
+  },
+  {
+   "id": "G009",
+   "title": "G9 분석·판정·결과 문서",
+   "status": "active"
+  },
+  {
+   "id": "G010",
+   "title": "G10 전달",
+   "status": "pending"
+  },
+  {
+   "id": "G011",
+   "title": "G11 조건부 채택 설치",
+   "status": "pending"
+  },
+  {
+   "id": "G012",
+   "title": "G12 오너 결정 블록 + 회수 전 관측",
+   "status": "pending"
+  }
+ ]
+}

@@ -1,0 +1,1154 @@
+{
+  "schema": "jexp.j0_test.v1",
+  "models": {
+    "sionic-ai/jev-omni": {
+      "all": {
+        "responses": 192,
+        "rawAccuracy": {
+          "num": 137,
+          "den": 192,
+          "value": 0.7135416666666666
+        },
+        "usedAccuracyTrialFamilies": {
+          "num": 93,
+          "den": 120,
+          "value": 0.775
+        },
+        "coverage": {
+          "num": 159,
+          "den": 192,
+          "value": 0.828125
+        },
+        "highConfidenceErrors": {
+          "num": 22,
+          "den": 192,
+          "value": 0.11458333333333333
+        },
+        "noDecision": {
+          "unnormalized_probabilities": 11
+        },
+        "unnormalizedAtSensitivity": 0,
+        "latencyMs": {
+          "p50": 104,
+          "p95": 163,
+          "n": 192
+        },
+        "costUsd": 0.0003380453999999998,
+        "policies": {
+          "P1": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 7,
+              "den": 48,
+              "value": 0.14583333333333334
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          },
+          "P2": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 10,
+              "den": 48,
+              "value": 0.20833333333333334
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          },
+          "P2_sensitivity": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 7,
+              "den": 48,
+              "value": 0.14583333333333334
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          }
+        }
+      },
+      "byClass": {
+        "error_repeat": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 44,
+            "den": 60,
+            "value": 0.7333333333333333
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 45,
+            "den": 60,
+            "value": 0.75
+          },
+          "coverage": {
+            "num": 50,
+            "den": 60,
+            "value": 0.8333333333333334
+          },
+          "highConfidenceErrors": {
+            "num": 6,
+            "den": 60,
+            "value": 0.1
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 105,
+            "p95": 163,
+            "n": 60
+          },
+          "costUsd": 0.00009389520000000002,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "scope_drift": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 51,
+            "den": 60,
+            "value": 0.85
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 48,
+            "den": 60,
+            "value": 0.8
+          },
+          "coverage": {
+            "num": 48,
+            "den": 60,
+            "value": 0.8
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 60,
+            "value": 0
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 103,
+            "p95": 161,
+            "n": 60
+          },
+          "costUsd": 0.0000879228,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "destructive": {
+          "responses": 72,
+          "rawAccuracy": {
+            "num": 42,
+            "den": 72,
+            "value": 0.5833333333333334
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 0,
+            "den": 0,
+            "value": null
+          },
+          "coverage": {
+            "num": 61,
+            "den": 72,
+            "value": 0.8472222222222222
+          },
+          "highConfidenceErrors": {
+            "num": 16,
+            "den": 72,
+            "value": 0.2222222222222222
+          },
+          "noDecision": {
+            "unnormalized_probabilities": 11
+          },
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 104,
+            "p95": 165,
+            "n": 72
+          },
+          "costUsd": 0.0001562274,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 7,
+                "den": 48,
+                "value": 0.14583333333333334
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 10,
+                "den": 48,
+                "value": 0.20833333333333334
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 7,
+                "den": 48,
+                "value": 0.14583333333333334
+              },
+              "falseStops": 0
+            }
+          }
+        }
+      },
+      "orderFlipRate": {
+        "num": 7,
+        "den": 86,
+        "value": 0.08139534883720931
+      },
+      "laterListedPreference": {
+        "num": 81,
+        "den": 181,
+        "value": 0.44751381215469616
+      }
+    },
+    "sionic-ai/decider-4b": {
+      "all": {
+        "responses": 192,
+        "rawAccuracy": {
+          "num": 119,
+          "den": 192,
+          "value": 0.6197916666666666
+        },
+        "usedAccuracyTrialFamilies": {
+          "num": 87,
+          "den": 120,
+          "value": 0.725
+        },
+        "coverage": {
+          "num": 109,
+          "den": 192,
+          "value": 0.5677083333333334
+        },
+        "highConfidenceErrors": {
+          "num": 0,
+          "den": 192,
+          "value": 0
+        },
+        "noDecision": {
+          "unnormalized_probabilities": 20
+        },
+        "unnormalizedAtSensitivity": 0,
+        "latencyMs": {
+          "p50": 91,
+          "p95": 141,
+          "n": 192
+        },
+        "costUsd": 0.00009700739999999999,
+        "policies": {
+          "P1": {
+            "falseStopRate": {
+              "num": 5,
+              "den": 24,
+              "value": 0.20833333333333334
+            },
+            "missedUnsafeRate": {
+              "num": 9,
+              "den": 48,
+              "value": 0.1875
+            },
+            "falseStops": 5,
+            "expectedStallMinutes": {
+              "median": 2631.666666666667,
+              "p25": 445.83333333333337,
+              "p75": 3261.666666666667
+            }
+          },
+          "P2": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 9,
+              "den": 48,
+              "value": 0.1875
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          },
+          "P2_sensitivity": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 9,
+              "den": 48,
+              "value": 0.1875
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          }
+        }
+      },
+      "byClass": {
+        "error_repeat": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 42,
+            "den": 60,
+            "value": 0.7
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 42,
+            "den": 60,
+            "value": 0.7
+          },
+          "coverage": {
+            "num": 45,
+            "den": 60,
+            "value": 0.75
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 60,
+            "value": 0
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 87,
+            "p95": 156,
+            "n": 60
+          },
+          "costUsd": 0.000026586000000000013,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "scope_drift": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 48,
+            "den": 60,
+            "value": 0.8
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 45,
+            "den": 60,
+            "value": 0.75
+          },
+          "coverage": {
+            "num": 51,
+            "den": 60,
+            "value": 0.85
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 60,
+            "value": 0
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 92,
+            "p95": 141,
+            "n": 60
+          },
+          "costUsd": 0.00002438100000000001,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "destructive": {
+          "responses": 72,
+          "rawAccuracy": {
+            "num": 29,
+            "den": 72,
+            "value": 0.4027777777777778
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 0,
+            "den": 0,
+            "value": null
+          },
+          "coverage": {
+            "num": 13,
+            "den": 72,
+            "value": 0.18055555555555555
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 72,
+            "value": 0
+          },
+          "noDecision": {
+            "unnormalized_probabilities": 20
+          },
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 90,
+            "p95": 136,
+            "n": 72
+          },
+          "costUsd": 0.0000460404,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 5,
+                "den": 24,
+                "value": 0.20833333333333334
+              },
+              "missedUnsafeRate": {
+                "num": 9,
+                "den": 48,
+                "value": 0.1875
+              },
+              "falseStops": 5
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 9,
+                "den": 48,
+                "value": 0.1875
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 9,
+                "den": 48,
+                "value": 0.1875
+              },
+              "falseStops": 0
+            }
+          }
+        }
+      },
+      "orderFlipRate": {
+        "num": 8,
+        "den": 79,
+        "value": 0.10126582278481013
+      },
+      "laterListedPreference": {
+        "num": 81,
+        "den": 172,
+        "value": 0.47093023255813954
+      }
+    },
+    "typesafe/jev-1.14": {
+      "all": {
+        "responses": 192,
+        "rawAccuracy": {
+          "num": 162,
+          "den": 192,
+          "value": 0.84375
+        },
+        "usedAccuracyTrialFamilies": {
+          "num": 98,
+          "den": 120,
+          "value": 0.8166666666666667
+        },
+        "coverage": {
+          "num": 168,
+          "den": 192,
+          "value": 0.875
+        },
+        "highConfidenceErrors": {
+          "num": 6,
+          "den": 192,
+          "value": 0.03125
+        },
+        "noDecision": {},
+        "unnormalizedAtSensitivity": 0,
+        "latencyMs": {
+          "p50": 384,
+          "p95": 474,
+          "n": 192
+        },
+        "costUsd": 0.004250988000000001,
+        "policies": {
+          "P1": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 0,
+              "den": 48,
+              "value": 0
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          },
+          "P2": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 6,
+              "den": 48,
+              "value": 0.125
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          },
+          "P2_sensitivity": {
+            "falseStopRate": {
+              "num": 0,
+              "den": 24,
+              "value": 0
+            },
+            "missedUnsafeRate": {
+              "num": 2,
+              "den": 48,
+              "value": 0.041666666666666664
+            },
+            "falseStops": 0,
+            "expectedStallMinutes": {
+              "median": 0,
+              "p25": 0,
+              "p75": 0
+            }
+          }
+        }
+      },
+      "byClass": {
+        "error_repeat": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 48,
+            "den": 60,
+            "value": 0.8
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 41,
+            "den": 60,
+            "value": 0.6833333333333333
+          },
+          "coverage": {
+            "num": 46,
+            "den": 60,
+            "value": 0.7666666666666667
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 60,
+            "value": 0
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 386,
+            "p95": 606,
+            "n": 60
+          },
+          "costUsd": 0.0012410999999999998,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "scope_drift": {
+          "responses": 60,
+          "rawAccuracy": {
+            "num": 60,
+            "den": 60,
+            "value": 1
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 57,
+            "den": 60,
+            "value": 0.95
+          },
+          "coverage": {
+            "num": 56,
+            "den": 60,
+            "value": 0.9333333333333333
+          },
+          "highConfidenceErrors": {
+            "num": 0,
+            "den": 60,
+            "value": 0
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 384,
+            "p95": 516,
+            "n": 60
+          },
+          "costUsd": 0.0011816279999999992,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 0,
+                "value": null
+              },
+              "falseStops": 0
+            }
+          }
+        },
+        "destructive": {
+          "responses": 72,
+          "rawAccuracy": {
+            "num": 54,
+            "den": 72,
+            "value": 0.75
+          },
+          "usedAccuracyTrialFamilies": {
+            "num": 0,
+            "den": 0,
+            "value": null
+          },
+          "coverage": {
+            "num": 66,
+            "den": 72,
+            "value": 0.9166666666666666
+          },
+          "highConfidenceErrors": {
+            "num": 6,
+            "den": 72,
+            "value": 0.08333333333333333
+          },
+          "noDecision": {},
+          "unnormalizedAtSensitivity": 0,
+          "latencyMs": {
+            "p50": 382,
+            "p95": 449,
+            "n": 72
+          },
+          "costUsd": 0.0018282600000000004,
+          "policies": {
+            "P1": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 0,
+                "den": 48,
+                "value": 0
+              },
+              "falseStops": 0
+            },
+            "P2": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 6,
+                "den": 48,
+                "value": 0.125
+              },
+              "falseStops": 0
+            },
+            "P2_sensitivity": {
+              "falseStopRate": {
+                "num": 0,
+                "den": 24,
+                "value": 0
+              },
+              "missedUnsafeRate": {
+                "num": 2,
+                "den": 48,
+                "value": 0.041666666666666664
+              },
+              "falseStops": 0
+            }
+          }
+        }
+      },
+      "orderFlipRate": {
+        "num": 0,
+        "den": 96,
+        "value": 0
+      },
+      "laterListedPreference": {
+        "num": 81,
+        "den": 192,
+        "value": 0.421875
+      }
+    }
+  },
+  "agreement": {
+    "units": 79,
+    "pairAgreement": {
+      "num": 66,
+      "den": 79,
+      "value": 0.8354430379746836
+    },
+    "agreementErrorRate": {
+      "num": 14,
+      "den": 66,
+      "value": 0.21212121212121213
+    },
+    "bothWrongHighConfidence": {
+      "num": 0,
+      "den": 79,
+      "value": 0
+    },
+    "threeWayAgreementErrorRate": {
+      "num": 5,
+      "den": 57,
+      "value": 0.08771929824561403
+    },
+    "errorCorrelationPhi": 0.6586761972332849
+  },
+  "w": {
+    "estimated": true,
+    "completed": 21,
+    "censored": 35,
+    "medianMinutes": 3158,
+    "p25Minutes": 535,
+    "p75Minutes": 3914,
+    "medianIsLowerBound": true,
+    "completedOnly": {
+      "median": 63,
+      "p25": 24,
+      "p75": 541
+    },
+    "censoredLowerBounds": [
+      {
+        "ref": "JJO-1570",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1821",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1106",
+        "atLeastMinutes": 4489
+      },
+      {
+        "ref": "JJO-1468",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1568",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1542",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1807",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-279",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1569",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-2153",
+        "atLeastMinutes": 1518
+      },
+      {
+        "ref": "JJO-2049",
+        "atLeastMinutes": 3020
+      },
+      {
+        "ref": "JJO-2184",
+        "atLeastMinutes": 3870
+      },
+      {
+        "ref": "JJO-2180",
+        "atLeastMinutes": 2076
+      },
+      {
+        "ref": "JJO-2273",
+        "atLeastMinutes": 1551
+      },
+      {
+        "ref": "JJO-2290",
+        "atLeastMinutes": 2078
+      },
+      {
+        "ref": "JJO-2336",
+        "atLeastMinutes": 1085
+      },
+      {
+        "ref": "JJO-1558",
+        "atLeastMinutes": 3877
+      },
+      {
+        "ref": "JJO-1638",
+        "atLeastMinutes": 2355
+      },
+      {
+        "ref": "JJO-2129",
+        "atLeastMinutes": 3158
+      },
+      {
+        "ref": "JJO-655",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-271",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-374",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-557",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-663",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-461",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-48",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-517",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-530",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-635",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-602",
+        "atLeastMinutes": 5946
+      },
+      {
+        "ref": "JJO-2215",
+        "atLeastMinutes": 2249
+      },
+      {
+        "ref": "JJO-664",
+        "atLeastMinutes": 5552
+      },
+      {
+        "ref": "JJO-664",
+        "atLeastMinutes": 5548
+      },
+      {
+        "ref": "JJO-664",
+        "atLeastMinutes": 3914
+      },
+      {
+        "ref": "JJO-664",
+        "atLeastMinutes": 3866
+      }
+    ]
+  },
+  "unit": "response = case × repeat × order; stall falseStops are averaged per destructive test set pass (÷ repeats ÷ orders)",
+  "labelSheetDigest": "6d6d6ef73e0a570315925adff9f86595f66112be36c95ce879d29f97665d57a2",
+  "frozenWording": {
+    "error_repeat": "W1",
+    "goal_state": "W2"
+  },
+  "requests": 576,
+  "spentUsd": 0.00468604080000011,
+  "stopped": false,
+  "labelStatus": "owner-sourced, blind second label agreed; owner-confirmation pending"
+}

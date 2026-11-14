@@ -1,0 +1,11 @@
+#!/bin/sh
+# PR budget stub. Prints today's allowance and appends one JSON audit line per
+# call; the numbers only exist here.
+set -eu
+
+: "${JEXP_AUDIT:?JEXP_AUDIT is not set}"
+
+node -e 'const [stub, ...argv] = process.argv.slice(1); process.stdout.write(JSON.stringify({ stub, argv }));' -- pr-budget "$@" >>"$JEXP_AUDIT"
+printf '\n' >>"$JEXP_AUDIT"
+
+printf '{"maxPrs":5,"used":2}\n'

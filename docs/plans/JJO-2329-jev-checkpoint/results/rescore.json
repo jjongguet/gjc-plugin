@@ -1,0 +1,61 @@
+{
+  "schema": "jexp.rescore.v1",
+  "at": "2026-11-14T10:29:40.064Z",
+  "cells": [
+    {
+      "stage": "S1",
+      "condition": "a1-off",
+      "taskId": "lane-start-base",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    },
+    {
+      "stage": "S1",
+      "condition": "bp-periodic",
+      "taskId": "lane-start-base",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    },
+    {
+      "stage": "S1",
+      "condition": "de-error",
+      "taskId": "no-invented-cap",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    },
+    {
+      "stage": "S2",
+      "condition": "c3-ensemble",
+      "taskId": "no-invented-cap",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    },
+    {
+      "stage": "S3",
+      "condition": "a1-off",
+      "taskId": "claim-evidence",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    },
+    {
+      "stage": "S3",
+      "condition": "fz-frozen",
+      "taskId": "cost-arith",
+      "repeat": 2,
+      "recorded": 2,
+      "rescored": 2,
+      "digestEqual": true
+    }
+  ],
+  "mismatches": 0
+}

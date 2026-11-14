@@ -1,0 +1,33 @@
+{
+  "schema": "jexp.summary.v1",
+  "at": "2026-11-14T10:28:48.847Z",
+  "manifestId": "jjo2329-2f9349d7",
+  "verdict": "rejected",
+  "branch": "x-rule",
+  "cells": 108,
+  "statusCounts": {
+    "S1:ok": 41,
+    "S1:failed/cell_cap": 11,
+    "S1:failed/timeout": 2,
+    "S2:ok": 15,
+    "S2:failed/cell_cap": 3,
+    "S3:ok": 34,
+    "S3:failed/cell_cap": 2
+  },
+  "spendByStageKindBasis": {
+    "L0|decision|observed_catalog": 0.0000016884000000000002,
+    "L0|chat|computed_tokens": 0.0013593599999999998,
+    "J0-dev|decision|observed_catalog": 0.0000597072,
+    "J0-test|decision|observed_catalog": 0.0004350527999999998,
+    "J0-test|decision|billed": 0.004250988000000001,
+    "S1|chat|computed_tokens": 0.2618091300000001,
+    "S1|decision|observed_catalog": 0.00021564900000000002,
+    "S2|chat|computed_tokens": 0.07165964999999998,
+    "S2|decision|observed_catalog": 0.00019651380000000005,
+    "S3|chat|computed_tokens": 0.12707378999999996,
+    "S3|decision|observed_catalog": 0.0000718956
+  },
+  "totalSpentUsd": 0.46713342479999925,
+  "priorExternalUsd": 0.02,
+  "stopped": false
+}
