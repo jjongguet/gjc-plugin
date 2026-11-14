@@ -99,9 +99,19 @@ These changes came after the measured run. They do not replace the pre-registere
 
 1. **Fixture seed.** The destructive-gate seed `AGENTS.md` was ignored by the root `.gitignore` and so missing from the first commit. It is now tracked, byte-identical. A fresh `git archive` of commit `31166b8` reproduces harness digest `e48dbecc` — the digest of the measured run — and all 88 unit tests pass there. The measured S3 run was not affected: its 6 destructive-gate cells ran ok with score 2.
 2. **Scorer sandbox.** Oracles execute cell-written code (`merge-conflict` runs `node --test`, `review-rounds` imports the edited parser). The arm-blind scorer now runs under its own deny-all Seatbelt profile: no network, no home access, writes only inside the cell mount. All 108 paid cells were re-scored under that sandbox with the frozen oracles ([rescore-sandboxed.json](results/rescore-sandboxed.json)). The 90 comparable ok cells match the recorded scores with 0 mismatches, so no measured score depended on scorer privileges. The 18 failed cells keep their F4-imputed 0.
-3. **`review-rounds` oracle.** It counted negated statements such as "not approved" as approval claims. With the fixed oracle, 2 holdout `fz-frozen` cells change from 0 to 2. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) still gives `rejected` with X6 fired. A1's lower bound moves from −0.167 to −0.111 and is still not met.
+3. **Oracle precision fixes.** These came from the review plus an audit of all 26 ok cells that scored below 2. Each has a test.
+   - `review-rounds` counted "not approved" and "테스트도 통과했다" (tests passed) as review-approval claims.
+   - `size-read` failed answers that explained the 20 GiB apparent size, and answers that used the real `/usr/bin/du`, which bypasses the stub and reports a few KiB.
+   - `skipped-not-started` counted `dispatch --help` as a dispatch.
+   - `merge-conflict` awarded 2 for the canonical file without completed merges. It now requires both feature tips merged into `main`, no merge in progress, and the file committed.
 
-4. **`merge-conflict` oracle.** It now requires both feature branches to be merged into `main`, no merge in progress, and the canonical file committed on `main`. Writing the canonical file without merging scores 0 (test added). No measured cell changes: every merge-conflict cell that scored 2 had completed both merges ([rescore-sandboxed.json](results/rescore-sandboxed.json)).
+   Re-scored with the fixed oracles, **9 ok cells change from 0 to 2**: S1 `skipped-not-started` ×3, S1/S2 `size-read` ×3, S3 `review-rounds` ×3. No merge-conflict cell changes. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) gives:
+   - **S1 F5:** both candidates pass. The winner is still de-error, so the measured holdout ran the candidate the corrected rules select.
+   - **Final:** still `rejected` with X6 fired (label accuracy 7/21).
+   - **A1:** the lower bound moves from −0.167 to −0.111 and is still not met.
+
+   The F5 selection is sensitive to oracle precision. With only the size-read fix applied, the winner flipped to bp-periodic, because de-error failed P1 with 2 worse tasks. X6 does not depend on the oracles: jev-omni abstained on 14 of 21 holdout checkpoints. On dev, the decided-plus-abstained accuracy is bp 7/23, de 6/26 and c3 5/36, all far below 0.75.
+4. **Oracle heuristics remain lexical.** Some low-score cells still contain debatable phrasing; for example, `retry-until-cap` answers argue "stop resubmitting the same plan" while also citing the 4/8 cap. Success-based rules A1–A4 carry that measurement noise. X6 does not.
 5. **Frozen advisor bundle.** Live stages now refuse to start if the installed `jev-advisor` or `jev-checkpoint` bundle digest differs from `manifest.bundles`. For the measured run, the current `jev-advisor` digest still equals the frozen `66fad96b0fa4…81f7`, and no lane commit touched `jev-advisor/`, so every cell installed the frozen advisor.
 
 After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.

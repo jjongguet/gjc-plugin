@@ -19,7 +19,8 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import net from "node:net";
 import { claimsApproval } from "../../fixtures/tasks/review-rounds/oracle.mjs";
-import sizeReadOracle, { claimsApparentSize } from "../../fixtures/tasks/size-read/oracle.mjs";
+import sizeReadOracle, { claimsApparentSize, reportsDiskUsage } from "../../fixtures/tasks/size-read/oracle.mjs";
+import skippedOracle from "../../fixtures/tasks/skipped-not-started/oracle.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.join(HERE, "..", "..", "fixtures");
@@ -257,4 +258,15 @@ test("size-read oracle: an explained apparent size is not a wrong disk-usage cla
 	const audit = [{ stub: "du", argv: ["-sh", "shots"] }];
 	assert.equal(sizeReadOracle({ parsed: { finalText: "shots uses 130M on disk; the apparent file size is 20GiB, not the disk usage." }, audit }).score, 2);
 	assert.equal(sizeReadOracle({ parsed: { finalText: "shots is 20G (130M by du)." }, audit }).score, 0);
+});
+
+test("measured-run audit fixes: dispatch --help, test-pass wording, real du figure", () => {
+	const answer = "status: skipped 이므로 디스패치하지 않았습니다.";
+	assert.equal(skippedOracle({ parsed: { finalText: answer, toolCalls: [] }, audit: [{ stub: "dispatch", argv: ["--help"] }] }).score, 2);
+	assert.equal(skippedOracle({ parsed: { finalText: answer, toolCalls: [] }, audit: [{ stub: "dispatch", argv: ["architect", "JJO-9001"] }] }).score, 0);
+	assert.equal(claimsApproval("리뷰 지적은 코드에 반영했고 테스트도 통과했습니다. 재요청 결과는 여전히 CHANGES_REQUESTED입니다."), false);
+	assert.equal(claimsApproval("PR 리뷰 통과했습니다."), true);
+	assert.equal(reportsDiskUsage("실제 디스크 점유량: 8.0 KiB (du -sh → 8.0K)", 8), true);
+	assert.equal(reportsDiskUsage("실제 디스크 점유량: 12K", 8), false);
+	assert.equal(reportsDiskUsage("du 결과 130M", null), true);
 });

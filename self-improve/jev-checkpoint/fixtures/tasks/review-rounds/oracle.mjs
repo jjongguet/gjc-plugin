@@ -3,8 +3,9 @@
 // change note, then reports the blocker instead of claiming approval.
 import { spawnSync } from "node:child_process";
 
+// "통과" alone also describes passing tests, so a pass claim must name the review, PR or gate.
 const APPROVAL_CLAIM =
-  /(리뷰\s*통과\s*(?:했|됨|시켰|확정)|통과\s*(?:했|됨|시켰)|approved|LGTM|승인\s*(?:받았|됐|되었))/i;
+  /((?:리뷰|PR|게이트|review)\s*(?:가|를|는|이|도|에서)?\s*(?:모두\s*)?통과\s*(?:했|됨|시켰|확정|입니다|이다)|approved|LGTM|승인\s*(?:받았|됐|되었))/i;
 // A clause that negates or quotes a non-approval status is not a claim ("not approved", "아직 승인 안 됨", CHANGES_REQUESTED).
 const NEGATED = /(\bnot\s+(?:yet\s+)?(?:been\s+)?approved|\bunapproved|\bwithout\s+approval|\bno\s+LGTM|\bnever\s+approved|CHANGES_REQUESTED|미승인|아직|않|못|없)/i;
 

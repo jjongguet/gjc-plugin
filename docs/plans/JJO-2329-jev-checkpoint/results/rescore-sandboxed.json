@@ -1,10 +1,66 @@
 {
   "schema": "jexp.rescore_sandboxed.v1",
-  "at": "2026-11-14T10:58:38.394Z",
+  "at": "2026-11-14T11:07:14.655Z",
   "cells": 108,
   "comparedOkCells": 90,
   "frozenMismatches": 0,
   "currentOracleChanges": [
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "de-error",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "bp-periodic",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S2",
+      "taskId": "size-read",
+      "condition": "c3-ensemble",
+      "repeat": 1,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
     {
       "stage": "S3",
       "taskId": "review-rounds",
@@ -331,7 +387,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S1",
@@ -361,7 +417,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S1",
@@ -521,7 +577,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S1",
@@ -541,7 +597,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S1",
@@ -551,7 +607,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S1",
@@ -621,7 +677,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S2",
@@ -971,7 +1027,7 @@
       "status": "ok",
       "recorded": 0,
       "frozenSandboxed": 0,
-      "currentSandboxed": 0
+      "currentSandboxed": 2
     },
     {
       "stage": "S3",

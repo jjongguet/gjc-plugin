@@ -1,8 +1,64 @@
 {
   "schema": "jexp.oracle_sensitivity.v1",
-  "at": "2026-11-14T10:58:38.481Z",
+  "at": "2026-11-14T11:07:14.774Z",
   "reportOnly": true,
   "changedCells": [
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "de-error",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "bp-periodic",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S2",
+      "taskId": "size-read",
+      "condition": "c3-ensemble",
+      "repeat": 1,
+      "recorded": 0,
+      "current": 2
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 2
+    },
     {
       "stage": "S3",
       "taskId": "review-rounds",
@@ -20,6 +76,25 @@
       "current": 2
     }
   ],
+  "s1": {
+    "winner": "de-error",
+    "winnerReason": "waste_reduction",
+    "c3ToFz": "p1_gate",
+    "candidates": [
+      {
+        "condition": "bp-periodic",
+        "passed": true,
+        "worseTasks": 1,
+        "wasteMedian": -0.16666666666666663
+      },
+      {
+        "condition": "de-error",
+        "passed": true,
+        "worseTasks": 1,
+        "wasteMedian": 0
+      }
+    ]
+  },
   "verdict": "rejected",
   "branch": "x-rule",
   "rules": {
@@ -49,7 +124,7 @@
       "fired": false
     },
     "X2": {
-      "value": -0.05555555555555556,
+      "value": 0.027777777777777776,
       "passed": true,
       "fired": false
     },
