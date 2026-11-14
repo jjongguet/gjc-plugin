@@ -20,6 +20,9 @@ export const ARTIFACTS = Object.freeze([
 	"s0-pass.json", "s0b-inertness.json", "j0-labels.json", "j0-dev.json", "j0-test.json",
 	"s1-decision.json", "fz-freeze.json", "analysis.json", "arm-table.md", "summary.json",
 	"S1/summary.json", "S1/reprojection.json", "S2/summary.json", "S3/summary.json",
+	"receipts/S1.jsonl", "receipts/S2.jsonl", "receipts/S3.jsonl", "receipts/validation.json",
+	// Post-run audits (report-only): operational impact, holdout guard, re-scoring, sensitivity.
+	"ops-impact.json", "holdout-access-pre-s3.json", "rescore.json", "rescore-sandboxed.json", "oracle-sensitivity.json", "post-review-outputs.json",
 ]);
 export const VOCABULARY = /(개선|improve|better)/i;
 
@@ -42,6 +45,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 		const text = readFileSync(source, "utf8").split(realpathSync(runDir)).join("<RUN>").split(runDir).join("<RUN>");
 		if (keys.some((key) => keyLeaked(key, [Buffer.from(text)]))) throw new Error(`key_material_in_artifact:${name}`);
 		const target = path.join(out, name.replace("/", "-"));
+		if (/\/Users\/|\/home\//.test(text)) throw new Error(`absolute_home_path_in_artifact:${name}`);
 		writeFileSync(target, text);
 		copied.push(path.basename(target));
 	}

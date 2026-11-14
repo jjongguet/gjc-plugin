@@ -21,12 +21,12 @@
 | readiness | PR #65 `db17b79` and #66 `5f0652e` are ancestors of origin/main; v0.0.28 → `db17b79` | [readiness.json](results/readiness.json) |
 | catalog | 2026-11-14 `GET /v1/models`: eco list 3e-7 / obs 3e-8, jev-omni list 1.26e-7 / obs 6.3e-9, decider-4b list 4.2e-8 / obs 2.1e-9 (per input token) | [catalog-latest.json](results/catalog-latest.json) |
 | L0, ≤ $0.05 | one real live cell (score 2, 4 turns, tool-call passthrough, 4.07 bytes/token) plus 2 decisions; $0.00136 | [ledger-l0.json](results/ledger-l0.json) |
-| operational impact | 9/9: no run markers in the real `~/.gjc` and `~/.gjc-plugin` state (positive control found), no cell processes, all proxy ports closed, 0 key bytes in 10,267 run files, real registry untouched, no tmux sessions | [ops-impact.json](results/ops-impact.json) |
+| operational impact | 9/9: no run markers in the real `~/.gjc` and `~/.gjc-plugin` state (positive control found; re-run under the fail-closed scanner with 0 unscanned files), no cell processes, all proxy ports closed, 0 key bytes in the run files, real registry untouched, no tmux sessions | [ops-impact.json](results/ops-impact.json) |
 | holdout guard | 0 holdout task ids in every pre-S3 cell and J0 case | [holdout-access-pre-s3.json](results/holdout-access-pre-s3.json) |
 
 ## Judge golden set J0
 
-J0 has 32 test and 12 dev cases with human-decided labels, each citing an owner-authored source. An independent blind second labeler agreed on 44/44 cases after `j0-t-d10` was excluded before any model call. The JJO-2374 false stop is case `j0-t-d01`. The label sheet sha256 is `6d6d6ef73e0a5703…57a2`, and its owner confirmation is pending (non-gating). Each model was scored on 3 repeats × 2 criteria orders = 192 responses.
+J0 has 32 test and 12 dev cases with human-decided labels. Each case cites an owner-authored source in its `source` field ([cases.json](../../../self-improve/jev-checkpoint/fixtures/j0/cases.json); 44/44 cases sourced; source list in the [J0 fixture README](../../../self-improve/jev-checkpoint/fixtures/j0/README.md)). An independent blind second labeler agreed on 44/44 cases after `j0-t-d10` was excluded before any model call. The JJO-2374 false stop is case `j0-t-d01`. The label sheet sha256 is `6d6d6ef73e0a5703…57a2`, and its owner confirmation is pending (non-gating). Each model was scored on 3 repeats × 2 criteria orders = 192 responses.
 
 | model | raw accuracy | used-value acc. (trial families) | coverage (c≥0.6) | high-conf. errors (c≥0.9 & wrong) | unnormalized | order-flip rate | p50 latency | cost |
 |---|---|---|---|---|---|---|---|---|
@@ -46,6 +46,16 @@ J0 has 32 test and 12 dev cases with human-decided labels, each citing an owner-
   | decider-4b | P1 | 5/24 | 9/48 |
 
   Two unsafe cases pass every deterministic check and are caught only by the judge. jev-1.14 did not reproduce the JJO-2374 false stop in 6 tries.
+- **Report-only columns.** Of the J0 outputs, only the P1 gate (agreement error and both-wrong-high-confidence on the trial families) feeds the verdict path. The stop-policy rows, W/expected-stall and order-flip columns are report-only and are not used in the verdict.
+- **Ensemble rule sensitivity** (post-review producer, [post-review-outputs.json](results/post-review-outputs.json)). This covers 60 trial-family test units (case × repeat, canonical order); abstains count as wrong.
+
+  | rule | accuracy | abstain rate |
+  |---|---|---|
+  | `primary_override` (frozen) | 45/60 = 0.750 | 0.05 |
+  | `agreement_only` | 33/60 = 0.550 | 0.35 |
+  | `single_primary` | 42/60 = 0.700 | 0.15 |
+  | voter-level unnormalized | 45/60 = 0.750 | 0.05 |
+
 - **Owner wait W** comes from Linear decision-block intervals ([w-intervals.json](results/w-intervals.json)). 21 blocks completed and 35 are still pending; the pending ones are counted at their observed lower bound. The binding median is ≥ 3,158 min (p25 535, p75 3,914). The completed-only median is 63 min.
 
 ## Trial cohort (108 paid cells)
@@ -64,7 +74,7 @@ Full table: [arm-table.md](results/arm-table.md). Unit = cell; the verdict uses 
 Failed cells were all `cell_cap` (16-turn cap) or `timeout`. They are imputed symmetrically under F4 (success 0, observed waste); `waste_error_imputed` = 0. No unnormalized response reached a trial cell.
 
 - **S1 (F5).** bp-periodic and de-error both pass P1–P4. The winner is de-error (waste median 0 vs −0.167). S2 was admitted ([s1-decision.json](results/s1-decision.json)).
-- **S2 → Fz.** C3 met the worse-task, waste and jev-cost conditions but was blocked by the frozen P1 gate. Fz = de-error, `{mode:"error"}` ([fz-freeze.json](results/fz-freeze.json)).
+- **S2 → Fz.** C3 met the worse-task and waste conditions and was blocked by the frozen P1 gate. The recorded jev-cost condition was vacuous: the winner absorbed −1.0 waste turns, so its cost per absorbed turn is not evaluable. The corrected analyzer reports it as not evaluable instead of a pass. This made no difference, because the P1 gate is checked first. Fz = de-error, `{mode:"error"}` ([fz-freeze.json](results/fz-freeze.json)).
 - **S3 holdout, Fz vs A1** ([analysis.json](results/analysis.json)):
 
   | rule | value | threshold | result |
@@ -76,8 +86,10 @@ Failed cells were all `cell_cap` (16-turn cap) or `timeout`. They are imputed sy
   | X1–X5 | — | — | not fired |
   | **X6 checkpoint label accuracy** | 7/21 = 0.333 (no-decisions count as wrong) | < 0.75 fires | **fired** |
 
-  On the holdout, the error-targeted checkpoint fired in 78% of sessions, but jev-omni stayed below the 0.6 acting threshold in 14 of 21 decisions. It appended **no advice** at all. Decided-only accuracy (7/7) is a sensitivity row; under the frozen rule, abstains are wrong.
+  On the holdout, the error-targeted checkpoint fired in 78% of sessions, but jev-omni stayed below the 0.6 acting threshold in 14 of 21 decisions. It appended **no advice** at all. The frozen sensitivity row `sensitivityAccuracy` is also 7/21. Counting decided labels only, all 7 decided labels were correct: 7/7 = 21 checks − 14 no-decisions, derived in [post-review-outputs.json](results/post-review-outputs.json). Under the frozen rule, abstains are wrong. The X4 ignored-advice limb had no denominator (0 advice) and only its trigger-rate limb was evaluable.
 - **Re-scoring:** 6 cells, one per stage×arm, re-scored by the arm-blind verifier: 0 mismatches ([rescore.json](results/rescore.json)).
+- **Receipts** (post-review producer): one `gjc.quality_trial.v2` receipt per executed cell. The canonical validator, run per stage × condition, accepts S1 54/54, S2 18/18 and S3 36/36, with 0 conflicting duplicates and 0 failures ([receipts-validation.json](results/receipts-validation.json), `receipts-S{1,2,3}.jsonl`).
+- **Measured advisor bundle.** The cells installed the lane `jev-advisor` tree (digest `66fad96b…`), not the v0.0.28 tag tree. The only difference between them is `jev-advisor/scripts/e2e-installed.mjs`, a dev script that is not part of the installed hooks or tools. Readiness now records this diff list and requires it to be runtime-irrelevant.
 
 ## Cost (actual)
 
@@ -120,11 +132,25 @@ These changes came after the measured run. They do not replace the pre-registere
 5. **Cohort completeness.** `decide.mjs --phase final` now checks that every planned S1/S2/S3 cell has exactly one record. A partial or duplicated cohort maps to early termination (`insufficient`). The runner also writes `not_run` rows, and a stage refuses to run twice in one run dir. The measured run is complete: 108/108 planned cells, 0 duplicates.
 6. **In-flight settlement.** The runner now drains each cell's in-flight proxy requests (`drainCell`) before reading its rows: running upstream chat calls are aborted and charged at their reservation. For the measured run, every cell's recorded `sessionUsd + jevUsd` equals its settled sum in `ledger.jsonl`, so no cost was omitted.
 7. **Frozen advisor bundle.** Live stages now refuse to start if the installed `jev-advisor` or `jev-checkpoint` bundle digest differs from `manifest.bundles`. For the measured run, the current `jev-advisor` digest still equals the frozen `66fad96b0fa4…81f7`, and no lane commit touched `jev-advisor/`, so every cell installed the frozen advisor.
+8. **Boundary cohort generation 1** (architect, cleaner and QA lanes over the merged change). The findings were fixed in a follow-up PR:
+   - Fail-closed probes: the ops-impact scan counts unscanned files, a tmux error is unknown, and pgrep exit 2/3 is unknown.
+   - Cost gates: a missing price refuses, NaN projections and caps refuse, and prior spend must be finite.
+   - The W scan refuses an incomplete issue read.
+   - Paid pre-manifest steps (L0, J0) must run on the S0-passing harness and bind their receipts to it.
+   - The analyzer counts imputed metrics. C3's jev cost per absorbed turn is null when not evaluable (never a vacuous pass).
+   - X4 records a not-applicable limb; X5 signal 2 uses tokens.
+   - The scorer is asynchronous and fails cells with a corrupted audit log.
+   - The checkpoint route validates `callIndex` and state.
+   - The test guard refuses skips and requires ≥ 88 executed cases.
+   - Producers now exist for receipts, the ensemble sensitivity and the Monte Carlo A3 (digest-bound in future manifests).
+
+   None of these change the sealed measured verdict.
 
 After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.
 
 ## Limitations
 
+- The repository record holds aggregate receipts (analysis, summaries, per-cell `quality_trial` receipts). It does not hold transcripts, cell trees, proxy bodies or the run ledger. `analysis.json` therefore cannot be re-derived from the repository alone; the 108/108 completeness claim rests on the per-cell receipts and the analyzer's pairing observations (`unpaired_task` and `repeat_count_mismatch` both absent).
 - 6 holdout tasks: differences under 25pp are not determinable, and `adopted` was unreachable by design (`powerGate=fail`).
 - The post-S1 variance estimate (σ = 1.09 waste turns, Δ = 20% of the dev baseline mean) implies **n ≈ 312 tasks per split** to detect the declared waste effect with power 0.8 (report-only).
 - The wording bar used only 4 dev cases per family.

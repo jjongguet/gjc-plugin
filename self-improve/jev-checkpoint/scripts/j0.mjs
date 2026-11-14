@@ -18,6 +18,7 @@ import { readOpenGatewayKey, readOpenRouterKey } from "../lib/keys.mjs";
 import { createDecisionDispatcher } from "../lib/decision-client.mjs";
 import { caseDigest, estimateW, j0Report, J0_THRESHOLD, labelSheetDigest, loadCases, plan, selectWordings } from "../lib/judge.mjs";
 import { FIXTURES_DIR } from "./stage.mjs";
+import { requireS0Harness } from "../lib/digest.mjs";
 import { PRIOR_EXTERNAL_USD } from "./prepare.mjs";
 
 export const J0_PHASE_CAP_USD = Object.freeze({ dev: 0.05, test: 0.3 });
@@ -60,8 +61,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 	if (!arg("run-dir") || !["freeze", "dev", "test"].includes(phase)) { process.stderr.write("usage: j0.mjs --run-dir <dir> --phase freeze|dev|test\n"); process.exit(2); }
 	const cases = loadCases(FIXTURES_DIR);
 	const sheet = labelSheetDigest(cases);
+	const harness = requireS0Harness(runDir);
 	if (phase === "freeze") {
-		const receipt = { schema: "jexp.j0_labels.v1", frozenAt: new Date().toISOString(), labelSheetDigest: sheet, cases: cases.map((entry) => ({ id: entry.id, split: entry.split, class: entry.class, label: entry.label, safe: entry.safe ?? null, deterministicVerdict: entry.deterministicVerdict ?? null, digest: caseDigest(entry), sourceRef: entry.source.ref })), counts: { test: cases.filter((entry) => entry.split === "test").length, dev: cases.filter((entry) => entry.split === "dev").length } };
+		const receipt = { schema: "jexp.j0_labels.v1", frozenAt: new Date().toISOString(), harnessDigest: harness, labelSheetDigest: sheet, cases: cases.map((entry) => ({ id: entry.id, split: entry.split, class: entry.class, label: entry.label, safe: entry.safe ?? null, deterministicVerdict: entry.deterministicVerdict ?? null, digest: caseDigest(entry), sourceRef: entry.source.ref })), counts: { test: cases.filter((entry) => entry.split === "test").length, dev: cases.filter((entry) => entry.split === "dev").length } };
 		writeFileSync(path.join(runDir, "j0-labels.json"), JSON.stringify(receipt, null, 2));
 		process.stdout.write(`J0 labels frozen ${sheet} test=${receipt.counts.test} dev=${receipt.counts.dev}\n`);
 	} else {
@@ -72,16 +74,18 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 			const requests = plan(cases, "dev");
 			const { rows, spentUsd, stopped } = await runPlan({ runDir, phase, requests, cases });
 			const selection = selectWordings(rows, new Map(cases.map((entry) => [entry.id, entry])));
-			writeFileSync(path.join(runDir, "j0-dev.json"), JSON.stringify({ schema: "jexp.j0_dev.v1", labelSheetDigest: sheet, requests: requests.length, spentUsd, stopped, selection, noDecision: rows.filter((row) => row.status === "no_decision").reduce((acc, row) => { acc[row.reason] = (acc[row.reason] ?? 0) + 1; return acc; }, {}) }, null, 2));
+			writeFileSync(path.join(runDir, "j0-dev.json"), JSON.stringify({ schema: "jexp.j0_dev.v1", harnessDigest: harness, labelSheetDigest: sheet, requests: requests.length, spentUsd, stopped, selection, noDecision: rows.filter((row) => row.status === "no_decision").reduce((acc, row) => { acc[row.reason] = (acc[row.reason] ?? 0) + 1; return acc; }, {}) }, null, 2));
 			process.stdout.write(`J0-dev requests=${requests.length} spent=${spentUsd} selection=${JSON.stringify(Object.fromEntries(Object.entries(selection).map(([family, value]) => [family, `${value.wordingId}/${value.rule}`])))}\n`);
 		} else {
 			const dev = JSON.parse(readFileSync(path.join(runDir, "j0-dev.json"), "utf8"));
 			const frozen = { error_repeat: dev.selection.error_repeat.wordingId, goal_state: dev.selection.goal_state.wordingId };
 			const requests = plan(cases, "test", frozen);
 			const { rows, spentUsd, stopped } = await runPlan({ runDir, phase, requests, cases });
-			const w = estimateW(JSON.parse(readFileSync(path.join(runDir, "w-intervals.json"), "utf8")).intervals);
+			const wReceipt = JSON.parse(readFileSync(path.join(runDir, "w-intervals.json"), "utf8"));
+			if (wReceipt.complete !== true) throw new Error("w_intervals_incomplete");
+			const w = estimateW(wReceipt.intervals);
 			const report = j0Report(rows, cases, w);
-			writeFileSync(path.join(runDir, "j0-test.json"), JSON.stringify({ ...report, labelSheetDigest: sheet, frozenWording: frozen, requests: requests.length, spentUsd, stopped, labelStatus: "owner-sourced, blind second label agreed; owner-confirmation pending" }, null, 2));
+			writeFileSync(path.join(runDir, "j0-test.json"), JSON.stringify({ ...report, harnessDigest: harness, labelSheetDigest: sheet, frozenWording: frozen, requests: requests.length, spentUsd, stopped, labelStatus: "owner-sourced, blind second label agreed; owner-confirmation pending" }, null, 2));
 			process.stdout.write(`J0-test requests=${requests.length} spent=${spentUsd} stopped=${stopped}\n`);
 		}
 	}

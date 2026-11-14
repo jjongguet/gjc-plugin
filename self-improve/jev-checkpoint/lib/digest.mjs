@@ -5,7 +5,7 @@
  * relative to the harness root; timestamps never enter a digest.
  */
 import { createHash } from "node:crypto";
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -38,4 +38,18 @@ export function analyzerDigest() {
 
 export function bundleDigest(bundleDir) {
 	return treeDigest(bundleDir);
+}
+
+/**
+ * Paid steps before the manifest (L0, J0) must run on the harness that passed
+ * S0: refuse unless s0-pass.json passed on the current digest. Returns the digest
+ * so the step can bind its own receipt to it.
+ */
+export function requireS0Harness(runDir) {
+	const file = path.join(runDir, "s0-pass.json");
+	if (!existsSync(file)) throw new Error("s0_pass_missing");
+	const receipt = JSON.parse(readFileSync(file, "utf8"));
+	const current = harnessDigest().digest;
+	if (receipt.pass !== true || receipt.harnessDigest !== current) throw new Error("harness_changed_since_s0");
+	return current;
 }

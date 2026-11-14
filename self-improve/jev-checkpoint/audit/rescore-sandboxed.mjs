@@ -28,8 +28,8 @@ for (const stage of ["S1", "S2", "S3"]) {
 		const record = JSON.parse(line);
 		const cell = path.join(runDir, stage, "cells", record.cellId);
 		const args = { workDir: path.join(cell, "mount", "work"), transcriptPath: path.join(cell, "transcript.jsonl"), auditPath: path.join(cell, "mount", "audit.jsonl") };
-		const frozen = scoreCell({ ...args, taskDir: path.join(frozenHarness, "fixtures", "tasks", record.taskId), harnessRoot: frozenHarness });
-		const current = scoreCell({ ...args, taskDir: path.join(HARNESS_ROOT, "fixtures", "tasks", record.taskId), harnessRoot: HARNESS_ROOT });
+		const frozen = await scoreCell({ ...args, taskDir: path.join(frozenHarness, "fixtures", "tasks", record.taskId), harnessRoot: frozenHarness });
+		const current = await scoreCell({ ...args, taskDir: path.join(HARNESS_ROOT, "fixtures", "tasks", record.taskId), harnessRoot: HARNESS_ROOT });
 		rows.push({ stage, taskId: record.taskId, condition: record.condition, repeat: record.repeat, status: record.status, recorded: record.score, frozenSandboxed: frozen.score, currentSandboxed: current.score });
 	}
 }

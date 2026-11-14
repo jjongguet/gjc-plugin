@@ -1,13 +1,20 @@
 {
   "schema": "jexp.ops_impact.v1",
-  "at": "2026-11-14T10:29:22.726Z",
+  "at": "2026-11-14T12:32:36.389Z",
   "since": "2026-11-14T09:55:00.000Z",
   "pass": true,
   "checks": [
     {
       "id": "1_no_markers_in_real_state",
       "pass": true,
-      "scannedFiles": 162,
+      "unscanned": {
+        "depth": 0,
+        "readdir": 0,
+        "stat": 0,
+        "oversize": 0,
+        "read": 0
+      },
+      "scannedFiles": 303,
       "cells": 151,
       "hits": [],
       "excludedControllerSession": "01a1d916-909e-7088-bfe4-667fcb63e4ed"
@@ -31,7 +38,7 @@
     {
       "id": "5_no_key_material_in_run_artifacts",
       "pass": true,
-      "artifactFiles": 10268,
+      "artifactFiles": 13119,
       "leakedFiles": 0
     },
     {
@@ -45,7 +52,8 @@
     {
       "id": "8_no_jexp_tmux_sessions",
       "pass": true,
-      "sessions": []
+      "sessions": [],
+      "tmuxStatus": 0
     },
     {
       "id": "9_isolation_receipts_and_env",

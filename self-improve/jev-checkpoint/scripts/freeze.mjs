@@ -16,7 +16,7 @@ import { fileURLToPath } from "node:url";
 import { assertFresh } from "../lib/catalog.mjs";
 import { analyzerDigest, bundleDigest, harnessDigest } from "../lib/digest.mjs";
 import { DECLARED_EFFECT_PP, POWER_GATE, ruleTableDigest } from "../lib/analyze.mjs";
-import { decisiveRunSize, signTestPower } from "../lib/power.mjs";
+import { decisiveRunSize, monteCarloA3, signTestPower } from "../lib/power.mjs";
 import { FAMILIES, questionDigest } from "../lib/questions.mjs";
 import { agreement, loadCases } from "../lib/judge.mjs";
 import { priorSpend } from "../lib/ledger-journal.mjs";
@@ -33,6 +33,24 @@ export const MAX_DECISION_REQUESTS_PER_CELL = 20;
 const read = (runDir, name) => JSON.parse(readFileSync(path.join(runDir, name), "utf8"));
 const sha256 = (text) => createHash("sha256").update(text).digest("hex");
 
+/**
+ * Price for the start-gate projection: the observed (billed) price, else the list
+ * price. A missing price refuses instead of pricing as zero; the hard stop itself
+ * still reserves at the maximum of both.
+ */
+export function projectionPrice(observed, list, name) {
+	const usable = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
+	if (usable(observed)) return observed;
+	if (usable(list)) return list;
+	throw new Error(`catalog_price_missing:${name}`);
+}
+
+/** AC17: the implemented-estimator Monte Carlo, frozen with a digest so analyze-time reproduction can be checked. */
+export function monteCarloWithDigest() {
+	const result = monteCarloA3();
+	return { ...result, digest: sha256(JSON.stringify(result)) };
+}
+
 export function freeze(runDir) {
 	const current = harnessDigest().digest;
 	const s0 = read(runDir, "s0-pass.json");
@@ -47,6 +65,9 @@ export function freeze(runDir) {
 	const j0Dev = read(runDir, "j0-dev.json");
 	const j0Test = read(runDir, "j0-test.json");
 	const labels = read(runDir, "j0-labels.json");
+	for (const [name, receipt] of [["ledger-l0.json", l0], ["j0-labels.json", labels], ["j0-dev.json", j0Dev], ["j0-test.json", j0Test]]) {
+		if (receipt.harnessDigest !== current) throw new Error(`receipt_not_bound_to_harness:${name}`);
+	}
 
 	// P1 gate (A2329-20): trial families only (destructive is the jev_check shape, C2329-17); unit = case × repeat, canonical order.
 	const cases = loadCases(FIXTURES_DIR);
@@ -68,13 +89,16 @@ export function freeze(runDir) {
 	}
 	const bytesPerToken = l0.chat.bytesPerToken;
 	if (!(bytesPerToken > 0)) throw new Error("l0_bytes_per_token_missing");
-	const cellCosts = [...perCell.values()].map((entry) => (entry.bytes / bytesPerToken) * chat.observedInputPricePerToken + entry.turns * OUTPUT_TOKENS_PER_TURN * chat.observedOutputPricePerToken);
+	const inputPrice = projectionPrice(chat.observedInputPricePerToken, chat.listInputPricePerToken, "chat_input");
+	const outputPrice = projectionPrice(chat.observedOutputPricePerToken, chat.listOutputPricePerToken, "chat_output");
+	if (perCell.size === 0) throw new Error("s0_chat_rows_missing");
+	const cellCosts = [...perCell.values()].map((entry) => (entry.bytes / bytesPerToken) * inputPrice + entry.turns * OUTPUT_TOKENS_PER_TURN * outputPrice);
 	const meanCellUsd = cellCosts.reduce((sum, value) => sum + value, 0) / cellCosts.length;
 	const decisionWorstPerCell = MAX_DECISION_REQUESTS_PER_CELL * (4096 + 1024) * 0.126e-6;
 	const paidCells = ["S1", "S2", "S3"].reduce((sum, stage) => sum + stagePlan(stage).length, 0);
 	const spentSoFar = priorSpend(path.join(runDir, "ledger.jsonl")) + PRIOR_EXTERNAL_USD;
 	const projectedUsd = spentSoFar + PROJECTION_MARGIN * paidCells * (meanCellUsd + decisionWorstPerCell);
-	if (projectedUsd > START_GATE_USD) throw new Error(`projection_over_start_gate:${projectedUsd}`);
+	if (!Number.isFinite(projectedUsd) || projectedUsd > START_GATE_USD) throw new Error(`projection_over_start_gate:${projectedUsd}`);
 	const cellUsdCap = Math.max(0.06, 2 * (meanCellUsd + decisionWorstPerCell));
 
 	const wording = { error_repeat: j0Dev.selection.error_repeat.wordingId, goal_state: j0Dev.selection.goal_state.wordingId };
@@ -103,11 +127,11 @@ export function freeze(runDir) {
 		criteriaOrderDigest: sha256(JSON.stringify({ goal_state: questions.goal_state.criteriaOrder, error_repeat: questions.error_repeat.criteriaOrder, destructive: FAMILIES.destructive.canonicalOrder })),
 		j0: { labelSheetDigest: labels.labelSheetDigest, devSelection: j0Dev.selection, p1Gate: { ...p1, c3Adoptable, scope: "trial families (error_repeat, goal_state), canonical order, unit = case × repeat" }, w: j0Test.w },
 		powerGate: POWER_GATE,
-		power: { holdoutTasks: 6, signTestPowerAtQ08: signTestPower({ n: 6, q: 0.8 }), decisiveRun: decisiveRunSize(), declaredEffectPp: DECLARED_EFFECT_PP, declaration: "12 tasks (holdout 6): differences under 25pp are not determinable; with powerGate=fail `adopted` is unreachable and the verdict is capped at insufficient → 현행 유지" },
+		power: { holdoutTasks: 6, signTestPowerAtQ08: signTestPower({ n: 6, q: 0.8 }), decisiveRun: decisiveRunSize(), monteCarloA3: monteCarloWithDigest(), declaredEffectPp: DECLARED_EFFECT_PP, declaration: "12 tasks (holdout 6): differences under 25pp are not determinable; with powerGate=fail `adopted` is unreachable and the verdict is capped at insufficient → 현행 유지" },
 		cost: { spentSoFarUsd: spentSoFar, priorExternalUsd: PRIOR_EXTERNAL_USD, meanCellUsd, decisionWorstPerCellUsd: decisionWorstPerCell, paidCells, projectedUsd, startGateUsd: START_GATE_USD, hardStopUsd: 4.0 },
 		cellUsdCap,
 		priorExternalUsd: PRIOR_EXTERNAL_USD,
-		x5Signal2: "appendRatio = appended advice bytes / chat request bytes ≥ 0.10 (parent design §4.3 signal 2)",
+		x5Signal2: "appendTokenRatio = appended advice tokens (bytes/4) / session tokens (input+output) ≥ 0.10 (parent design §4.3 signal 2); appendRatio (bytes) reported only",
 	};
 	return manifest;
 }

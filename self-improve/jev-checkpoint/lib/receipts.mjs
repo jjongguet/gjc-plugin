@@ -271,3 +271,36 @@ export function validateAll(receipts) {
     trials,
   };
 }
+
+/**
+ * AC14/AC18 producer: one `gjc.quality_trial.v2` receipt per executed cell of
+ * each paid stage, re-validated as a batch. Throws unless every receipt is
+ * valid and no execution key conflicts, so a run can never report a cohort the
+ * canonical validator rejects.
+ */
+export function stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest }) {
+  const context = {
+    producer: { id: "jexp-runner", kind: "harness" },
+    executor: { id: "gjc-cell-session" },
+    harness: { sourceDigest: manifest.harnessDigest, harnessDigest: manifest.harnessDigest, manifestDigest, version: manifest.manifestId },
+    oracle: { kind: "arm-blind-oracle", verifierId: "jexp-score-cell", evidenceDigestFor: (cell) => cell.oracleDigest },
+    createdAt: (cell) => stageTimes[cell.stage],
+    sourceHead: readiness.originMain,
+  };
+  const out = {};
+  for (const stage of STAGES) {
+    const { receipts, skipped } = buildReceipts(records.filter((record) => record.stage === stage), context);
+    // Every treatment condition maps to arm B1, so each (condition) is its own
+    // B0/B1 batch: two treatments of one task never share an execution key.
+    const validation = { total: 0, valid: 0, duplicates: 0, conflictingDuplicates: 0, failures: 0 };
+    for (const condition of [...new Set(receipts.map((receipt) => receipt.condition))]) {
+      const checked = validateAll(receipts.filter((receipt) => receipt.condition === condition));
+      if (!checked.ok) fail(`stage ${stage} ${condition} receipts invalid: failures=${checked.failures.length} conflicts=${checked.conflicts.length}`);
+      validation.total += checked.total;
+      validation.valid += checked.valid;
+      validation.duplicates += checked.duplicates;
+    }
+    out[stage] = { receipts, skipped, validation };
+  }
+  return out;
+}

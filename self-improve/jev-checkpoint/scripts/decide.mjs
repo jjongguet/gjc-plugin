@@ -7,13 +7,15 @@
  * fz:    F5 with S2 → fz-freeze.json (C3 or the S1 winner becomes Fz) before S3.
  * final: analyzeFinal over S1–S3 → analysis.json, arm-table.md, summary.json.
  */
-import { existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeFinal, analyzeS1, POWER_GATE, ruleTableDigest } from "../lib/analyze.mjs";
 import { nRequired } from "../lib/power.mjs";
 import { spendTable, priorSpend } from "../lib/ledger-journal.mjs";
 import { stagePlan } from "../lib/stage-plans.mjs";
+import { stageReceipts } from "../lib/receipts.mjs";
 import { analyzerDigest, harnessDigest } from "../lib/digest.mjs";
 
 const readJsonl = (file) => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)) : []);
@@ -41,13 +43,17 @@ export function armTable(records, w) {
 		groups.get(key).push(record);
 	}
 	const lines = [
-		"| stage | split | condition | cells ok/failed/not_run | success (mean) | wasteTurns (mean) | toolCalls (mean) | tokens (mean) | sessionUsd (sum) | wall s (mean) | jevUsd (sum) | 오판 falseStop/falseProceed | labelCorrect/labelChecks | noDecision | expectedStall (W) | waste_error_imputed |",
+		"| stage | split | condition | cells ok/failed/not_run | success (mean) | wasteTurns (mean) | toolCalls (mean) | tokens (mean) | sessionUsd (sum) | wall s (mean) | jevUsd (sum) | 오판 falseStop/falseProceed | labelCorrect/labelChecks | noDecision | expectedStallMinutes (assumption: falseStops × W, W = lower-bound median; report-only) | waste_error_imputed |",
 		"|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|",
 	];
 	for (const [key, list] of [...groups.entries()].sort()) {
 		const [stage, split, condition] = key.split("|");
 		const ran = list.filter((record) => record.status !== "not_run");
-		const mean = (field) => (ran.length ? ran.reduce((sum, record) => sum + (Number.isFinite(record[field]) ? record[field] : 0), 0) / ran.length : null);
+		// Means over recorded values only; a missing value is never averaged in as 0.
+		const mean = (field) => {
+			const values = ran.map((record) => record[field]).filter((value) => Number.isFinite(value));
+			return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+		};
 		const sum = (field) => list.reduce((total, record) => total + (Number.isFinite(record[field]) ? record[field] : 0), 0);
 		const noDecision = {};
 		for (const record of list) for (const [reason, count] of Object.entries(record.noDecision ?? {})) noDecision[reason] = (noDecision[reason] ?? 0) + count;
@@ -63,6 +69,21 @@ export function armTable(records, w) {
  * an interrupted stage that left neither stop.json nor not_run rows is still
  * incomplete and maps to early termination, never to a definitive verdict.
  */
+/** AC14/AC18: write validated per-stage receipts; throws when the validator rejects any. */
+export function writeStageReceipts(runDir, records) {
+	const manifestText = readFileSync(path.join(runDir, "manifest.json"), "utf8");
+	const stageTimes = Object.fromEntries(["S1", "S2", "S3"].map((stage) => [stage, read(runDir, `${stage}/summary.json`).at ?? statSync(path.join(runDir, stage, "results.jsonl")).mtime.toISOString()]));
+	const out = stageReceipts({ records, manifest: JSON.parse(manifestText), readiness: read(runDir, "readiness.json"), stageTimes, manifestDigest: createHash("sha256").update(manifestText).digest("hex") });
+	mkdirSync(path.join(runDir, "receipts"), { recursive: true });
+	const validation = {};
+	for (const [stage, entry] of Object.entries(out)) {
+		writeFileSync(path.join(runDir, "receipts", `${stage}.jsonl`), entry.receipts.map((receipt) => JSON.stringify(receipt)).join("\n") + "\n");
+		validation[stage] = { ...entry.validation, skippedNotRun: entry.skipped.length };
+	}
+	writeFileSync(path.join(runDir, "receipts", "validation.json"), JSON.stringify({ schema: "jexp.receipts_validation.v1", validator: "gjc.quality_trial.v2", stages: validation }, null, 2));
+	return validation;
+}
+
 export function cohortCompleteness(records, stages) {
 	const counts = new Map();
 	for (const record of records) {
@@ -124,6 +145,7 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 		const sd = (() => { if (devBaseline.length < 2) return null; const mean = devBaseline.reduce((a, b) => a + b, 0) / devBaseline.length; return Math.sqrt(devBaseline.reduce((acc, value) => acc + (value - mean) ** 2, 0) / (devBaseline.length - 1)); })();
 		const meanBaselineWaste = devBaseline.length ? devBaseline.reduce((a, b) => a + b, 0) / devBaseline.length : null;
 		analysis.postS1Power = { reportOnly: true, sigmaWasteTurns: sd, delta: meanBaselineWaste !== null ? 0.2 * meanBaselineWaste : null, nRequired: sd && meanBaselineWaste ? nRequired({ sigma: sd, delta: Math.max(1e-9, 0.2 * meanBaselineWaste) }) : null, formula: "ceil((z0.95+z0.80)^2 σ^2 / Δ^2), Δ = 20% of the dev baseline waste mean" };
+		analysis.receipts = writeStageReceipts(runDir, records);
 		writeFileSync(path.join(runDir, "analysis.json"), JSON.stringify(analysis, null, 2));
 		const w = read(runDir, "j0-test.json").w;
 		writeFileSync(path.join(runDir, "arm-table.md"), `${armTable(records, w)}\n`);

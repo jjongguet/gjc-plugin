@@ -348,11 +348,14 @@ const noDecisionOf = (value) => {
  * The same function runs for every arm, so the imputation is symmetric. The
  * `waste_error_imputed` count is the sensitivity line the arm table reports.
  */
+const METRIC_NUMBERS = Object.freeze(["jevUsd", "wallMs"]);
+const METRIC_COUNTS = Object.freeze(["tokens", "triggerCount", "adviceCount", "ignoredAdvice", "falseStop", "falseProceed", "labelChecks", "labelCorrect", "appendTokens", "harnessSignals"]);
+
 export function normalizeRecords(records, { turnCap = TURN_CAP_DEFAULT } = {}) {
   if (!Number.isSafeInteger(turnCap) || turnCap < 1) fail(`turnCap must be a positive integer, got ${turnCap}`);
   const cells = [];
   const observations = [];
-  const imputed = { cells: 0, error_cells: 0, waste_error_imputed: 0, cost_reserved: 0, cost_unmeasured: 0, not_run: 0 };
+  const imputed = { cells: 0, error_cells: 0, waste_error_imputed: 0, cost_reserved: 0, cost_unmeasured: 0, metrics_imputed: 0, not_run: 0 };
   for (const record of Array.isArray(records) ? records : []) {
     if (!record || typeof record !== "object") fail("cell record must be an object");
     const stage = assertMember(record.stage, STAGES, "stage");
@@ -402,6 +405,13 @@ export function normalizeRecords(records, { turnCap = TURN_CAP_DEFAULT } = {}) {
         sessionUsd = reserved;
         imputed.cost_reserved += 1;
       }
+    }
+    // A missing metric enters as 0 like the runner's own defaults, but never silently:
+    // every such cell is counted and named so the report shows the imputation.
+    const missing = [...METRIC_NUMBERS.filter((field) => finiteOr(record[field]) === null), ...METRIC_COUNTS.filter((field) => !(Number.isSafeInteger(record[field]) && record[field] >= 0))];
+    if (missing.length) {
+      imputed.metrics_imputed += 1;
+      observations.push({ code: "metric_imputed", detail: { taskId: record.taskId, condition, repeat: record.repeat, status, fields: missing } });
     }
     cells.push({
       stage,
@@ -597,7 +607,9 @@ export function evaluateRejectionRules({ splitPairs, allPairs, cost, advice }) {
       triggerRate: RULE_TABLE.rejection.X4.triggerRateThreshold,
     },
     fired: ignoredFired || triggerFired,
-    detail: { ignoredFired, triggerFired, sessions: advice?.sessions ?? 0, adviceCount: advice?.adviceCount ?? 0 },
+    // With no advice appended the ignoredAdvice limb has no denominator: it is not
+    // applicable (reported), not a pass that the triggerRate limb could hide.
+    detail: { ignoredFired, triggerFired, ignoredLimbApplicable: Number.isFinite(ignored), sessions: advice?.sessions ?? 0, adviceCount: advice?.adviceCount ?? 0 },
   };
   X4.passed = !X4.fired;
 
@@ -820,8 +832,9 @@ export function pickWinner(candidates) {
   };
 }
 
+// jev cost per absorbed waste turn; null when the arm absorbed none (not evaluable, never a vacuous pass).
 const absorbedRatio = (candidate) =>
-  candidate.absorbedWasteTurns > 0 && Number.isFinite(candidate.jevUsd) ? candidate.jevUsd / candidate.absorbedWasteTurns : Infinity;
+  candidate.absorbedWasteTurns > 0 && Number.isFinite(candidate.jevUsd) ? candidate.jevUsd / candidate.absorbedWasteTurns : null;
 
 /**
  * S1 verdict: candidate pass table, winner and whether C3 may replace the
@@ -883,22 +896,24 @@ export function analyzeS1(records, { turnCap = TURN_CAP_DEFAULT, baselineConditi
     winner.jevUsdPerAbsorbedTurn = absorbedRatio(winner);
     const worseOk = c3.worseTasks <= 1;
     const wasteOk = Number.isFinite(c3.wasteMedianAbs) && Number.isFinite(winner.wasteMedianAbs) && c3.wasteMedianAbs <= winner.wasteMedianAbs + EPS;
-    const jevOk = c3.jevUsdPerAbsorbedTurn < winner.jevUsdPerAbsorbedTurn;
+    const jevEvaluable = c3.jevUsdPerAbsorbedTurn !== null && winner.jevUsdPerAbsorbedTurn !== null;
+    if (!jevEvaluable) observations.push({ code: "c3_cost_not_evaluable", detail: { c3Absorbed: c3.absorbedWasteTurns, winnerAbsorbed: winner.absorbedWasteTurns } });
+    const jevOk = jevEvaluable && c3.jevUsdPerAbsorbedTurn < winner.jevUsdPerAbsorbedTurn;
     const gateOk = gate === null || gate.c3Adoptable;
     c3ToFz = {
       evaluated: true,
       becomeFz: worseOk && wasteOk && jevOk && gateOk,
-      reason: !gateOk ? "p1_gate" : !worseOk ? "worse_tasks" : !wasteOk ? "waste_median" : !jevOk ? "jev_per_absorbed_turn" : "c3_becomes_fz",
+      reason: !gateOk ? "p1_gate" : !worseOk ? "worse_tasks" : !wasteOk ? "waste_median" : !jevOk ? (jevEvaluable ? "jev_per_absorbed_turn" : "jev_cost_not_evaluable") : "c3_becomes_fz",
       c3: {
         worseTasks: c3.worseTasks,
         wasteMedian: c3.wasteMedianAbs,
-        jevUsdPerAbsorbedTurn: Number.isFinite(c3.jevUsdPerAbsorbedTurn) ? c3.jevUsdPerAbsorbedTurn : null,
+        jevUsdPerAbsorbedTurn: c3.jevUsdPerAbsorbedTurn,
         absorbedWasteTurns: c3.absorbedWasteTurns,
       },
       winner: {
         condition: winner.condition,
         wasteMedian: winner.wasteMedianAbs,
-        jevUsdPerAbsorbedTurn: Number.isFinite(winner.jevUsdPerAbsorbedTurn) ? winner.jevUsdPerAbsorbedTurn : null,
+        jevUsdPerAbsorbedTurn: winner.jevUsdPerAbsorbedTurn,
         absorbedWasteTurns: winner.absorbedWasteTurns,
       },
       conditions: { worseTasksOk: worseOk, wasteMedianOk: wasteOk, jevPerAbsorbedTurnOk: jevOk, p1GateOpen: gateOk },
@@ -1009,6 +1024,7 @@ export function analyzeFinal({
   const advice = armRates(treatmentCells);
 
   const xRules = evaluateRejectionRules({ splitPairs: { holdout: pairs, dev: devSet.pairs }, allPairs, cost, advice });
+  if (!xRules.X4.detail.ignoredLimbApplicable) observations.push({ code: "x4_ignored_advice_not_applicable", detail: { adviceCount: xRules.X4.detail.adviceCount } });
   const adoption = evaluateAdoptionRules({ pairs, cost, wall, advice, xRules }, options);
 
   const terminated = Boolean(termination?.terminated) || normalized.imputed.not_run > 0 || normalized.cells.some((cell) => cell.errorClass === "global_stop");

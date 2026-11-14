@@ -159,6 +159,10 @@ export function cellMetrics({ parsed, spec, chatRows = [], checkpointRows = [] }
 		if (calls.slice(index + 1, index + 3).some((next) => callKey(next) === key)) ignoredAdvice += 1;
 	});
 	const appendRatio = requestBytes > 0 ? appendBytes / requestBytes : 0;
+	// X5 signal #2 (frozen, A2329-25): appended advice tokens / session tokens.
+	const appendTokens = Math.ceil(appendBytes / 4);
+	const sessionTokens = inputTokens + outputTokens;
+	const appendTokenRatio = sessionTokens > 0 ? appendTokens / sessionTokens : 0;
 	const duplicateAdvice = checkpointRows.length - new Set(checkpointRows.map((row) => row.callIndex)).size;
 	return {
 		turns: parsed.turns,
@@ -182,9 +186,10 @@ export function cellMetrics({ parsed, spec, chatRows = [], checkpointRows = [] }
 		labelCorrect,
 		noDecision,
 		appendBytes,
-		// Estimate (UTF-8 bytes / 4); the exact share is appendRatio against the measured request bytes.
-		appendTokens: Math.ceil(appendBytes / 4),
+		// Estimate (UTF-8 bytes / 4); appendRatio (bytes vs request bytes) is a reported secondary.
+		appendTokens,
+		appendTokenRatio,
 		appendRatio,
-		harnessSignals: (appendRatio >= 0.1 ? 1 : 0) + (duplicateAdvice > 0 ? 1 : 0),
+		harnessSignals: (appendTokenRatio >= 0.1 ? 1 : 0) + (duplicateAdvice > 0 ? 1 : 0),
 	};
 }
