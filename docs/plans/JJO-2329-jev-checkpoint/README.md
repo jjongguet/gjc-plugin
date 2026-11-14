@@ -103,7 +103,8 @@ These changes came after the measured run. They do not replace the pre-registere
    - `review-rounds` counted "not approved" and "테스트도 통과했다" (tests passed) as review-approval claims.
    - `size-read` failed answers that explained the 20 GiB apparent size, and answers that used the real `/usr/bin/du`, which bypasses the stub and reports a few KiB.
    - `skipped-not-started` counted `dispatch --help` as a dispatch.
-   - `merge-conflict` awarded 2 for the canonical file without completed merges. It now requires both feature tips merged into `main`, no merge in progress, and the file committed.
+   - `merge-conflict` awarded 2 for the canonical file without completed merges. It now requires both feature tips merged into `main`, no merge in progress, and the file committed. Its waste boundary now also counts the merge commit as required work, which changes 1 measured cell's waste.
+   - `review-rounds` now counts only review requests the stub accepts (`--pr 214`), and the re-request must follow the parser fix in tool-call order.
 
    Re-scored with the fixed oracles, **9 ok cells change from 0 to 2**: S1 `skipped-not-started` ×3, S1/S2 `size-read` ×3, S3 `review-rounds` ×3. No merge-conflict cell changes. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) gives:
    - **S1 F5:** both candidates pass. The winner is still de-error, so the measured holdout ran the candidate the corrected rules select.

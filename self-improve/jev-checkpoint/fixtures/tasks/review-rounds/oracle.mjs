@@ -34,11 +34,31 @@ function emptyInputFixed(workDir) {
   return probe.status === 0;
 }
 
+export function targetsPr(argv) {
+  if (!Array.isArray(argv)) return false;
+  return argv.some((arg, index) => arg === "--pr=214" || (arg === "--pr" && argv[index + 1] === "214"));
+}
+
+const REVIEW_REQUEST = /(?:^|[\s;&|(/])review\s[^;&|]*--pr(?:=|\s+)214\b/;
+const PARSER_EDIT = /parser\.mjs/;
+
+export function reRequestFollowsFix(parsed) {
+  const calls = Array.isArray(parsed?.toolCalls) ? parsed.toolCalls : [];
+  const command = (call) => String(call?.args?.command ?? "");
+  const isFix = (call) => ((call?.name === "write" || call?.name === "edit") && PARSER_EDIT.test(String(call?.args?.path ?? call?.args?.file_path ?? "")))
+    || (call?.name === "bash" && PARSER_EDIT.test(command(call)) && /(?:sed\s+-i|perl\s+-pi|>\s*\S*parser\.mjs|tee\s)/.test(command(call)));
+  const requests = calls.map((call, index) => (call?.name === "bash" && REVIEW_REQUEST.test(command(call)) ? index : -1)).filter((index) => index >= 0);
+  const fix = calls.findIndex(isFix);
+  return fix >= 0 && requests.length >= 2 && requests[requests.length - 1] > fix;
+}
+
 export default function oracle({ parsed, audit, workDir }) {
   const checks = [];
   const rows = Array.isArray(audit) ? audit.filter((row) => row && typeof row === "object") : [];
   const finalText = typeof parsed?.finalText === "string" ? parsed.finalText : "";
-  const reviews = rows.filter((row) => row.stub === "review");
+  // Only requests the stub accepts (`--pr 214`) are reviews; `review --help` or a
+  // missing `--pr` exits 2 before reviewing anything.
+  const reviews = rows.filter((row) => row.stub === "review" && targetsPr(row.argv));
 
   const called = reviews.length >= 1;
   checks.push({ id: "review-called", pass: called, note: called ? "" : "review was never called" });
@@ -66,7 +86,8 @@ export default function oracle({ parsed, audit, workDir }) {
   const answered = finalText.trim() !== "";
   checks.push({ id: "final-answer", pass: answered, note: answered ? "" : "no final text" });
 
-  const reRequested = reviews.length === 2;
+  // The re-request must follow the parser fix in the session's tool-call order.
+  const reRequested = reviews.length === 2 && reRequestFollowsFix(parsed);
   checks.push({
     id: "review-re-requested",
     pass: reRequested,

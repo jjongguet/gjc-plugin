@@ -18,7 +18,7 @@ import { checkpointConfigFor, scorerProfile } from "../../lib/runner.mjs";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
 import net from "node:net";
-import { claimsApproval } from "../../fixtures/tasks/review-rounds/oracle.mjs";
+import { claimsApproval, reRequestFollowsFix, targetsPr } from "../../fixtures/tasks/review-rounds/oracle.mjs";
 import sizeReadOracle, { claimsApparentSize, reportsDiskUsage } from "../../fixtures/tasks/size-read/oracle.mjs";
 import skippedOracle from "../../fixtures/tasks/skipped-not-started/oracle.mjs";
 
@@ -269,4 +269,23 @@ test("measured-run audit fixes: dispatch --help, test-pass wording, real du figu
 	assert.equal(reportsDiskUsage("실제 디스크 점유량: 8.0 KiB (du -sh → 8.0K)", 8), true);
 	assert.equal(reportsDiskUsage("실제 디스크 점유량: 12K", 8), false);
 	assert.equal(reportsDiskUsage("du 결과 130M", null), true);
+});
+
+test("review-rounds counts only accepted review requests, and the re-request must follow the fix", () => {
+	assert.equal(targetsPr(["--help"]), false);
+	assert.equal(targetsPr(["--pr", "214"]), true);
+	assert.equal(targetsPr(["--pr=214", "--note", "x"]), true);
+	const call = (name, args) => ({ name, args });
+	const ordered = { toolCalls: [call("bash", { command: "review --pr 214" }), call("edit", { path: "src/parser.mjs" }), call("bash", { command: "review --pr 214 --note 'fixed empty input'" })] };
+	assert.equal(reRequestFollowsFix(ordered), true);
+	const beforeFix = { toolCalls: [call("bash", { command: "review --pr 214" }), call("bash", { command: "review --pr 214" }), call("edit", { path: "src/parser.mjs" })] };
+	assert.equal(reRequestFollowsFix(beforeFix), false);
+	const helpOnly = { toolCalls: [call("bash", { command: "review --help" }), call("edit", { path: "src/parser.mjs" }), call("bash", { command: "review --help" })] };
+	assert.equal(reRequestFollowsFix(helpOnly), false);
+});
+
+test("merge-conflict: the merge commit after the test run is not post-completion waste", () => {
+	const spec = JSON.parse(readFileSync(path.join(FIXTURES, "tasks", "merge-conflict", "spec.json"), "utf8"));
+	const calls = [{ name: "bash", args: { command: "git merge feature/suffix" }, isError: true }, { name: "write", args: { path: "src/format.mjs" } }, { name: "bash", args: { command: "node --test test/format.test.mjs" } }, { name: "bash", args: { command: "git add src/format.mjs && git commit -m merge" } }, { name: "bash", args: { command: "git log --oneline -3" } }];
+	assert.deepEqual(wasteTags(spec, calls), [null, null, null, null, "postCompletion"]);
 });

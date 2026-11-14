@@ -1,6 +1,6 @@
 {
   "schema": "jexp.oracle_sensitivity.v1",
-  "at": "2026-11-14T11:07:14.774Z",
+  "at": "2026-11-14T11:14:18.573Z",
   "reportOnly": true,
   "changedCells": [
     {
@@ -74,6 +74,16 @@
       "repeat": 3,
       "recorded": 0,
       "current": 2
+    }
+  ],
+  "wasteChanges": [
+    {
+      "stage": "S3",
+      "taskId": "merge-conflict",
+      "condition": "fz-frozen",
+      "repeat": 3,
+      "recorded": 1,
+      "current": 0
     }
   ],
   "s1": {
