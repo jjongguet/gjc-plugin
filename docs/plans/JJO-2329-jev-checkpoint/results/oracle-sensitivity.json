@@ -1,6 +1,6 @@
 {
   "schema": "jexp.oracle_sensitivity.v1",
-  "at": "2026-11-14T11:40:01.472Z",
+  "at": "2026-11-14T11:46:56.458Z",
   "reportOnly": true,
   "changedCells": [
     {
@@ -78,14 +78,279 @@
   ],
   "wasteChanges": [
     {
+      "stage": "S1",
+      "taskId": "lane-start-base",
+      "condition": "a1-off",
+      "repeat": 1,
+      "recorded": 3,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "scope-stop",
+      "condition": "de-error",
+      "repeat": 1,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "bp-periodic",
+      "repeat": 1,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "de-error",
+      "repeat": 1,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "lane-start-base",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "scope-stop",
+      "condition": "bp-periodic",
+      "repeat": 2,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S1",
+      "taskId": "scope-stop",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 3,
+      "current": 2
+    },
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "de-error",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 4
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "de-error",
+      "repeat": 2,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "lane-start-base",
+      "condition": "bp-periodic",
+      "repeat": 3,
+      "recorded": 3,
+      "current": 1
+    },
+    {
+      "stage": "S1",
+      "taskId": "retry-until-cap",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "size-read",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 0,
+      "current": 5
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S1",
+      "taskId": "skipped-not-started",
+      "condition": "bp-periodic",
+      "repeat": 3,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S2",
+      "taskId": "scope-stop",
+      "condition": "c3-ensemble",
+      "repeat": 1,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S2",
+      "taskId": "skipped-not-started",
+      "condition": "c3-ensemble",
+      "repeat": 1,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S2",
+      "taskId": "scope-stop",
+      "condition": "c3-ensemble",
+      "repeat": 2,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S2",
+      "taskId": "size-read",
+      "condition": "c3-ensemble",
+      "repeat": 2,
+      "recorded": 0,
+      "current": 3
+    },
+    {
+      "stage": "S2",
+      "taskId": "skipped-not-started",
+      "condition": "c3-ensemble",
+      "repeat": 2,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S2",
+      "taskId": "lane-start-base",
+      "condition": "c3-ensemble",
+      "repeat": 2,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S2",
+      "taskId": "skipped-not-started",
+      "condition": "c3-ensemble",
+      "repeat": 3,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S3",
+      "taskId": "cost-arith",
+      "condition": "fz-frozen",
+      "repeat": 1,
+      "recorded": 2,
+      "current": 0
+    },
+    {
+      "stage": "S3",
+      "taskId": "merge-conflict",
+      "condition": "a1-off",
+      "repeat": 1,
+      "recorded": 1,
+      "current": 0
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "a1-off",
+      "repeat": 1,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S3",
+      "taskId": "cost-arith",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 4,
+      "current": 2
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "fz-frozen",
+      "repeat": 1,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S3",
+      "taskId": "cost-arith",
+      "condition": "fz-frozen",
+      "repeat": 2,
+      "recorded": 2,
+      "current": 0
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "a1-off",
+      "repeat": 2,
+      "recorded": 2,
+      "current": 1
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "fz-frozen",
+      "repeat": 2,
+      "recorded": 3,
+      "current": 2
+    },
+    {
+      "stage": "S3",
+      "taskId": "cost-arith",
+      "condition": "a1-off",
+      "repeat": 3,
+      "recorded": 5,
+      "current": 3
+    },
+    {
+      "stage": "S3",
+      "taskId": "cost-arith",
+      "condition": "fz-frozen",
+      "repeat": 3,
+      "recorded": 5,
+      "current": 3
+    },
+    {
       "stage": "S3",
       "taskId": "merge-conflict",
       "condition": "fz-frozen",
       "repeat": 3,
       "recorded": 1,
       "current": 0
+    },
+    {
+      "stage": "S3",
+      "taskId": "review-rounds",
+      "condition": "fz-frozen",
+      "repeat": 3,
+      "recorded": 6,
+      "current": 5
     }
   ],
+  "labelChanges": [],
   "s1": {
     "winner": "de-error",
     "winnerReason": "waste_reduction",
@@ -95,7 +360,7 @@
         "condition": "bp-periodic",
         "passed": true,
         "worseTasks": 1,
-        "wasteMedian": -0.16666666666666663
+        "wasteMedian": -0.39999999999999997
       },
       {
         "condition": "de-error",
@@ -111,37 +376,79 @@
     "A1": {
       "value": -0.11111111111111112,
       "passed": false,
-      "fired": null
+      "fired": null,
+      "detail": {
+        "point": 0,
+        "upper": 0.11111111111111112,
+        "pairs": 6,
+        "reps": 10000,
+        "seed": 20261114
+      }
     },
     "A2": {
       "value": 1.0978202514136473,
       "passed": false,
-      "fired": null
+      "fired": null,
+      "detail": {
+        "ratioOfMeans": 0.9812497076625162,
+        "meanOfRatios": 0.9569694190555015,
+        "lower": 0.8723728388947641,
+        "pairs": 6,
+        "note": null
+      }
     },
     "A3": {
-      "value": 0.19090909090909092,
+      "value": 0.2333333333333334,
       "passed": false,
-      "fired": null
+      "fired": null,
+      "detail": {
+        "lower": -0.3666666666666667,
+        "upper": 0.6000000000000001,
+        "pairs": 6,
+        "zeroBaseline": 0,
+        "note": null
+      }
     },
     "A4": {
       "value": 0.0011423679352175772,
       "passed": false,
-      "fired": null
+      "fired": null,
+      "detail": {
+        "wallRatio": 1.0205445628630176,
+        "wallUpper": 1.2192813330279995,
+        "wallThreshold": 1.1,
+        "jevUsd": 0.00007189559999999999,
+        "sessionUsd": 0.06293558999999999,
+        "wallPairs": 6
+      }
     },
     "X1": {
       "value": 0,
       "passed": true,
-      "fired": false
+      "fired": false,
+      "detail": {
+        "tasks": []
+      }
     },
     "X2": {
       "value": 0.027777777777777776,
       "passed": true,
-      "fired": false
+      "fired": false,
+      "detail": {
+        "pairs": 12,
+        "perSplit": {
+          "holdout": 6,
+          "dev": 6
+        }
+      }
     },
     "X3": {
       "value": 1.0978202514136473,
       "passed": true,
-      "fired": false
+      "fired": false,
+      "detail": {
+        "ratioOfMeans": 0.9812497076625162
+      }
     },
     "X6": {
       "value": {
@@ -150,7 +457,21 @@
         "sensitivityAccuracy": 0.3333333333333333
       },
       "passed": false,
-      "fired": true
+      "fired": true,
+      "detail": {
+        "falseStopFired": false,
+        "accuracyFired": true,
+        "breakdown": [
+          {
+            "reason": "low_confidence",
+            "count": 14
+          }
+        ],
+        "noDecisionTotal": 14,
+        "labelChecks": 21,
+        "labelCorrect": 7,
+        "accuracyDenominator": 21
+      }
     }
   }
 }

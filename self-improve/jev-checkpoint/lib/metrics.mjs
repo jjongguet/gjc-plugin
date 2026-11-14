@@ -24,7 +24,9 @@ export function callKey(call) {
 	return createHash("sha256").update(`${call.name}\u0000${JSON.stringify(stable(call.args ?? {}))}`).digest("hex");
 }
 
-const argsText = (call) => JSON.stringify(call.args ?? {});
+// Bash predicates are written against the command line (word boundaries, `^`, `$`);
+// every other tool's predicates match its serialized arguments (e.g. `"path": …`).
+const argsText = (call) => (call.name === "bash" && typeof call.args?.command === "string" ? call.args.command : JSON.stringify(call.args ?? {}));
 
 function predicateFires(predicate, calls, index) {
 	const call = calls[index];
@@ -65,6 +67,15 @@ function readPath(call) {
 	return typeof value === "string" ? value.split(":")[0] : null;
 }
 
+/** A read is identified by its path and its requested range (selector, offset, limit). */
+function readKey(call) {
+	const target = readPath(call);
+	if (!target) return null;
+	const value = String(call.args?.path ?? call.args?.file_path);
+	const selector = value.slice(target.length);
+	return `${target}|${selector}|${call.args?.offset ?? ""}|${call.args?.limit ?? ""}`;
+}
+
 function touches(call, target) {
 	if (call.name === "write" || call.name === "edit") return true;
 	if (call.name === "bash") return typeof call.args?.command === "string" && call.args.command.includes(target.split("/").pop());
@@ -88,9 +99,10 @@ export function wasteTags(spec, calls) {
 	calls.forEach((call, index) => {
 		const target = readPath(call);
 		if (!target) return;
+		const key = readKey(call);
 		for (let j = index - 1; j >= 0; j--) {
 			if (touches(calls[j], target)) break;
-			if (readPath(calls[j]) === target) { tags[index] ??= "repeatRead"; break; }
+			if (readKey(calls[j]) === key) { tags[index] ??= "repeatRead"; break; }
 		}
 	});
 	for (let i = 1; i < calls.length; i++) {

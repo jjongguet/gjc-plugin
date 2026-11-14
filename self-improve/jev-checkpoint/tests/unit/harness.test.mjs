@@ -9,7 +9,7 @@ import { priorSpend } from "../../lib/ledger-journal.mjs";
 import { startProxy } from "../../lib/proxy.mjs";
 import { createScriptedChat, createScriptedDecision, scriptedEnvelope } from "../../lib/scripted.mjs";
 import { parseTranscript } from "../../lib/transcript.mjs";
-import { cellMetrics, wasteTags } from "../../lib/metrics.mjs";
+import { cellMetrics, expectedLabel, wasteTags } from "../../lib/metrics.mjs";
 import { normalizeBody } from "../../lib/normalize.mjs";
 import { DEV_TASKS, HOLDOUT_TASKS, stagePlan } from "../../lib/stage-plans.mjs";
 import { assertFresh, catalogReceipt } from "../../lib/catalog.mjs";
@@ -364,4 +364,15 @@ test("proxy drainCell waits for an in-flight chat request and charges it before 
 	} finally {
 		await proxy.close();
 	}
+});
+
+test("metrics: bash predicates match the command line; paginated reads are not repeat reads", () => {
+	const spec = JSON.parse(readFileSync(path.join(FIXTURES, "tasks", "size-read", "spec.json"), "utf8"));
+	assert.deepEqual(wasteTags(spec, [{ name: "bash", args: { command: "du -sh shots" } }, { name: "bash", args: { command: "ls -l shots" } }]), [null, "postCompletion"]);
+	const plain = { lastRequiredCall: null, allowedTaskCalls: 0 };
+	const reads = [{ name: "read", args: { path: "sync.log", offset: 1, limit: 3 } }, { name: "read", args: { path: "sync.log", offset: 4, limit: 3 } }, { name: "read", args: { path: "sync.log", offset: 4, limit: 3 } }];
+	assert.deepEqual(wasteTags(plain, reads), [null, null, "repeatRead"]);
+	assert.deepEqual(wasteTags(plain, [{ name: "read", args: { path: "a.md:1-20" } }, { name: "read", args: { path: "a.md:21-40" } }]), [null, null]);
+	const skipped = JSON.parse(readFileSync(path.join(FIXTURES, "tasks", "skipped-not-started", "spec.json"), "utf8"));
+	assert.equal(expectedLabel(skipped, "goal_state", [{ name: "bash", args: { command: "dispatch architect JJO-9001" } }], 1), "off_track");
 });

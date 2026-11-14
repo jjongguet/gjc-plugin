@@ -107,10 +107,13 @@ These changes came after the measured run. They do not replace the pre-registere
    - `no-invented-cap` no longer reads list markers ("1.", "2)") as invented budget figures.
    - `review-rounds` now counts only review requests the stub accepts (`--pr 214`). The stub also records a hash of `src/parser.mjs` at each request, and the re-request must see changed code. Older audit rows fall back to tool-call order, with script-based edits also recognized. The seeded parser tests must also still pass.
 
-   Re-scored with the fixed oracles, **9 ok cells change from 0 to 2**: S1 `skipped-not-started` ×3, S1/S2 `size-read` ×3, S3 `review-rounds` ×3. No merge-conflict cell changes. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) gives:
+   - Metric matching: bash predicates and waste cutoffs are now matched against the command line rather than the JSON-serialized arguments. This fixes `du`, `dispatch` and every `[^\n]*`/`$`-anchored predicate. Paginated reads (different selector/offset/limit) are no longer counted as repeat reads.
+
+   Re-scored with the fixed oracles, **9 ok cells change from 0 to 2**: S1 `skipped-not-started` ×3, S1/S2 `size-read` ×3, S3 `review-rounds` ×3. No merge-conflict cell changes. With the fixed metrics, waste changes in 34 ok cells, and checkpoint label counts change in 0. The report-only recomputation ([oracle-sensitivity.json](results/oracle-sensitivity.json)) gives:
    - **S1 F5:** both candidates pass. The winner is still de-error, so the measured holdout ran the candidate the corrected rules select.
    - **Final:** still `rejected` with X6 fired (label accuracy 7/21).
    - **A1:** the lower bound moves from −0.167 to −0.111 and is still not met.
+   - **A3:** the waste median moves from 0.191 to 0.233, but its bootstrap lower bound is −0.367, so A3 is still not met.
 
    The F5 selection is sensitive to oracle precision. With only the size-read fix applied, the winner flipped to bp-periodic, because de-error failed P1 with 2 worse tasks. X6 does not depend on the oracles: jev-omni abstained on 14 of 21 holdout checkpoints. On dev, the decided-plus-abstained accuracy is bp 7/23, de 6/26 and c3 5/36, all far below 0.75.
 4. **Oracle heuristics remain lexical.** Some low-score cells still contain debatable phrasing; for example, `retry-until-cap` answers argue "stop resubmitting the same plan" while also citing the 4/8 cap. Success-based rules A1–A4 carry that measurement noise. X6 does not.
