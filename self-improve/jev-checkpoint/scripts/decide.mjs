@@ -64,10 +64,16 @@ export function armTable(records, w) {
  * incomplete and maps to early termination, never to a definitive verdict.
  */
 export function cohortCompleteness(records, stages) {
-	const have = new Set(records.map((record) => `${record.stage}|${record.taskId}|${record.condition}|${record.repeat}`));
+	const counts = new Map();
+	for (const record of records) {
+		const key = `${record.stage}|${record.taskId}|${record.condition}|${record.repeat}`;
+		counts.set(key, (counts.get(key) ?? 0) + 1);
+	}
 	const missing = [];
-	for (const stage of stages) for (const cell of stagePlan(stage)) if (!have.has(`${stage}|${cell.taskId}|${cell.condition}|${cell.repeat}`)) missing.push({ stage, taskId: cell.taskId, condition: cell.condition, repeat: cell.repeat });
-	return { complete: missing.length === 0, missing };
+	for (const stage of stages) for (const cell of stagePlan(stage)) if (!counts.has(`${stage}|${cell.taskId}|${cell.condition}|${cell.repeat}`)) missing.push({ stage, taskId: cell.taskId, condition: cell.condition, repeat: cell.repeat });
+	// A duplicated execution would be averaged into the task mean, so it is not a complete cohort either.
+	const duplicates = [...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key);
+	return { complete: missing.length === 0 && duplicates.length === 0, missing, duplicates };
 }
 
 function arg(name, fallback = null) {
@@ -109,9 +115,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 			const fz = read(runDir, "fz-freeze.json");
 			// X2's dev half compares the same mechanism that became Fz.
 			const cohort = cohortCompleteness(records, ["S1", ...(decision.runS2 ? ["S2"] : []), "S3"]);
-			const termination = stopped ? { terminated: true, reason: "global_stop" } : !cohort.complete ? { terminated: true, reason: "incomplete_cohort" } : null;
+			const termination = stopped ? { terminated: true, reason: "global_stop" } : !cohort.complete ? { terminated: true, reason: cohort.duplicates.length ? "duplicate_executions" : "incomplete_cohort" } : null;
 			analysis = analyzeFinal({ records, j0, devCondition: fz.fzCondition, termination });
-			analysis.cohort = { complete: cohort.complete, missing: cohort.missing.length };
+			analysis.cohort = { complete: cohort.complete, missing: cohort.missing.length, duplicates: cohort.duplicates.length };
 			analysis.powerGate = POWER_GATE;
 		}
 		const devBaseline = records.filter((record) => record.stage === "S1" && record.condition === "a1-off" && record.status === "ok").map((record) => record.wasteTurns);

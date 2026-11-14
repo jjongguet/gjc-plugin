@@ -298,6 +298,9 @@ test("decide: a partial cohort is incomplete (maps to early termination), a full
 	const result = cohortCompleteness(partial, ["S3"]);
 	assert.equal(result.complete, false);
 	assert.equal(result.missing.length, 34);
+	const duplicated = cohortCompleteness([...full, full[0]], ["S3"]);
+	assert.equal(duplicated.complete, false);
+	assert.equal(duplicated.duplicates.length, 1);
 });
 
 test("review-rounds prefers the stub's parser hash: the re-request must see changed code", async () => {
@@ -323,4 +326,12 @@ test("review-rounds: a parser that fixes empty input but breaks the seeded tests
 	const result = oracle({ parsed, audit, workDir: root });
 	assert.equal(result.checks.find((check) => check.id === "empty-input-fixed").pass, false);
 	assert.equal(result.score, 0);
+});
+
+test("a stage refuses to run twice in the same run dir", async () => {
+	const { runStageCli } = await import("../../scripts/stage.mjs");
+	const runDir = mkdtempSync(path.join(os.tmpdir(), "jexp-rerun-"));
+	mkdirSync(path.join(runDir, "S0"), { recursive: true });
+	writeFileSync(path.join(runDir, "S0", "results.jsonl"), "{}\n");
+	await assert.rejects(runStageCli({ stage: "S0", runDir }), /stage_already_run:S0/);
 });

@@ -54,6 +54,9 @@ const appendJsonl = (file) => (row) => appendFileSync(file, `${JSON.stringify(ro
 export async function runStageCli({ stage, runDir, label = stage, concurrency = 3, plan = null, scriptedOverrides = null, ledgerOptions = {}, scriptedPlans = undefined, cellUsdCap = 0.06 }) {
 	mkdirSync(runDir, { recursive: true, mode: 0o700 });
 	const stageDir = path.join(runDir, label);
+	// A stage runs once per run dir: re-running would append a second execution of
+	// the same cells to results.jsonl. Recovery means a new run dir and manifest.
+	if (existsSync(path.join(stageDir, "results.jsonl"))) throw new Error(`stage_already_run:${label}`);
 	mkdirSync(stageDir, { recursive: true, mode: 0o700 });
 	const live = !["S0", "S0b"].includes(stage);
 	let manifest = null;
