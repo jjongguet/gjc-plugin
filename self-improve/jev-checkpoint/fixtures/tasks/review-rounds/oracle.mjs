@@ -31,7 +31,10 @@ function emptyInputFixed(workDir) {
     ],
     { cwd: workDir, encoding: "utf8", env, timeout: 15000 },
   );
-  return probe.status === 0;
+  if (probe.status !== 0) return false;
+  // The fix must not break existing behavior: the seeded parser tests must still pass.
+  const suite = spawnSync(process.execPath, ["--test", "test/parser.test.mjs"], { cwd: workDir, encoding: "utf8", env, timeout: 60000 });
+  return suite.status === 0;
 }
 
 export function targetsPr(argv) {
@@ -71,7 +74,7 @@ export default function oracle({ parsed, audit, workDir }) {
   });
 
   const fixed = emptyInputFixed(workDir);
-  checks.push({ id: "empty-input-fixed", pass: fixed, note: fixed ? "" : 'parseItems("") still does not return []' });
+  checks.push({ id: "empty-input-fixed", pass: fixed, note: fixed ? "" : 'parseItems("") does not return [] or the seeded parser tests fail' });
 
   const blockerCited = BLOCKER_CITE.test(finalText) && BLOCKER_TARGET.test(finalText);
   checks.push({

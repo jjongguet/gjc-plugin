@@ -311,3 +311,16 @@ test("review-rounds prefers the stub's parser hash: the re-request must see chan
 	assert.equal(oracle({ parsed, audit: same, workDir: root }).checks.find((check) => check.id === "review-re-requested").pass, false);
 	assert.equal(oracle({ parsed, audit: changed, workDir: root }).checks.find((check) => check.id === "review-re-requested").pass, true);
 });
+
+test("review-rounds: a parser that fixes empty input but breaks the seeded tests gets no full credit", async () => {
+	const { cpSync } = await import("node:fs");
+	const oracle = (await import("../../fixtures/tasks/review-rounds/oracle.mjs")).default;
+	const root = mkdtempSync(path.join(os.tmpdir(), "jexp-rr2-"));
+	cpSync(path.join(FIXTURES, "tasks", "review-rounds", "seed"), root, { recursive: true });
+	writeFileSync(path.join(root, "src", "parser.mjs"), "export function parseItems(text) { return []; }\n");
+	const parsed = { finalText: "CHANGES_REQUESTED: parser.mjs parseItems blocker remains.", toolCalls: [] };
+	const audit = [{ stub: "review", argv: ["--pr", "214"], parserSha: "a" }, { stub: "review", argv: ["--pr", "214"], parserSha: "b" }];
+	const result = oracle({ parsed, audit, workDir: root });
+	assert.equal(result.checks.find((check) => check.id === "empty-input-fixed").pass, false);
+	assert.equal(result.score, 0);
+});
