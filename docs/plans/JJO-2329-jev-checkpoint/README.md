@@ -88,7 +88,7 @@ Failed cells were all `cell_cap` (16-turn cap) or `timeout`. They are imputed sy
 
   On the holdout, the error-targeted checkpoint fired in 78% of sessions, but jev-omni stayed below the 0.6 acting threshold in 14 of 21 decisions. It appended **no advice** at all. The frozen sensitivity row `sensitivityAccuracy` is also 7/21. Counting decided labels only, all 7 decided labels were correct: 7/7 = 21 checks − 14 no-decisions, derived in [post-review-outputs.json](results/post-review-outputs.json). Under the frozen rule, abstains are wrong. The X4 ignored-advice limb had no denominator (0 advice) and only its trigger-rate limb was evaluable.
 - **Re-scoring:** 6 cells, one per stage×arm, re-scored by the arm-blind verifier: 0 mismatches ([rescore.json](results/rescore.json)).
-- **Receipts** (post-review producer): one `gjc.quality_trial.v2` receipt per executed cell. The canonical validator, run per stage × condition, accepts S1 54/54, S2 18/18 and S3 36/36, with 0 conflicting duplicates and 0 failures ([receipts-validation.json](results/receipts-validation.json), `receipts-S{1,2,3}.jsonl`).
+- **Receipts** (post-review producer): one `gjc.quality_trial.v2` receipt per executed cell. The canonical validator, run per stage × condition, accepts S1 54/54, S2 18/18 and S3 36/36 ([receipts-validation.json](results/receipts-validation.json), `receipts-S{1,2,3}.jsonl`); a failure or conflicting duplicate would have thrown. The receipts carry the run-time `oracleDigest`s. The current scorer adds `audit-intact` to its evidence digest, so those digests cannot be re-derived with today's scorer; scores are re-derivable, and `rescore-sandboxed.json` compares them.
 - **Measured advisor bundle.** The cells installed the lane `jev-advisor` tree (digest `66fad96b…`), not the v0.0.28 tag tree. The only difference between them is `jev-advisor/scripts/e2e-installed.mjs`, a dev script that is not part of the installed hooks or tools. Readiness now records this diff list and requires it to be runtime-irrelevant.
 
 ## Cost (actual)
@@ -145,6 +145,8 @@ These changes came after the measured run. They do not replace the pre-registere
    - Producers now exist for receipts, the ensemble sensitivity and the Monte Carlo A3 (digest-bound in future manifests).
 
    None of these change the sealed measured verdict.
+
+The sealed measured artifacts (`analysis.json`, `arm-table.md`, `fz-freeze.json`, `s1-decision.json`, summaries) were **not** regenerated. They keep the run-time analyzer's fields: no `metrics_imputed`, no X4 `ignoredLimbApplicable`, the old `expectedStall (W)` header, and the vacuous `jevPerAbsorbedTurnOk: true`. All post-run corrections live in the report-only audit files listed above.
 
 After these amendments the harness digest differs from `e48dbecc`. A new run therefore needs new S0/S0b receipts and a new manifest; every live stage enforces this.
 

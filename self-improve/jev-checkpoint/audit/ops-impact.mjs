@@ -124,13 +124,26 @@ const keys = [readOpenGatewayKey()];
 try { keys.push(readOpenRouterKey()); } catch { /* absent key cannot leak */ }
 let artifactFiles = 0;
 let leaked = 0;
+const before = { ...unscanned };
+const artifactUnscanned = { oversize: 0, read: 0 };
+let sparseEmpty = 0;
 for (const file of walk(runDir)) {
 	let data;
-	try { if (statSync(file).size > MAX_FILE) continue; data = readFileSync(file); } catch { continue; }
+	try {
+		const stats = statSync(file);
+		// A file with no allocated blocks is all holes (zero bytes): no key can be in it.
+		// The size-read fixture's sparse frames are exactly this.
+		if (stats.size > 0 && stats.blocks === 0) { sparseEmpty += 1; continue; }
+		if (stats.size > MAX_FILE) { artifactUnscanned.oversize += 1; continue; }
+		data = readFileSync(file);
+	} catch { artifactUnscanned.read += 1; continue; }
 	artifactFiles += 1;
 	if (keys.some((key) => keyLeaked(key, [data]))) leaked += 1;
 }
-check("5_no_key_material_in_run_artifacts", artifactFiles > 0 && leaked === 0, { artifactFiles, leakedFiles: leaked });
+// Directories walk() could not enter count as unscanned too.
+artifactUnscanned.walk = Object.keys(unscanned).reduce((sum, key) => sum + unscanned[key] - before[key], 0);
+const artifactUnscannedTotal = artifactUnscanned.oversize + artifactUnscanned.read + artifactUnscanned.walk;
+check("5_no_key_material_in_run_artifacts", artifactFiles > 0 && leaked === 0 && artifactUnscannedTotal === 0, { artifactFiles, sparseEmpty, leakedFiles: leaked, unscanned: artifactUnscanned });
 
 let registryListsCheckpoint = null;
 try {

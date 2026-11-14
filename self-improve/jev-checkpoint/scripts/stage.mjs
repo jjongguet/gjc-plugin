@@ -62,6 +62,7 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 	let manifest = null;
 	let catalog = {};
 	let keys = {};
+	let priorExternalUsd = 0;
 	if (live) {
 		manifest = JSON.parse(readFileSync(path.join(runDir, "manifest.json"), "utf8"));
 		const current = harnessDigest().digest;
@@ -69,6 +70,8 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 		if (manifest.analyzerDigest !== analyzerDigest() || manifest.ruleTableDigest !== ruleTableDigest()) throw new Error("analyzer_changed_since_freeze");
 		// The installed advisor bundle sits outside the harness digest; every cell installs it, so it is frozen too.
 		for (const [name, dir] of Object.entries(BUNDLES)) if (manifest.bundles?.[name] !== bundleDigest(dir).digest) throw new Error(`bundle_changed_since_freeze:${name}`);
+		// Validated before any key is read: prior spend is part of the cumulative stop.
+		priorExternalUsd = requireFinite(manifest.priorExternalUsd, "manifest.priorExternalUsd");
 		for (const gate of ["s0-pass.json", "s0b-inertness.json"]) {
 			const receipt = JSON.parse(readFileSync(path.join(runDir, gate), "utf8"));
 			if (receipt.pass !== true) throw new Error(`gate_failed:${gate}`);
@@ -80,7 +83,7 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 	const journalPath = live ? path.join(runDir, "ledger.jsonl") : path.join(stageDir, "ledger-scripted.jsonl");
 	const stopPath = live ? path.join(runDir, "stop.json") : path.join(stageDir, "stop.json");
 	if (existsSync(stopPath)) throw new Error("global_stop_already_reached");
-	const ledger = createLedger({ hardStopUsd: HARD_STOP_USD, priorSpentUsd: live ? priorSpend(journalPath) + requireFinite(manifest.priorExternalUsd, "manifest.priorExternalUsd") : 0, journalPath, stopPath, label, ...ledgerOptions });
+	const ledger = createLedger({ hardStopUsd: HARD_STOP_USD, priorSpentUsd: live ? priorSpend(journalPath) + priorExternalUsd : 0, journalPath, stopPath, label, ...ledgerOptions });
 	const proxy = await startProxy({
 		mode: live ? "live" : "scripted",
 		ledger,
@@ -121,7 +124,7 @@ export async function runStageCli({ stage, runDir, label = stage, concurrency = 
 		const key = `${record.status}${record.errorClass ? `/${record.errorClass}` : ""}`;
 		statusCounts[key] = (statusCounts[key] ?? 0) + 1;
 	}
-	const summary = { stage, label, live, cells: cells.length, wallMs: Date.now() - started, stopped: outcome.stopped, upstreamCalls: proxy.upstreamCalls, decisionTransportCalls: proxy.decisionTransportCalls, ledger: ledger.snapshot(), statusCounts };
+	const summary = { stage, label, live, at: new Date().toISOString(), cells: cells.length, wallMs: Date.now() - started, stopped: outcome.stopped, upstreamCalls: proxy.upstreamCalls, decisionTransportCalls: proxy.decisionTransportCalls, ledger: ledger.snapshot(), statusCounts };
 	writeFileSync(path.join(stageDir, "summary.json"), JSON.stringify(summary, null, 2), { mode: 0o600 });
 	return { summary, results: outcome.results, rows: proxy.rows, stageDir };
 }

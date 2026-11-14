@@ -288,17 +288,19 @@ export function stageReceipts({ records, manifest, readiness, stageTimes, manife
     sourceHead: readiness.originMain,
   };
   const out = {};
-  for (const stage of STAGES) {
+  for (const stage of STAGES.filter((name) => records.some((record) => record.stage === name))) {
     const { receipts, skipped } = buildReceipts(records.filter((record) => record.stage === stage), context);
     // Every treatment condition maps to arm B1, so each (condition) is its own
     // B0/B1 batch: two treatments of one task never share an execution key.
-    const validation = { total: 0, valid: 0, duplicates: 0, conflictingDuplicates: 0, failures: 0 };
+    // Failures and conflicts throw, so only the admitted counts are reported.
+    const validation = { total: 0, valid: 0, identicalDuplicates: 0, batches: 0 };
     for (const condition of [...new Set(receipts.map((receipt) => receipt.condition))]) {
       const checked = validateAll(receipts.filter((receipt) => receipt.condition === condition));
       if (!checked.ok) fail(`stage ${stage} ${condition} receipts invalid: failures=${checked.failures.length} conflicts=${checked.conflicts.length}`);
       validation.total += checked.total;
       validation.valid += checked.valid;
-      validation.duplicates += checked.duplicates;
+      validation.identicalDuplicates += checked.duplicates;
+      validation.batches += 1;
     }
     out[stage] = { receipts, skipped, validation };
   }

@@ -175,7 +175,7 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 		if (cell.invocations >= INVOCATION_CAPS[cell.checkpoint.mode]) return refuse("request_cap", 429);
 		cell.invocations += 1;
 		const question = questionConfig[family];
-		const ask = (model) => dispatcher.decide({ cellId: cell.id, invocationId, model, family, wordingId: question.wordingId, criteriaOrder: question.criteriaOrder, state: String(body.state ?? ""), threshold: ACTING_THRESHOLD, meta: { ...cell.meta, invocation: cell.invocations } });
+		const ask = (model) => dispatcher.decide({ cellId: cell.id, invocationId, model, family, wordingId: question.wordingId, criteriaOrder: question.criteriaOrder, state: body.state, threshold: ACTING_THRESHOLD, meta: { ...cell.meta, invocation: cell.invocations } });
 		const started = Date.now();
 		const voters = await Promise.all(expectedModels.map(ask));
 		let decision;
@@ -232,8 +232,9 @@ export async function startProxy({ mode, ledger, keys = {}, fetchImpl = globalTh
 			if (!/^[a-f0-9]{16,64}$/.test(cellId)) fail("invalid_cell_id");
 			if (cells.has(cellId)) fail("duplicate_cell");
 			if (!["off", "periodic", "error", "ensemble"].includes(checkpoint?.mode)) fail("invalid_checkpoint_mode");
-			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }), pending: new Set(), controllers: new Set(), toolCallsServed: 0 });
+			// Caps are validated before the cell becomes routable.
 			ledger.configureCell(cellId, { usdCap, turnCap });
+			cells.set(cellId, { id: cellId, token, checkpoint, turn: 0, invocations: 0, closed: false, normalization, meta: Object.freeze({ ...meta }), pending: new Set(), controllers: new Set(), toolCallsServed: 0 });
 			return { baseUrl: `http://127.0.0.1:${port}/c/${cellId}/v1`, checkpointUrl: `http://127.0.0.1:${port}/c/${cellId}/checkpoint` };
 		},
 		closeCell(cellId) { const cell = cells.get(cellId); if (cell) cell.closed = true; },

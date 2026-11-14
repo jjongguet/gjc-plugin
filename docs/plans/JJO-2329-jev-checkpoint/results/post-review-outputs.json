@@ -1,30 +1,27 @@
 {
   "schema": "jexp.post_review_outputs.v1",
-  "at": "2026-11-14T12:32:05.163Z",
+  "at": "2026-11-14T12:52:45.106Z",
   "reportOnly": true,
   "receipts": {
     "S1": {
       "total": 54,
       "valid": 54,
-      "duplicates": 0,
-      "conflictingDuplicates": 0,
-      "failures": 0,
+      "identicalDuplicates": 0,
+      "batches": 3,
       "skippedNotRun": 0
     },
     "S2": {
       "total": 18,
       "valid": 18,
-      "duplicates": 0,
-      "conflictingDuplicates": 0,
-      "failures": 0,
+      "identicalDuplicates": 0,
+      "batches": 1,
       "skippedNotRun": 0
     },
     "S3": {
       "total": 36,
       "valid": 36,
-      "duplicates": 0,
-      "conflictingDuplicates": 0,
-      "failures": 0,
+      "identicalDuplicates": 0,
+      "batches": 2,
       "skippedNotRun": 0
     }
   },

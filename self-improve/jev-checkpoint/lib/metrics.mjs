@@ -162,7 +162,10 @@ export function cellMetrics({ parsed, spec, chatRows = [], checkpointRows = [] }
 	// X5 signal #2 (frozen, A2329-25): appended advice tokens / session tokens.
 	const appendTokens = Math.ceil(appendBytes / 4);
 	const sessionTokens = inputTokens + outputTokens;
-	const appendTokenRatio = sessionTokens > 0 ? appendTokens / sessionTokens : 0;
+	// Unmeasured session usage with appended advice is not a 0 ratio: the signal is
+	// counted (fail toward the rejection rule) and the cell says so.
+	const appendTokenRatioMeasured = appendTokens === 0 || sessionTokens > 0;
+	const appendTokenRatio = appendTokens === 0 ? 0 : sessionTokens > 0 ? appendTokens / sessionTokens : null;
 	const duplicateAdvice = checkpointRows.length - new Set(checkpointRows.map((row) => row.callIndex)).size;
 	return {
 		turns: parsed.turns,
@@ -189,7 +192,8 @@ export function cellMetrics({ parsed, spec, chatRows = [], checkpointRows = [] }
 		// Estimate (UTF-8 bytes / 4); appendRatio (bytes vs request bytes) is a reported secondary.
 		appendTokens,
 		appendTokenRatio,
+		appendTokenRatioMeasured,
 		appendRatio,
-		harnessSignals: (appendTokenRatio >= 0.1 ? 1 : 0) + (duplicateAdvice > 0 ? 1 : 0),
+		harnessSignals: (appendTokenRatio === null || appendTokenRatio >= 0.1 ? 1 : 0) + (duplicateAdvice > 0 ? 1 : 0),
 	};
 }

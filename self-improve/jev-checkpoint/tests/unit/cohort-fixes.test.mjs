@@ -13,7 +13,14 @@ import { harnessDigest, requireS0Harness } from "../../lib/digest.mjs";
 import { ensembleSensitivity } from "../../lib/judge.mjs";
 import { stageReceipts } from "../../lib/receipts.mjs";
 import { stagePlan } from "../../lib/stage-plans.mjs";
-import { monteCarloWithDigest, projectionPrice } from "../../scripts/freeze.mjs";
+import { monteCarloWithDigest, projectCost, projectionPrice } from "../../scripts/freeze.mjs";
+import { stageFinishedAt, writeStageReceipts } from "../../scripts/decide.mjs";
+import { requireCompleteW } from "../../scripts/j0.mjs";
+import { BUNDLES, runStageCli } from "../../scripts/stage.mjs";
+import { analyzerDigest, bundleDigest } from "../../lib/digest.mjs";
+import { ruleTableDigest } from "../../lib/analyze.mjs";
+import { cellMetrics } from "../../lib/metrics.mjs";
+import { CHECKPOINT_STATE_LIMIT } from "../../lib/proxy.mjs";
 import { fileOk, tapCounts } from "../../scripts/verify.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -99,7 +106,11 @@ test("stage receipts validate a full cohort and refuse a cell without an oracle 
 	const records = ["S1", "S2", "S3"].flatMap((stage) => stagePlan(stage).map((planned) => ({ ...cell({}), ...planned, stage, oracleDigest: (n++).toString(16).padStart(64, "0") })));
 	const out = stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) });
 	assert.equal(out.S1.validation.valid, 54);
-	assert.equal(out.S3.validation.conflictingDuplicates, 0);
+	assert.equal(out.S1.validation.batches, 3, "one B0/B1 batch per condition");
+	assert.equal(out.S3.validation.valid, 36);
+	// A second execution of one cell with a different outcome is a conflicting duplicate and throws.
+	const conflicting = [...records, { ...records.at(-1), success: 0, score: 0 }];
+	assert.throws(() => stageReceipts({ records: conflicting, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) }), /conflicts=1/);
 	records[0].oracleDigest = "not-a-digest";
 	assert.throws(() => stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest: "c".repeat(64) }), /oracle evidence digest/);
 });
@@ -139,4 +150,77 @@ test("score-cell fails a cell whose audit log has an unparsable line", () => {
 	assert.equal(corrupted.checks.find((check) => check.id === "audit-intact").pass, false);
 	assert.equal(clean.checks.find((check) => check.id === "audit-intact").pass, true);
 	assert.ok(readFileSync(audit, "utf8").length > 0);
+});
+
+test("receipts are written only for stages that ran, dated from recorded run data", () => {
+	const runDir = tmp("jexp-rcpt-s1-");
+	writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify({ harnessDigest: "a".repeat(64), manifestId: "jjo2329-test" }));
+	writeFileSync(path.join(runDir, "readiness.json"), JSON.stringify({ originMain: "5f0652e8f50c16795f303357acb62570c782daa0" }));
+	mkdirSync(path.join(runDir, "S1"));
+	writeFileSync(path.join(runDir, "S1", "summary.json"), JSON.stringify({ stage: "S1" }));
+	let n = 0;
+	const records = stagePlan("S1").map((planned) => ({ ...cell({}), ...planned, stage: "S1", oracleDigest: (n++).toString(16).padStart(64, "0") }));
+	assert.throws(() => writeStageReceipts(runDir, records), /stage_time_unrecorded:S1/);
+	writeFileSync(path.join(runDir, "ledger.jsonl"), `${JSON.stringify({ at: "2026-11-14T10:05:00.000Z", stage: "S1", kind: "settled" })}\n${JSON.stringify({ at: "2026-11-14T10:09:00.000Z", stage: "S1", kind: "settled" })}\n`);
+	assert.equal(stageFinishedAt(runDir, "S1"), "2026-11-14T10:09:00.000Z");
+	const validation = writeStageReceipts(runDir, records);
+	assert.deepEqual(Object.keys(validation), ["S1"], "S2/S3 never ran, so no receipts and no summary reads for them");
+	assert.equal(validation.S1.valid, 54);
+	writeFileSync(path.join(runDir, "S1", "summary.json"), JSON.stringify({ stage: "S1", at: "2026-11-14T10:10:00.000Z" }));
+	assert.equal(stageFinishedAt(runDir, "S1"), "2026-11-14T10:10:00.000Z");
+});
+
+test("J0-test refuses a missing or incomplete W receipt (checked before any spend)", () => {
+	const runDir = tmp("jexp-w-");
+	assert.throws(() => requireCompleteW(runDir), /w_intervals_missing/);
+	writeFileSync(path.join(runDir, "w-intervals.json"), JSON.stringify({ complete: false, intervals: [] }));
+	assert.throws(() => requireCompleteW(runDir), /w_intervals_incomplete/);
+	writeFileSync(path.join(runDir, "w-intervals.json"), JSON.stringify({ complete: true, intervals: [] }));
+	assert.equal(requireCompleteW(runDir).complete, true);
+	const source = readFileSync(path.join(ROOT, "scripts", "j0.mjs"), "utf8");
+	assert.ok(source.indexOf("requireCompleteW(runDir)") < source.lastIndexOf("await runPlan("), "the W check precedes the paid J0-test run");
+});
+
+test("X5 signal 2: fires at >= 0.10 of session tokens, not below, and counts unmeasured usage", () => {
+	const parsed = (advice) => ({ turns: 2, toolCalls: [{ name: "bash", args: { command: "ls" }, advice: advice ? { text: "x".repeat(advice) } : null }] });
+	const spec = { lastRequiredCall: null, allowedTaskCalls: 0 };
+	const rows = (tokens) => [{ kind: "chat", inputTokens: tokens, outputTokens: 0, requestBytes: 4 * tokens, costUsd: 0 }];
+	const fires = cellMetrics({ parsed: parsed(400), spec, chatRows: rows(900) });
+	assert.equal(fires.appendTokenRatio, 100 / 900);
+	assert.equal(fires.harnessSignals, 1);
+	const quiet = cellMetrics({ parsed: parsed(40), spec, chatRows: rows(900) });
+	assert.equal(quiet.harnessSignals, 0);
+	const unmeasured = cellMetrics({ parsed: parsed(40), spec, chatRows: [{ kind: "chat", inputTokens: null, outputTokens: null, requestBytes: 3600, costUsd: 0 }] });
+	assert.equal(unmeasured.appendTokenRatioMeasured, false);
+	assert.equal(unmeasured.appendTokenRatio, null);
+	assert.equal(unmeasured.harnessSignals, 1, "unmeasured usage with appended advice counts toward the rejection rule");
+	const none = cellMetrics({ parsed: parsed(0), spec, chatRows: [] });
+	assert.equal(none.appendTokenRatioMeasured, true);
+	assert.equal(none.harnessSignals, 0);
+});
+
+test("start-gate projection refuses missing rows, missing calibration and non-finite or over-gate results", () => {
+	const chat = { observedInputPricePerToken: 3e-8, listInputPricePerToken: 3e-7, observedOutputPricePerToken: 1.2e-7, listOutputPricePerToken: 1.2e-6 };
+	const rows = [{ cellId: "c1", requestBytes: 40000 }, { cellId: "c1", requestBytes: 50000 }, { cellId: "c2", requestBytes: 30000 }];
+	const ok = projectCost({ s0ChatRows: rows, bytesPerToken: 4, chat, spentSoFar: 0.02, paidCells: 108 });
+	assert.ok(Number.isFinite(ok.projectedUsd) && ok.projectedUsd < 3.4 && ok.cellUsdCap >= 0.06);
+	assert.throws(() => projectCost({ s0ChatRows: [], bytesPerToken: 4, chat, spentSoFar: 0, paidCells: 108 }), /s0_chat_rows_missing/);
+	assert.throws(() => projectCost({ s0ChatRows: rows, bytesPerToken: 0, chat, spentSoFar: 0, paidCells: 108 }), /l0_bytes_per_token_missing/);
+	assert.throws(() => projectCost({ s0ChatRows: rows, bytesPerToken: 4, chat, spentSoFar: Number.NaN, paidCells: 108 }), /projection_over_start_gate:NaN/);
+	assert.throws(() => projectCost({ s0ChatRows: rows, bytesPerToken: 4, chat, spentSoFar: 3.39, paidCells: 108 }), /projection_over_start_gate/);
+});
+
+test("a live stage refuses a manifest without a finite priorExternalUsd before reading any key", async () => {
+	const runDir = tmp("jexp-prior-");
+	const { harnessDigest: current } = await import("../../lib/digest.mjs");
+	const base = { harnessDigest: current().digest, analyzerDigest: analyzerDigest(), ruleTableDigest: ruleTableDigest(), bundles: Object.fromEntries(Object.entries(BUNDLES).map(([name, dir]) => [name, bundleDigest(dir).digest])) };
+	for (const prior of [undefined, null, Number.NaN, -1, "0.02"]) {
+		writeFileSync(path.join(runDir, "manifest.json"), JSON.stringify({ ...base, priorExternalUsd: prior }));
+		await assert.rejects(runStageCli({ stage: "S1", runDir }), /invalid_manifest\.priorExternalUsd/);
+	}
+});
+
+test("the proxy checkpoint state limit equals the plugin's state cap", () => {
+	const core = readFileSync(path.join(ROOT, "plugin", "src", "core.ts"), "utf8");
+	assert.equal(Number(/export const MAX_STATE_BYTES = (\d+);/.exec(core)?.[1]), CHECKPOINT_STATE_LIMIT);
 });

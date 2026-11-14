@@ -3,7 +3,7 @@
 // A skip, todo or cancellation is not a pass, and the suite must execute at least
 // MIN_EXECUTED cases in total (the measured run's freeze point executed 88).
 import { execFileSync, spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -22,7 +22,7 @@ export function fileOk(status, counts) {
 	return status === 0 && counts.tests > 0 && counts.pass === counts.tests && counts.fail === 0 && counts.skipped === 0 && counts.todo === 0 && counts.cancelled === 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))) {
 	const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 	execFileSync(process.execPath, [path.join(root, "plugin", "scripts", "build.mjs"), "--check"], { stdio: "inherit" });
 	const dir = path.join(root, "tests", "unit");

@@ -24,6 +24,15 @@ import { PRIOR_EXTERNAL_USD } from "./prepare.mjs";
 export const J0_PHASE_CAP_USD = Object.freeze({ dev: 0.05, test: 0.3 });
 const CONCURRENCY = 4;
 
+/** The owner-wait receipt must come from a complete Linear scan. */
+export function requireCompleteW(runDir) {
+	const file = path.join(runDir, "w-intervals.json");
+	if (!existsSync(file)) throw new Error("w_intervals_missing");
+	const receipt = JSON.parse(readFileSync(file, "utf8"));
+	if (receipt.complete !== true) throw new Error("w_intervals_incomplete");
+	return receipt;
+}
+
 async function runPlan({ runDir, phase, requests, cases }) {
 	const catalog = assertFresh(JSON.parse(readFileSync(path.join(runDir, "catalog-latest.json"), "utf8"))).entries;
 	const journalPath = path.join(runDir, "ledger.jsonl");
@@ -80,10 +89,9 @@ if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToP
 			const dev = JSON.parse(readFileSync(path.join(runDir, "j0-dev.json"), "utf8"));
 			const frozen = { error_repeat: dev.selection.error_repeat.wordingId, goal_state: dev.selection.goal_state.wordingId };
 			const requests = plan(cases, "test", frozen);
+			// Checked before the paid run: a refusal after spending would leave rows that block the retry.
+			const w = estimateW(requireCompleteW(runDir).intervals);
 			const { rows, spentUsd, stopped } = await runPlan({ runDir, phase, requests, cases });
-			const wReceipt = JSON.parse(readFileSync(path.join(runDir, "w-intervals.json"), "utf8"));
-			if (wReceipt.complete !== true) throw new Error("w_intervals_incomplete");
-			const w = estimateW(wReceipt.intervals);
 			const report = j0Report(rows, cases, w);
 			writeFileSync(path.join(runDir, "j0-test.json"), JSON.stringify({ ...report, harnessDigest: harness, labelSheetDigest: sheet, frozenWording: frozen, requests: requests.length, spentUsd, stopped, labelStatus: "owner-sourced, blind second label agreed; owner-confirmation pending" }, null, 2));
 			process.stdout.write(`J0-test requests=${requests.length} spent=${spentUsd} stopped=${stopped}\n`);

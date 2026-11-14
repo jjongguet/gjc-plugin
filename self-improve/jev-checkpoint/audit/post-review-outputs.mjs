@@ -33,7 +33,7 @@ const out = {
 	receipts,
 	ensembleSensitivity: ensemble,
 	monteCarloA3: monteCarloWithDigest(),
-	x6DecidedOnly: { decided, correct: x6.labelCorrect, accuracy: decided > 0 ? x6.labelCorrect / decided : null, note: "all correct labels are decided ones; the frozen X6 counts abstains as wrong (7/21)" },
+	x6DecidedOnly: { decided, correct: x6.labelCorrect, accuracy: decided > 0 ? x6.labelCorrect / decided : null, note: `all correct labels are decided ones; the frozen X6 counts abstains as wrong (${x6.labelCorrect}/${x6.accuracyDenominator})` },
 };
 writeFileSync(path.join(runDir, "post-review-outputs.json"), JSON.stringify(out, null, 2));
 process.stdout.write(`receipts ${JSON.stringify(Object.fromEntries(Object.entries(receipts).map(([stage, v]) => [stage, `${v.valid}/${v.total}`])))} ensemble ${Object.entries(ensemble.variants).map(([name, v]) => `${name}=${v.accuracy.value?.toFixed(3)}`).join(" ")} mc=${out.monteCarloA3.digest.slice(0, 12)} x6decided=${out.x6DecidedOnly.correct}/${decided}\n`);

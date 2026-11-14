@@ -8,7 +8,7 @@
  * final: analyzeFinal over S1–S3 → analysis.json, arm-table.md, summary.json.
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { analyzeFinal, analyzeS1, POWER_GATE, ruleTableDigest } from "../lib/analyze.mjs";
@@ -59,20 +59,31 @@ export function armTable(records, w) {
 		for (const record of list) for (const [reason, count] of Object.entries(record.noDecision ?? {})) noDecision[reason] = (noDecision[reason] ?? 0) + count;
 		const falseStops = sum("falseStop");
 		const stall = w?.estimated ? `${falseStops}×${w.medianMinutes}=${falseStops * w.medianMinutes}m` : `${falseStops}×{15,60,240}m (가정값, W 미추정)`;
-		lines.push(`| ${stage} | ${split} | ${condition} | ${list.filter((r) => r.status === "ok").length}/${list.filter((r) => r.status === "failed").length}/${list.filter((r) => r.status === "not_run").length} | ${fmt(mean("success"), 3)} | ${fmt(mean("wasteTurns"), 2)} | ${fmt(mean("toolCalls"), 2)} | ${fmt(mean("tokens"), 0)} | ${fmt(sum("sessionUsd"), 5)} | ${fmt((mean("wallMs") ?? 0) / 1000, 1)} | ${fmt(sum("jevUsd"), 6)} | ${falseStops}/${sum("falseProceed")} | ${sum("labelCorrect")}/${sum("labelChecks")} | ${Object.entries(noDecision).map(([reason, count]) => `${reason}:${count}`).join(", ") || "—"} | ${stall} | ${list.filter((r) => r.imputed).length} |`);
+		lines.push(`| ${stage} | ${split} | ${condition} | ${list.filter((r) => r.status === "ok").length}/${list.filter((r) => r.status === "failed").length}/${list.filter((r) => r.status === "not_run").length} | ${fmt(mean("success"), 3)} | ${fmt(mean("wasteTurns"), 2)} | ${fmt(mean("toolCalls"), 2)} | ${fmt(mean("tokens"), 0)} | ${fmt(sum("sessionUsd"), 5)} | ${fmt(mean("wallMs") === null ? null : mean("wallMs") / 1000, 1)} | ${fmt(sum("jevUsd"), 6)} | ${falseStops}/${sum("falseProceed")} | ${sum("labelCorrect")}/${sum("labelChecks")} | ${Object.entries(noDecision).map(([reason, count]) => `${reason}:${count}`).join(", ") || "—"} | ${stall} | ${list.filter((r) => r.imputed).length} |`);
 	}
 	return lines.join("\n");
 }
 
 /**
- * Every planned (task, condition, repeat) of the given stages must have a record;
- * an interrupted stage that left neither stop.json nor not_run rows is still
- * incomplete and maps to early termination, never to a definitive verdict.
+ * When a stage finished, from recorded run data only: the stage summary's `at`,
+ * else the last ledger row the stage wrote (runs before `at` existed). A stage
+ * with neither is refused rather than dated from a mutable file time.
  */
-/** AC14/AC18: write validated per-stage receipts; throws when the validator rejects any. */
+export function stageFinishedAt(runDir, stage) {
+	const summaryPath = path.join(runDir, stage, "summary.json");
+	const at = existsSync(summaryPath) ? read(runDir, `${stage}/summary.json`).at : undefined;
+	if (typeof at === "string" && Number.isFinite(Date.parse(at))) return at;
+	const ledgerPath = path.join(runDir, "ledger.jsonl");
+	const times = existsSync(ledgerPath) ? readJsonl(ledgerPath).filter((row) => row.stage === stage && typeof row.at === "string").map((row) => row.at).sort() : [];
+	if (!times.length) throw new Error(`stage_time_unrecorded:${stage}`);
+	return times[times.length - 1];
+}
+
+/** AC14/AC18: write validated receipts for every stage that has records; throws when the validator rejects any. */
 export function writeStageReceipts(runDir, records) {
 	const manifestText = readFileSync(path.join(runDir, "manifest.json"), "utf8");
-	const stageTimes = Object.fromEntries(["S1", "S2", "S3"].map((stage) => [stage, read(runDir, `${stage}/summary.json`).at ?? statSync(path.join(runDir, stage, "results.jsonl")).mtime.toISOString()]));
+	const stages = ["S1", "S2", "S3"].filter((stage) => records.some((record) => record.stage === stage));
+	const stageTimes = Object.fromEntries(stages.map((stage) => [stage, stageFinishedAt(runDir, stage)]));
 	const out = stageReceipts({ records, manifest: JSON.parse(manifestText), readiness: read(runDir, "readiness.json"), stageTimes, manifestDigest: createHash("sha256").update(manifestText).digest("hex") });
 	mkdirSync(path.join(runDir, "receipts"), { recursive: true });
 	const validation = {};
@@ -84,6 +95,11 @@ export function writeStageReceipts(runDir, records) {
 	return validation;
 }
 
+/**
+ * Every planned (task, condition, repeat) of the given stages must have exactly one record;
+ * an interrupted stage that left neither stop.json nor not_run rows is still
+ * incomplete and maps to early termination, never to a definitive verdict.
+ */
 export function cohortCompleteness(records, stages) {
 	const counts = new Map();
 	for (const record of records) {

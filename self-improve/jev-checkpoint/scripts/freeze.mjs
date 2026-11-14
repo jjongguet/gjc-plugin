@@ -45,6 +45,31 @@ export function projectionPrice(observed, list, name) {
 	throw new Error(`catalog_price_missing:${name}`);
 }
 
+/**
+ * Start-gate projection from the S0 chat rows (per-cell request bytes and turns),
+ * the L0 bytes/token calibration and the catalog price. Refuses missing rows, a
+ * missing calibration, a non-finite result, or a projection over the start gate.
+ */
+export function projectCost({ s0ChatRows, bytesPerToken, chat, spentSoFar, paidCells }) {
+	const perCell = new Map();
+	for (const row of s0ChatRows) {
+		const entry = perCell.get(row.cellId) ?? { bytes: 0, turns: 0 };
+		entry.bytes += row.requestBytes;
+		entry.turns += 1;
+		perCell.set(row.cellId, entry);
+	}
+	if (perCell.size === 0) throw new Error("s0_chat_rows_missing");
+	if (!(bytesPerToken > 0)) throw new Error("l0_bytes_per_token_missing");
+	const inputPrice = projectionPrice(chat.observedInputPricePerToken, chat.listInputPricePerToken, "chat_input");
+	const outputPrice = projectionPrice(chat.observedOutputPricePerToken, chat.listOutputPricePerToken, "chat_output");
+	const cellCosts = [...perCell.values()].map((entry) => (entry.bytes / bytesPerToken) * inputPrice + entry.turns * OUTPUT_TOKENS_PER_TURN * outputPrice);
+	const meanCellUsd = cellCosts.reduce((sum, value) => sum + value, 0) / cellCosts.length;
+	const decisionWorstPerCell = MAX_DECISION_REQUESTS_PER_CELL * (4096 + 1024) * 0.126e-6;
+	const projectedUsd = spentSoFar + PROJECTION_MARGIN * paidCells * (meanCellUsd + decisionWorstPerCell);
+	if (!Number.isFinite(projectedUsd) || projectedUsd > START_GATE_USD) throw new Error(`projection_over_start_gate:${projectedUsd}`);
+	return { meanCellUsd, decisionWorstPerCell, projectedUsd, cellUsdCap: Math.max(0.06, 2 * (meanCellUsd + decisionWorstPerCell)) };
+}
+
 /** AC17: the implemented-estimator Monte Carlo, frozen with a digest so analyze-time reproduction can be checked. */
 export function monteCarloWithDigest() {
 	const result = monteCarloA3();
@@ -80,26 +105,9 @@ export function freeze(runDir) {
 	// Cost projection from the S0 request-size distribution and the L0 bytes→tokens calibration.
 	const chat = catalogReceipt.entries[CHAT_MODEL];
 	const s0Rows = readFileSync(path.join(runDir, "S0", "proxy-rows.jsonl"), "utf8").split("\n").filter(Boolean).map((line) => JSON.parse(line)).filter((row) => row.kind === "chat");
-	const perCell = new Map();
-	for (const row of s0Rows) {
-		const entry = perCell.get(row.cellId) ?? { bytes: 0, turns: 0 };
-		entry.bytes += row.requestBytes;
-		entry.turns += 1;
-		perCell.set(row.cellId, entry);
-	}
-	const bytesPerToken = l0.chat.bytesPerToken;
-	if (!(bytesPerToken > 0)) throw new Error("l0_bytes_per_token_missing");
-	const inputPrice = projectionPrice(chat.observedInputPricePerToken, chat.listInputPricePerToken, "chat_input");
-	const outputPrice = projectionPrice(chat.observedOutputPricePerToken, chat.listOutputPricePerToken, "chat_output");
-	if (perCell.size === 0) throw new Error("s0_chat_rows_missing");
-	const cellCosts = [...perCell.values()].map((entry) => (entry.bytes / bytesPerToken) * inputPrice + entry.turns * OUTPUT_TOKENS_PER_TURN * outputPrice);
-	const meanCellUsd = cellCosts.reduce((sum, value) => sum + value, 0) / cellCosts.length;
-	const decisionWorstPerCell = MAX_DECISION_REQUESTS_PER_CELL * (4096 + 1024) * 0.126e-6;
 	const paidCells = ["S1", "S2", "S3"].reduce((sum, stage) => sum + stagePlan(stage).length, 0);
 	const spentSoFar = priorSpend(path.join(runDir, "ledger.jsonl")) + PRIOR_EXTERNAL_USD;
-	const projectedUsd = spentSoFar + PROJECTION_MARGIN * paidCells * (meanCellUsd + decisionWorstPerCell);
-	if (!Number.isFinite(projectedUsd) || projectedUsd > START_GATE_USD) throw new Error(`projection_over_start_gate:${projectedUsd}`);
-	const cellUsdCap = Math.max(0.06, 2 * (meanCellUsd + decisionWorstPerCell));
+	const { meanCellUsd, decisionWorstPerCell, projectedUsd, cellUsdCap } = projectCost({ s0ChatRows: s0Rows, bytesPerToken: l0.chat.bytesPerToken, chat, spentSoFar, paidCells });
 
 	const wording = { error_repeat: j0Dev.selection.error_repeat.wordingId, goal_state: j0Dev.selection.goal_state.wordingId };
 	const questions = {
