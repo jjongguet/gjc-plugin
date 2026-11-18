@@ -53,12 +53,28 @@ async function suite(root: string) {
 import { appendFileSync } from "node:fs";
 const args = process.argv.slice(2);
 appendFileSync(process.env.FAKE_LOG, JSON.stringify(args) + "\n");
-if (args[0] !== "--account" || !/^u?(0|[1-9][0-9]{0,9})$/.test(args[1]) || args[2] !== "memory") process.exit(90);
+const isList = args[0] === "account" && args[1] === "list" && args.length === 2;
+if (!isList && (args[0] !== "--account" || !/^u?(0|[1-9][0-9]{0,9})$/.test(args[1]) || args[2] !== "memory")) process.exit(90);
 if (args[1] === "u999") { process.stderr.write("SYNTHETIC_PRIVATE_DIAGNOSTIC"); process.exit(2); }
 const route = args[1];
 const memoryRoot = "/fixture-memory/" + route;
 const row = (excerpt, extra = {}) => ({path: memoryRoot + "/USER.md", title:"SYNTHETIC_PRIVATE_TITLE", headings:["SYNTHETIC_PRIVATE_HEADING"], excerpt, line:1, lineEnd:8, score:1, chunkId:"a".repeat(64), ...extra});
-if (args[3] === "path") {
+if (isList) {
+ const mode = process.env.FAKE_ACCOUNT_MODE;
+ const active = "* u42  SYNTHETIC_PRIVATE_ACCOUNT@example.invalid  ";
+ const other = "  u43  Local Account  ";
+ const tail = "  profiles: Profile a";
+ if (mode === "signed-out") process.stdout.write(active + "signed out" + tail + ", Profile b\n  session: local\n" + other + "signed in" + tail + "\n");
+ else if (mode === "other-signed-out") process.stdout.write(active + "signed in" + tail + "\n" + other + "signed out" + tail + "\n");
+ else if (mode === "signed-in") process.stdout.write(active + "signed in" + tail + "\n");
+ else if (mode === "duplicate") process.stdout.write(active + "signed out" + tail + "\n" + active + "signed in" + tail + "\n");
+ else if (mode === "garbage") process.stdout.write("SYNTHETIC_UNKNOWN_ACCOUNT_FORMAT\n");
+ else if (mode === "empty") process.stdout.write("");
+ else if (mode === "over") process.stdout.write("x".repeat(16385));
+ else if (mode === "stderr") {process.stderr.write("z".repeat(4097)); process.stdout.write(active + "signed out" + tail + "\n");}
+ else if (mode === "nonzero") {process.stderr.write("SYNTHETIC_PRIVATE_DIAGNOSTIC"); process.exit(1);}
+ else process.stdout.write(active + "signed in" + tail + "\n");
+} else if (args[3] === "path") {
  const mode = process.env.FAKE_ROOT_MODE;
  if (mode === "nonzero") {process.stderr.write("SYNTHETIC_PRIVATE_DIAGNOSTIC"); process.exit(1);}
  if (mode === "stall") {Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0);}
@@ -83,6 +99,7 @@ if (args[3] === "path") {
  else if (query === "blank") process.stdout.write("");
  else if (query === "utf8") process.stdout.write(Buffer.from([255]));
  else if (query === "offroot") out([row("Safe context", {path:"/other/USER.md"})]);
+ else if (query === "auth-words") out([row("My account shows signed out in the CLI.")]);
  else if (query === "nonzero") {process.stderr.write("SYNTHETIC_PRIVATE_DIAGNOSTIC"); process.exit(2);}
  else if (query === "stderr-exact") {process.stderr.write("z".repeat(4096)); out([]);}
  else if (query === "stderr-over") {process.stderr.write("z".repeat(4097)); out([]);}
@@ -270,9 +287,57 @@ if (args[3] === "path") {
 		} finally { chmodSync(fakePath, 0o700); }
 	});
 	await check("root failure and invalid root/UTF8 prevent search", async () => {
-		for (const [mode, reason] of [["nonzero", "cli_nonzero"], ["invalid", "invalid_root"], ["utf8", "invalid_root"]]) {
+		for (const [mode, reason, spawns] of [["nonzero", "cli_nonzero", 2], ["invalid", "invalid_root", 1], ["utf8", "invalid_root", 1]]) {
 			const before = calls().length; process.env.FAKE_ROOT_MODE = mode;
-			try { noPayload(await invoke(), reason); assert.equal(calls().length - before, 1); } finally { delete process.env.FAKE_ROOT_MODE; }
+			try {
+				noPayload(await invoke(), reason); assert.equal(calls().length - before, spawns);
+				// A nonzero memory exit is investigated once with the CLI's own account list.
+				if (spawns === 2) assert.deepEqual(calls().at(-1), ["account", "list"]);
+			} finally { delete process.env.FAKE_ROOT_MODE; }
+		}
+	});
+	await check("same bound account signed out yields unavailable guidance without leaking the table", async () => {
+		process.env.FAKE_ACCOUNT_MODE = "signed-out"; process.env.FAKE_ROOT_MODE = "nonzero";
+		try {
+			const before = calls().length;
+			const result = await invoke();
+			assert.equal(result.status, "unavailable"); assert.equal(result.reason, "signed_out");
+			assert.equal(result.diagnosticStage, "root"); assert.equal(result.retrievedAt, null);
+			assert.deepEqual(result.briefing, []); assert.deepEqual(result.counts, { matches: null, returned: 0, withheld: null, duplicates: null });
+			assert.equal(result.guidance?.length, 2);
+			assert.match(result.guidance![0], /`aside login`/); assert.match(result.guidance![1], /No automatic sign-in/);
+			assert.deepEqual(calls().slice(before).map(args => args.slice(0, 2)), [["--account", "u42"], ["account", "list"]]);
+			// Only the status column is evidence: the synthetic label, email, profile, continuation
+			// line and other account never reach the response.
+			assert.doesNotMatch(JSON.stringify(result), /SYNTHETIC_PRIVATE|example\.invalid|Profile|session:|u4[23]/);
+			assert.ok(!result.warnings.includes("content_withheld")); assert.equal(result.warnings.length, 7);
+			// A successful memory call stays ordinary retrieval while the same table says signed out,
+			// and memory prose that mentions the words is never auth evidence.
+			delete process.env.FAKE_ROOT_MODE;
+			const ok = await invoke("auth-words");
+			assert.equal(ok.status, "ok"); assert.equal(ok.guidance, undefined);
+			assert.deepEqual(ok.briefing[0].snippets, ["My account shows signed out in the CLI."]);
+			assert.deepEqual(calls().slice(-2).map(args => args.slice(0, 2)), [["--account", "u42"], ["--account", "u42"]]);
+		} finally { delete process.env.FAKE_ACCOUNT_MODE; delete process.env.FAKE_ROOT_MODE; }
+	});
+	await check("search nonzero and configured numeric account match the bound signed-out entry", async () => {
+		process.env.FAKE_ACCOUNT_MODE = "signed-out";
+		try {
+			const result = await asideMemory({ query: "nonzero" }, { env: { ...process.env, GJC_ASIDE_MEMORY_ACCOUNT: "42" } });
+			assert.equal(result.status, "unavailable"); assert.equal(result.reason, "signed_out");
+			assert.equal(result.diagnosticStage, "search"); assert.equal(result.accountBinding, "configuration");
+			assert.equal(result.guidance?.length, 2);
+		} finally { delete process.env.FAKE_ACCOUNT_MODE; }
+	});
+	await check("signed-in, other-account, ambiguous and failed account probes stay cli_nonzero", async () => {
+		for (const mode of ["signed-in", "other-signed-out", "duplicate", "garbage", "empty", "over", "stderr", "nonzero", undefined]) {
+			if (mode) process.env.FAKE_ACCOUNT_MODE = mode; else delete process.env.FAKE_ACCOUNT_MODE;
+			try {
+				const result = await invoke("nonzero");
+				noPayload(result, "cli_nonzero"); assert.equal(result.status, "error"); assert.equal(result.guidance, undefined);
+				assert.equal(result.diagnosticStage, "search"); assert.equal(calls().at(-1)[0], "account");
+				assert.doesNotMatch(JSON.stringify(result), /SYNTHETIC_PRIVATE|example\.invalid|Profile|Local Account/);
+			} finally { delete process.env.FAKE_ACCOUNT_MODE; }
 		}
 	});
 	await check("native process empty/withheld/partial and parse failures distinct", async () => {
@@ -373,6 +438,30 @@ if (args[3] === "path") {
 			assert.doesNotMatch(JSON.stringify(result), /SYNTHETIC_PRIVATE/);
 		}
 		assert.equal((await memoryChild([], 8, 100, { spawn: (() => { throw Error("private"); }) as any })).reason, "spawn_failed");
+	});
+	await check("account probe errors and cleanup uncertainty never become signed_out", async () => {
+		const run = async (probe: (child: any) => void, killCloses = true) => {
+			const children: any[] = [];
+			const result = await asideMemory({ query: "safe", account: "u42" }, {
+				now: () => (children.length === 0 ? 0 : 29950),
+				spawn: (() => {
+					const child = children.length === 0 ? childFixture(c => c.emit("close", 2), true) : childFixture(probe, killCloses);
+					children.push(child); return child;
+				}) as any,
+			});
+			return { result, children };
+		};
+		const missing = await run(child => child.emit("error", Object.assign(Error("SYNTHETIC_PRIVATE"), { code: "ENOENT" })));
+		noPayload(missing.result, "cli_nonzero"); assert.equal(missing.result.diagnosticStage, "root");
+		assert.equal(missing.result.guidance, undefined); assert.ok(!missing.result.warnings.includes("cli_cleanup_unconfirmed"));
+		assert.equal(missing.children.length, 2); assert.doesNotMatch(JSON.stringify(missing.result), /SYNTHETIC_PRIVATE/);
+		const stalled = await run(() => {}, false);
+		noPayload(stalled.result, "cli_nonzero"); assert.ok(stalled.result.warnings.includes("cli_cleanup_unconfirmed"));
+		assert.equal(stalled.result.guidance, undefined);
+		// A memory-side cli_not_found is not investigated at all.
+		let spawns = 0;
+		const absent = await asideMemory({ query: "safe", account: "u42" }, { spawn: (() => { spawns++; return childFixture(c => c.emit("error", Object.assign(Error("SYNTHETIC_PRIVATE"), { code: "ENOENT" }))); }) as any });
+		noPayload(absent, "cli_not_found"); assert.equal(absent.status, "unavailable"); assert.equal(spawns, 1);
 	});
 	await check("shared monotonic budget stops before search after exhausted root time", async () => {
 		const before = calls().length; let tick = 0;
