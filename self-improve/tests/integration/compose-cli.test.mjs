@@ -90,6 +90,11 @@ function makeRepo({ heldoutSentinel = false } = {}) {
     )}\n`,
   );
   write(join(repo, "self-improve", "ledger.jsonl"), "");
+  // This fixture exercises the CLI wiring, not the cost gate: its synthetic probes
+  // emit no score delta, so a hosted runner's wall-clock jitter would otherwise make
+  // `cost_rule` a hard reason and abstain the composition. The cost gate keeps its
+  // real thresholds here; the dedicated compose suite asserts it with injected costs.
+  write(join(repo, "self-improve", "rrsi.json"), `${JSON.stringify({ cost: { wallMsBytesIncreaseRatio: 1000 } }, null, 2)}\n`);
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.name", "fixture"]);
   git(repo, ["config", "user.email", "fixture@example.invalid"]);
@@ -214,6 +219,20 @@ test("compose CLI refuses invalid flags, counts and caller-supplied provenance b
     assert.match(oneCandidate.stderr, /compose_candidate_count_out_of_range/);
     assert.match(oneCandidate.stderr, /count=1 \(2\.\.4\)/);
     assert.equal(JSON.parse(oneCandidate.stdout).status, "refused");
+
+    const badRatio = runCli([
+      "compose",
+      "--proposals",
+      writeManifest(root, composeRefusal(root, { candidates: [proposalA, proposalB] })),
+      "--repo",
+      repo,
+      "--json",
+      "--cost-ratio",
+      "0",
+    ]);
+    assert.equal(badRatio.status, 2);
+    assert.match(badRatio.stderr, /compose_cost_ratio_invalid/);
+    assert.equal(JSON.parse(badRatio.stdout).status, "refused");
 
     const fiveCandidates = runCli([
       "compose",
@@ -396,13 +415,17 @@ test("compose CLI probes each candidate and the composed patch through the real 
       hypothesis: "compose the two independent fixture candidates",
       candidates: ["a.json", "b.json"],
     });
-    const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json"], {
+    const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json", "--cost-ratio", "1000"], {
       env: { ...process.env, PATH: `${tools.bin}:${process.env.PATH ?? ""}` },
     });
     const refusal = (() => {
       try {
         const parsed = JSON.parse(proc.stdout);
-        return `status=${parsed.status} reason=${parsed.reason ?? "-"} detail=${String(parsed.detail ?? "-").slice(0, 200)}`;
+        const rows = Array.isArray(parsed.candidates)
+          ? parsed.candidates.map((candidate) => `${candidate.id}:${candidate.verdict}/${(candidate.hardReasons ?? []).join("+") || "-"}/${(candidate.reasons ?? []).join("+") || "-"}`).join(",")
+          : "";
+        const excluded = Array.isArray(parsed.excluded) ? parsed.excluded.map((row) => `${row.id}:${(row.reasons ?? []).join("+")}`).join(",") : "";
+        return `status=${parsed.status} reason=${parsed.reason ?? "-"} refused=${parsed.refused ?? "-"} candidates=${rows} excluded=${excluded} detail=${String(parsed.detail ?? "-").slice(0, 160)}`;
       } catch {
         return `stdout=${String(proc.stdout).slice(0, 200)}`;
       }

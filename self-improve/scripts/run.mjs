@@ -78,7 +78,7 @@ commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
-  compose --proposals <path> [--repo <path>] [--objective <id>] [--domain <id>] [--campaign <id>]
+  compose [--cost-ratio <n>] --proposals <path> [--repo <path>] [--objective <id>] [--domain <id>] [--campaign <id>]
           [--run-root <path>] [--ledger <path>] [--dry-run] [--install] [--reset-budget] [--json]
   loop    [--repo <path>] [--store <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
           [--candidate-file <path>] [--max-lag <n>]
@@ -98,6 +98,7 @@ commands:
 `;
 
 const VALUED_FLAGS = new Set([
+  "--cost-ratio",
   "--ledger",
   "--store",
   "--objective",
@@ -385,10 +386,19 @@ async function runComposeCommand(options) {
     if (!composed.ok) {
       return fail("refused", composed.reason ?? "compose_refused", boundedComposeRefusal(composed), 2);
     }
+    let costConfig;
+    if (options["cost-ratio"] !== undefined) {
+      const ratio = Number(options["cost-ratio"]);
+      if (!Number.isFinite(ratio) || ratio <= 0) {
+        return fail("refused", "compose_cost_ratio_invalid", String(options["cost-ratio"]).slice(0, 40), 2);
+      }
+      costConfig = { wallMsBytesIncreaseRatio: ratio };
+    }
     const result = await runComposeCycle({
       repoRoot,
       adapter,
       candidates,
+      ...(costConfig ? { costConfig } : {}),
       composed: { proposal: composed.proposal, composition: composed.composition },
       campaignId,
       runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
