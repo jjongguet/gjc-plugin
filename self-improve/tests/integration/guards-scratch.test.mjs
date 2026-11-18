@@ -46,7 +46,7 @@ test("scratch-copy guards run green and leave the live harness digest unchanged"
     // is surfaced. This adds diagnosis only: the assertions below are unchanged.
     for (const failure of failures) {
       try {
-        process.stderr.write(`guard ${failure.id} log tail:\n${readFileSync(failure.logPath, "utf8").slice(-4000)}\n`);
+        process.stderr.write(`guard ${failure.id} log tail:\n${readFileSync(failure.logPath, "utf8").slice(-20000)}\n`);
       } catch {
         process.stderr.write(`guard ${failure.id} log unreadable at ${failure.logPath}\n`);
       }
