@@ -15,6 +15,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { FAMILIES, swappedOrder } from "./questions.mjs";
+import { combineVoters, combineVotersVoterLevel } from "./ensemble.mjs";
 
 export const J0_TEST_MODELS = Object.freeze(["sionic-ai/jev-omni", "sionic-ai/decider-4b", "typesafe/jev-1.14"]);
 export const J0_DEV_MODELS = Object.freeze(["sionic-ai/jev-omni", "sionic-ai/decider-4b"]);
@@ -285,6 +286,49 @@ export function stallMinutes(falseStops, w) {
 	return Object.fromEntries(w.sensitivityMinutes.map((minutes) => [`W=${minutes}`, falseStops * minutes]));
 }
 
+/**
+ * Ensemble rule sensitivity (AC5): the frozen trial ensemble rule and the ADR
+ * alternatives evaluated on the same J0-test responses. Unit = (case, repeat),
+ * canonical order, trial families only (the destructive class is the jev_check
+ * shape and is not an ensemble consumer). An abstain counts as wrong, as in X6.
+ */
+export function ensembleSensitivity(testRows, cases) {
+	const caseById = new Map(cases.map((entry) => [entry.id, entry]));
+	const units = new Map();
+	for (const row of testRows) {
+		if (row.order !== "canonical" || caseById.get(row.caseId)?.family === "destructive") continue;
+		const key = `${row.caseId}|${row.repeat}`;
+		if (!units.has(key)) units.set(key, {});
+		units.get(key)[row.model] = row;
+	}
+	const voter = (row) => ({ status: row.status, choice: row.choice, confidence: row.confidence, reason: row.reason });
+	const variants = {
+		primary_override: (primary, aux) => combineVoters({ primary, aux, rule: "primary_override" }),
+		agreement_only: (primary, aux) => combineVoters({ primary, aux, rule: "agreement_only" }),
+		single_primary: (primary, aux) => combineVoters({ primary, aux, rule: "single_primary" }),
+		voter_level_unnormalized: (primary, aux) => combineVotersVoterLevel({ primary, aux, rule: "primary_override" }),
+	};
+	const out = {};
+	for (const [name, combine] of Object.entries(variants)) {
+		let total = 0;
+		let correct = 0;
+		let abstain = 0;
+		const branches = {};
+		for (const [key, group] of units) {
+			const omni = group["sionic-ai/jev-omni"];
+			const decider = group["sionic-ai/decider-4b"];
+			if (!omni || !decider) continue;
+			total += 1;
+			const decision = combine(voter(omni), voter(decider));
+			branches[decision.branch] = (branches[decision.branch] ?? 0) + 1;
+			if (decision.branch === "abstain") abstain += 1;
+			else if (decision.label === caseById.get(key.split("|")[0]).label) correct += 1;
+		}
+		out[name] = { units: total, accuracy: ratio(correct, total), abstainRate: ratio(abstain, total), branches };
+	}
+	return { frozenRule: "primary_override", unit: "case × repeat, canonical order, trial families; abstain counts as wrong", variants: out };
+}
+
 /** Full J0-test report from rows. */
 export function j0Report(testRows, cases, w) {
 	const caseById = new Map(cases.map((entry) => [entry.id, entry]));
@@ -299,5 +343,5 @@ export function j0Report(testRows, cases, w) {
 		}
 		models[model] = { all, byClass, ...orderBias(rows, caseById) };
 	}
-	return { schema: "jexp.j0_test.v1", models, agreement: agreement(testRows, caseById), w, unit: "response = case × repeat × order; stall falseStops are averaged per destructive test set pass (÷ repeats ÷ orders)" };
+	return { schema: "jexp.j0_test.v1", models, agreement: agreement(testRows, caseById), ensembleSensitivity: ensembleSensitivity(testRows, cases), w, unit: "response = case × repeat × order; stall falseStops are averaged per destructive test set pass (÷ repeats ÷ orders)" };
 }

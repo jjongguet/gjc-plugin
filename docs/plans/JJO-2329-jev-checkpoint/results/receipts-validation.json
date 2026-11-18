@@ -1,0 +1,27 @@
+{
+  "schema": "jexp.receipts_validation.v1",
+  "validator": "gjc.quality_trial.v2",
+  "stages": {
+    "S1": {
+      "total": 54,
+      "valid": 54,
+      "identicalDuplicates": 0,
+      "batches": 3,
+      "skippedNotRun": 0
+    },
+    "S2": {
+      "total": 18,
+      "valid": 18,
+      "identicalDuplicates": 0,
+      "batches": 1,
+      "skippedNotRun": 0
+    },
+    "S3": {
+      "total": 36,
+      "valid": 36,
+      "identicalDuplicates": 0,
+      "batches": 2,
+      "skippedNotRun": 0
+    }
+  }
+}

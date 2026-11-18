@@ -55,6 +55,10 @@ export function createLedger({ hardStopUsd = HARD_STOP_USD, priorSpentUsd = 0, c
 		snapshot,
 		get stopped() { return stopped; },
 		configureCell(cellId, { usdCap = Infinity, turnCap = Infinity } = {}) {
+			// NaN would disable the `>` cap checks below; only a positive number (or an explicit Infinity) is a cap.
+			for (const [name, value] of [["usdCap", usdCap], ["turnCap", turnCap]]) {
+				if (typeof value !== "number" || Number.isNaN(value) || value <= 0) throw new Error(`invalid_${name}`);
+			}
 			const entry = cell(cellId);
 			entry.usdCap = usdCap;
 			entry.turnCap = turnCap;

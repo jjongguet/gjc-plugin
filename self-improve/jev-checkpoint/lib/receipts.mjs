@@ -271,3 +271,52 @@ export function validateAll(receipts) {
     trials,
   };
 }
+
+/**
+ * Evidence digest for a receipt: the scorer's digest when the cell was scored. A
+ * cell that failed before scoring (setup, isolation, scorer) attests its failure
+ * record instead, so its receipt is an honest `failed` outcome rather than a
+ * fabricated oracle result. An `ok` cell must have been scored.
+ */
+export function failureAwareEvidence(cell) {
+  if (DIGEST.test(cell.oracleDigest ?? "")) return cell.oracleDigest;
+  if (cell.status === "failed") {
+    return sha256(canonicalJson({ attestation: "failed_before_scoring", cellId: cell.cellId ?? null, stage: cell.stage, taskId: cell.taskId, condition: cell.condition, repeat: cell.repeat, errorClass: cell.errorClass ?? null }));
+  }
+  return cell.oracleDigest;
+}
+
+/**
+ * AC14/AC18 producer: one `gjc.quality_trial.v2` receipt per executed cell of
+ * each paid stage, re-validated as a batch. Throws unless every receipt is
+ * valid and no execution key conflicts, so a run can never report a cohort the
+ * canonical validator rejects.
+ */
+export function stageReceipts({ records, manifest, readiness, stageTimes, manifestDigest }) {
+  const context = {
+    producer: { id: "jexp-runner", kind: "harness" },
+    executor: { id: "gjc-cell-session" },
+    harness: { sourceDigest: manifest.harnessDigest, harnessDigest: manifest.harnessDigest, manifestDigest, version: manifest.manifestId },
+    oracle: { kind: "arm-blind-oracle", verifierId: "jexp-score-cell", evidenceDigestFor: failureAwareEvidence },
+    createdAt: (cell) => stageTimes[cell.stage],
+    sourceHead: readiness.originMain,
+  };
+  const out = {};
+  for (const stage of STAGES.filter((name) => records.some((record) => record.stage === name))) {
+    const { receipts, skipped } = buildReceipts(records.filter((record) => record.stage === stage), context);
+    // Every treatment condition maps to arm B1, so each (condition) is its own
+    // B0/B1 batch: two treatments of one task never share an execution key.
+    // Failures and conflicts throw, so only the admitted counts are reported.
+    const validation = { total: 0, valid: 0, identicalDuplicates: 0, batches: 0 };
+    for (const condition of [...new Set(receipts.map((receipt) => receipt.condition))]) {
+      const checked = validateAll(receipts.filter((receipt) => receipt.condition === condition));
+      if (!checked.ok) fail(`stage ${stage} ${condition} receipts invalid: failures=${checked.failures.length} conflicts=${checked.conflicts.length}`);
+      validation.total += checked.total;
+      validation.valid += checked.valid;
+      validation.identicalDuplicates += checked.duplicates;
+      validation.batches += 1;
+    }
+    out[stage] = { receipts, skipped, validation };
+  }
+  return out;
+}

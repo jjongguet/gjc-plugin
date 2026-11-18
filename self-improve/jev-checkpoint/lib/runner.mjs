@@ -5,7 +5,8 @@
  * on `stop.json` it stops scheduling, kills every running cell's process group,
  * marks in-flight cells `failed/global_stop` and leaves the rest `not_run`.
  */
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import os from "node:os";
@@ -17,6 +18,7 @@ import { parseTranscript } from "./transcript.mjs";
 import { cellMetrics } from "./metrics.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+const execFileAsync = promisify(execFile);
 export const STOP_POLL_MS = 1000;
 
 const successOf = (score) => (score === 2 ? 1 : score === 1 ? 0.5 : 0);
@@ -49,7 +51,7 @@ export function scorerProfile({ taskDir, mountDir, transcriptPath, harnessRoot =
 	return buildSeatbeltProfile({ mountDir: realpathSync(mountDir), allowNetworkHosts: [], readRoots, protectedReadRoots });
 }
 
-export function scoreCell({ taskDir: rawTaskDir, workDir: rawWorkDir, transcriptPath: rawTranscript, auditPath: rawAudit, harnessRoot: rawHarness = HARNESS_ROOT }) {
+export async function scoreCell({ taskDir: rawTaskDir, workDir: rawWorkDir, transcriptPath: rawTranscript, auditPath: rawAudit, harnessRoot: rawHarness = HARNESS_ROOT }) {
 	if (!existsSync(SEATBELT_BIN)) throw new Error("scorer_sandbox_unavailable");
 	// Seatbelt matches canonical paths only (/tmp is a symlink to /private/tmp).
 	const [taskDir, workDir, transcriptPath, auditPath, harnessRoot] = [rawTaskDir, rawWorkDir, rawTranscript, rawAudit, rawHarness].map((entry) => realpathSync(entry));
@@ -61,8 +63,9 @@ export function scoreCell({ taskDir: rawTaskDir, workDir: rawWorkDir, transcript
 	// Homebrew git first: /usr/bin/git is an xcrun shim that needs developer-tool paths the profile does not grant.
 	const env = { PATH: "/opt/homebrew/bin:/usr/bin:/bin", HOME: path.join(mountDir, "home"), TMPDIR: scratch, NO_COLOR: "1", GIT_CONFIG_NOSYSTEM: "1" };
 	const script = path.join(harnessRoot, "scripts", "score-cell.mjs");
-	const out = execFileSync(SEATBELT_BIN, ["-f", profilePath, process.execPath, script, taskDir, workDir, transcriptPath, auditPath], { encoding: "utf8", timeout: 120000, stdio: ["ignore", "pipe", "pipe"], env, cwd: mountDir });
-	return JSON.parse(out);
+	// Asynchronous so the proxy and the stop watchdog keep running while a cell is scored.
+	const { stdout } = await execFileAsync(SEATBELT_BIN, ["-f", profilePath, process.execPath, script, taskDir, workDir, transcriptPath, auditPath], { encoding: "utf8", timeout: 120000, env, cwd: mountDir, maxBuffer: 16 * 1024 * 1024 });
+	return JSON.parse(stdout);
 }
 
 export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot, fixturesDir, gjcBin, bundlesFor, userHome, laneRoot, concurrency = 3, frozen = null, cellUsdCap = 0.06, onCell = () => {} }) {
@@ -123,7 +126,7 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 			const capped = cellRows.some((row) => row.kind === "chat" && row.status === "refused" && row.error === "cell_cap");
 			let parsed = null;
 			try { parsed = parseTranscript(session.stdout); } catch (error) { record.transcriptError = error.message; }
-			const scored = scoreCell({ taskDir, workDir: cell.work, transcriptPath, auditPath: cell.audit });
+			const scored = await scoreCell({ taskDir, workDir: cell.work, transcriptPath, auditPath: cell.audit });
 			record.score = scored.score;
 			record.success = successOf(scored.score);
 			record.checks = scored.checks;
