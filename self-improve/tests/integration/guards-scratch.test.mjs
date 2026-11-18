@@ -46,7 +46,18 @@ test("scratch-copy guards run green and leave the live harness digest unchanged"
     // is surfaced. This adds diagnosis only: the assertions below are unchanged.
     for (const failure of failures) {
       try {
-        process.stderr.write(`guard ${failure.id} log tail:\n${readFileSync(failure.logPath, "utf8").slice(-20000)}\n`);
+        const log = readFileSync(failure.logPath, "utf8");
+        // A long nested run pushes its failure above any tail window: extract the
+        // failing TAP subtests (with their assertion text) first, then a short tail.
+        const rows = log.split("\n");
+        const picked = [];
+        for (let index = 0; index < rows.length; index += 1) {
+          if (/^\s*(#\s*)?(\\?#\s*)?not ok \d+ - /.test(rows[index])) {
+            picked.push(...rows.slice(Math.max(0, index - 1), index + 14));
+          }
+        }
+        const excerpt = picked.length > 0 ? picked.join("\n") : log.slice(-4000);
+        process.stderr.write(`guard ${failure.id} failing subtests:\n${excerpt.slice(0, 12000)}\n`);
       } catch {
         process.stderr.write(`guard ${failure.id} log unreadable at ${failure.logPath}\n`);
       }
