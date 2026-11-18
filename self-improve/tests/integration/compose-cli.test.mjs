@@ -407,7 +407,11 @@ test("compose CLI probes each candidate and the composed patch through the real 
     const refusal = (() => {
       try {
         const parsed = JSON.parse(proc.stdout);
-        return `status=${parsed.status} reason=${parsed.reason ?? "-"} detail=${String(parsed.detail ?? "-").slice(0, 200)}`;
+        const rows = Array.isArray(parsed.candidates)
+          ? parsed.candidates.map((candidate) => `${candidate.id}:${candidate.verdict}/${(candidate.hardReasons ?? []).join("+") || "-"}/${(candidate.reasons ?? []).join("+") || "-"}`).join(",")
+          : "";
+        const excluded = Array.isArray(parsed.excluded) ? parsed.excluded.map((row) => `${row.id}:${(row.reasons ?? []).join("+")}`).join(",") : "";
+        return `status=${parsed.status} reason=${parsed.reason ?? "-"} refused=${parsed.refused ?? "-"} candidates=${rows} excluded=${excluded} detail=${String(parsed.detail ?? "-").slice(0, 160)}`;
       } catch {
         return `stdout=${String(proc.stdout).slice(0, 200)}`;
       }
