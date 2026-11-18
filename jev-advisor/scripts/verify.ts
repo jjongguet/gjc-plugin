@@ -1493,6 +1493,47 @@ async function runSuite(root: string) {
 		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("artifacts/evidence/report.json"), authority: scopedPath }).block, false, "the requested evidence write stays allowed");
 	});
 
+	await check("goal alignment core: an explicit write assignment grants only its named targets", () => {
+		const digest = (path: string) => alignmentCore.digestTarget(path);
+		// A supervisory entry that keeps the task read-only but names the exact file to write:
+		// the named target is admitted, every other target stays blocked.
+		const delegation = alignmentCore.collectAuthority([
+			alignmentUser("entry-delegated-write", "This is read-only; do not modify anything. Modify `docs/agent-rules.md` only."),
+		]);
+		assert.equal(delegation.constraints.some((constraint: any) => constraint.kind === "read_only"), true, "the task-wide read-only constraint survives");
+		const named = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("docs/agent-rules.md"), authority: delegation });
+		assert.deepEqual([named.ruleId, named.verdict, named.coverage, named.stage2Admissible, named.block], ["aligned_write_within_requested_scope", "aligned", "evaluated", true, false]);
+		const unnamed = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("src/app.ts"), authority: delegation });
+		assert.deepEqual([unnamed.ruleId, unnamed.verdict, unnamed.block], ["drift_write_vs_readonly", "drift", true]);
+
+		// A named do-not-touch path outranks the write verb even when both appear once.
+		const guarded = alignmentCore.collectAuthority([
+			alignmentUser("entry-write-with-forbidden", "Update `docs/guide.md` and do not touch src/prod.ts"),
+		]);
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("docs/guide.md"), authority: guarded }).block, false);
+		assert.deepEqual(
+			[alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("src/prod.ts"), authority: guarded }).ruleId,
+			 alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("src/prod.ts"), authority: guarded }).block],
+			["drift_write_forbidden_target", true],
+		);
+
+		// A later stop wins over an earlier grant.
+		const stopped = alignmentCore.collectAuthority([
+			alignmentUser("entry-grant", "Modify `docs/agent-rules.md`."),
+			alignmentUser("entry-stop", "중지해줘"),
+		]);
+		assert.deepEqual(
+			[alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("docs/agent-rules.md"), authority: stopped }).ruleId,
+			 alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("docs/agent-rules.md"), authority: stopped }).block],
+			["drift_write_after_stop", true],
+		);
+
+		// No write verb, no grant: a bare read-only entry cannot be turned into a write scope.
+		const plain = alignmentCore.collectAuthority([alignmentUser("entry-plain", "This is read-only; do not modify anything.")]);
+		assert.deepEqual(plain.writeTargets, []);
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: digest("docs/agent-rules.md"), authority: plain }).ruleId, "drift_write_vs_readonly");
+	});
+
 	await check("goal alignment core: typed transition chain, mismatch, baseline and missing criterion", () => {
 		const authority = alignmentCore.collectAuthority([alignmentUser("entry-chain", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")]);
 		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });

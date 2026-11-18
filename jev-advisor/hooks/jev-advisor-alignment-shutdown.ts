@@ -125,6 +125,14 @@ const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]
  * ("the code", "the repo", "any files") keeps the read-only directive. */
 const SCOPED_NO_WRITE = /\bno\s+(?:edits?|changes?|writes?)\s+(?:to|on|in|into|outside|within|against)\s+(?:(?:the|this|that|any|your|my|whole|entire|all|of)\s+){0,3}([^\s;,]{1,200})/gi;
 const READ_ONLY_SELF = /^(?:anything|any\s+files?|any\s+code|code(?:base)?|source|repo(?:sitory)?|files?|tree|workspace|project)$/i;
+
+/**
+ * An explicit write assignment for named targets ("modify `docs/x.md`", "고쳐라").
+ * A supervisory message that also says "no edits" must not turn a delegated write
+ * into drift when it names the exact target the writer is asked to change; the
+ * grant is per named target and never a blanket release.
+ */
+const WRITE_VERB = /\b(?:write|edit|modify|update|change|fix|implement|apply|patch|create|add|refactor|rewrite)\b|(?:작성|수정|고쳐|고치|편집|구현|반영|바꿔)/i;
 /* `instead` alone is a style instruction ("use map instead of for loop"). Only
  * goal-level replacement wording supersedes the current request. Ambiguous phrases stay out: "다른 작업은
  * 하지 마" narrows the scope of the current request instead of replacing it, so the Korean branch needs a
@@ -207,6 +215,8 @@ export type Authority = {
 	/** Normalised request targets (paths are adapter-local, digests are recorded). */
 	targets: readonly AuthorityTarget[];
 	scopeDigests: readonly string[];
+	/** Digests named by the latest entry when it also carries an explicit write verb. */
+	writeTargets: readonly string[];
 	release: ReleaseMode;
 	criterion: CriterionState | null;
 	/** True when older branch entries were not scanned, so constraints may be unseen. */
@@ -324,6 +334,7 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 	const forbidden = new Map<string, AuthorityConstraint>();
 	let targets: AuthorityTarget[] = [];
 	let criterion: CriterionState | null = null;
+	let writeTargets: string[] = [];
 
 	for (const entry of entries) {
 		const semantics = classifyChange(entry.text);
@@ -379,6 +390,9 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 			release = "release_ambiguous";
 		}
 		if (semantics === "add" || semantics === "narrow" || semantics === "supersede") stop = null;
+		// Only the latest entry can grant a write target: an older grant must not survive
+		// a later read-only instruction.
+		writeTargets = WRITE_VERB.test(entry.text) ? entryTargets.map(target => digestTarget(target)).filter(Boolean) : [];
 		changeSemantics = semantics;
 		latestUserEntryId = entry.id;
 	}
@@ -396,6 +410,7 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 		constraints,
 		targets,
 		scopeDigests: targets.map(target => target.digest),
+		writeTargets,
 		release,
 		criterion,
 		authorityTruncated,
@@ -465,10 +480,19 @@ export function evaluateAction(input: {
 	if (!authority) {
 		return { ...base, ruleId: "unknown_authority", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
 	}
-	if (authority.constraints.some(constraint => constraint.kind === "read_only")) return drift("drift_write_vs_readonly");
 	if (targetDigest && authority.constraints.some(constraint => constraint.kind === "forbidden_target" && constraint.targetDigest === targetDigest)) {
 		return drift("drift_write_forbidden_target");
 	}
+	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
+	if (targetDigest && authority.writeTargets.includes(targetDigest)) {
+		// The latest request names this exact target with a write verb: the constraint
+		// still applies to every other target.
+		if (authority.authorityTruncated) {
+			return { ...base, ruleId: "uncertain_authority_ambiguous", verdict: "uncertain", coverage: "coverage_gap", stage2Admissible: false, block: false };
+		}
+		return { ...base, ruleId: "aligned_write_within_requested_scope", verdict: "aligned", coverage: "evaluated", stage2Admissible: true, block: false };
+	}
+	if (authority.constraints.some(constraint => constraint.kind === "read_only")) return drift("drift_write_vs_readonly");
 	if (authority.constraints.some(constraint => constraint.kind === "stop")) return drift("drift_write_after_stop");
 	if (targetDigest && authority.scopeDigests.includes(targetDigest) && authority.authorityTruncated) {
 		// Older entries were not scanned, so an unseen constraint may exist:
