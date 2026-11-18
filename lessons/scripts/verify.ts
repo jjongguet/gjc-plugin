@@ -265,6 +265,10 @@ await check("manifest declares two tools, the two hooks and the documented bound
 			excerptBytes: correction.EXCERPT_MAX_BYTES,
 			recentWindow: correction.RECENT_WINDOW_MS,
 			shutdownTimeout: correction.SHUTDOWN_TIMEOUT_MS,
+			chunkBytes: correction.TRANSCRIPT_CHUNK_BYTES,
+			readCap: correction.TRANSCRIPT_MAX_BYTES,
+			sessionDirs: correction.MAX_SESSION_DIRS,
+			sessionFiles: correction.MAX_SESSION_FILES,
 			stagedLimit: correction.STAGED_MAX_LIMIT,
 			stagedResultBytes: correction.MAX_RESULT_BYTES,
 		},
@@ -286,6 +290,10 @@ await check("manifest declares two tools, the two hooks and the documented bound
 			excerptBytes: 600,
 			recentWindow: 900000,
 			shutdownTimeout: 1500,
+			chunkBytes: 1048576,
+			readCap: 16777216,
+			sessionDirs: 2048,
+			sessionFiles: 8192,
 			stagedLimit: 20,
 			stagedResultBytes: 4096,
 		},
@@ -839,6 +847,8 @@ await check("the newest transcript for the hook cwd inside the 15-minute window 
 		null,
 		"nothing is read outside the 15-minute window",
 	);
+	assert.equal(correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now(), maxSessionDirs: 0 }), null);
+	assert.equal(correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now(), maxSessionFiles: 0 }), null);
 });
 
 await check("staging appends one 0600 line and a replay appends nothing", async () => {
@@ -1060,6 +1070,99 @@ await check("lessons_staged add-argv prints one exact, runnable ledger command a
 	]);
 	const unknownId = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id: "0000000000000000" }));
 	assert.deepEqual(unknownId.json, { status: "error", reason: "unknown_correction_id" });
+});
+
+await check("the transcript scan abandons the rest at the deadline instead of running to completion", async () => {
+	const sessions = sessionsAt("deadline-sessions");
+	const cwd = path.join(sandbox, "deadline project");
+	for (let index = 0; index < 24; index++) {
+		transcriptFile(
+			sessions,
+			`deadline-session-${index}`,
+			[sessionRecord(cwd), assistantRecord(`assistant ${index}`), userRecord("Actually, use bun")],
+			`p-${String(index).padStart(2, "0")}`,
+		);
+	}
+	const controlData = dataAt("deadline-control-data");
+	const control = await correction.sessionEndStage({ cwd }, { sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: controlData }, now: Date.now() });
+	assert.equal(control.status, "appended", "the same store stages with a real clock");
+	let calls = 0;
+	const start = Date.parse("2026-11-19T05:00:00.000Z");
+	const clock = () => {
+		calls += 1;
+		return start + calls * 400;
+	};
+	const data = dataAt("deadline-data");
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), clock, timeoutMs: 1500 },
+	);
+	assert.equal(result, null, "an expired scan stages nothing instead of finishing the enumeration");
+	assert.ok(calls >= 3, `the deadline check is reached (${calls} clock reads)`);
+	assert.equal(existsSync(stagedFile(data)), false);
+});
+
+await check("a correction earlier than the old 4 MiB tail is found by the chunked backward read", async () => {
+	const sessions = sessionsAt("chunked-sessions");
+	const cwd = path.join(sandbox, "chunked project");
+	const filler = JSON.stringify({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "x".repeat(4096) }] } });
+	const head = [
+		JSON.stringify(sessionRecord(cwd)),
+		JSON.stringify(assistantRecord("I ran node --test.")),
+		JSON.stringify(userRecord("아니 그게 아니라 bun test로 돌려")),
+	];
+	const dir = path.join(sessions, "chunked");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const file = path.join(dir, "2026-11-19T04-59-00-000Z_chunked-session.jsonl");
+	writeFileSync(file, `${head.join("\n")}\n${Array.from({ length: 1300 }, () => filler).join("\n")}\n`, { mode: 0o600 });
+	const bytes = statSync(file).size;
+	const headBytes = Buffer.byteLength(head.join("\n"), "utf8");
+	assert.ok(bytes > 4 * 1024 * 1024, `fixture is ${bytes} bytes`);
+	assert.ok(bytes - headBytes > 4 * 1024 * 1024, "the correction is farther than 4 MiB from the end");
+	const data = dataAt("chunked-data");
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result.status, "appended");
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.pattern, "그게 아니라");
+	assert.match(stored.correctionText, /bun test/);
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test.");
+});
+
+await check("a transcript whose only user record is beyond the read cap is a documented no-op", async () => {
+	const sessions = sessionsAt("cap-sessions");
+	const cwd = path.join(sandbox, "cap project");
+	const filler = JSON.stringify({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "y".repeat(8192) }] } });
+	const head = [
+		JSON.stringify(sessionRecord(cwd)),
+		JSON.stringify(assistantRecord("I ran node --test.")),
+		JSON.stringify(userRecord("Actually, use bun")),
+	];
+	const dir = path.join(sessions, "cap");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const file = path.join(dir, "2026-11-19T04-59-00-000Z_cap-session.jsonl");
+	writeFileSync(file, `${head.join("\n")}\n${Array.from({ length: 2200 }, () => filler).join("\n")}\n`, { mode: 0o600 });
+	assert.ok(statSync(file).size > correction.TRANSCRIPT_MAX_BYTES, "the user record is beyond the documented cap");
+	const data = dataAt("cap-data");
+	const logs: string[] = [];
+	const debugs: string[] = [];
+	let registered: ((event: unknown, ctx: unknown) => unknown) | null = null;
+	sessionEndHookModule.default(
+		{
+			on: (_event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				registered = handler;
+			},
+			logger: { info: (message: string) => logs.push(message), debug: (message: string) => debugs.push(message) },
+		},
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(await (registered as (event: unknown, ctx: unknown) => unknown)({ type: "session_shutdown" }, { cwd }), undefined);
+	assert.deepEqual(logs, [], "nothing is reported as staged");
+	assert.equal(debugs.length, 1, "exactly one debug line");
+	assert.match(debugs[0], /^lessons: no correction staged \(transcript scan stopped at the 16 MiB read cap\)$/);
+	assert.equal(existsSync(stagedFile(data)), false, "the cap never stages a partial candidate");
 });
 
 await check("one wiki-root chain: GJC_COMPOUND_ROOT, then GJC_LESSONS_WIKI, then the home default", async () => {

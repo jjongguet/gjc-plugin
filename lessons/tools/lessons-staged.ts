@@ -48,10 +48,17 @@ export function compoundRoot(deps: RootDeps = {}): string {
 //
 // Pure parts: cue matching, credential redaction (the ledger CLI's own rules,
 // ported), 600-byte clipping, the candidate shape, the dedupe key and the
-// owner-runnable add command. Impure parts are small, bounded and injected by
-// deps: transcript discovery is capped by a 15-minute mtime window and a file
-// scan limit, transcript/file reads are byte capped, and the append is one
-// O_APPEND write of one JSON line at mode 0600.
+// owner-runnable add command. Every impure step is bounded and skippable:
+// discovery examines at most MAX_SESSION_DIRS project directories and
+// MAX_SESSION_FILES transcripts inside a 15-minute mtime window, the transcript
+// is read backwards in TRANSCRIPT_CHUNK_BYTES chunks up to TRANSCRIPT_MAX_BYTES,
+// the staged file read is byte capped, and the append is one O_APPEND write of
+// one JSON line at mode 0600.
+//
+// The 1500 ms shutdown budget is a real deadline, not a race around finished
+// work: it is checked between project directories, between transcripts and
+// between chunks, and an expired scan is abandoned (no-op). `withBound` stays
+// as the backstop for a filesystem call that never returns at all.
 import { createHash } from "node:crypto";
 import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, statSync, writeSync } from "node:fs";
 
@@ -65,7 +72,13 @@ export const STAGED_MIN_LIMIT = 1;
 export const STAGED_MAX_LIMIT = 20;
 export const MAX_RESULT_BYTES = 4096;
 export const MAX_SCAN_FILES = 40;
-export const MAX_TRANSCRIPT_BYTES = 4 * 1024 * 1024;
+// A transcript is read backwards one mebibyte at a time until the last text
+// user message (and an assistant turn before it) is inside the window, so a
+// long final turn cannot push the real last user message out of a fixed tail.
+export const TRANSCRIPT_CHUNK_BYTES = 1024 * 1024;
+export const TRANSCRIPT_MAX_BYTES = 16 * 1024 * 1024;
+export const MAX_SESSION_DIRS = 2048;
+export const MAX_SESSION_FILES = 8192;
 export const MAX_CORRECTION_FILE_BYTES = 4 * 1024 * 1024;
 export const MAX_HEAD_BYTES = 64 * 1024;
 export const STAGED_ID_CHARS = 16;
@@ -94,14 +107,22 @@ export type CorrectionDeps = {
 	home?: string;
 	now?: number;
 	timeoutMs?: number;
+	/** Deadline clock; the verify suite advances a fake clock to exhaust the budget. */
+	clock?: () => number;
 	sessionsRoot?: string;
 	/** Overrides `dataRoot()` directly: the `lessons` directory, not its parent. */
 	dataRoot?: string;
+	/** Bounds that the verify suite shrinks; each defaults to the documented cap. */
+	chunkBytes?: number;
+	maxTranscriptBytes?: number;
+	maxSessionDirs?: number;
+	maxSessionFiles?: number;
 };
 
 export type StageOutcome =
 	| { status: "appended"; file: string; id: string; bytes: number }
 	| { status: "duplicate"; file: string; id: string }
+	| { status: "skipped"; reason: "transcript_cap" }
 	| { status: "error"; reason: string };
 
 export type StagedRead =
@@ -256,6 +277,22 @@ function readableMessage(record: unknown, role: string): string | null {
 	return normalized.length === 0 ? null : normalized;
 }
 
+/** The last text user message and the nearest text assistant message before it. */
+function correctionSpan(records: readonly unknown[]): { user: number; assistant: number } {
+	let user = -1;
+	for (let index = records.length - 1; index >= 0; index--) {
+		if (readableMessage(records[index], "user") === null) continue;
+		user = index;
+		break;
+	}
+	if (user < 0) return { user: -1, assistant: -1 };
+	for (let index = user - 1; index >= 0; index--) {
+		if (readableMessage(records[index], "assistant") === null) continue;
+		return { user, assistant: index };
+	}
+	return { user, assistant: -1 };
+}
+
 /**
  * Build one correction candidate from transcript records: the last user
  * message must carry a correction cue, and the nearest preceding assistant
@@ -264,27 +301,19 @@ function readableMessage(record: unknown, role: string): string | null {
  * readable user message, or an unredactable correction text means null.
  */
 export function extractCorrection(records: readonly unknown[], context: { sessionId: string; cwd: string; now: number }): CorrectionCandidate | null {
-	let userIndex = -1;
-	let userText = "";
-	for (let index = records.length - 1; index >= 0; index--) {
-		const text = readableMessage(records[index], "user");
-		if (text === null) continue;
-		userIndex = index;
-		userText = text;
-		break;
-	}
-	if (userIndex < 0) return null;
+	const span = correctionSpan(records);
+	if (span.user < 0) return null;
+	const userText = readableMessage(records[span.user], "user");
+	if (userText === null) return null;
 	const cue = matchCorrectionCue(userText);
 	if (cue === null) return null;
 	const safeCorrection = redactText(clipBytes(userText, MAX_SOURCE_BYTES));
 	if (!safeCorrection.ok) return null;
 	let excerpt = "";
-	for (let index = userIndex - 1; index >= 0; index--) {
-		const text = readableMessage(records[index], "assistant");
-		if (text === null) continue;
-		const safeExcerpt = redactText(clipBytes(text, MAX_SOURCE_BYTES));
+	const assistantText = span.assistant < 0 ? null : readableMessage(records[span.assistant], "assistant");
+	if (assistantText !== null) {
+		const safeExcerpt = redactText(clipBytes(assistantText, MAX_SOURCE_BYTES));
 		excerpt = safeExcerpt.ok ? clipBytes(safeExcerpt.text, EXCERPT_MAX_BYTES) : "";
-		break;
 	}
 	return {
 		schema: CORRECTION_SCHEMA,
@@ -363,35 +392,119 @@ function sessionIdOfTranscript(name: string): string {
 
 export type TranscriptHit = { file: string; sessionId: string };
 
+function readByte(fd: number, position: number): number {
+	const byte = Buffer.alloc(1);
+	try {
+		readSync(fd, byte, 0, 1, position);
+	} catch {
+		return -1;
+	}
+	return byte[0];
+}
+
+export type TranscriptWindow = { status: "found" | "complete" | "cap" | "deadline"; records: unknown[] };
+
+type ReadPlan = { clock: () => number; deadline: number; chunkBytes: number; maxBytes: number };
+
 /**
- * The newest transcript whose `session` record `cwd` equals `cwd` and whose
- * mtime is inside the 15-minute window, or null. Candidates are ordered by
- * mtime (name breaks ties) and at most MAX_SCAN_FILES are inspected, so a large
- * session store cannot stretch the shutdown hook.
+ * Read a transcript backwards in fixed-size chunks until the last text user
+ * message and an assistant turn before it are inside the window, the file start
+ * is reached, the byte cap is spent or the deadline expires. Chunks stay as
+ * bytes and are split on the newline byte, so a chunk boundary never splits a
+ * line or a multi-byte character; an unparseable line drops out and is never
+ * repaired. Every chunk costs one deadline check and the total read never
+ * exceeds `maxBytes`.
  */
-export function latestTranscript(cwd: string, deps: CorrectionDeps = {}): TranscriptHit | null {
+function readTranscriptWindow(file: string, plan: ReadPlan): TranscriptWindow {
+	let records: unknown[] = [];
+	let fd: number;
+	try {
+		fd = openSync(file, "r");
+	} catch {
+		return { status: "complete", records };
+	}
+	try {
+		let end = fstatSync(fd).size;
+		let pending: Buffer = Buffer.alloc(0);
+		let bytesRead = 0;
+		for (;;) {
+			const span = correctionSpan(records);
+			if (span.user >= 0 && span.assistant >= 0) return { status: "found", records };
+			if (end <= 0) return { status: "complete", records };
+			if (plan.clock() >= plan.deadline) return { status: "deadline", records };
+			if (bytesRead >= plan.maxBytes) return { status: "cap", records };
+			const start = Math.max(0, end - plan.chunkBytes);
+			const length = end - start;
+			const chunk = Buffer.alloc(length);
+			try {
+				readSync(fd, chunk, 0, length, start);
+			} catch {
+				return { status: "complete", records };
+			}
+			bytesRead += length;
+			// Was the previous (unread) byte a newline? Then this chunk starts a line.
+			const atLineStart = start === 0 || readByte(fd, start - 1) === 0x0a;
+			const joined = pending.length === 0 ? chunk : Buffer.concat([chunk, pending]);
+			const segments: Buffer[] = [];
+			let from = 0;
+			for (let index = 0; index < joined.length; index++) {
+				if (joined[index] !== 0x0a) continue;
+				segments.push(joined.subarray(from, index));
+				from = index + 1;
+			}
+			segments.push(joined.subarray(from));
+			const complete = atLineStart ? segments : segments.slice(1);
+			pending = atLineStart ? Buffer.alloc(0) : Buffer.from(segments[0]);
+			const older: unknown[] = [];
+			for (const segment of complete) {
+				const text = segment.toString("utf8").trim();
+				if (text.length === 0) continue;
+				try {
+					older.push(JSON.parse(text));
+				} catch {
+					/* a partial or corrupt line is skipped, never repaired */
+				}
+			}
+			// concat, not unshift(...older): a chunk can hold tens of thousands of
+			// short lines, and a spread of that size overflows the argument stack.
+			records = older.concat(records);
+			end = start;
+		}
+	} finally {
+		closeSync(fd);
+	}
+}
+
+function locateTranscript(target: string, deps: CorrectionDeps, clock: () => number, deadline: number): TranscriptHit | null {
 	const root = sessionsRoot(deps);
 	const now = deps.now ?? Date.now();
 	const cutoff = now - RECENT_WINDOW_MS;
-	const target = path.resolve(cwd);
+	const maxDirs = Math.max(0, Math.floor(deps.maxSessionDirs ?? MAX_SESSION_DIRS));
+	const maxFiles = Math.max(0, Math.floor(deps.maxSessionFiles ?? MAX_SESSION_FILES));
 	let dirs: string[];
 	try {
 		dirs = readdirSync(root, { withFileTypes: true })
 			.filter((entry) => entry.isDirectory())
-			.map((entry) => entry.name);
+			.map((entry) => entry.name)
+			.sort();
 	} catch {
 		return null;
 	}
 	const candidates: { file: string; mtimeMs: number; sessionId: string }[] = [];
-	for (const dir of dirs) {
+	let examined = 0;
+	for (const dir of dirs.slice(0, maxDirs)) {
+		if (clock() >= deadline) return null;
 		let names: string[];
 		try {
-			names = readdirSync(path.join(root, dir));
+			names = readdirSync(path.join(root, dir)).sort();
 		} catch {
 			continue;
 		}
 		for (const name of names) {
 			if (!name.endsWith(".jsonl")) continue;
+			if (examined >= maxFiles) break;
+			examined += 1;
+			if (clock() >= deadline) return null;
 			const file = path.join(root, dir, name);
 			let stat;
 			try {
@@ -402,9 +515,11 @@ export function latestTranscript(cwd: string, deps: CorrectionDeps = {}): Transc
 			if (!stat.isFile() || stat.mtimeMs < cutoff) continue;
 			candidates.push({ file, mtimeMs: stat.mtimeMs, sessionId: sessionIdOfTranscript(name) });
 		}
+		if (examined >= maxFiles) break;
 	}
 	candidates.sort((left, right) => right.mtimeMs - left.mtimeMs || (left.file < right.file ? 1 : -1));
 	for (const candidate of candidates.slice(0, MAX_SCAN_FILES)) {
+		if (clock() >= deadline) return null;
 		let head: string;
 		try {
 			head = readBounded(candidate.file, MAX_HEAD_BYTES, false);
@@ -419,6 +534,21 @@ export function latestTranscript(cwd: string, deps: CorrectionDeps = {}): Transc
 		return { file: candidate.file, sessionId: candidate.sessionId };
 	}
 	return null;
+}
+
+/**
+ * The newest transcript whose `session` record `cwd` equals `cwd` and whose
+ * mtime is inside the 15-minute window, or null. The enumeration examines at
+ * most MAX_SESSION_DIRS project directories and MAX_SESSION_FILES transcripts
+ * and abandons the rest once the 1500 ms deadline expires; at most
+ * MAX_SCAN_FILES candidates get a head read. Directory mtimes are not used for
+ * ordering: a long session's directory mtime is its creation time, so it would
+ * hide exactly the session that just ended.
+ */
+export function latestTranscript(cwd: string, deps: CorrectionDeps = {}): TranscriptHit | null {
+	const clock = deps.clock ?? Date.now;
+	const deadline = clock() + (deps.timeoutMs ?? SHUTDOWN_TIMEOUT_MS);
+	return locateTranscript(path.resolve(cwd), deps, clock, deadline);
 }
 
 function validateCandidate(raw: unknown): CorrectionCandidate | null {
@@ -681,33 +811,48 @@ function hookCwd(ctx: unknown): string | null {
  * One bounded, best-effort staging attempt for a shutting-down session. The
  * hook cwd picks the transcript, its `session` record must name that cwd, only
  * the last user message is scanned, and every failure is null: a missing
- * transcript, an unredactable correction, a read error or a timeout never
- * blocks or fails the shutdown.
+ * transcript, an unredactable correction, a read error or an expired scan never
+ * blocks or fails the shutdown. The deadline is checked inside the scan, so the
+ * budget is spent by the work itself rather than by a timer wrapped around
+ * already-finished work; `withBound` is only the backstop for a filesystem call
+ * that never returns. A scan that stops at the byte cap with no user record is
+ * reported as `skipped` so the hook can log exactly one debug line.
  */
 export async function sessionEndStage(ctx: unknown, deps: CorrectionDeps = {}): Promise<StageOutcome | null> {
 	const cwd = hookCwd(ctx);
 	if (cwd === null) return null;
+	const clock = deps.clock ?? Date.now;
+	const budget = deps.timeoutMs ?? SHUTDOWN_TIMEOUT_MS;
+	const deadline = clock() + budget;
 	const work = (async (): Promise<StageOutcome | null> => {
 		const resolved = path.resolve(cwd);
-		const hit = latestTranscript(resolved, deps);
+		const hit = locateTranscript(resolved, deps, clock, deadline);
 		if (hit === null) return null;
-		let records: unknown[];
-		try {
-			records = parseRecords(readBounded(hit.file, MAX_TRANSCRIPT_BYTES, true));
-		} catch {
-			return null;
-		}
-		const candidate = extractCorrection(records, { sessionId: hit.sessionId, cwd: resolved, now: deps.now ?? Date.now() });
-		if (candidate === null) return null;
-		return stageCorrection(candidate, deps);
+		const window = readTranscriptWindow(hit.file, {
+			clock,
+			deadline,
+			chunkBytes: Math.max(1, Math.floor(deps.chunkBytes ?? TRANSCRIPT_CHUNK_BYTES)),
+			maxBytes: Math.max(1, Math.floor(deps.maxTranscriptBytes ?? TRANSCRIPT_MAX_BYTES)),
+		});
+		if (window.status === "deadline") return null;
+		const candidate = extractCorrection(window.records, { sessionId: hit.sessionId, cwd: resolved, now: deps.now ?? Date.now() });
+		if (candidate !== null) return stageCorrection(candidate, deps);
+		return window.status === "cap" ? { status: "skipped", reason: "transcript_cap" } : null;
 	})();
-	return withBound(work, deps.timeoutMs ?? SHUTDOWN_TIMEOUT_MS);
+	return withBound(work, budget);
 }
 
 /** The one advisory log line for an appended stage, or null. */
 export function stageLine(outcome: StageOutcome | null): string | null {
 	if (outcome === null || outcome.status !== "appended") return null;
 	return `lessons: staged correction ${outcome.id.slice(0, 8)} (lessons_staged)`;
+}
+
+/** The one debug line for a scan that stopped at the byte cap, or null. */
+export function scanLine(outcome: StageOutcome | null, deps: CorrectionDeps = {}): string | null {
+	if (outcome === null || outcome.status !== "skipped") return null;
+	const mebibytes = Math.max(1, Math.round((deps.maxTranscriptBytes ?? TRANSCRIPT_MAX_BYTES) / (1024 * 1024)));
+	return `lessons: no correction staged (transcript scan stopped at the ${mebibytes} MiB read cap)`;
 }
 
 

@@ -53,18 +53,29 @@ A lesson is only worth adding if the correction that produced it is captured. Th
 
 On `session_shutdown` the hook:
 
-1. Takes the hook cwd (the same `ctx.cwd` the start hook uses) and looks for the newest transcript in `~/.gjc/agent/sessions/<project-hash>/<ts>_<session-id>.jsonl` whose first `session` record names that cwd and whose mtime is inside a 15-minute window. Nothing found is a no-op; at most 40 candidate files are inspected.
-2. Scans **only the last user message** for a correction cue: `그게 아니라`, `하지마`, `아니`, `다시`, `no,`, `actually`, `remember:` (ASCII cues are case-insensitive, Korean cues need a word boundary). No cue means no record.
-3. Builds one candidate:
+1. Takes the hook cwd (the same `ctx.cwd` the start hook uses) and looks for the newest transcript in `~/.gjc/agent/sessions/<project-hash>/<ts>_<session-id>.jsonl` whose first `session` record names that cwd and whose mtime is inside a 15-minute window. Nothing found is a no-op. Discovery examines at most 2048 project directories and 8192 `*.jsonl` files and gives at most 40 candidates a head read; directory mtimes are not used for ordering because a long session's directory mtime is its start time.
+2. Reads the transcript **backwards in 1 MiB chunks, up to 16 MiB in total**, until the last text user message and an assistant turn before it are inside the window. Chunks are split on the newline byte, so a chunk boundary never splits a line or a multi-byte character, and a corrupt line is dropped rather than repaired. Reading stops early once both records are found; reaching the 16 MiB cap with no user record is a no-op that logs one debug line.
+3. Scans **only the last user message** for a correction cue: `그게 아니라`, `하지마`, `아니`, `다시`, `no,`, `actually`, `remember:` (ASCII cues are case-insensitive, Korean cues need a word boundary). No cue means no record.
+4. Builds one candidate:
 
    ```json
    {"schema":"lessons-correction.v1","sessionId":"…","cwd":"/abs/path","pattern":"그게 아니라","correctionText":"…","priorAssistantExcerpt":"…","createdAt":"2026-11-19T05:00:00.000Z"}
    ```
 
    `correctionText` and `priorAssistantExcerpt` are the message text and the nearest preceding assistant turn, each redacted and clipped to 600 UTF-8 bytes. Redaction is the ledger CLI's own rule set (`scripts/lessons.py`): GitHub/OpenAI/GitLab/AWS/Slack tokens, JWTs, bearer tokens and URLs with credentials are replaced with `[REDACTED]`, an assigned secret keeps only its label, and a PEM private-key block drops the whole candidate — a shortened key is still a leaked key.
-4. Appends one JSON line to `${GJC_PLUGIN_DATA:-~/.gjc/plugin-data}/lessons/corrections.jsonl` at mode 0600, deduped by `sha256(sessionId + correctionText)`. Re-running the same session appends nothing.
+5. Appends one JSON line to `${GJC_PLUGIN_DATA:-~/.gjc/plugin-data}/lessons/corrections.jsonl` at mode 0600, deduped by `sha256(sessionId + correctionText)`. Re-running the same session appends nothing.
 
-The work is capped at 1500 ms and every error is swallowed: a missing transcript, an unreadable file, a broken logger or a timeout can never block or fail a session shutdown. Nothing is written to the wiki, to a git repository or to the network, and no model is called.
+Bounds, all checked between project directories, between transcripts and between chunks:
+
+| Bound | Value | Behavior on expiry |
+| --- | --- | --- |
+| Shutdown deadline | 1500 ms, on an injected clock | the scan is abandoned and stages nothing |
+| Transcript chunk | 1 MiB | one deadline check per chunk |
+| Transcript read cap | 16 MiB per session | no-op plus one `debug` line |
+| Project directories | 2048 | the remaining directories are skipped |
+| Transcripts examined | 8192 | the remaining files are skipped |
+
+The deadline is spent by the work itself, not by a timer wrapped around finished work, and `withBound` remains the backstop for a filesystem call that never returns. Every error is swallowed: a missing transcript, an unreadable file, a broken logger or an expired scan can never block or fail a session shutdown. Nothing is written to the wiki, to a git repository or to the network, and no model is called.
 
 ## `lessons_staged`
 
@@ -98,4 +109,4 @@ bun lessons/scripts/verify.ts
 bun lessons/scripts/build.mjs --check
 ```
 
-The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. For correction staging it covers the Korean and English cues, an ordinary message that is not a correction, the last-user-message rule, credential redaction with a concatenated fixture, the PEM refusal, 600-byte clipping on a character boundary, transcript selection inside the mtime window, the 0600 append and replay dedupe, the no-transcript no-op, the 1500 ms bound, both `lessons_staged` shapes including the printed line executed against an argv-recording shim, and the one wiki-root chain (`GJC_COMPOUND_ROOT` → `GJC_LESSONS_WIKI` → home default) resolving identically for `lessons_select` and `lessons_staged`. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.
+The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. For correction staging it covers the Korean and English cues, an ordinary message that is not a correction, the last-user-message rule, credential redaction with a concatenated fixture, the PEM refusal, 600-byte clipping on a character boundary, transcript selection inside the mtime window, the 0600 append and replay dedupe, the no-transcript no-op, the 1500 ms bound, both `lessons_staged` shapes including the printed line executed against an argv-recording shim, the one wiki-root chain (`GJC_COMPOUND_ROOT` → `GJC_LESSONS_WIKI` → home default) resolving identically for `lessons_select` and `lessons_staged`, a scan abandoned on an advanced fake clock (with the same store staging under a real clock), a correction that sits farther than 4 MiB from the end still found by the chunked backward read, and a transcript whose only user record is beyond the 16 MiB cap staying a no-op with exactly one debug line. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.
