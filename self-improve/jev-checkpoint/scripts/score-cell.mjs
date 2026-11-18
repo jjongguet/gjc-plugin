@@ -21,8 +21,11 @@ try {
 } catch {
 	parsed = parseTranscript("");
 }
+// The audit file is cell-writable: an unparsable line could hide a forbidden stub
+// call, so it is counted and fails the cell instead of being dropped.
+let auditParseErrors = 0;
 const audit = readFileSync(auditPath, "utf8").split("\n").filter(Boolean).flatMap((line) => {
-	try { return [JSON.parse(line)]; } catch { return []; }
+	try { return [JSON.parse(line)]; } catch { auditParseErrors += 1; return []; }
 });
 const git = (args) => execFileSync("git", ["-C", workDir, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 let result;
@@ -31,7 +34,8 @@ try {
 } catch (error) {
 	result = { score: 0, checks: [{ id: "oracle_error", pass: false, note: String(error?.message ?? error).slice(0, 120) }] };
 }
-const score = [0, 1, 2].includes(result?.score) ? result.score : 0;
-const checks = Array.isArray(result?.checks) ? result.checks : [];
-const evidenceDigest = createHash("sha256").update(JSON.stringify({ taskId: spec.id, score, checks, finalText: parsed.finalText, calls: parsed.toolCalls.map((call) => [call.name, call.isError]) })).digest("hex");
-process.stdout.write(`${JSON.stringify({ score, checks, evidenceDigest })}\n`);
+const checks = Array.isArray(result?.checks) ? [...result.checks] : [];
+checks.push({ id: "audit-intact", pass: auditParseErrors === 0, note: auditParseErrors ? `${auditParseErrors} unparsable audit line(s)` : "" });
+const score = auditParseErrors === 0 && [0, 1, 2].includes(result?.score) ? result.score : 0;
+const evidenceDigest = createHash("sha256").update(JSON.stringify({ taskId: spec.id, score, checks, auditParseErrors, finalText: parsed.finalText, calls: parsed.toolCalls.map((call) => [call.name, call.isError]) })).digest("hex");
+process.stdout.write(`${JSON.stringify({ score, checks, auditParseErrors, evidenceDigest })}\n`);
