@@ -399,7 +399,7 @@ test("compose CLI probes each candidate and the composed patch through the real 
     const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json"], {
       env: { ...process.env, PATH: `${tools.bin}:${process.env.PATH ?? ""}` },
     });
-    assert.equal(proc.status, 0, proc.stderr);
+    assert.equal(proc.status, 0, `${proc.stderr}\n${String(proc.stdout).slice(0, 800)}`);
     const result = JSON.parse(proc.stdout);
     assert.equal(result.status, "dry-run");
     assert.equal(result.candidates.length, 2);
