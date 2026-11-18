@@ -1,6 +1,6 @@
 {
   "name": "gjc-plugin",
-  "version": "0.0.29",
+  "version": "0.0.30",
   "private": true,
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
@@ -37,6 +37,7 @@
     "build:aside-memory": "bun aside-memory/scripts/build.mjs",
     "test:aside-memory": "bun aside-memory/scripts/verify.ts",
     "build:egm": "bun egm/scripts/build.mjs",
+    "egm:install": "bun egm/scripts/install.ts",
     "build:memory-dream": "bun memory-dream/scripts/build.mjs",
     "test:egm": "bun egm/scripts/verify.ts",
     "test:memory-dream": "bun memory-dream/scripts/verify.ts",
