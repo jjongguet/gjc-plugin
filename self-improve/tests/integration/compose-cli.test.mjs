@@ -90,6 +90,11 @@ function makeRepo({ heldoutSentinel = false } = {}) {
     )}\n`,
   );
   write(join(repo, "self-improve", "ledger.jsonl"), "");
+  // This fixture exercises the CLI wiring, not the cost gate: its synthetic probes
+  // emit no score delta, so a hosted runner's wall-clock jitter would otherwise make
+  // `cost_rule` a hard reason and abstain the composition. The cost gate keeps its
+  // real thresholds here; the dedicated compose suite asserts it with injected costs.
+  write(join(repo, "self-improve", "rrsi.json"), `${JSON.stringify({ cost: { wallMsBytesIncreaseRatio: 1000 } }, null, 2)}\n`);
   git(repo, ["init", "-q"]);
   git(repo, ["config", "user.name", "fixture"]);
   git(repo, ["config", "user.email", "fixture@example.invalid"]);
