@@ -363,7 +363,7 @@ test("compose CLI refuses a composed patch that leaks a held-out value", () => {
   }
 });
 
-test("compose CLI probes each candidate and the composed patch through the real entrypoint", () => {
+test("compose CLI probes each candidate and the composed patch through the real entrypoint", (t) => {
   const { root, repo } = makeRepo();
   const tools = makeFakeTools(root);
   try {
@@ -399,7 +399,16 @@ test("compose CLI probes each candidate and the composed patch through the real 
     const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json"], {
       env: { ...process.env, PATH: `${tools.bin}:${process.env.PATH ?? ""}` },
     });
-    const refusal = (() => { try { const parsed = JSON.parse(proc.stdout); return `status=${parsed.status} reason=${parsed.reason ?? "-"} detail=${String(parsed.detail ?? "-").slice(0, 200)}`; } catch { return `stdout=${String(proc.stdout).slice(0, 200)}`; } })();
+    const refusal = (() => {
+      try {
+        const parsed = JSON.parse(proc.stdout);
+        return `status=${parsed.status} reason=${parsed.reason ?? "-"} detail=${String(parsed.detail ?? "-").slice(0, 200)}`;
+      } catch {
+        return `stdout=${String(proc.stdout).slice(0, 200)}`;
+      }
+    })();
+    // Hosted CI only: the refusal reason is otherwise hidden by TAP message truncation.
+    t.diagnostic(`gjc-compose-cli-refusal: exit=${proc.status} ${refusal} stderrBytes=${String(proc.stderr ?? "").length}`);
     assert.equal(proc.status, 0, `${refusal} stderr=${String(proc.stderr).slice(0, 300)}`);
     const result = JSON.parse(proc.stdout);
     assert.equal(result.status, "dry-run");
