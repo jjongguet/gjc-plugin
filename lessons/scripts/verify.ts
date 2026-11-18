@@ -6,10 +6,23 @@
  * checks never read the owner's real wiki, never need Python and never touch the
  * network. The suite covers the four documented statuses, the bounds (limit,
  * byte budget, 4096-byte result, stdout cap, timeout), argv/env shaping without a
- * shell and the advisory session_start line.
+ * shell, the advisory session_start line, and the correction staging path:
+ * cue matching, redaction, 600-byte clipping, replay dedupe, transcript
+ * selection and the lessons_staged json/add-argv surfaces.
  */
 import assert from "node:assert/strict";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+	chmodSync,
+	existsSync,
+	mkdirSync,
+	mkdtempSync,
+	readFileSync,
+	realpathSync,
+	rmSync,
+	statSync,
+	utimesSync,
+	writeFileSync,
+} from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -20,9 +33,11 @@ const plugin = path.resolve(path.dirname(script), "..");
 const buildScript = path.join(plugin, "scripts", "build.mjs");
 const toolFile = path.join(plugin, "tools", "lessons-select.ts");
 const hookFile = path.join(plugin, "hooks", "lessons-start.ts");
+const stagedToolFile = path.join(plugin, "tools", "lessons-staged.ts");
+const sessionEndHookFile = path.join(plugin, "hooks", "session-end.ts");
 const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "lessons-verify-")));
 
-for (const file of [toolFile, hookFile]) {
+for (const file of [toolFile, hookFile, stagedToolFile, sessionEndHookFile]) {
 	if (existsSync(file)) continue;
 	const built = spawnSync(process.execPath, [buildScript], { encoding: "utf8" });
 	if (built.status !== 0) {
@@ -33,8 +48,11 @@ for (const file of [toolFile, hookFile]) {
 
 const core = await import(pathToFileURL(path.join(plugin, "lib", "select.ts")).href);
 const notice = await import(pathToFileURL(path.join(plugin, "lib", "notice.ts")).href);
+const correction = await import(pathToFileURL(path.join(plugin, "lib", "correction.ts")).href);
 const toolModule = await import(pathToFileURL(toolFile).href);
 const hookModule = await import(pathToFileURL(hookFile).href);
+const stagedToolModule = await import(pathToFileURL(stagedToolFile).href);
+const sessionEndHookModule = await import(pathToFileURL(sessionEndHookFile).href);
 
 const sandbox = path.join(root, "sandbox");
 mkdirSync(sandbox, { recursive: true, mode: 0o700 });
@@ -138,6 +156,7 @@ async function withEnv(values: Record<string, string | undefined>, fn: () => Pro
 
 const Type = new Proxy({}, { get: (_target, name) => (...args: unknown[]) => ({ kind: String(name), args }) });
 const tool = toolModule.default({ cwd: plugin, typebox: { Type } });
+const stagedTool = stagedToolModule.default({ cwd: plugin, typebox: { Type } });
 
 // The host validates advertised parameters before the plugin runs, so an
 // advertised bound it rejects would fail outside this code (JJO-1107).
@@ -195,17 +214,37 @@ async function runTool(params: Record<string, unknown>) {
 	return { text, isError: result.isError === true, json };
 }
 
-await check("manifest declares one tool, one session_start hook and the documented bounds", async () => {
+async function runStagedTool(params: Record<string, unknown>) {
+	const result = await stagedTool.execute("call-1", params);
+	const text = String(result.content?.[0]?.text ?? "");
+	let json: any = null;
+	try {
+		json = JSON.parse(text);
+	} catch {
+		json = null;
+	}
+	return { text, isError: result.isError === true, json };
+}
+
+await check("manifest declares two tools, the two hooks and the documented bounds", async () => {
 	const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8"));
 	assert.equal(manifest.kind, "gajae-code-plugin");
 	assert.equal(manifest.name, "lessons");
 	assert.equal(manifest.version, "0.0.1");
-	assert.equal(manifest.tools.length, 1);
-	assert.equal(manifest.tools[0].name, "lessons_select");
-	assert.equal(manifest.tools[0].path, "tools/lessons-select.ts");
-	assert.equal(manifest.tools[0].schema, undefined, "the adapter parameters are statically readable");
+	assert.deepEqual(
+		manifest.tools.map((entry: { name: string; path: string; schema?: unknown }) => ({
+			name: entry.name,
+			path: entry.path,
+			schema: entry.schema,
+		})),
+		[
+			{ name: "lessons_select", path: "tools/lessons-select.ts", schema: undefined },
+			{ name: "lessons_staged", path: "tools/lessons-staged.ts", schema: undefined },
+		],
+	);
 	assert.deepEqual(manifest.hooks, [
 		{ name: "lessons-start", event: "session_start", path: "hooks/lessons-start.ts" },
+		{ name: "session-end", event: "session_shutdown", path: "hooks/session-end.ts" },
 	]);
 	assert.deepEqual(
 		{
@@ -221,6 +260,17 @@ await check("manifest declares one tool, one session_start hook and the document
 			startTimeout: core.START_TIMEOUT_MS,
 			startLine: core.START_MAX_LINE_CHARS,
 			resultBytes: core.MAX_RESULT_BYTES,
+			correctionSchema: correction.CORRECTION_SCHEMA,
+			correctionTextBytes: correction.CORRECTION_TEXT_MAX_BYTES,
+			excerptBytes: correction.EXCERPT_MAX_BYTES,
+			recentWindow: correction.RECENT_WINDOW_MS,
+			shutdownTimeout: correction.SHUTDOWN_TIMEOUT_MS,
+			chunkBytes: correction.TRANSCRIPT_CHUNK_BYTES,
+			readCap: correction.TRANSCRIPT_MAX_BYTES,
+			sessionDirs: correction.MAX_SESSION_DIRS,
+			sessionFiles: correction.MAX_SESSION_FILES,
+			stagedLimit: correction.STAGED_MAX_LIMIT,
+			stagedResultBytes: correction.MAX_RESULT_BYTES,
 		},
 		{
 			defaultLimit: 6,
@@ -235,6 +285,17 @@ await check("manifest declares one tool, one session_start hook and the document
 			startTimeout: 1500,
 			startLine: 300,
 			resultBytes: 4096,
+			correctionSchema: "lessons-correction.v1",
+			correctionTextBytes: 600,
+			excerptBytes: 600,
+			recentWindow: 900000,
+			shutdownTimeout: 1500,
+			chunkBytes: 1048576,
+			readCap: 16777216,
+			sessionDirs: 2048,
+			sessionFiles: 8192,
+			stagedLimit: 20,
+			stagedResultBytes: 4096,
 		},
 	);
 });
@@ -243,10 +304,12 @@ await check("generated surfaces are in sync and export the manifest paths", asyn
 	const built = spawnSync(process.execPath, [buildScript, "--check"], { encoding: "utf8" });
 	assert.equal(built.status, 0, built.stderr);
 	assert.match(built.stdout, /in sync/);
-	assert.match(readFileSync(toolFile, "utf8"), /^\/\/ GENERATED FILE - do not edit by hand\./);
-	assert.match(readFileSync(hookFile, "utf8"), /^\/\/ GENERATED FILE - do not edit by hand\./);
-	assert.equal(typeof toolModule.default, "function");
-	assert.equal(typeof hookModule.default, "function");
+	for (const file of [toolFile, hookFile, stagedToolFile, sessionEndHookFile]) {
+		assert.match(readFileSync(file, "utf8"), /^\/\/ GENERATED FILE - do not edit by hand\./);
+	}
+	for (const module of [toolModule, hookModule, stagedToolModule, sessionEndHookModule]) {
+		assert.equal(typeof module.default, "function");
+	}
 });
 
 await check("tool advertises exactly repo/limit/max_bytes and refuses unknown or relative input", async () => {
@@ -634,6 +697,587 @@ await check("a broken UI or logger never blocks the session", async () => {
 		);
 		assert.equal(value, undefined);
 	});
+});
+
+// ---- correction staging (JJO-2566) -------------------------------------
+
+const sessionRecord = (cwd: string) => ({
+	type: "session",
+	id: "01a1f043-05ab-7312-8574-7bdb75518f30",
+	cwd,
+	timestamp: "2026-11-19T04:59:00.000Z",
+});
+const userRecord = (text: string) => ({ type: "message", message: { role: "user", content: [{ type: "text", text }] } });
+const assistantRecord = (text: string) => ({ type: "message", message: { role: "assistant", content: [{ type: "text", text }] } });
+
+function sessionsAt(name: string): string {
+	const dir = path.join(caseDir(name), "sessions");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	return dir;
+}
+
+function dataAt(name: string): string {
+	const dir = path.join(caseDir(name), "data");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	return dir;
+}
+
+// `GJC_PLUGIN_DATA` is the plugin data base; the staged file is under `lessons/`.
+function stagedFile(data: string): string {
+	return path.join(data, "lessons", "corrections.jsonl");
+}
+
+// The real store is `<sessions>/<project-hash>/<ts>_<session-id>.jsonl`.
+function transcriptFile(sessions: string, sessionId: string, records: unknown[], project = "project"): string {
+	const dir = path.join(sessions, project);
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const file = path.join(dir, `2026-11-19T04-59-00-000Z_${sessionId}.jsonl`);
+	writeFileSync(file, `${records.map((record) => JSON.stringify(record)).join("\n")}\n`, { mode: 0o600 });
+	return file;
+}
+
+function lineCount(file: string): number {
+	return readFileSync(file, "utf8")
+		.split("\n")
+		.filter((line) => line.trim().length > 0).length;
+}
+
+const stagedCandidate = (index: number) => ({
+	schema: "lessons-correction.v1",
+	sessionId: `01a1f043-05ab-7312-8574-7bdb7551800${index}`,
+	cwd: "/srv/work/project",
+	pattern: "그게 아니라",
+	correctionText: `correction ${index} ${"상세".repeat(150)}`,
+	priorAssistantExcerpt: `excerpt ${index}`,
+	createdAt: "2026-11-19T05:00:00.000Z",
+});
+
+await check("correction cues match Korean and English and ignore an ordinary message", async () => {
+	const cwd = path.join(sandbox, "cue-project");
+	const build = (text: string) => correction.extractCorrection([sessionRecord(cwd), userRecord(text)], { sessionId: "s-cue", cwd, now: Date.parse("2026-11-19T05:00:00.000Z") });
+	assert.equal(build("아니 그게 아니라 bun으로 돌려").pattern, "그게 아니라");
+	assert.equal(build("그러지 하지마").pattern, "하지마");
+	assert.equal(build("아니, 테스트는 bun으로").pattern, "아니");
+	assert.equal(build("다시 해줘").pattern, "다시");
+	assert.equal(build("No, use the repo default").pattern, "no,");
+	assert.equal(build("Actually, use bun instead").pattern, "actually");
+	assert.equal(build("Remember: the ledger is canonical").pattern, "remember:");
+	assert.equal(build("please run the build and report the result"), null);
+	assert.equal(build("the tests are green and 2026-11-19 is done"), null);
+	assert.equal(build("nothing to change here"), null);
+});
+
+await check("only the last user message is scanned, and the assistant turn before it is the excerpt", async () => {
+	const cwd = path.join(sandbox, "last-message-project");
+	const now = Date.parse("2026-11-19T05:00:00.000Z");
+	const earlier = correction.extractCorrection(
+		[sessionRecord(cwd), userRecord("아니 이건 고쳐"), assistantRecord("done"), userRecord("good, thanks")],
+		{ sessionId: "s-last", cwd, now },
+	);
+	assert.equal(earlier, null, "a correction that is not the last user message is not a candidate");
+	const candidate = correction.extractCorrection(
+		[sessionRecord(cwd), userRecord("아니 이건 고쳐"), assistantRecord("I ran node --test."), userRecord("Actually, use bun test")],
+		{ sessionId: "s-last", cwd, now },
+	);
+	assert.equal(candidate.pattern, "actually");
+	assert.equal(candidate.priorAssistantExcerpt, "I ran node --test.");
+	assert.equal(candidate.schema, "lessons-correction.v1");
+	assert.equal(candidate.sessionId, "s-last");
+	assert.equal(candidate.cwd, cwd);
+	assert.equal(candidate.createdAt, "2026-11-19T05:00:00.000Z");
+	assert.equal(correction.extractCorrection([sessionRecord(cwd)], { sessionId: "s-last", cwd, now }), null);
+});
+
+await check("credential-shaped text is redacted and a private key drops the candidate", async () => {
+	const cwd = path.join(sandbox, "redaction-project");
+	const now = Date.parse("2026-11-19T05:00:00.000Z");
+	// Built by concatenation: the fixture is not a live credential shape in the repo.
+	const token = ["sk", "-", "abcdefghijklmnopqrstuvwx"].join("");
+	const candidate = correction.extractCorrection(
+		[sessionRecord(cwd), assistantRecord(`deploy with ${token} now`), userRecord(`no, ${token} is wrong`)],
+		{ sessionId: "s-secret", cwd, now },
+	);
+	assert.equal(candidate.pattern, "no,");
+	assert.equal(candidate.correctionText.includes(token), false, "the credential never survives");
+	assert.match(candidate.correctionText, /\[REDACTED\]/);
+	assert.equal(candidate.priorAssistantExcerpt.includes(token), false);
+	assert.match(candidate.priorAssistantExcerpt, /\[REDACTED\]/);
+	const assignment = correction.redactText(`password: ${"hunter2hunter2hunter2"}`);
+	assert.equal(assignment.ok, true);
+	assert.equal(assignment.text, "password: [REDACTED]", "the label is kept, the value is not");
+	const pem = ["-----BEGIN", "RSA PRIVATE KEY-----", "body"].join(" ");
+	assert.deepEqual(correction.redactText(pem), { ok: false, reason: "private_key" });
+	assert.equal(correction.extractCorrection([sessionRecord(cwd), userRecord(`no, here: ${pem}`)], { sessionId: "s-pem", cwd, now }), null);
+});
+
+await check("staged text is clipped to 600 UTF-8 bytes on a character boundary", async () => {
+	const cwd = path.join(sandbox, "clip-project");
+	const long = `그게 아니라 ${"가나다라마바사".repeat(200)}`;
+	const candidate = correction.extractCorrection([sessionRecord(cwd), assistantRecord("가나다".repeat(400)), userRecord(long)], {
+		sessionId: "s-clip",
+		cwd,
+		now: Date.parse("2026-11-19T05:00:00.000Z"),
+	});
+	assert.ok(Buffer.byteLength(candidate.correctionText, "utf8") <= 600);
+	assert.ok(Buffer.byteLength(candidate.correctionText, "utf8") > 590);
+	assert.equal(candidate.correctionText.includes("\ufffd"), false, "no half character survives");
+	assert.ok(Buffer.byteLength(candidate.priorAssistantExcerpt, "utf8") <= 600);
+	assert.equal(Buffer.byteLength(correction.clipBytes("가".repeat(400), 600), "utf8"), 600);
+	assert.equal(correction.clipBytes("가".repeat(400), 600).length, 200, "600 bytes is 200 three-byte characters");
+});
+
+await check("the newest transcript for the hook cwd inside the 15-minute window is used", async () => {
+	const sessions = sessionsAt("correction-transcripts");
+	const project = path.join(sandbox, "transcript project");
+	const other = path.join(sandbox, "another project");
+	const stale = transcriptFile(sessions, "stale-session", [sessionRecord(project), userRecord("아니 이전 세션")], "p-stale");
+	const old = (Date.now() - 20 * 60 * 1000) / 1000;
+	utimesSync(stale, old, old);
+	const fresh = transcriptFile(sessions, "fresh-session", [sessionRecord(project), userRecord("아니 지금 세션")], "p-fresh");
+	const otherFile = transcriptFile(sessions, "other-session", [sessionRecord(other), userRecord("아니 다른 프로젝트")], "p-other");
+	const later = new Date(Date.now() + 30_000);
+	utimesSync(otherFile, later, later);
+	const hit = correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now() });
+	assert.equal(hit.file, fresh);
+	assert.equal(hit.sessionId, "fresh-session");
+	assert.equal(correction.latestTranscript(path.join(sandbox, "no session recorded"), { sessionsRoot: sessions, now: Date.now() }), null);
+	assert.equal(correction.latestTranscript(project, { sessionsRoot: path.join(sandbox, "absent-sessions"), now: Date.now() }), null);
+	assert.equal(
+		correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now() + 30 * 60 * 1000 }),
+		null,
+		"nothing is read outside the 15-minute window",
+	);
+	assert.equal(correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now(), maxSessionDirs: 0 }), null);
+	assert.equal(correction.latestTranscript(project, { sessionsRoot: sessions, now: Date.now(), maxSessionFiles: 0 }), null);
+});
+
+await check("staging appends one 0600 line and a replay appends nothing", async () => {
+	const sessions = sessionsAt("correction-dedupe-sessions");
+	const data = dataAt("correction-dedupe-data");
+	const cwd = path.join(sandbox, "dedupe project");
+	const sessionId = "01a1f043-05ab-7312-8574-7bdb75518f30";
+	transcriptFile(sessions, sessionId, [sessionRecord(cwd), assistantRecord("I ran node --test."), userRecord("아니 그게 아니라 bun test로 돌려")]);
+	const deps = { sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now() };
+	const first = await correction.sessionEndStage({ cwd }, deps);
+	assert.equal(first.status, "appended");
+	const file = stagedFile(data);
+	assert.equal(statSync(file).mode & 0o777, 0o600, "the staged file is owner-only");
+	assert.equal(lineCount(file), 1);
+	const stored = JSON.parse(readFileSync(file, "utf8").trim());
+	assert.equal(stored.schema, "lessons-correction.v1");
+	assert.equal(stored.sessionId, sessionId);
+	assert.equal(stored.pattern, "그게 아니라");
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test.");
+	const replay = await correction.sessionEndStage({ cwd }, deps);
+	assert.equal(replay.status, "duplicate");
+	assert.equal(lineCount(file), 1, "the replay appends nothing");
+	const second = correction.stageCorrection({ ...stored, correctionText: "a different correction" }, { env: { GJC_PLUGIN_DATA: data } });
+	assert.equal(second.status, "appended");
+	assert.equal(lineCount(file), 2);
+});
+
+await check("a session with no matching transcript is a no-op", async () => {
+	const sessions = sessionsAt("correction-missing-sessions");
+	const data = dataAt("correction-missing-data");
+	const deps = { sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data } };
+	assert.equal(await correction.sessionEndStage({ cwd: path.join(sandbox, "no transcript here") }, deps), null);
+	assert.equal(existsSync(stagedFile(data)), false, "nothing is created when nothing matched");
+	assert.equal(await correction.sessionEndStage({ cwd: sandbox }, { ...deps, sessionsRoot: path.join(sandbox, "absent-root") }), null);
+	assert.equal(await correction.sessionEndStage({}, deps), null);
+	assert.equal(await correction.sessionEndStage({ cwd: "" }, deps), null);
+});
+
+await check("withBound settles a stalled promise to null and never rejects (promise guard only)", async () => {
+	const started = Date.now();
+	assert.equal(await correction.withBound(new Promise(() => {}), 60), null);
+	assert.ok(Date.now() - started < 1000, "a stalled read cannot hold the shutdown");
+	assert.ok(Date.now() - started >= 50, "the bound is the documented timeout, not a zero wait");
+	assert.equal(await correction.withBound(Promise.reject(new Error("boom")), 60), null);
+	assert.equal(await correction.withBound(Promise.resolve("ok"), 60), "ok");
+});
+
+await check("session_shutdown registers one handler, stages once, and swallows every error", async () => {
+	const sessions = sessionsAt("hook-shutdown-sessions");
+	const data = dataAt("hook-shutdown-data");
+	const cwd = path.join(sandbox, "hook shutdown project");
+	transcriptFile(sessions, "hook-session", [sessionRecord(cwd), assistantRecord("I used node."), userRecord("Actually, use bun")]);
+	const events: string[] = [];
+	const logs: string[] = [];
+	let registered: ((event: unknown, ctx: unknown) => unknown) | null = null;
+	sessionEndHookModule.default(
+		{
+			on: (event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				events.push(event);
+				registered = handler;
+			},
+			logger: { info: (message: string) => logs.push(message) },
+		},
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data } },
+	);
+	assert.deepEqual(events, ["session_shutdown"]);
+	const handler = registered as (event: unknown, ctx: unknown) => unknown;
+	assert.equal(
+		await handler(
+			{ type: "session_shutdown" },
+			{
+				cwd,
+				ui: {
+					notify: () => {
+						throw new Error("ui broke");
+					},
+				},
+			},
+		),
+		undefined,
+	);
+	assert.equal(await handler({ type: "session_shutdown" }, { cwd }), undefined);
+	const file = stagedFile(data);
+	assert.equal(lineCount(file), 1, "the replay appends nothing");
+	assert.equal(logs.length, 1, "the replay logs nothing");
+	assert.match(logs[0], /^lessons: staged correction [0-9a-f]{8} \(lessons_staged\)$/);
+	logs.length = 0;
+	sessionEndHookModule.default({
+		on: (_event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+			registered = handler;
+		},
+		logger: {
+			info: () => {
+				throw new Error("logger broke");
+			},
+		},
+	});
+	assert.equal(await (registered as (event: unknown, ctx: unknown) => unknown)({ type: "session_shutdown" }, { cwd }), undefined);
+	assert.equal(await (registered as (event: unknown, ctx: unknown) => unknown)({ type: "session_shutdown" }, { cwd: 42 }), undefined);
+});
+
+await check("lessons_staged returns counts, newest first, bounded to 4096 bytes", async () => {
+	const wiki = ledgerRoot("staged-json");
+	const data = dataAt("staged-json-data");
+	for (let index = 0; index < 12; index++) {
+		assert.equal(correction.stageCorrection(stagedCandidate(index) as never, { env: { GJC_PLUGIN_DATA: data } }).status, "appended");
+	}
+	const file = stagedFile(data);
+	const result = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.equal(result.isError, false);
+	assert.equal(result.json.status, "ok");
+	assert.equal(result.json.format, "json");
+	assert.equal(result.json.root, wiki);
+	assert.equal(result.json.truncated, false, "a small file is fully visible");
+	assert.equal(result.json.count, 12);
+	assert.equal(result.json.returned, result.json.entries.length);
+	assert.ok(result.json.entries.length < 12, "the entry list is reduced to fit the result budget");
+	assert.ok(result.json.entries.length >= 1);
+	assert.ok(Buffer.byteLength(result.text, "utf8") <= 4096, `result bytes ${Buffer.byteLength(result.text, "utf8")}`);
+	assert.match(result.json.entries[0].id, /^[0-9a-f]{16}$/);
+	assert.equal(result.json.entries[0].correctionText.startsWith("correction 11 "), true, "newest first");
+	const limited = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ limit: 1 }));
+	assert.equal(limited.json.returned, 1);
+	assert.equal(limited.json.count, 12);
+	const clamped = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ limit: 500 }));
+	assert.ok(clamped.json.returned <= 20);
+	// A duplicate and a corrupt line already in the file change neither count nor content.
+	writeFileSync(file, `{"not":"a candidate"}\n${JSON.stringify(stagedCandidate(11))}\n`, { flag: "a" });
+	const after = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.equal(after.json.count, 12);
+});
+
+await check("lessons_staged refuses unknown fields, a bad format and a misplaced id", async () => {
+	const wiki = ledgerRoot("staged-invalid");
+	const data = dataAt("staged-invalid-data");
+	const run = (params: Record<string, unknown>) => withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool(params));
+	const unknown = await run({ query: "x" });
+	assert.equal(unknown.isError, true);
+	assert.match(unknown.text, /lessons_staged: invalid_input \(unknown field query\)/);
+	const badFormat = await run({ format: "csv" });
+	assert.equal(badFormat.isError, true);
+	assert.match(badFormat.text, /format must be json or add-argv/);
+	const missingId = await run({ format: "add-argv" });
+	assert.equal(missingId.isError, true);
+	assert.match(missingId.text, /id is required for format add-argv/);
+	const misplaced = await run({ id: "0123456789abcdef" });
+	assert.equal(misplaced.isError, true);
+	assert.match(misplaced.text, /id is only used with format add-argv/);
+	const nan = await run({ limit: "3" });
+	assert.equal(nan.isError, true);
+	assert.match(nan.text, /limit must be a number/);
+	assert.deepEqual(rejectable(schemaView(stagedTool.parameters)), []);
+	assert.deepEqual(Object.keys(stagedTool.parameters.args[0]), ["limit", "format", "id"]);
+	assert.equal(stagedTool.name, "lessons_staged");
+});
+
+await check("lessons_staged is unavailable without a wiki root and empty without a staged file", async () => {
+	const data = dataAt("staged-unavailable-data");
+	const absent = path.join(root, "cases", "absent-wiki");
+	const missing = await withEnv({ GJC_COMPOUND_ROOT: absent, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.deepEqual(missing.json, { status: "unavailable", reason: "wiki_root_missing", truncated: false });
+	const noScript = caseDir("staged-no-script");
+	const noScriptResult = await withEnv({ GJC_COMPOUND_ROOT: noScript, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.deepEqual(noScriptResult.json, { status: "unavailable", reason: "script_missing", truncated: false });
+	const wiki = ledgerRoot("staged-empty");
+	const empty = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.equal(empty.json.status, "empty");
+	assert.equal(empty.json.count, 0);
+	assert.equal(empty.json.returned, 0);
+});
+
+await check("lessons_staged add-argv prints one exact, runnable ledger command and never executes it", async () => {
+	const wiki = ledgerRoot("staged-argv");
+	const data = dataAt("staged-argv-data");
+	const candidate = {
+		schema: "lessons-correction.v1" as const,
+		sessionId: "01a1f043-05ab-7312-8574-7bdb75518f30",
+		cwd: "/srv/work/project with space",
+		pattern: "그게 아니라",
+		correctionText: "bun test로 돌려",
+		priorAssistantExcerpt: "I ran node --test.",
+		createdAt: "2026-11-19T05:00:00.000Z",
+	};
+	assert.equal(correction.stageCorrection(candidate, { env: { GJC_PLUGIN_DATA: data } }).status, "appended");
+	const listed = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	const id = listed.json.entries[0].id;
+	const result = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id }));
+	assert.equal(result.json.status, "ok");
+	assert.equal(result.json.format, "add-argv");
+	assert.equal(result.json.id, id);
+	assert.ok(Buffer.byteLength(result.text, "utf8") <= 4096);
+	// Nothing ran and nothing was written into the wiki.
+	assert.equal(existsSync(path.join(wiki, "lessons")), false);
+	// The printed line, executed by a shell against an argv-recording python3 shim,
+	// must produce exactly the documented argv (quoting included).
+	const { bin, log } = shim("staged-argv-run", "process.exit(0);", { as: "python3" });
+	const shell = spawnSync("/bin/sh", ["-c", result.json.command], {
+		encoding: "utf8",
+		env: { PATH: `${path.dirname(bin)}:/usr/bin:/bin` },
+	});
+	assert.equal(shell.status, 0, shell.stderr);
+	assert.deepEqual(calls(log)[0].argv, [
+		path.join(wiki, "scripts", "lessons.py"),
+		"--root",
+		wiki,
+		"add",
+		"--id",
+		`L-corr-${id}`,
+		"--trigger",
+		"Owner correction (그게 아니라) after: I ran node --test.",
+		"--action",
+		"bun test로 돌려",
+		"--scope",
+		"project",
+		"--repo",
+		"/srv/work/project with space",
+		"--evidence",
+		candidate.sessionId,
+		"--json",
+	]);
+	const unknownId = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id: "0000000000000000" }));
+	assert.deepEqual(unknownId.json, { status: "error", reason: "unknown_correction_id", truncated: false });
+});
+
+await check("the transcript scan abandons the rest at the deadline instead of running to completion", async () => {
+	const sessions = sessionsAt("deadline-sessions");
+	const cwd = path.join(sandbox, "deadline project");
+	for (let index = 0; index < 24; index++) {
+		transcriptFile(
+			sessions,
+			`deadline-session-${index}`,
+			[sessionRecord(cwd), assistantRecord(`assistant ${index}`), userRecord("Actually, use bun")],
+			`p-${String(index).padStart(2, "0")}`,
+		);
+	}
+	const controlData = dataAt("deadline-control-data");
+	const control = await correction.sessionEndStage({ cwd }, { sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: controlData }, now: Date.now() });
+	assert.equal(control.status, "appended", "the same store stages with a real clock");
+	let calls = 0;
+	const start = Date.parse("2026-11-19T05:00:00.000Z");
+	const clock = () => {
+		calls += 1;
+		return start + calls * 400;
+	};
+	const data = dataAt("deadline-data");
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), clock, timeoutMs: 1500 },
+	);
+	assert.equal(result, null, "an expired scan stages nothing instead of finishing the enumeration");
+	assert.ok(calls >= 3, `the deadline check is reached (${calls} clock reads)`);
+	assert.equal(existsSync(stagedFile(data)), false);
+});
+
+await check("a correction earlier than the old 4 MiB tail is found by the chunked backward read", async () => {
+	const sessions = sessionsAt("chunked-sessions");
+	const cwd = path.join(sandbox, "chunked project");
+	const filler = JSON.stringify({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "x".repeat(4096) }] } });
+	const head = [
+		JSON.stringify(sessionRecord(cwd)),
+		JSON.stringify(assistantRecord("I ran node --test.")),
+		JSON.stringify(userRecord("아니 그게 아니라 bun test로 돌려")),
+	];
+	const dir = path.join(sessions, "chunked");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const file = path.join(dir, "2026-11-19T04-59-00-000Z_chunked-session.jsonl");
+	writeFileSync(file, `${head.join("\n")}\n${Array.from({ length: 1300 }, () => filler).join("\n")}\n`, { mode: 0o600 });
+	const bytes = statSync(file).size;
+	const headBytes = Buffer.byteLength(head.join("\n"), "utf8");
+	assert.ok(bytes > 4 * 1024 * 1024, `fixture is ${bytes} bytes`);
+	assert.ok(bytes - headBytes > 4 * 1024 * 1024, "the correction is farther than 4 MiB from the end");
+	const data = dataAt("chunked-data");
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result.status, "appended");
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.pattern, "그게 아니라");
+	assert.match(stored.correctionText, /bun test/);
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test.");
+});
+
+await check("a transcript whose only user record is beyond the read cap is a documented no-op", async () => {
+	const sessions = sessionsAt("cap-sessions");
+	const cwd = path.join(sandbox, "cap project");
+	const filler = JSON.stringify({ type: "message", message: { role: "toolResult", content: [{ type: "text", text: "y".repeat(8192) }] } });
+	const head = [
+		JSON.stringify(sessionRecord(cwd)),
+		JSON.stringify(assistantRecord("I ran node --test.")),
+		JSON.stringify(userRecord("Actually, use bun")),
+	];
+	const dir = path.join(sessions, "cap");
+	mkdirSync(dir, { recursive: true, mode: 0o700 });
+	const file = path.join(dir, "2026-11-19T04-59-00-000Z_cap-session.jsonl");
+	writeFileSync(file, `${head.join("\n")}\n${Array.from({ length: 2200 }, () => filler).join("\n")}\n`, { mode: 0o600 });
+	assert.ok(statSync(file).size > correction.TRANSCRIPT_MAX_BYTES, "the user record is beyond the documented cap");
+	const data = dataAt("cap-data");
+	const logs: string[] = [];
+	const debugs: string[] = [];
+	let registered: ((event: unknown, ctx: unknown) => unknown) | null = null;
+	sessionEndHookModule.default(
+		{
+			on: (_event: string, handler: (event: unknown, ctx: unknown) => unknown) => {
+				registered = handler;
+			},
+			logger: { info: (message: string) => logs.push(message), debug: (message: string) => debugs.push(message) },
+		},
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(await (registered as (event: unknown, ctx: unknown) => unknown)({ type: "session_shutdown" }, { cwd }), undefined);
+	assert.deepEqual(logs, [], "nothing is reported as staged");
+	assert.equal(debugs.length, 1, "exactly one debug line");
+	assert.match(debugs[0], /^lessons: no correction staged \(transcript scan stopped at the 16 MiB read cap\)$/);
+	assert.equal(existsSync(stagedFile(data)), false, "the cap never stages a partial candidate");
+});
+
+await check("one wiki-root chain: GJC_COMPOUND_ROOT, then GJC_LESSONS_WIKI, then the home default", async () => {
+	const wikiA = ledgerRoot("root-chain-a");
+	const wikiB = ledgerRoot("root-chain-b");
+	const data = dataAt("root-chain-data");
+	const viaWiki = await withEnv({ GJC_COMPOUND_ROOT: undefined, GJC_LESSONS_WIKI: wikiB, GJC_PLUGIN_DATA: data }, async () => ({
+		select: core.wikiRoot({ env: process.env, home }),
+		staged: await runStagedTool({}),
+	}));
+	assert.equal(viaWiki.select, wikiB, "lessons_select resolves GJC_LESSONS_WIKI");
+	assert.equal(viaWiki.staged.json.root, wikiB, "lessons_staged resolves the same checkout");
+	assert.equal(viaWiki.staged.json.status, "empty");
+	const both = await withEnv({ GJC_COMPOUND_ROOT: wikiA, GJC_LESSONS_WIKI: wikiB, GJC_PLUGIN_DATA: data }, async () => ({
+		select: core.wikiRoot({ env: process.env, home }),
+		staged: await runStagedTool({}),
+	}));
+	assert.equal(both.select, wikiA, "GJC_COMPOUND_ROOT wins over GJC_LESSONS_WIKI");
+	assert.equal(both.staged.json.root, wikiA, "both surfaces prefer the same name");
+	const wikiOnly = correction.stagedResult({ limit: 20, format: "json", id: null }, { env: { GJC_LESSONS_WIKI: wikiB }, home });
+	assert.equal(wikiOnly.status, "empty");
+	if (wikiOnly.status !== "ok" && wikiOnly.status !== "empty") throw new Error(`unexpected status ${wikiOnly.status}`);
+	assert.equal(wikiOnly.root, wikiB, "the staged core honors the same chain without an env override object");
+	assert.equal(core.wikiRoot({ env: { GJC_LESSONS_WIKI: "  " }, home }), path.join(home, "jjongguet", "personal-wiki"));
+	assert.equal(core.wikiRoot({ env: { GJC_COMPOUND_ROOT: "~/wiki" }, home }), path.join(home, "wiki"), "~ expands for both names");
+	assert.equal(core.wikiRoot({ env: {}, home }), path.join(home, "jjongguet", "personal-wiki"));
+});
+
+await check("a staged file larger than the newest window reports truncated:true with a bounded count", async () => {
+	const wiki = ledgerRoot("staged-window");
+	const data = dataAt("staged-window-data");
+	const file = stagedFile(data);
+	mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	const total = 4000;
+	const lines: string[] = [];
+	for (let index = 0; index < total; index++) lines.push(JSON.stringify(stagedCandidate(index)));
+	writeFileSync(file, `${lines.join("\n")}\n`, { mode: 0o600 });
+	const size = statSync(file).size;
+	assert.ok(size > correction.MAX_CORRECTION_FILE_BYTES, `fixture is ${size} bytes`);
+	const result = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.equal(result.json.status, "ok");
+	assert.equal(result.json.truncated, true, "the newest window binds");
+	assert.ok(result.json.count > 0 && result.json.count < total, `visible count ${result.json.count} of ${total}`);
+	assert.equal(result.json.returned, result.json.entries.length);
+	assert.ok(Buffer.byteLength(result.text, "utf8") <= 4096);
+	const oldest = correction.correctionId(stagedCandidate(0).sessionId, stagedCandidate(0).correctionText);
+	const miss = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id: oldest }));
+	assert.deepEqual(miss.json, { status: "error", reason: "unknown_correction_id", truncated: true });
+	const small = dataAt("staged-window-small");
+	assert.equal(correction.stageCorrection(stagedCandidate(0) as never, { env: { GJC_PLUGIN_DATA: small } }).status, "appended");
+	const smallResult = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: small }, () => runStagedTool({}));
+	assert.equal(smallResult.json.truncated, false);
+	assert.equal(smallResult.json.count, 1);
+});
+
+await check("control characters are stripped from both staged fields and the printed command", async () => {
+	const sessions = sessionsAt("control-sessions");
+	const data = dataAt("control-data");
+	const cwd = path.join(sandbox, "control project");
+	const controls = "\u0000\u001b\u0007";
+	assert.equal(correction.normalizeText(`a${controls}b\u0000c`), "a b c", "every control character is replaced, not only the first");
+	const userText = `Actually,${controls} use bun${controls}`;
+	const assistantText = `I ran${controls} node --test${controls}`;
+	transcriptFile(sessions, "control-session", [sessionRecord(cwd), assistantRecord(assistantText), userRecord(userText)]);
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result.status, "appended");
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.pattern, "actually");
+	assert.equal(stored.correctionText, "Actually, use bun");
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(stored.correctionText), false, "no control character survives in correctionText");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(stored.priorAssistantExcerpt), false, "no control character survives in the excerpt");
+	const wiki = ledgerRoot("control-argv");
+	const listed = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	const argv = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () =>
+		runStagedTool({ format: "add-argv", id: listed.json.entries[0].id }),
+	);
+	assert.equal(argv.json.status, "ok");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(argv.json.command), false, "the printed command carries no control character");
+	assert.equal(argv.json.command.includes("\n"), false, "the printed command is one line");
+	assert.ok(argv.json.command.includes("--action 'Actually, use bun'"));
+});
+
+await check("a PEM block in the assistant turn drops the whole candidate", async () => {
+	const cwd = path.join(sandbox, "pem excerpt project");
+	const data = dataAt("pem-excerpt-data");
+	// Built by concatenation: the fixture is not a live key in the repo.
+	const pem = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ");
+	const sessions = sessionsAt("pem-excerpt-sessions");
+	transcriptFile(sessions, "pem-session", [sessionRecord(cwd), assistantRecord(`here it is: ${pem}`), userRecord("Actually, use bun")]);
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result, null, "the candidate is dropped instead of staged with an emptied excerpt");
+	assert.equal(existsSync(stagedFile(data)), false, "no staged line at all");
+	// The same correction with a clean assistant turn still stages, so the drop is the PEM.
+	const cleanSessions = sessionsAt("pem-excerpt-clean-sessions");
+	transcriptFile(cleanSessions, "pem-clean-session", [
+		sessionRecord(cwd),
+		assistantRecord("I ran node --test."),
+		userRecord("Actually, use bun"),
+	]);
+	const clean = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: cleanSessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(clean.status, "appended");
+	assert.equal(lineCount(stagedFile(data)), 1);
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test.");
 });
 
 rmSync(root, { recursive: true, force: true });
