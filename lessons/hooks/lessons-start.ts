@@ -261,7 +261,7 @@ function parsePayload(text: string): Payload | null {
 	return { status, lessons: record.lessons };
 }
 
-function validateLesson(raw: unknown, maxBytes: number): Lesson | null {
+function validateLesson(raw: unknown): Lesson | null {
 	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
 	const record = raw as Record<string, unknown>;
 	const { id, scope, confidence, helpful, harmful, repos, trigger, action, text } = record;
@@ -281,7 +281,7 @@ function validateLesson(raw: unknown, maxBytes: number): Lesson | null {
 		repos: repos.slice(0, MAX_REPOS).map((entry) => clipBytes(entry as string, MAX_REPO_BYTES)),
 		trigger: clipBytes(trigger, MAX_FIELD_BYTES),
 		action: clipBytes(action, MAX_FIELD_BYTES),
-		text: clipBytes(text, Math.min(MAX_TEXT_BYTES, maxBytes)),
+		text: clipBytes(text, MAX_TEXT_BYTES),
 	};
 }
 
@@ -310,8 +310,11 @@ function envelope(
 	};
 }
 
-// The serialized result must stay under MAX_RESULT_BYTES even if the CLI ignores
-// its own budget: keep the ranked prefix that fits and drop the tail.
+// Both budgets are enforced on the ranked prefix: the injected block (the
+// emitted `text` values joined by one newline, separators included) must fit
+// `max_bytes`, and the serialized result must stay under MAX_RESULT_BYTES. A
+// lesson that does not fit is dropped whole — its framing and attribution are
+// never split across a budget boundary.
 function boundedEnvelope(
 	root: string,
 	repo: string | null,
@@ -321,8 +324,9 @@ function boundedEnvelope(
 ): Extract<SelectResult, { status: "ok" | "empty" }> {
 	const kept: Lesson[] = [];
 	for (const lesson of lessons) {
-		const candidate = envelope(root, repo, limit, maxBytes, [...kept, lesson]);
-		if (lessonBytes(JSON.stringify(candidate)) > MAX_RESULT_BYTES) break;
+		const candidate = [...kept, lesson];
+		if (blockBytes(candidate) > maxBytes) break;
+		if (lessonBytes(JSON.stringify(envelope(root, repo, limit, maxBytes, candidate))) > MAX_RESULT_BYTES) break;
 		kept.push(lesson);
 	}
 	return envelope(root, repo, limit, maxBytes, kept);
@@ -386,7 +390,7 @@ export async function selectLessons(query: SelectQuery, deps: SelectDeps = {}): 
 	if (payload.status === "empty") return envelope(root, repo, limit, maxBytes, []);
 	const lessons: Lesson[] = [];
 	for (const raw of payload.lessons.slice(0, limit)) {
-		const lesson = validateLesson(raw, maxBytes);
+		const lesson = validateLesson(raw);
 		if (lesson === null) return { status: "error", reason: "invalid_lesson_shape" };
 		lessons.push(lesson);
 	}

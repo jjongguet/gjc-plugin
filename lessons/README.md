@@ -18,7 +18,7 @@ Requires a personal-wiki checkout with `scripts/lessons.py` and `python3` on `PA
 | --- | --- | --- |
 | `repo` | absolute path, ≤ 4096 characters | Repository used for relevance ranking. Omitted: only `host` and `global` lessons are relevant. Never a command. |
 | `limit` | 1–6, default 6 | Out-of-range numbers are clamped, not widened. |
-| `max_bytes` | 200–600, default 600 | Budget for emitted lesson text in UTF-8 bytes. Out-of-range numbers are clamped. |
+| `max_bytes` | 200–600, default 600 | Budget for the `\n`-joined lesson `text` block in UTF-8 bytes (separators included). Out-of-range numbers are clamped. |
 
 It runs exactly one command, as an argv array and never through a shell:
 
@@ -35,7 +35,7 @@ The single JSON text response is one of:
 - `{"status":"unavailable","reason":"root_missing"|"script_missing"|"ledger_unavailable"}` — no spawn when the root or script is missing; the CLI's own `unavailable` (exit 2) is reported as `ledger_unavailable`.
 - `{"status":"error","reason":…}` — `timeout`, `stdout_too_large`, `spawn_failed`, `invalid_json`, `invalid_lesson_shape`, `exit_<code>` or `result_too_large`. Child stderr is never returned.
 
-Invalid parameters are refused in-plugin (`invalid_input`) before any process starts. Every result is serialized under 4096 bytes; a ledger CLI that ignores its own budget is bounded by the limit, per-lesson clipping and dropping the lowest-ranked tail.
+Invalid parameters are refused in-plugin (`invalid_input`) before any process starts. Every result is serialized under 4096 bytes and the `\n`-joined `text` block never exceeds `max_bytes`: a ledger CLI that ignores its own budget is bounded by the limit and by dropping the lowest-ranked lessons whole — a lesson's framing and attribution are never split across a budget boundary.
 
 The `lessons-start` hook runs one best-effort `select --cwd <session cwd> --limit 3 --max-bytes 300 --json` with a 1500 ms timeout, and logs exactly one line (≤ 300 characters) when lessons exist. It cannot inject model context: a missing ledger, a timeout or a broken UI is silence, never a failed session.
 

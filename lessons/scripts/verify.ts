@@ -379,16 +379,14 @@ await check("limit and max_bytes clamp into the documented windows before the ca
 	assert.deepEqual(second.slice(second.indexOf("--limit")), ["--limit", "1", "--max-bytes", "200", "--json"]);
 });
 
-await check("oversize: the limit wins and the serialized result stays under 4096 bytes", async () => {
+await check("oversize: the limit wins, the joined text budget holds and the JSON envelope stays under 4096 bytes", async () => {
+	const repo = path.join(sandbox, "repo");
 	const wiki = ledgerRoot("oversize");
 	const many = Array.from({ length: 20 }, (_value, index) =>
-		lesson(`L-${String(index).padStart(2, "0")}`, { text: "y".repeat(1200) }),
+		lesson(`L-${String(index).padStart(2, "0")}`, { text: "y".repeat(200) }),
 	);
 	const { bin } = shim("oversize", emit(payload(many)));
-	const result = await core.selectLessons(
-		{ repo: path.join(sandbox, "repo"), limit: 6, max_bytes: 600 },
-		deps(bin, wiki),
-	);
+	const result = await core.selectLessons({ repo, limit: 6, max_bytes: 600 }, deps(bin, wiki));
 	assert.equal(result.status, "ok");
 	assert.ok(result.count <= 6, `count ${result.count}`);
 	assert.ok(result.count >= 1, "the ranked first lesson is kept");
@@ -396,7 +394,72 @@ await check("oversize: the limit wins and the serialized result stays under 4096
 		result.lessons.every((entry: { text: string }) => Buffer.byteLength(entry.text, "utf8") <= 600),
 		"no single lesson exceeds the whole byte budget",
 	);
+	assert.equal(result.bytes, Buffer.byteLength(result.lessons.map((entry: { text: string }) => entry.text).join("\n"), "utf8"));
+	assert.ok(result.bytes <= 600, `joined bytes ${result.bytes}`);
 	assert.ok(Buffer.byteLength(JSON.stringify(result), "utf8") <= 4096);
+
+	// Small texts, fat metadata: the byte budget is not the binding constraint here,
+	// so the 4096-byte envelope must drop the ranked tail on its own.
+	const jsonWiki = ledgerRoot("oversize-json");
+	const fat = Array.from({ length: 6 }, (_value, index) =>
+		lesson(`L-${String(index).padStart(2, "0")}`, { text: "t".repeat(40), trigger: "g".repeat(400), action: "h".repeat(400) }),
+	);
+	const jsonShim = shim("oversize-json", emit(payload(fat)));
+	const capped = await core.selectLessons({ repo, limit: 6, max_bytes: 600 }, deps(jsonShim.bin, jsonWiki));
+	assert.equal(capped.status, "ok");
+	assert.ok(capped.count < 6, `envelope cap must drop the tail: count ${capped.count}`);
+	assert.ok(capped.count >= 1);
+	assert.ok(Buffer.byteLength(JSON.stringify(capped), "utf8") <= 4096);
+});
+
+await check("multiple near-budget lessons never exceed the aggregate joined-text budget", async () => {
+	const repo = path.join(sandbox, "repo");
+	const wiki = ledgerRoot("aggregate");
+	// 6 x 250 B: the sum of two fits 600 but the joined block of three does not.
+	const near = Array.from({ length: 6 }, (_value, index) => {
+		const id = `L-${index + 1}`;
+		const prefix = `[${id}] `;
+		return lesson(id, { text: prefix + "k".repeat(250 - prefix.length) });
+	});
+	const { bin } = shim("aggregate", emit(payload(near)));
+	const result = await core.selectLessons({ repo, limit: 6, max_bytes: 600 }, deps(bin, wiki));
+	assert.equal(result.status, "ok");
+	assert.equal(result.count, 2, "three 250 B lessons plus two separators exceed 600");
+	assert.equal(result.lessons.length, result.count);
+	assert.deepEqual(
+		result.lessons.map((entry: { id: string }) => entry.id),
+		["L-1", "L-2"],
+		"the ranked tail is dropped, not reordered",
+	);
+	const joined = result.lessons.map((entry: { text: string }) => entry.text).join("\n");
+	assert.equal(result.bytes, Buffer.byteLength(joined, "utf8"));
+	assert.equal(result.bytes, 501);
+	assert.ok(result.bytes <= 600);
+
+	// The separator is budgeted: two 300 B texts sum to exactly 600 but join to 601,
+	// so only the first is emitted.
+	const edgeWiki = ledgerRoot("aggregate-edge");
+	const edge = [
+		lesson("L-a", { text: "a".repeat(300) }),
+		lesson("L-b", { text: "b".repeat(300) }),
+	];
+	const edgeShim = shim("aggregate-edge", emit(payload(edge)));
+	const edgeResult = await core.selectLessons({ repo, limit: 6, max_bytes: 600 }, deps(edgeShim.bin, edgeWiki));
+	assert.equal(edgeResult.status, "ok");
+	assert.equal(edgeResult.count, 1);
+	assert.equal(edgeResult.bytes, 300);
+	assert.ok(edgeResult.bytes <= 600);
+
+	// The reported regression: two lessons that are each exactly at the budget.
+	const twinWiki = ledgerRoot("aggregate-twins");
+	const twins = [lesson("L-x", { text: "x".repeat(600) }), lesson("L-y", { text: "y".repeat(600) })];
+	const twinShim = shim("aggregate-twins", emit(payload(twins)));
+	const twinResult = await core.selectLessons({ repo, limit: 6, max_bytes: 600 }, deps(twinShim.bin, twinWiki));
+	assert.equal(twinResult.status, "ok");
+	assert.equal(twinResult.count, 1, "two 600 B texts join to 1201 and cannot both fit");
+	assert.equal(twinResult.bytes, 600);
+	assert.ok(twinResult.bytes <= twinResult.max_bytes);
+	assert.ok(Buffer.byteLength(JSON.stringify(twinResult), "utf8") <= 4096);
 });
 
 await check("invalid JSON, a non-zero exit and a malformed lesson are bounded errors with no stderr passthrough", async () => {
