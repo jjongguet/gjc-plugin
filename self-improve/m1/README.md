@@ -13,6 +13,14 @@ default and answers `--live` with one of five stable codes: `live_not_approved`
 `live_executor_absent`, exit 2). This planning CLI does not dispatch requests.
 The separately gated execution entry point is `run-pilot.mjs`.
 
+`--dry-run` explicitly selects the default planning mode and cannot be combined
+with `--live` or `--approve-live` (usage error, exit 2). For this preflight,
+`maxCalls` counts planned provider request slots, not cells: B0 uses one slot
+per cell and B1/B2 use three. `cleanupUsd` is a single task-level reserve,
+committed once with prior spend, reservations and unresolved charges before
+admitting any request; it is not charged again per cell or request. Planning
+does not make those provider calls or spend the reserve.
+
 ## What a cell is
 
 One task × one arm. Each cell gets

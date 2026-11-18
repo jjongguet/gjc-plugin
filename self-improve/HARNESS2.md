@@ -30,7 +30,8 @@ forgery still passes. Task outcomes remain the independent oracle's job.
 development cells only (the holdout stays untouched), an accumulated budget that
 blocks on the first refusal, oracle/prompt blockers
 (`oracle_unresolved`, `oracle_kind_unimplemented`, `prompt_missing`), a sandbox
-probe, the loading receipt, and the five live refusals. The dry-run artifact is
+probe, the loading receipt, and five live response codes (one skip and four
+refusals). The dry-run artifact is
 the blocker report; no trial receipt is produced and no model is called.
 
 ## Decision and evidence boundary

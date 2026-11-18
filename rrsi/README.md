@@ -61,7 +61,9 @@ is out of scope and unprovided.
   `{records, projected, omitted, ratio, limited}` plus `newest_covered`,
   `head_omitted`, `novelty` (`{retained, novel, shared, density}`) and
   `blocking_segments`; omitted
-  older records are labeled, never silently dropped. `import` returns the same
+  older records are labeled, never silently dropped. `head_omitted` and
+  `attemptsOmitted` use `projection.omitted`: all scanned JSON values not
+  retained, including non-object values (arrays are not records). `import` returns the same
   labels under `journal`/`window`. The same projection is stored as
   `lastProjection` for `rrsi status`.
 - **State, receipts, retention.** `~/.gjc-plugin/rrsi/periodic.json`
@@ -155,8 +157,8 @@ drift gate.
 ```sh
 bun rrsi/scripts/build.mjs            # regenerate tools/rrsi.ts + hooks/rrsi-periodic.ts (keyless)
 bun rrsi/scripts/build.mjs --check    # non-mutating drift gate (generated_out_of_sync:<path> on drift)
-bun rrsi/scripts/verify.ts            # hermetic acceptance suite (isolated HOME; includes the periodic cases)
-bun test rrsi/tests/real-journal.test.ts          # capture -> import -> dream and one periodic cycle over real journal attempts
+bun run test:rrsi                    # hermetic acceptance + journal-boundaries.test.ts (CI gate)
+bun test rrsi/tests/real-journal.test.ts          # manual diagnostic requiring >=10 local real records; not a CI gate
 node --test rrsi/tests/periodic.test.mjs          # receipt-bearing node:test harness (delegates to bun)
 ```
 
@@ -164,8 +166,10 @@ The verifier uses a temporary isolated `HOME`; the real `~/.gjc-plugin/rrsi`
 store is never touched. The real-journal test reads the jev-advisor journal
 read-only and copies a bounded slice into the isolated home, so the round trip
 and the periodic cycle run over real attempts with a hermetic store. If the
-real journal is unavailable the verifier records the measured count (null/0)
-instead of substituting synthetic data. `.ts`/bun suites are local gates;
+real journal is unavailable the manual diagnostic reports the measured count
+and fails instead of substituting synthetic data. Synthetic projection and
+freshness cases are in `journal-boundaries.test.ts`, included in `test:rrsi`;
+they do not depend on a user's real journal. `.ts`/bun suites are local gates;
 `rrsi/tests/periodic.test.mjs` is the node-native file eligible for
 `verification_run`.
 
