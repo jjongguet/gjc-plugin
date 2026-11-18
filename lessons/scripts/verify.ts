@@ -1250,6 +1250,36 @@ await check("control characters are stripped from both staged fields and the pri
 	assert.ok(argv.json.command.includes("--action 'Actually, use bun'"));
 });
 
+await check("a PEM block in the assistant turn drops the whole candidate", async () => {
+	const cwd = path.join(sandbox, "pem excerpt project");
+	const data = dataAt("pem-excerpt-data");
+	// Built by concatenation: the fixture is not a live key in the repo.
+	const pem = ["-----BEGIN", "RSA PRIVATE KEY-----"].join(" ");
+	const sessions = sessionsAt("pem-excerpt-sessions");
+	transcriptFile(sessions, "pem-session", [sessionRecord(cwd), assistantRecord(`here it is: ${pem}`), userRecord("Actually, use bun")]);
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result, null, "the candidate is dropped instead of staged with an emptied excerpt");
+	assert.equal(existsSync(stagedFile(data)), false, "no staged line at all");
+	// The same correction with a clean assistant turn still stages, so the drop is the PEM.
+	const cleanSessions = sessionsAt("pem-excerpt-clean-sessions");
+	transcriptFile(cleanSessions, "pem-clean-session", [
+		sessionRecord(cwd),
+		assistantRecord("I ran node --test."),
+		userRecord("Actually, use bun"),
+	]);
+	const clean = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: cleanSessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(clean.status, "appended");
+	assert.equal(lineCount(stagedFile(data)), 1);
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test.");
+});
+
 rmSync(root, { recursive: true, force: true });
 if (failures > 0) {
 	console.error(`lessons verify: ${failures}/${cases} failed`);

@@ -273,8 +273,10 @@ function correctionSpan(records: readonly unknown[]): { user: number; assistant:
  * Build one correction candidate from transcript records: the last user
  * message must carry a correction cue, and the nearest preceding assistant
  * message becomes the evidence excerpt. Both fields are redacted and clipped,
- * so a credential-shaped value is never part of the result. No cue, no
- * readable user message, or an unredactable correction text means null.
+ * so a credential-shaped value is never part of the result. No cue, no readable
+ * user message, or a refused redaction in *either* field means null: a
+ * credential replacement is acceptable, a PEM block is not, because a shortened
+ * private key is still a leaked key and an excerpt-less record would hide that.
  */
 export function extractCorrection(records: readonly unknown[], context: { sessionId: string; cwd: string; now: number }): CorrectionCandidate | null {
 	const span = correctionSpan(records);
@@ -289,7 +291,11 @@ export function extractCorrection(records: readonly unknown[], context: { sessio
 	const assistantText = span.assistant < 0 ? null : readableMessage(records[span.assistant], "assistant");
 	if (assistantText !== null) {
 		const safeExcerpt = redactText(clipBytes(assistantText, MAX_SOURCE_BYTES));
-		excerpt = safeExcerpt.ok ? clipBytes(safeExcerpt.text, EXCERPT_MAX_BYTES) : "";
+		// A refused redaction here drops the whole candidate, exactly as it does for
+		// the correction text; keeping a record with an emptied excerpt would stage
+		// the session anyway and contradict the documented boundary.
+		if (!safeExcerpt.ok) return null;
+		excerpt = clipBytes(safeExcerpt.text, EXCERPT_MAX_BYTES);
 	}
 	return {
 		schema: CORRECTION_SCHEMA,
