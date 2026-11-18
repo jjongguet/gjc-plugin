@@ -72,8 +72,10 @@ node self-improve/scripts/verify-unit.mjs
 node self-improve/scripts/verify-integration.mjs
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo . --dry-run --json
 node self-improve/scripts/run.mjs cycle --proposal /tmp/proposal.json --repo .
+node self-improve/scripts/run.mjs compose --proposals /tmp/compose.json --repo . --dry-run --json
 node self-improve/scripts/run.mjs loop --max-cycles 2 --proposer stub --json
 node self-improve/scripts/run.mjs loop --max-cycles 1 --proposer cmd --proposer-cmd 'node tools/proposer.mjs {request} {response}' --live-approved --json
+node self-improve/scripts/run.mjs loop --compose-count 2 --max-cycles 1 --max-proposer-calls 2 --proposer cmd --proposer-cmd 'node tools/proposer.mjs {request} {response}' --live-approved --json
 node self-improve/scripts/run.mjs replay --corpus ledger --json
 node self-improve/scripts/run.mjs replay --policy <id> --json
 node self-improve/scripts/run.mjs dream --seed 1 --out receipt.json --json
@@ -92,7 +94,7 @@ is invoked from a repository subdirectory.
 
 ```sh
 node self-improve/scripts/run.mjs loop --repo . [--proposer stub|cmd] [--proposer-cmd '<template>'] \
-  [--live-approved] [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] \
+  [--live-approved] [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--compose-count N] \
   [--stop-on-adopt] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
 ```
 
@@ -142,6 +144,84 @@ validation minimum, the corpus sha256 and the no-post-hoc-edits sentence.
 Headroom cases live in `domains/gjc-plugin/probes/fixtures.json` with a
 `provenance` object naming the documented statement; held-out parallels carry
 `parallelOf`. See `PATTERNS.md` for the procedure.
+
+## Composition (`compose`, `loop --compose-count`)
+
+Harness² M2 makes Propose–Probe–Compose reachable from the same entrypoints as
+the single-candidate cycle. A composition is N=2..4 independent candidates for
+one objective; every candidate is probed on its own against ONE shared baseline,
+and the composed patch is then a new candidate that runs through the ordinary
+`runCycle` gates. An individual candidate win is recorded evidence, never
+adoption: only the composed verdict can adopt, and a composed regression
+(floor, cost rule, held-out, guards, budget) rejects the composition even when
+some source candidate improved.
+
+```sh
+node self-improve/scripts/run.mjs compose --proposals /tmp/compose.json --repo . \
+  [--objective <id>] [--domain <id>] [--campaign <id>] [--run-root <path>] [--ledger <path>] \
+  [--dry-run] [--install] [--reset-budget] [--json]
+```
+
+`--proposals` names a manifest; paths resolve relative to it:
+
+```json
+{
+  "schema": "gjc.self-improve.compose-input.v1",
+  "objective": "probe.decision_accuracy",
+  "hypothesis": "optional composed hypothesis",
+  "commitMessage": "optional composed commit message",
+  "candidates": ["a.json", "b.json"]
+}
+```
+
+`candidates` holds 2..4 entries; each entry is a proposal-file path (string) or
+`{"file": "<path>"}`. A candidate file uses the ordinary proposal shape
+(`hypothesis`, `commitMessage`, optional `objective`, and exactly one of
+`patchFile` — relative to the candidate file — or inline `patchText`).
+Provenance is derived, never supplied: `id`, `patchSha256`, `groupId`,
+`composition`, `composedSha256`, `sources`, `baselineFingerprint` and
+`provenance` are refused in the manifest or in any candidate file. Candidate
+objectives must equal the declared objective (or omit `objective`), candidate
+counts outside 2..4 are refused, and candidate files that edit the same file
+are a composition conflict — there is no 3-way merge. Admission (schema,
+budget rung, protected paths, hypothesis novelty, held-out verbatim scan) runs
+before any scratch execution or spend.
+
+- **Exit codes:** `0` when the composed run finished (`status=ok` or
+  `status=dry-run`, including a reject verdict), `2` for argument, manifest or
+  admission refusals, `3` for unreadable or invalid input files (manifest,
+  candidate proposal, candidate patch).
+- **`--json`:** prints the `runComposeCycle` result (`status`, `composeId`,
+  `cycleId`, `decision`, `reasons`, `adoption`, `candidates[]`, `composition`,
+  `baselineFingerprint`, `composed`); refusals print
+  `{status:"refused"|"error", reason, detail?}`. Text mode prints one status
+  line, the reasons line and one line per candidate.
+- **Pass-through:** `--dry-run`, `--install` and `--reset-budget` mean exactly
+  what they mean for `cycle`; the rung comes from this campaign's accepted
+  count, and no model transport is added.
+
+Loop opt-in (`--compose-count 2..4`) reuses the existing proposer seam per
+candidate: `buildCandidateRequests` → the configured `stub`/`cmd` proposer once
+per candidate → `collectCandidateProposals` → `composeCandidateProposals` →
+`runComposeCycle`. Default `composeCount=1` keeps the pre-M2 one-candidate
+path unchanged.
+
+- A composing round evaluates exactly one objective (batch size does not fan a
+  composition out) and each candidate consumes one proposer call, so set
+  `--max-proposer-calls` to at least the compose count; a round that cannot fit
+  the remaining calls stops with `max_proposer_calls` instead of starting a
+  partial composition.
+- A pinned `--candidate-file` cannot be composed (the loop returns a bounded
+  skip, `compose_requires_unpinned_objective`).
+- Refused compositions are recorded in loop-state as `composition_failed`
+  (fewer than two usable candidates) or `composition_refused` (conflict,
+  budget, protected path, novelty or held-out scan); they do not run guards or
+  probes and do not stop the campaign. `caps.composeCount` records the mode.
+- Held-out fixtures stay out of proposer requests and scratch copies through
+  the existing `self-improve/domains/**` exclusion; request files and loop logs
+  carry failing probe labels only, never held-out values. Composed cycle rows
+  carry the bounded composition evidence; `journalEvidence` remains on ordinary
+  cycle rows only.
 
 ## Honest evidence boundary (mandated disclosure)
 

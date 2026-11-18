@@ -5,13 +5,23 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import * as fs from "node:fs";
 import DOMAIN from "../domains/gjc-plugin/adapter.mjs";
 import RULES_TEXT_DOMAIN from "../domains/rules-text/adapter.mjs";
-import { defaultRunRoot, historyState, pruneRuns, recoverPendingCycle, runCycle } from "../lib/engine.mjs";
+import {
+  campaignAcceptedCount,
+  defaultRunRoot,
+  historyState,
+  pruneRuns,
+  recoverPendingCycle,
+  runComposeCycle,
+  runCycle,
+} from "../lib/engine.mjs";
+import { rungFor } from "../lib/budget.mjs";
 import { LOOP_DEFAULTS, runLoop } from "../lib/loop.mjs";
-import { ledgerCounts, readLedger } from "../lib/ledger.mjs";
+import { MAX_COMPOSITION_SOURCES, MIN_COMPOSITION_SOURCES, ledgerCounts, readLedger } from "../lib/ledger.mjs";
+import { composeCandidateProposals } from "../lib/propose.mjs";
 import { distillTrajectories, parseMaxLag, readStoreFile, RRSI_STORE_SCHEMA } from "../lib/distill.mjs";
 import { BASELINE_POLICIES, DEFAULT_BETAS, loadCorpus, scorePolicy } from "../lib/replay.mjs";
 import { runDream, summarizeScore } from "../lib/dream.mjs";
@@ -29,6 +39,23 @@ import { buildTextFixturePrompt, runStochasticEvaluation } from "../lib/runner.m
 
 const SELF_IMPROVE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const DEFAULT_LEDGER = join(SELF_IMPROVE_DIR, "ledger.jsonl");
+
+// `compose` input manifest contract (Harness² M2). Candidate provenance is
+// derived by the proposal pipeline, never accepted from the caller: these keys
+// are refused wherever they appear in the manifest or a candidate file.
+const COMPOSE_INPUT_SCHEMA = "gjc.self-improve.compose-input.v1";
+const COMPOSE_INPUT_FIELDS = Object.freeze(["schema", "objective", "hypothesis", "commitMessage", "candidates"]);
+const COMPOSE_PROVENANCE_FIELDS = Object.freeze([
+  "id",
+  "patchSha256",
+  "groupId",
+  "composition",
+  "composed",
+  "composedSha256",
+  "sources",
+  "baselineFingerprint",
+  "provenance",
+]);
 
 // Domain registry: `--domain <id>` selects an adapter; absent -> gjc-plugin
 // (the historical default, unchanged). Unknown ids fail closed with exit 2.
@@ -51,9 +78,11 @@ commands:
   report  [--json] [--ledger <path>]
   cycle   --proposal <path> [--repo <path>] [--run-root <path>] [--ledger <path>]
           [--domain <id>] [--campaign <id>] [--dry-run] [--install] [--reset-budget] [--json]
+  compose --proposals <path> [--repo <path>] [--objective <id>] [--domain <id>] [--campaign <id>]
+          [--run-root <path>] [--ledger <path>] [--dry-run] [--install] [--reset-budget] [--json]
   loop    [--repo <path>] [--store <path>] [--domain <id>] [--proposer stub|cmd] [--proposer-cmd '<template>'] [--live-approved]
           [--candidate-file <path>] [--max-lag <n>]
-          [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--proposer-timeout-ms <n>]
+          [--max-cycles N] [--max-wall-ms T] [--max-proposer-calls C] [--batch-size W] [--compose-count N] [--proposer-timeout-ms <n>]
           [--stop-on-adopt] [--install] [--loop-id <id>] [--run-root <path>] [--ledger <path>] [--dry-run] [--json]
   replay  [--corpus ledger] [--domain <id>] [--policy <id>|B0|B1] [--policy-file <path>] [--policy-dir <path>] [--ledger <path>] [--json]
   dream   [--domain <id>] [--seed <n>] [--max-candidates <n>] [--out <path>] [--write-policy <id>] [--policy-dir <path>]
@@ -90,6 +119,8 @@ const VALUED_FLAGS = new Set([
   "--text-fixture",
   "--proposer",
   "--proposer-cmd",
+  "--proposals",
+  "--compose-count",
   "--max-cycles",
   "--max-wall-ms",
   "--max-proposer-calls",
@@ -184,6 +215,209 @@ async function runCycleCommand(options) {
     );
   }
   return result.status === "ok" || result.status === "dry-run" ? 0 : 2;
+}
+
+function boundedComposeRefusal(result) {
+  const parts = [];
+  const detail = result?.detail;
+  if (detail && Array.isArray(detail.violations)) parts.push(`violations=${detail.violations.slice(0, 4).join("|")}`);
+  if (detail && Array.isArray(detail.offending)) parts.push(`offending=${detail.offending.slice(0, 4).join("|")}`);
+  if (Array.isArray(result?.matched)) parts.push(`matched=${result.matched.slice(0, 4).join(",")}`);
+  if (Array.isArray(result?.conflicts)) {
+    parts.push(`conflicts=${result.conflicts.slice(0, 4).map((entry) => entry.path).join(",")}`);
+  }
+  if (typeof detail === "string") parts.push(detail);
+  else if (typeof detail?.detail === "string") parts.push(detail.detail);
+  return parts.join(" ").slice(0, 240) || undefined;
+}
+
+/**
+ * `compose`: propose–probe–compose over an explicit, bounded candidate set.
+ *
+ * The manifest names 2..4 proposal files (same shape as `cycle --proposal`);
+ * the composed proposal and its provenance are derived here by the ordinary
+ * admission pipeline, never read from the caller. Each candidate is probed on
+ * its own against one shared baseline, and the composed patch then runs through
+ * the ordinary `runCycle` gates; only that composed verdict can adopt.
+ */
+async function runComposeCommand(options) {
+  if (!options.proposals) {
+    process.stderr.write(`compose requires --proposals <path>\n\n${USAGE}`);
+    return 2;
+  }
+  const { adapter, error: domainError } = resolveDomain(options);
+  if (domainError) {
+    process.stderr.write(`${domainError}\n`);
+    return 2;
+  }
+  const fail = (status, reason, detail, code) => {
+    const payload = { status, reason, ...(detail ? { detail } : {}) };
+    if (options.json) process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    process.stderr.write(`compose: ${status}: ${reason}${detail ? ` (${detail})` : ""}\n`);
+    return code;
+  };
+  const repoRoot = resolve(options.repo ?? process.cwd());
+  const manifestPath = resolve(options.proposals);
+  let manifestText;
+  try {
+    manifestText = fs.readFileSync(manifestPath, "utf8");
+  } catch (error) {
+    return fail("error", "compose_manifest_unreadable", manifestPath, 3);
+  }
+  let manifest;
+  try {
+    manifest = JSON.parse(manifestText);
+  } catch (error) {
+    return fail("error", "compose_manifest_invalid_json", String(error.message).slice(0, 120), 3);
+  }
+  if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
+    return fail("refused", "compose_input_shape", null, 2);
+  }
+  if (manifest.schema !== COMPOSE_INPUT_SCHEMA) {
+    return fail("refused", "compose_input_schema_mismatch", COMPOSE_INPUT_SCHEMA, 2);
+  }
+  const extraFields = Object.keys(manifest).filter((key) => !COMPOSE_INPUT_FIELDS.includes(key));
+  const forgedFields = extraFields.filter((key) => COMPOSE_PROVENANCE_FIELDS.includes(key));
+  if (forgedFields.length > 0) {
+    return fail("refused", "compose_input_carries_provenance", forgedFields.join(","), 2);
+  }
+  if (extraFields.length > 0) {
+    return fail("refused", "compose_input_unknown_field", extraFields.join(","), 2);
+  }
+  if (manifest.hypothesis !== undefined && typeof manifest.hypothesis !== "string") {
+    return fail("refused", "compose_input_shape", "hypothesis", 2);
+  }
+  if (manifest.commitMessage !== undefined && typeof manifest.commitMessage !== "string") {
+    return fail("refused", "compose_input_shape", "commitMessage", 2);
+  }
+  const objective = options.objective ?? manifest.objective;
+  if (typeof objective !== "string" || objective.length === 0) {
+    return fail("refused", "compose_objective_required", null, 2);
+  }
+  const declared = Array.isArray(manifest.candidates) ? manifest.candidates.length : 0;
+  if (!Array.isArray(manifest.candidates) || declared < MIN_COMPOSITION_SOURCES || declared > MAX_COMPOSITION_SOURCES) {
+    return fail(
+      "refused",
+      "compose_candidate_count_out_of_range",
+      `count=${declared} (${MIN_COMPOSITION_SOURCES}..${MAX_COMPOSITION_SOURCES})`,
+      2,
+    );
+  }
+  const candidates = [];
+  for (const [index, entry] of manifest.candidates.entries()) {
+    const relativePath = typeof entry === "string"
+      ? entry
+      : entry && typeof entry === "object" && !Array.isArray(entry) && typeof entry.file === "string" && Object.keys(entry).length === 1
+        ? entry.file
+        : null;
+    if (relativePath === null || relativePath.length === 0) {
+      return fail("refused", "compose_candidate_input_invalid", `index=${index}`, 2);
+    }
+    const candidatePath = isAbsolute(relativePath) ? relativePath : resolve(dirname(manifestPath), relativePath);
+    let candidateText;
+    try {
+      candidateText = fs.readFileSync(candidatePath, "utf8");
+    } catch (error) {
+      return fail("error", "compose_candidate_unreadable", `index=${index} ${candidatePath}`, 3);
+    }
+    let proposal;
+    try {
+      proposal = JSON.parse(candidateText);
+    } catch (error) {
+      return fail("error", "compose_candidate_invalid_json", `index=${index}`, 3);
+    }
+    if (!proposal || typeof proposal !== "object" || Array.isArray(proposal)) {
+      return fail("refused", "compose_candidate_shape", `index=${index}`, 2);
+    }
+    const candidateForged = COMPOSE_PROVENANCE_FIELDS.filter((key) => Object.hasOwn(proposal, key));
+    if (candidateForged.length > 0) {
+      return fail("refused", "compose_candidate_carries_provenance", `index=${index}:${candidateForged.join(",")}`, 2);
+    }
+    if (typeof proposal.hypothesis !== "string" || proposal.hypothesis.trim().length === 0) {
+      return fail("refused", "compose_candidate_proposal_incomplete", `index=${index}:hypothesis`, 2);
+    }
+    if (typeof proposal.commitMessage !== "string" || proposal.commitMessage.trim().length === 0) {
+      return fail("refused", "compose_candidate_proposal_incomplete", `index=${index}:commitMessage`, 2);
+    }
+    if (proposal.objective !== undefined && proposal.objective !== objective) {
+      return fail("refused", "compose_candidate_objective_mismatch", `index=${index}`, 2);
+    }
+    const hasPatchText = typeof proposal.patchText === "string" && proposal.patchText.length > 0;
+    const hasPatchFile = typeof proposal.patchFile === "string" && proposal.patchFile.length > 0;
+    if (hasPatchText && hasPatchFile) {
+      return fail("refused", "compose_candidate_patch_ambiguous", `index=${index}`, 2);
+    }
+    if (!hasPatchText && !hasPatchFile) {
+      return fail("refused", "compose_candidate_patch_required", `index=${index}`, 2);
+    }
+    candidates.push({
+      objective,
+      hypothesis: proposal.hypothesis,
+      commitMessage: proposal.commitMessage,
+      ...(hasPatchText
+        ? { patchText: proposal.patchText }
+        : {
+            patchFile: isAbsolute(proposal.patchFile)
+              ? proposal.patchFile
+              : resolve(dirname(candidatePath), proposal.patchFile),
+          }),
+    });
+  }
+
+  const ledgerPath = options.ledger ? resolve(options.ledger) : join(repoRoot, "self-improve", "ledger.jsonl");
+  const campaignId = options.campaign ?? "default";
+  const accepted = options.resetBudget === true ? 0 : campaignAcceptedCount(ledgerPath, campaignId);
+  const rung = rungFor(accepted, adapter.budget);
+  const patchDir = fs.mkdtempSync(join(tmpdir(), "self-improve-compose-cli-"));
+  try {
+    const composed = composeCandidateProposals({
+      candidates,
+      objective,
+      hypothesis: manifest.hypothesis ?? null,
+      commitMessage: manifest.commitMessage ?? null,
+      rung,
+      adapter,
+      repoRoot,
+      ledgerPath,
+      stallK: adapter.stallK ?? 3,
+      patchDir,
+    });
+    if (!composed.ok) {
+      return fail("refused", composed.reason ?? "compose_refused", boundedComposeRefusal(composed), 2);
+    }
+    const result = await runComposeCycle({
+      repoRoot,
+      adapter,
+      candidates,
+      composed: { proposal: composed.proposal, composition: composed.composition },
+      campaignId,
+      runRoot: options["run-root"] ? resolve(options["run-root"]) : undefined,
+      ledgerPath,
+      dryRun: options.dryRun === true,
+      install: options.install === true,
+      resetBudget: options.resetBudget === true,
+    });
+    if (options.json) {
+      process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+    } else {
+      const composedSha256 = result.composition?.composedSha256 ?? null;
+      process.stdout.write(
+        `status=${result.status} compose=${result.composeId ?? "-"} cycle=${result.cycleId ?? "-"} ` +
+          `decision=${result.decision ?? "-"} adoption=${result.adoption ?? "-"} ` +
+          `candidates=${result.candidates?.length ?? 0} composed=${composedSha256 ? composedSha256.slice(0, 12) : "-"}\n` +
+          (result.reasons?.length ? `reasons: ${result.reasons.join(", ")}\n` : ""),
+      );
+      for (const candidateEntry of result.candidates ?? []) {
+        process.stdout.write(
+          `- ${candidateEntry.id} ${candidateEntry.verdict ?? "-"} improved=${candidateEntry.improved === true} ` +
+            `delta=${candidateEntry.scores?.delta ?? "-"}\n`,
+        );
+      }
+    }
+    return result.status === "ok" || result.status === "dry-run" ? 0 : 2;
+  } finally {
+    fs.rmSync(patchDir, { recursive: true, force: true });
+  }
 }
 
 function selfImproveConfig() {
@@ -476,8 +710,17 @@ async function runLoopCommand(options) {
   const maxWallMs = numberFlag("max-wall-ms");
   const maxProposerCalls = numberFlag("max-proposer-calls");
   const batchSize = numberFlag("batch-size");
+  const composeCount = numberFlag("compose-count");
   const proposerTimeoutMs = numberFlag("proposer-timeout-ms");
-  if ([maxCycles, maxWallMs, maxProposerCalls, batchSize, proposerTimeoutMs].includes(null)) return 2;
+  if ([maxCycles, maxWallMs, maxProposerCalls, batchSize, composeCount, proposerTimeoutMs].includes(null)) return 2;
+  if (composeCount !== undefined && composeCount > MAX_COMPOSITION_SOURCES) {
+    process.stderr.write(`invalid --compose-count: ${options["compose-count"]} (1..${MAX_COMPOSITION_SOURCES})\n`);
+    return 2;
+  }
+  if (composeCount !== undefined && composeCount >= MIN_COMPOSITION_SOURCES && options["candidate-file"]) {
+    process.stderr.write("loop --compose-count requires an unpinned objective (no --candidate-file)\n");
+    return 2;
+  }
   const result = await runLoop({
     repoRoot,
     adapter,
@@ -488,6 +731,7 @@ async function runLoopCommand(options) {
     maxWallMs: maxWallMs ?? LOOP_DEFAULTS.maxWallMs,
     maxProposerCalls: maxProposerCalls ?? LOOP_DEFAULTS.maxProposerCalls,
     batchSize: batchSize ?? LOOP_DEFAULTS.batchSize,
+    composeCount: composeCount ?? 1,
     cmdProposerTimeoutMs: proposerTimeoutMs ?? undefined,
     stopOnAdopt: options.stopOnAdopt === true,
     install: options.install === true,
@@ -618,6 +862,7 @@ async function run(argv) {
   const { command, options } = parsed;
   if (command === "report") return runReport(options);
   if (command === "cycle") return await runCycleCommand(options);
+  if (command === "compose") return await runComposeCommand(options);
   if (command === "loop") return await runLoopCommand(options);
   if (command === "replay") return runReplayCommand(options);
   if (command === "dream") return runDreamCommand(options);

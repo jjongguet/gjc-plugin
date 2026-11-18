@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -41,6 +41,27 @@ test("scratch-copy guards run green and leave the live harness digest unchanged"
       `live harness digest changed during scratch guards: ${summary}`,
     );
     const failures = results.filter((row) => row.status !== "pass");
+    // A hosted-runner-only guard failure is otherwise undiagnosable from the job log
+    // (the scratch directory lives on the runner), so each failing guard's own log tail
+    // is surfaced. This adds diagnosis only: the assertions below are unchanged.
+    for (const failure of failures) {
+      try {
+        const log = readFileSync(failure.logPath, "utf8");
+        // A long nested run pushes its failure above any tail window: extract the
+        // failing TAP subtests (with their assertion text) first, then a short tail.
+        const rows = log.split("\n");
+        const picked = [];
+        for (let index = 0; index < rows.length; index += 1) {
+          if (/^\s*(#\s*)?(\\?#\s*)?not ok \d+ - /.test(rows[index])) {
+            picked.push(...rows.slice(Math.max(0, index - 1), index + 14));
+          }
+        }
+        const excerpt = picked.length > 0 ? picked.join("\n") : log.slice(-4000);
+        process.stderr.write(`guard ${failure.id} failing subtests:\n${excerpt.slice(0, 12000)}\n`);
+      } catch {
+        process.stderr.write(`guard ${failure.id} log unreadable at ${failure.logPath}\n`);
+      }
+    }
     assert.deepEqual(
       failures.map((row) => ({ id: row.id, error: row.error, log: row.logPath })),
       [],
