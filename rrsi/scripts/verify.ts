@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
-import { journalWindowCoverage, projectJournalRecords, projectionCoverage, readJournalRecords, RRSI_LIMITS } from "../lib/rrsi";
+import { journalWindowCoverage, projectJournalRecords, projectLedgerRows, projectionCoverage, readJournalRecords, RRSI_DREAM_RECEIPT_LIMITS, RRSI_DREAM_RECEIPT_SCHEMA, RRSI_LIMITS } from "../lib/rrsi";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
@@ -125,14 +125,26 @@ async function runSuite(root) {
 	});
 
 	await check("capture clamps attempts, coerces unknown decisions and truncates labels", async () => {
-		const attempts = Array.from({ length: 200 }, (_, index) => ({ objective: `x`.repeat(400) + index, decision: "exploded", wallMs: -5 }));
+		// wallMs boundary: an invalid negative, an absent field, a measured 0 and a measured value.
+		// The stored attempt keeps null for the first two (README: "a measured 0 and an unmeasured
+		// value are different facts"), so capture never fabricates the 0 the old assertion expected.
+		const attempts = Array.from({ length: 200 }, (_, index) => ({
+			objective: `x`.repeat(400) + index,
+			decision: "exploded",
+			wallMs: index % 4 === 0 ? -5 : index % 4 === 1 ? undefined : index % 4 === 2 ? 0 : 42,
+		}));
 		const captured = await call({ action: "capture", goal: "y".repeat(500), attempts: JSON.stringify(attempts) });
 		assert.equal(captured.episode.attempts, 160, "attempts per episode are capped at 160");
 		const stored = JSON.parse(readFileSync(storeFile, "utf8"));
 		const episode = stored.episodes.at(-1);
 		assert.equal(episode.attempts.length, 160);
 		assert.equal(episode.attempts[0].decision, "inconclusive");
-		assert.equal(episode.attempts[0].wallMs, 0);
+		assert.deepEqual(
+			episode.attempts.slice(0, 4).map((attempt) => attempt.wallMs),
+			[null, null, 0, 42],
+			"an invalid or absent duration stays unknown (null); a measured 0 and a measured value are kept",
+		);
+		assert.deepEqual([episode.attempts[0].files, episode.attempts[0].hunks], [null, null], "an unrecorded count stays unknown, never 0");
 		assert.equal(episode.goal.length, 200);
 		assert.equal(episode.attempts[0].objective.length, 120);
 	});
@@ -166,6 +178,44 @@ async function runSuite(root) {
 		assert.equal(imported.projection.omitted, 7);
 		assert.equal(imported.projection.ratio, 5 / 12);
 		assert.equal(imported.projection.limited, true);
+	});
+
+	await check("journal projection keeps unsupported fields unknown instead of fabricating zeros", async () => {
+		const records = [
+			// success: a real decision with a measured duration
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "a0000000-0000-4000-8000-000000000001", observedAt: "2026-10-13T00:00:00.000Z", operation: "advise", durationMs: 412, advice: { status: "decision", tier: "balanced" } },
+			// failure: an explicit no-decision with a provider reason and no duration
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "a0000000-0000-4000-8000-000000000002", observedAt: "2026-10-13T00:00:01.000Z", operation: "advise", advice: { status: "no_decision", tier: "strong", reason: "provider_error" } },
+			// missing evidence: a check record carries no advice entry and no duration
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "a0000000-0000-4000-8000-000000000003", observedAt: "2026-10-13T00:00:02.000Z", operation: "check", check: { status: "decision", verdict: "unsure", confidence: 0.4 } },
+			// batch shape: the first real decision represents the record
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "a0000000-0000-4000-8000-000000000004", observedAt: "2026-10-13T00:00:03.000Z", operation: "task_advice", durationMs: 900, taskAdvice: [{ index: 0, status: "no_decision", tier: "fast", reason: "timeout" }, { index: 1, status: "decision", tier: "balanced" }] },
+		];
+		const projected = projectJournalRecords(records);
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.decision), ["adopt", "reject", "inconclusive", "adopt"], "an advice-less record has an unknown outcome, not a fabricated failure");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.wallMs), [412, null, null, 900], "a measured duration is kept; a missing one is unknown, never 0");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.files), [null, null, null, null], "the outcome journal records no file count");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.hunks), [null, null, null, null], "the outcome journal records no hunk count");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.objective), ["advise:balanced", "advise:strong", "check:unknown", "task_advice:balanced"]);
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.provenance), records.map((record) => record.id), "the journal record id is preserved");
+		assert.equal(projected.headOmitted, 0);
+	});
+
+	await check("ledger projection keeps measured counts and leaves unrecorded fields unknown", async () => {
+		const rows = [
+			{ kind: "cycle", cycleId: "c-measured", objective: "probe.decision_accuracy", budgetRung: 1, proposal: { files: ["a.ts", "b.ts"], hunks: 3 }, cost: { wallMs: 2500, bytes: 10, tokens: null }, guards: [{ id: "build", status: "pass" }], verdict: { decision: "adopt" } },
+			{ kind: "cycle", cycleId: "c-missing", objective: "probe.tone_gate", guards: [{ id: "critic", status: "fail" }], verdict: { decision: "inconclusive" } },
+			{ kind: "cycle", cycleId: "c-unmeasured", objective: "probe.router", proposal: { files: [], hunks: 0 }, cost: { wallMs: null }, verdict: { decision: "reject" } },
+			{ kind: "adoption", cycleId: "c-measured" },
+		];
+		const { attempts } = projectLedgerRows(rows);
+		assert.equal(attempts.length, 3, "non-cycle rows are not attempts");
+		assert.deepEqual(attempts.map((attempt) => attempt.decision), ["adopt", "inconclusive", "reject"]);
+		assert.deepEqual(attempts.map((attempt) => attempt.wallMs), [2500, null, null], "a measured wallMs is kept; a missing one is unknown, never 0");
+		assert.deepEqual(attempts.map((attempt) => attempt.files), [2, null, 0], "a recorded file list counts; a missing proposal is unknown; an empty list is a measured 0");
+		assert.deepEqual(attempts.map((attempt) => attempt.hunks), [3, null, 0]);
+		assert.deepEqual(attempts.map((attempt) => attempt.provenance), ["c-measured", "c-missing", "c-unmeasured"]);
+		assert.deepEqual(attempts[1].guardFailures, ["critic"]);
 	});
 
 	await check("journal-dream emits a deterministic receipt over the synthetic journal", async () => {
@@ -202,6 +252,27 @@ async function runSuite(root) {
 		assert.match(missing.stderr, /no_journal/);
 		assert.equal(existsSync(neverOut), false, "no receipt is written on failure");
 		assert.equal(existsSync(storeFile) ? readFileSync(storeFile, "utf8") : null, storeBefore, "the rrsi store is never touched");
+	});
+
+	await check("import stores realistic records with unknown fields as null, never zero", async () => {
+		const realistic = [
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "b0000000-0000-4000-8000-000000000001", observedAt: "2026-10-14T00:00:00.000Z", operation: "advise", durationMs: 640, advice: { status: "decision", tier: "fast" } },
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "b0000000-0000-4000-8000-000000000002", observedAt: "2026-10-14T00:00:01.000Z", operation: "advise", advice: { status: "no_decision", tier: "fast", reason: "timeout" } },
+			{ schemaVersion: 1, plugin: "jev-advisor", id: "b0000000-0000-4000-8000-000000000003", observedAt: "2026-10-14T00:00:02.000Z", operation: "check", check: { status: "no_decision", reason: "transport" } },
+		];
+		mkdirSync(journalDir, { recursive: true, mode: 0o700 });
+		writeFileSync(path.join(journalDir, "seg-2.jsonl"), `${realistic.map((record) => JSON.stringify(record)).join("\n")}\n`);
+		const imported = await call({ action: "import", limit: "50" });
+		assert.equal(imported.imported, 15, "12 synthetic + 3 realistic records project 1:1");
+		const stored = JSON.parse(readFileSync(storeFile, "utf8"));
+		const episode = stored.episodes.find((entry) => entry.source === "jev-journal");
+		const ids = new Set(realistic.map((record) => record.id));
+		const projected = episode.attempts.filter((attempt) => ids.has(attempt.provenance));
+		assert.equal(projected.length, 3);
+		assert.deepEqual(projected.map((attempt) => attempt.decision), ["adopt", "reject", "inconclusive"]);
+		assert.deepEqual(projected.map((attempt) => attempt.wallMs), [640, null, null], "a positive wallMs is preserved; a missing one is stored as null");
+		assert.deepEqual(projected.map((attempt) => attempt.files), [null, null, null]);
+		assert.deepEqual(projected.map((attempt) => attempt.hunks), [null, null, null]);
 	});
 
 	await check("import projects a self-improve ledger read-only when a path is given", async () => {
@@ -287,6 +358,28 @@ async function runSuite(root) {
 			assert.equal(typeof first.summary.caveat, "string");
 			assert.match(first.summary.caveat, /no statistical significance is claimed/);
 			assert.equal(first.journalStorage.persisted, true);
+			const receiptsDir = path.join(isolatedHome, ".gjc-plugin", "rrsi", "runs", "v1");
+			const receiptFiles = readdirSync(receiptsDir).filter((name) => name.includes("-dr-"));
+			assert.equal(receiptFiles.length, 2, "each dream writes one private policy receipt");
+			const receipts = receiptFiles.map((name) => {
+				const file = path.join(receiptsDir, name);
+				const body = readFileSync(file, "utf8");
+				return { file, body, receipt: JSON.parse(body) };
+			});
+			assert.equal(receipts.every((entry) => entry.receipt.schema === RRSI_DREAM_RECEIPT_SCHEMA), true);
+			assert.equal(receipts.every((entry) => entry.receipt.receiptHash === first.summary.receiptHash), true, "the receipt names the same dream hash as the tool summary");
+			assert.equal(receipts.every((entry) => entry.receipt.seed === 1), true);
+			assert.equal(receipts.every((entry) => entry.receipt.gate.ok === false), true, "a sub-gate corpus keeps gate.ok false in the receipt");
+			assert.equal(receipts.every((entry) => (statSync(entry.file).mode & 0o7777) === 0o600), true);
+			const policyReceipt = receipts[0].receipt;
+			assert.equal(policyReceipt.selected, first.summary.selected.id);
+			assert.equal(policyReceipt.top.length, RRSI_DREAM_RECEIPT_LIMITS.topPolicies);
+			assert.deepEqual(policyReceipt.top.map((entry) => entry.policyId), first.summary.ranking.slice(0, RRSI_DREAM_RECEIPT_LIMITS.topPolicies), "top ids follow the reported ranking");
+			assert.equal(typeof policyReceipt.top[0].validation.value, "number");
+			assert.equal(policyReceipt.baselines.B0 === null, false, "the baseline validation score is recorded");
+			assert.equal(receipts.every((entry) => entry.body.includes("small:fast") === false), true, "no objective/task text enters the receipt");
+			assert.equal(receipts.every((entry) => "objective" in entry.receipt === false), true);
+			assert.equal(receipts.every((entry) => Buffer.byteLength(entry.body, "utf8") <= RRSI_DREAM_RECEIPT_LIMITS.maxBytes), true, "the receipt stays inside its byte bound");
 		} finally {
 			process.env.HOME = previous;
 		}
@@ -302,6 +395,18 @@ async function runSuite(root) {
 		assert.equal(typeof dreamed.summary.thresholds.attemptsOk, "boolean");
 		const again = await call({ action: "dream", seed: "7" });
 		assert.equal(dreamed.summary.receiptHash, again.summary.receiptHash, "same seed => identical receipt hash");
+		assert.equal(dreamed.policyReceipt.persisted, true, "the dream action writes its policy receipt");
+		const receiptsDir = path.join(home, ".gjc-plugin", "rrsi", "runs", "v1");
+		const gateReceipts = readdirSync(receiptsDir)
+			.filter((name) => name.includes("-dr-"))
+			.map((name) => JSON.parse(readFileSync(path.join(receiptsDir, name), "utf8")))
+			.filter((receipt) => receipt.receiptHash === dreamed.summary.receiptHash);
+		assert.equal(gateReceipts.length >= 1, true, "the evaluated dream keeps its policy receipt");
+		assert.equal(gateReceipts[0].gate.ok, true);
+		assert.equal(gateReceipts[0].selected, dreamed.summary.selected.id);
+		assert.equal(gateReceipts[0].top.length, RRSI_DREAM_RECEIPT_LIMITS.topPolicies);
+		assert.equal(gateReceipts[0].top[0].policyId, dreamed.summary.selected.id);
+		assert.equal(typeof gateReceipts[0].top[0].validation.attemptsToFirstAdoption, "number", "an evaluated slice carries its measured attempts-to-first-adoption");
 	});
 
 	await check("the round trip runs capture -> import -> dream over >=10 imported attempts", async () => {

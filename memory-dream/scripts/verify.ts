@@ -440,11 +440,29 @@ try {
 	await check("tool runs keyless against a real scope and reports no-decision", async () => {
 		const toolMemory = path.join(agentDir, "memories", "--tool--");
 		write(path.join(toolMemory, "memory_summary.md"), "- Linear 429 responses are quota exhaustion; switch to the fallback lane immediately.\n");
+		// Every provider credential name the generated tool's jev path consumes (resolveJevConfig):
+		// an ambient key turns this keyless invocation into a real provider call, so the list is
+		// checked against the tool source and each name is saved, scrubbed here and restored below.
+		const toolSource = readFileSync(path.join(pluginRoot, "tools", "memory-dream.ts"), "utf8");
+		const credentialNames = ["JEV_ADVISOR_API_KEY", "JEV_ADVISOR_PROVIDER", "OPENROUTER_API_KEY", "OPENROUTER_DECISION_API_KEY"];
+		const consumed = [...new Set([...toolSource.matchAll(/\b(?:JEV_ADVISOR|OPENROUTER)_[A-Z_]+/g)].map((match) => match[0]))].sort();
+		assert.deepEqual(consumed, [...credentialNames].sort(), "the scrub list is exactly the credential names the tool consumes");
+		const previousEnv: Record<string, string | undefined> = {};
+		for (const name of credentialNames) { previousEnv[name] = process.env[name]; delete process.env[name]; }
 		const previousAgent = process.env.MEMORY_DREAM_AGENT_DIR;
 		const previousResults = process.env.MEMORY_DREAM_RESULTS_DIR;
 		process.env.MEMORY_DREAM_AGENT_DIR = agentDir;
 		process.env.MEMORY_DREAM_RESULTS_DIR = path.join(root, "tool-results");
+		// A provider call from this test is a hermeticity defect: the stub fails loudly and is counted.
+		const realFetch = globalThis.fetch;
+		let providerCalls = 0;
+		globalThis.fetch = (async () => {
+			providerCalls++;
+			throw new Error("memory_dream verify: provider call attempted in a keyless test");
+		}) as unknown as typeof fetch;
 		try {
+			for (const name of credentialNames) assert.equal(process.env[name], undefined, `${name} is scrubbed for the keyless run`);
+			assert.equal(existsSync(path.join(agentDir, "jev-advisor", ".env")), false, "the isolated test agent dir cannot load a host .env");
 			const tool = (await import(pathToFileURL(path.join(pluginRoot, "tools", "memory-dream.ts")).href)).default({
 				cwd: project,
 				typebox: {
@@ -471,7 +489,13 @@ try {
 			assert.notEqual(optedIn.isError, true);
 			assert.match(optedIn.content[0].text, /jev_reason=unconfigured/);
 			assert.match(optedIn.content[0].text, /sent_to_jev=0/);
+			assert.equal(providerCalls, 0, "the keyless tool run never attempts a provider call");
 		} finally {
+			globalThis.fetch = realFetch;
+			for (const name of credentialNames) {
+				if (previousEnv[name] === undefined) delete process.env[name];
+				else process.env[name] = previousEnv[name];
+			}
 			if (previousAgent === undefined) delete process.env.MEMORY_DREAM_AGENT_DIR;
 			else process.env.MEMORY_DREAM_AGENT_DIR = previousAgent;
 			if (previousResults === undefined) delete process.env.MEMORY_DREAM_RESULTS_DIR;
@@ -546,14 +570,23 @@ try {
 	});
 
 	await check("real jev golden run stops before any call when no key is configured", () => {
-		const goldenEnv = { ...process.env, MEMORY_DREAM_RESULTS_DIR: path.join(root, "golden-no-key") };
-		delete goldenEnv.JEV_ADVISOR_API_KEY;
-		delete goldenEnv.OPENROUTER_API_KEY;
-		delete goldenEnv.OPENROUTER_DECISION_API_KEY;
-		delete goldenEnv.JEV_ADVISOR_PROVIDER;
+		// Hermetic keyless run: an isolated HOME has no jev-advisor/.env, and every credential
+		// name the jev path consumes is scrubbed from the child so an ambient OPENROUTER_API_KEY
+		// or JEV_ADVISOR_API_KEY can never turn this into a live provider call.
+		const keylessHome = path.join(root, "golden-no-key-home");
+		mkdirSync(path.join(keylessHome, ".gjc", "agent"), { recursive: true, mode: 0o700 });
+		assert.equal(existsSync(path.join(keylessHome, ".gjc", "agent", "jev-advisor", ".env")), false, "the keyless fixture home carries no credential file");
+		const goldenEnv: Record<string, string | undefined> = { ...process.env };
+		goldenEnv.HOME = keylessHome;
+		goldenEnv.MEMORY_DREAM_RESULTS_DIR = path.join(root, "golden-no-key");
+		for (const name of Object.keys(goldenEnv)) {
+			if (/^JEV_ADVISOR_|^OPENROUTER_|_API_(?:KEY|TOKEN)$/i.test(name)) delete goldenEnv[name];
+		}
+		assert.deepEqual([goldenEnv.JEV_ADVISOR_API_KEY, goldenEnv.OPENROUTER_API_KEY, goldenEnv.OPENROUTER_DECISION_API_KEY, goldenEnv.JEV_ADVISOR_PROVIDER], [undefined, undefined, undefined, undefined]);
 		const child = spawnSync(process.execPath, [goldenScript, "--runs", "3"], { encoding: "utf8", env: goldenEnv, timeout: 120000 });
 		assert.equal(child.status, 3, child.stderr);
 		assert.match(child.stdout, /no_key/);
+		assert.equal(existsSync(path.join(keylessHome, ".gjc", "agent", "jev-advisor", ".env")), false, "the keyless run never creates a credential file");
 	});
 
 	await check("generated surfaces are in sync with sources", () => {

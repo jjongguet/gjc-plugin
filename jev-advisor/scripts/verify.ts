@@ -1471,6 +1471,28 @@ async function runSuite(root: string) {
 		}
 	});
 
+	// JJO-2360: "no edits to production; temp evidence allowed" is an object-scoped prohibition.
+	// The bare `no edits` alternation promoted it to whole-task read-only and blocked the write the
+	// task actually asked for. The fixture keeps the allowlist phrase the real assignment used.
+	await check("alignment lexicon: 'no edits' scoped to production never blocks the requested write", () => {
+		const fixture = "Write the run report to `artifacts/evidence/run.json`. Do not edit production. No edits to production; temp evidence allowed.";
+		const authority = alignmentCore.collectAuthority([alignmentUser("entry-no-edits", fixture)]);
+		assert.deepEqual(authority.constraints.map((constraint: any) => constraint.kind), [], "a scoped prohibition is neither whole-task read-only nor a path prohibition");
+		const write = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("artifacts/evidence/run.json"), authority });
+		assert.deepEqual([write.ruleId, write.block, write.stage2Admissible], ["aligned_write_within_requested_scope", false, true], "the requested temp write is admitted, not drift");
+		// The genuine guard is unchanged: a bare phrase or a whole-task object stays read-only.
+		const readOnlyOf = (text: string) => alignmentCore.collectAuthority([alignmentUser("entry-no-edits-genuine", text)]).constraints.some((constraint: any) => constraint.kind === "read_only");
+		for (const text of ["No edits.", "No edits at all, please.", "No edits to the code.", "No edits to the entire codebase.", "No changes to any files.", "no writes"]) {
+			assert.equal(readOnlyOf(text), true, text);
+		}
+		// A scoped prohibition that names a path still forbids that exact path.
+		const scopedPath = alignmentCore.collectAuthority([alignmentUser("entry-no-edits-path", "Add evidence under `artifacts/evidence/report.json`. No edits to `src/prod.ts`.")]);
+		assert.equal(scopedPath.constraints.some((constraint: any) => constraint.kind === "read_only"), false, "a path prohibition is not whole-task read-only");
+		assert.equal(scopedPath.constraints.filter((constraint: any) => constraint.kind === "forbidden_target").length, 1);
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/prod.ts"), authority: scopedPath }).ruleId, "drift_write_forbidden_target");
+		assert.equal(alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("artifacts/evidence/report.json"), authority: scopedPath }).block, false, "the requested evidence write stays allowed");
+	});
+
 	await check("goal alignment core: typed transition chain, mismatch, baseline and missing criterion", () => {
 		const authority = alignmentCore.collectAuthority([alignmentUser("entry-chain", "Create `src/demo.ts` with criterion=artifact_exists:src/demo.ts")]);
 		const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/demo.ts"), authority });
@@ -1529,6 +1551,53 @@ async function runSuite(root: string) {
 		const snapshot = alignmentCore.readJournalTexts([`${alignmentCore.serializeEvent(correction.event)}\n${alignmentCore.serializeEvent(shutdown)}\n`], now);
 		assert.equal(snapshot.shutdownFor[correction.state.recoveryId], true, "the stop record is keyed by recovery id");
 		assert.equal(snapshot.counts.unresolved, 1);
+	});
+
+	// JJO-2360: the session aggregate read only the newest state, so a completed recovery vanished
+	// behind a later open chain and repeated blocks were only visible as a per-key retry counter.
+	await check("goal alignment journal: per-session aggregate counts every recovery and retry", () => {
+		const now = Date.UTC(2026, 9, 25, 9, 0, 0);
+		const authorityOf = (id: string, text: string) => alignmentCore.collectAuthority([alignmentUser(id, text)]);
+		const chain = (authority: any, target: string, at: number, options: { baseline?: "true" | "false"; stopAt?: 1 | 2 | 3 } = {}): any[] => {
+			const evaluation = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget(target), authority });
+			const correction = alignmentCore.recordCorrection({ authority, baseline: options.baseline ?? "false", now: at });
+			const events: any[] = [correction.event];
+			if ((options.stopAt ?? 0) === 1) return events;
+			const admission = alignmentCore.admitAlignedAction({ state: correction.state, evaluation, targetDigest: alignmentCore.digestTarget(target), toolCallIdDigest: alignmentCore.digestText(`call-${target}`), now: at + 1 });
+			assert.equal(admission.applied, true, `admission for ${target}`);
+			events.push(admission.event);
+			if (options.stopAt === 2) return events;
+			const observed = alignmentCore.observeResult({ state: admission.state, toolCallIdDigest: alignmentCore.digestText(`call-${target}`), observation: "true", now: at + 2 });
+			assert.equal(observed.applied, true, `observation for ${target}`);
+			events.push(observed.event);
+			if (options.stopAt === 3) return events;
+			const completed = alignmentCore.evaluateCompletion({ state: observed.state, now: at + 3 });
+			assert.equal(completed.applied, true, `completion for ${target}`);
+			events.push(completed.event);
+			return events;
+		};
+		const events: any[] = [
+			...chain(authorityOf("entry-agg-1", "Create `src/one.ts` with criterion=artifact_exists:src/one.ts"), "src/one.ts", now),
+			...chain(authorityOf("entry-agg-2", "Create `src/two.ts` with criterion=artifact_exists:src/two.ts"), "src/two.ts", now + 10),
+			...chain(authorityOf("entry-agg-3", "Create `src/three.ts` with criterion=artifact_exists:src/three.ts"), "src/three.ts", now + 20, { baseline: "true" }),
+			...chain(authorityOf("entry-agg-4", "Create `src/four.ts` with criterion=artifact_exists:src/four.ts"), "src/four.ts", now + 30, { stopAt: 3 }),
+		];
+		const readOnlyAuthority = alignmentCore.collectAuthority([alignmentUser("entry-agg-ro", "This is read-only; do not modify anything.")]);
+		const repeated = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/one.ts"), authority: readOnlyAuthority });
+		const other = alignmentCore.evaluateAction({ actionClass: "write", targetDigest: alignmentCore.digestTarget("src/two.ts"), authority: readOnlyAuthority });
+		assert.deepEqual([repeated.block, other.block], [true, true]);
+		events.push(alignmentCore.recordBlock({ evaluation: repeated, retryCount: 1, now: now + 40 }));
+		events.push(alignmentCore.recordBlock({ evaluation: repeated, retryCount: 2, now: now + 41 }));
+		events.push(alignmentCore.recordBlock({ evaluation: other, retryCount: 1, now: now + 42 }));
+		const text = events.map((event: any) => alignmentCore.serializeEvent(event)).join("\n") + "\n";
+		const snapshot = alignmentCore.readJournalTexts([text], now + 60);
+		assert.deepEqual(snapshot.counts, { corrections: 4, blocks: 3, recovered: 2, unverified: 1, unresolved: 1 }, "every retained recovery is represented, not only the newest");
+		assert.deepEqual([snapshot.retryCounts[repeated.retryKey], snapshot.retryCounts[other.retryKey]], [2, 1], "the repeated block keeps its retry chain");
+		assert.deepEqual([snapshot.latest?.status, snapshot.latest?.step], ["result_observed", 3], "the newest chain is the actionable open recovery");
+		assert.ok(!text.includes("src/two.ts") && !text.includes("src/one.ts"), "the aggregate text carries digests only");
+		const noCounter = { v: 1, kind: "block", at: now, recoveryId: null, state: null, retryKey: repeated.retryKey, ruleId: repeated.ruleId };
+		const derived = alignmentCore.readJournalTexts([`${JSON.stringify(noCounter)}\n${JSON.stringify({ ...noCounter, at: now + 1 })}\n`], now + 2);
+		assert.deepEqual([derived.counts.blocks, derived.retryCounts[repeated.retryKey]], [2, 2], "a record without retryCount derives it from the retained chain");
 	});
 
 	await check("goal alignment journal rotation keeps two bounded segments", async () => {
@@ -2149,12 +2218,22 @@ async function runSuite(root: string) {
 		const target = path.join(process.env.HOME!, "artifact", "shutdown.txt");
 		const ctx = alignmentContext([alignmentUser("entry-shutdown", "Create `" + target + "` with criterion=artifact_exists:" + target)]);
 		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shutdown", target), ctx), undefined);
-		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, ctx), undefined);
+		mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+		writeFileSync(target, "created\n", { mode: 0o600 });
+		assert.equal(await alignmentAfter[0].handler(alignmentResult("call-shutdown", target), ctx), undefined);
+		// A later open recovery must not erase the completed one from the flushed aggregate.
+		const next = path.join(process.env.HOME!, "artifact", "shutdown-next.txt");
+		const nextCtx = alignmentContext([
+			alignmentUser("entry-shutdown", "Create `" + target + "` with criterion=artifact_exists:" + target),
+			alignmentUser("entry-shutdown-next", "Create `" + next + "` with criterion=artifact_exists:" + next),
+		]);
+		assert.equal(await alignmentBefore[0].handler(alignmentWrite("call-shutdown-next", next), nextCtx), undefined);
+		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, nextCtx), undefined);
 		const first = alignmentEvents().events;
 		const shutdowns = first.filter((event: any) => event.kind === "shutdown");
 		assert.equal(shutdowns.length, 1);
-		assert.equal(shutdowns[0].counts.unresolved, 1);
-		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, ctx), undefined);
+		assert.deepEqual(shutdowns[0].counts, { corrections: 2, blocks: 0, recovered: 1, unverified: 0, unresolved: 1 }, "the completed recovery stays in the session aggregate");
+		assert.equal(await alignmentShutdownSurface[0].handler({ type: "session_shutdown" }, nextCtx), undefined);
 		assert.equal(alignmentEvents().events.length, first.length, "a repeated shutdown appends nothing");
 	});
 
