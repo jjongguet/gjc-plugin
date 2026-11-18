@@ -5,9 +5,9 @@
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
   "scripts": {
-    "build": "bun run build:advisor && bun run build:verification && bun run build:ui && bun run build:wiki && bun run build:rea && bun run build:backplan && bun run build:rrsi && bun run build:aside-memory && bun run build:egm && bun run build:memory-dream",
+    "build": "bun run build:advisor && bun run build:verification && bun run build:ui && bun run build:wiki && bun run build:rea && bun run build:backplan && bun run build:rrsi && bun run build:aside-memory && bun run build:egm && bun run build:memory-dream && bun run build:lessons",
     "test": "node scripts/run-checks.mjs",
-    "build:check": "bun jev-advisor/scripts/build.mjs --check && bun verification-receipts/scripts/build.mjs --check && bun ui-regression/scripts/build.mjs --check && bun wiki/scripts/build.mjs --check && bun rea/scripts/build.mjs --check && bun backplan/scripts/build.mjs --check && bun rrsi/scripts/build.mjs --check && bun aside-memory/scripts/build.mjs --check && bun egm/scripts/build.mjs --check && bun memory-dream/scripts/build.mjs --check",
+    "build:check": "bun jev-advisor/scripts/build.mjs --check && bun verification-receipts/scripts/build.mjs --check && bun ui-regression/scripts/build.mjs --check && bun wiki/scripts/build.mjs --check && bun rea/scripts/build.mjs --check && bun backplan/scripts/build.mjs --check && bun rrsi/scripts/build.mjs --check && bun aside-memory/scripts/build.mjs --check && bun egm/scripts/build.mjs --check && bun memory-dream/scripts/build.mjs --check && bun lessons/scripts/build.mjs --check",
     "evidence:check": "node scripts/check-evidence-paths.mjs",
     "paths:check": "node scripts/check-paths.mjs",
     "verify:installed-surface": "node scripts/verify-installed-surface.mjs",
@@ -52,6 +52,8 @@
     "self-improve:cycle": "node self-improve/scripts/run.mjs cycle",
     "self-improve:loop": "node self-improve/scripts/run.mjs loop",
     "self-improve:integration": "node self-improve/scripts/verify-integration.mjs",
-    "nightly:file": "node nightly-review/bin/nightly-review.mjs file"
+    "nightly:file": "node nightly-review/bin/nightly-review.mjs file",
+    "build:lessons": "bun lessons/scripts/build.mjs",
+    "test:lessons": "bun lessons/scripts/verify.ts"
   }
 }

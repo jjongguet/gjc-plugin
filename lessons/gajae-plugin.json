@@ -1,0 +1,19 @@
+{
+  "kind": "gajae-code-plugin",
+  "name": "lessons",
+  "version": "0.0.1",
+  "tools": [
+    {
+      "name": "lessons_select",
+      "path": "tools/lessons-select.ts",
+      "description": "Select at most 6 relevant lessons from the personal-wiki lesson ledger for one repository, bounded to 600 UTF-8 bytes of lesson text and one 4096-byte JSON result. Read-only: runs scripts/lessons.py select with a 4 s timeout, a minimal environment and no shell, and returns ok, empty, unavailable or a bounded error."
+    }
+  ],
+  "hooks": [
+    {
+      "name": "lessons-start",
+      "event": "session_start",
+      "path": "hooks/lessons-start.ts"
+    }
+  ]
+}
