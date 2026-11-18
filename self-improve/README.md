@@ -12,7 +12,7 @@ plus declared probes, and records every decision in an append-only ledger
 
 | Path | Role |
 | --- | --- |
-| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `isolation-runtime`, `loading-receipt`, `runner`, `propose`, `loop`, `replay`, `dream`, `policy`, `quality-trial`, `behavior-eval`) |
+| `lib/` | node-only `.mjs` engine modules (`types`, `domain`, `ledger`, `budget`, `gates`, `engine`, `guards`, `isolate`, `isolation-runtime`, `loading-receipt`, `runner`, `propose`, `loop`, `replay`, `dream`, `policy`, `quality-trial`, `behavior-eval`, `experience`, `experience-eval`) |
 | `domains/gjc-plugin/` | first domain: probes and held-out fixtures (run via `bun`, stdout JSON, incl. per-case `failures` labels) |
 | `scripts/run.mjs` | CLI (`report`, `cycle`, `loop`, `recover`, `prune`, `runner`, `history`) |
 | `scripts/loading-receipt.mjs` | read-only loading receipt: loader state + harness digest + canonical payload (`loaded` only when every declared expectation resolves) |
@@ -25,6 +25,7 @@ plus declared probes, and records every decision in an append-only ledger
 | `replay-protocol.json` | pre-registered P2 numbers/epoch/reveal/threshold statements (committed before the dream run) |
 | `policies/` | committed policy artifacts (`<id>.json`) plus the `current.json` pointer |
 | `PATTERNS.md` | proposer/review rules (commit pattern, resubmission ban, threat model, labels) |
+| `experience/library.jsonl` | bounded experience store (created on the first append; absent means empty) |
 
 ## Gates
 
@@ -222,6 +223,64 @@ path unchanged.
   carry failing probe labels only, never held-out values. Composed cycle rows
   carry the bounded composition evidence; `journalEvidence` remains on ordinary
   cycle rows only.
+
+## Bounded experience reuse (Harness² M3)
+
+`lib/experience.mjs` carries cue/lesson/evidence records with explicit
+provenance and `lib/experience-eval.mjs` executes the frozen contract in
+`policies/experience-eval-contract.json`. This is an offline contract layer: no
+model call, network access, timer or paid execution is added, and **no measured
+reuse benefit exists**. The stub evaluation can reject a broken reuse rule; it
+cannot show that any harness gets better.
+
+- **Record** (`gjc.self-improve.experience.v1`): non-empty `cue`, `lesson` and
+  `evidence` (the library rule), plus `source`, `version`, `outcome`
+  (`adopt|reject|observe`), `domain`, `patchSha256`, `validFrom` and `status`
+  (`active|invalidated|superseded`). The id is `exp-` + 12 hex of the canonical
+  payload, so it is recomputable and cannot be re-labelled. Cue/lesson/evidence
+  have byte caps and one row must fit the same 2 KiB ceiling the ledger uses.
+- **Store** (`experience/library.jsonl`): append-only JSONL with the ledger's
+  `seq`/sha256 `prev` discipline. Reads validate the chain and every row and
+  fail closed on corruption — a missing file is an empty store, a damaged one
+  is not a partial library. Contradicted lessons are never edited: an
+  `op:"invalidate"` or `op:"supersede"` row is appended, replaying the same op
+  returns `{ok:true, duplicate:true}`, unknown targets are refused, and a
+  supersede must name an active replacement that is not the target itself.
+- **Selection** (`selectExperience`): active-only; the cue must share at least
+  one normalized token (a domain match alone ranks first but does not admit a
+  cue-unrelated record), ordered by exact repo/domain match, then token
+  overlap, then id; default limit 6 and 600 total lesson bytes. Invalidated and
+  superseded records are withheld, and corrupt records are skipped and counted
+  instead of throwing.
+- **Held-out separation** (`assertHeldoutSeparation`): rejects a literal
+  held-out substring and any shared normalized token run of >= 8 words in
+  `cue`, `lesson` or `evidence`, and fails closed when no held-out text is
+  supplied. Overlaps are reported as field/kind/short digest, never the matched
+  text.
+- **Evaluation contract** (`policies/experience-eval-contract.json`): authored
+  and content-hashed before any run (`contractSha256` over the sorted-key body
+  excluding itself). It pins the on/off design, the misleading-lesson negative
+  control, the thresholds, the exclusions and the stopping rule. A run over the
+  deterministic stub cases writes
+  `{contractSha256, cases, learningOn, learningOff, misleadingControl, pass, reason}`
+  with no clock, path or ordering input, so two runs are byte-identical. The
+  misleading lesson is scored separately: `learningOn.misleadingGain` must stay
+  `0`, and a run that counts it as a gain fails even when every other threshold
+  is met. A missing or non-finite measurement is an exclusion, never a pass.
+
+```sh
+node self-improve/lib/experience-eval.mjs --out /tmp/experience-eval-1.json
+node self-improve/lib/experience-eval.mjs --out /tmp/experience-eval-2.json
+cmp /tmp/experience-eval-1.json /tmp/experience-eval-2.json
+node self-improve/lib/experience-eval.mjs --misleading-as-gain --out /tmp/experience-eval-cheat.json
+```
+
+The `--misleading-as-gain` run exits non-zero and records
+`reason:"misleading_counted_as_gain"`: that is the negative control proving the
+rule is enforced, not a result.
+Threshold or case changes require a new contract file whose `contractSha256`
+differs, committed before the next run. A real learning-on/off comparison
+still needs M1's approved window and a model in the loop.
 
 ## Honest evidence boundary (mandated disclosure)
 

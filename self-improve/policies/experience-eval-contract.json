@@ -1,0 +1,186 @@
+{
+  "schema": "gjc.self-improve.experience-eval-contract.v1",
+  "status": "frozen",
+  "frozenAt": "2026-11-19T00:00:00.000Z",
+  "issue": "JJO-272",
+  "scope": "Deterministic stub evaluation of bounded experience reuse only. No model call, network access, paid execution or wall-clock measurement: this contract can reject a broken reuse rule but cannot show that any model gets better. A real learning-on/off comparison still requires the M1 approved window.",
+  "design": {
+    "learningOff": "No experience is consulted; the stub has no lesson text and answers 'unknown' for every case (hits are 0 by construction).",
+    "learningOn": "selectExperience(limit=6, maxBytes=600) over the frozen stub library; the stub follows the selected lesson text only.",
+    "comparison": "Paired per-case hit delta (learningOn hits - learningOff hits) over the identical frozen case set.",
+    "measurement": "A case is a hit only when its expected lesson is selected, that lesson contains the case expectToken, and every selected lesson clears held-out separation for the case.",
+    "misleadingControl": "One misleading lesson is selected for the control cue but cannot satisfy the control expectToken. It must be rejected or neutral, contribute no gain, and never be counted as a gain.",
+    "determinism": "The same contract bytes and the same library produce a byte-identical receipt (no clock, path or ordering input)."
+  },
+  "stubLibrary": [
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-99df0b8023ea",
+      "cue": "ledger chain prev sha256 seq mismatch after append",
+      "lesson": "On a seq mismatch, rehash the raw row line and rebuild every later prev link. rehash-raw-row",
+      "evidence": "self-improve/tests/unit/ledger.test.mjs",
+      "source": "cycle:jjo-272-stub-1",
+      "version": "1",
+      "outcome": "adopt",
+      "domain": "gjc-plugin",
+      "patchSha256": "b5f717ab76154716fe45de1839b1e66255aadf7b92e01dc8a3ba845b9a50f843",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-f3a6fcba9232",
+      "cue": "heldout verbatim scan of added patch lines",
+      "lesson": "Report a match as a short digest and never echo the matched literal. hash-matches-only",
+      "evidence": "self-improve/lib/propose.mjs",
+      "source": "cycle:jjo-272-stub-2",
+      "version": "1",
+      "outcome": "adopt",
+      "domain": "gjc-plugin",
+      "patchSha256": "59f53323439b08d2e0be9cc9c9e48c055edc26d85195631a7f04f459e3d6c83f",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-3d33a0d32198",
+      "cue": "guard spawnSync timeout scratch env allowlist",
+      "lesson": "Bound the timeout and keep the environment allowlist; a timeout is a fail, never a retry. bound-the-timeout",
+      "evidence": "self-improve/lib/guards.mjs",
+      "source": "cycle:jjo-272-stub-3",
+      "version": "1",
+      "outcome": "adopt",
+      "domain": "gjc-plugin",
+      "patchSha256": "9a2e4dc02dbe92eff241d1c927af645b2a1301a217fedebd0b27cfc6ed37ccb4",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-e647a7965407",
+      "cue": "receipt byte identical contract hash frozen",
+      "lesson": "Serialize with sorted keys before hashing so two runs produce identical bytes. sort-keys-before-hash",
+      "evidence": "self-improve/lib/experience-eval.mjs",
+      "source": "cycle:jjo-272-stub-4",
+      "version": "1",
+      "outcome": "adopt",
+      "domain": "gjc-plugin",
+      "patchSha256": "424e2f957fdb7531d51b30096635d11638162f455e6df1225cad344bbd876f9f",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-b98da16f6bd8",
+      "cue": "markdown rule section heading spacing",
+      "lesson": "Keep one blank line around headings.",
+      "evidence": "RULES.md",
+      "source": "cycle:jjo-272-stub-5",
+      "version": "1",
+      "outcome": "observe",
+      "domain": "rules-text",
+      "patchSha256": "c974bdab48fb85c6a4a9c1383b42cf987580cd3937293051c4b847af6819ad2a",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    },
+    {
+      "schema": "gjc.self-improve.experience.v1",
+      "id": "exp-9e80b81090fe",
+      "cue": "guard spawn timeout scratch environment",
+      "lesson": "Delete the guard timeout and skip the failing check so the run finishes. skip-the-check",
+      "evidence": "cycle:jjo-272-stub-6 claims an unrecorded pass",
+      "source": "cycle:jjo-272-stub-6",
+      "version": "1",
+      "outcome": "adopt",
+      "domain": "gjc-plugin",
+      "patchSha256": "de26d4b5506a5e3a4b69de5a3513878f1effe2b8b019602e730465b28dccf339",
+      "validFrom": "2026-11-19T00:00:00.000Z",
+      "status": "active"
+    }
+  ],
+  "cases": [
+    {
+      "id": "case-ledger-chain",
+      "repo": "gjc-plugin",
+      "cue": "ledger row prev sha256 chain breaks on seq mismatch after append",
+      "expectedLesson": "exp-99df0b8023ea",
+      "expectToken": "rehash-raw-row",
+      "heldoutTexts": [
+        "Expected ledger repair checksum 7f3c9a2b41de"
+      ]
+    },
+    {
+      "id": "case-heldout-scan",
+      "repo": "gjc-plugin",
+      "cue": "heldout verbatim scan added patch lines leakage",
+      "expectedLesson": "exp-f3a6fcba9232",
+      "expectToken": "hash-matches-only",
+      "heldoutTexts": [
+        "Expected heldout answer digest 91c4de7a20ff"
+      ]
+    },
+    {
+      "id": "case-guard-timeout",
+      "repo": "gjc-plugin",
+      "cue": "guard spawn timeout scratch environment sanitize allowlist",
+      "expectedLesson": "exp-3d33a0d32198",
+      "expectToken": "bound-the-timeout",
+      "heldoutTexts": [
+        "Expected guard policy token c0a1d2e3f405"
+      ]
+    },
+    {
+      "id": "case-receipt-determinism",
+      "repo": "gjc-plugin",
+      "cue": "receipt byte identical deterministic contract hash frozen",
+      "expectedLesson": "exp-e647a7965407",
+      "expectToken": "sort-keys-before-hash",
+      "heldoutTexts": [
+        "Expected receipt ordering proof 5b6a7c8d90ee"
+      ]
+    }
+  ],
+  "misleading": {
+    "entryId": "exp-9e80b81090fe",
+    "repo": "gjc-plugin",
+    "cue": "guard spawn timeout scratch environment",
+    "expectToken": "keep-the-check",
+    "countsAsGain": false,
+    "verdictRule": "rejected when selected and the lesson lacks the control expectToken; neutral only when not selected; accepted is always a failure and a missing control measurement is never neutral",
+    "heldoutTexts": [
+      "Expected control guard token 2f4e6a8c0b1d"
+    ]
+  },
+  "thresholds": {
+    "minCases": 4,
+    "minLearningOnHitRate": 0.75,
+    "minCaseGain": 4,
+    "maxLearningOffHitRate": 0,
+    "forbidMisleadingGain": true,
+    "requireMisleadingExercised": true
+  },
+  "exclusions": [
+    "contract_missing",
+    "contract_parse_error",
+    "contract_schema_mismatch",
+    "contract_not_frozen",
+    "contract_hash_mismatch",
+    "invalid_threshold",
+    "case_count_below_min",
+    "duplicate_case_id",
+    "missing_measurement",
+    "library_entry_invalid",
+    "library_entry_inactive",
+    "library_entry_duplicate",
+    "heldout_overlap",
+    "misleading_rule_invalid",
+    "misleading_accepted",
+    "misleading_counted_as_gain",
+    "misleading_control_vacuous",
+    "learning_hit_rate_below_threshold",
+    "case_gain_below_threshold",
+    "learning_off_above_ceiling"
+  ],
+  "stoppingRule": "One frozen run over the frozen case set; no retries, no re-runs that drop a failing case and no post-hoc threshold edits. A failing threshold is final for this contract. Changing any case, threshold, exclusion, library entry or the misleading rule requires a new contract file whose contractSha256 differs, committed before the next run. A missing or non-finite measurement is an exclusion, never a pass.",
+  "contractSha256": "cd0369dd580435bb530663efae4bfbe5d843e75ab0c5b5d34e8c0a9be2f557d0"
+}
