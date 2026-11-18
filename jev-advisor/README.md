@@ -533,12 +533,28 @@ and 128 KiB request / 64 KiB response caps. Truncated/missing authority and
 unparseable targets are rejected before outbound. Read/bash/off calls never
 invoke semantic advice. Enabling outbound is an operator action requiring the
 task's approved budget, call cap and current cost ledger before live use.
+- **Durable budget.** The consumer reserves US$0.05 before sending, with a
+US$5 cumulative ceiling and one attempt per stable host session. The private
+`~/.gjc-plugin/jev-advisor/semantic/budget.json` ledger survives restarts. Its
+first initialization requires `JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD` to declare
+verified historical spend plus unresolved liability in integer microdollars;
+later values cannot reset an existing ledger. Never use zero for unknown spend
+or delete the ledger to regain budget. A missing session identity, unsafe or
+corrupt store, or held lock suppresses outbound without changing tool execution.
+There is no automatic stale-lock recovery. Provider-reported `usage.cost` in USD
+settles a reservation, rounded up to a microdollar; missing/invalid usage,
+transport failure, process death and failed settlement retain the full reserve.
+Only session digests, timestamps and amounts are stored, never authority text
+or credentials. The US$0.05 reserve is a conservative bound against the published
+jev-omni list price (US$0.126 per million input tokens, 32,768-token context,
+zero completion price), not a measured charge; operators must recheck pricing
+before authorizing live use.
 - **Numeric preservation.** Advice consumes only a valid choice, finite
 confidence/probabilities in `[0,1]` and all three probabilities summing to
 `1±1e-6`. Values are not clamped, rounded or renormalized. A
 `precision_anomaly` is `no_decision`, preserving the raw envelope for the
 caller but never exposing a consumable choice. Metadata-only UI status shows
-the decision or fixed failure reason; semantic output is not journaled and
+the decision or fixed failure reason; semantic choices are not journaled and
 never becomes a block, recovery admission or permission. A provider/UI failure
 cannot suppress a deterministic block. Offline wire/fixture tests are not
 live-provider quality or installed-entry E2E evidence.

@@ -29,7 +29,7 @@ const surfaces = [
 	// semantic consumer, with its wire schema inlined for one-file distribution.
 	// The journal store is a second keyless core so the three surfaces share one
 	// bounded read/append path instead of three drifting copies.
-	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts", "lib/semantic.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false, semantic: true },
+	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts", "lib/semantic.ts", "lib/semantic-budget.ts"], adapter: "src/alignment.adapter.ts", out: "hooks/jev-advisor-alignment.ts", shared: false, semantic: true },
 	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-observe.adapter.ts", out: "hooks/jev-advisor-alignment-observe.ts", shared: false },
 	{ cores: ["lib/alignment.ts", "lib/alignment-journal.ts"], adapter: "src/alignment-shutdown.adapter.ts", out: "hooks/jev-advisor-alignment-shutdown.ts", shared: false },
 ];
