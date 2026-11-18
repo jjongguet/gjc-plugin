@@ -164,3 +164,16 @@ test("the digest is re-derived: a tampered or unloaded receipt is rejected", () 
   assert.deepEqual(verifyLoadingReceipt(unloaded), { ok: false, reason: "loading_not_proven" });
   assert.deepEqual(verifyLoadingReceipt({ sha256: hex("a"), loaded: true }), { ok: false, reason: "loading_payload_missing" });
 });
+
+test("loaded cannot override payload failures, malformed failures or the byte bound", () => {
+  const valid = receiptFor();
+  for (const failures of [["plugin_disabled"], null, "", {}]) {
+    const payload = { ...valid.payload, failures };
+    const forged = { ...valid, payload, sha256: createHash("sha256").update(canonicalJson(payload)).digest("hex"), loaded: true };
+    assert.deepEqual(verifyLoadingReceipt(forged), { ok: false, reason: "loading_not_proven" });
+  }
+  const payload = { ...valid.payload, sourceHead: "x".repeat(9 * 1024) };
+  const oversized = { ...valid, payload, sha256: createHash("sha256").update(canonicalJson(payload)).digest("hex"), loaded: true, canonicalBytes: 1 };
+  assert.deepEqual(verifyLoadingReceipt(oversized), { ok: false, reason: "loading_payload_mismatch" });
+  assert.deepEqual(verifyLoadingReceipt(valid), { ok: true, reason: null });
+});

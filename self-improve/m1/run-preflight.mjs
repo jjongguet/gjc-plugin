@@ -57,6 +57,9 @@ for (let index = 0; index < args.length; index += 1) {
 
 const flag = (name) => parsed.get(name) === true;
 const valueOf = (name) => (parsed.has(name) ? parsed.get(name) : null);
+if (flag("--dry-run") && (flag("--live") || parsed.has("--approve-live"))) {
+  refuse("--dry-run cannot be combined with --live or --approve-live");
+}
 const readJson = (target, label) => {
   try {
     return JSON.parse(readFileSync(target, "utf8"));

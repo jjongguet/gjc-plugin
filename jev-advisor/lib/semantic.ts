@@ -68,7 +68,7 @@ export function parseSemanticAdvice(value: unknown): SemanticAdvice {
 }
 
 /** One request, including response consumption, has an 8s deadline. No retry. */
-export async function askSemanticAdvice(input: SemanticInput, env: SemanticEnv = process.env, fetcher: SemanticFetch = (url, init) => fetch(url, init)): Promise<SemanticAdvice> {
+export async function askSemanticAdvice(input: SemanticInput, env: SemanticEnv = process.env, fetcher: SemanticFetch = (url, init) => fetch(url, init), recordUsage?: (value: unknown) => void): Promise<SemanticAdvice> {
 	// Check the opt-in BEFORE the credential, branch facade, serialization or fetch.
 	let key: string | undefined;
 	try {
@@ -115,6 +115,7 @@ export async function askSemanticAdvice(input: SemanticInput, env: SemanticEnv =
 			}
 			let value: unknown;
 			try { value = JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { return semanticNoDecision("invalid_response", true); }
+			try { recordUsage?.(value); } catch { /* accounting must never change advice */ }
 			return parseSemanticAdvice(value);
 		} catch {
 			return semanticNoDecision(controller.signal.aborted ? "timeout" : "provider_error", outbound);

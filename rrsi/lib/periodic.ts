@@ -534,10 +534,11 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       dreamFailure = "dream_failed";
     }
 
+    const imported = newestCovered ? projected.attempts.length : 0;
     const journalStorage = await appendPeriodicRecord({
       env,
       startedMs,
-      summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: dream?.policies ?? 0 },
+      summary: { episodes: counts.episodes, attempts: counts.attempts, imported, policies: dream?.policies ?? 0 },
       storage: "ok",
     });
     const receiptId = receiptIdFor(now.replace(/\.\d+Z$/, "Z"), mode === "worker" ? "wk" : "in");
@@ -560,7 +561,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         derivedChunks: derivedSet.length,
         episodes: counts.episodes,
         attempts: counts.attempts,
-        imported: projected.attempts.length,
+        imported,
         policies: dream?.policies ?? 0,
         corpusAttempts,
         blocking_segments: window.blocking,

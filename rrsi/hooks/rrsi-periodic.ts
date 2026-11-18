@@ -2503,9 +2503,10 @@ function journalAdviceEntries(record) {
  *   decision = "adopt" when the representative entry is a decision else "reject"
  *   wallMs = durationMs; provenance = the journal record id
  *
- * One record is one attempt. Novelty is computed over the full read order,
+ * One object record is one attempt. Novelty is computed over the full read order,
  * then the newest `limit` attempts are retained. `scanned` counts inspected
- * records and `headOmitted` counts the older attempts the window dropped.
+ * JSON values and `headOmitted` counts every value not retained: older attempts
+ * and non-object values. It uses the same definition as projection.omitted.
  */
 export function projectJournalRecords(records, { limit = 4000 } = {}) {
   const input = Array.isArray(records) ? records : [];
@@ -2515,7 +2516,7 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
   const bound = Number.isSafeInteger(limit) && limit > 0 ? limit : 0;
   for (const record of input) {
     scanned += 1;
-    if (!record || typeof record !== "object") continue;
+    if (!record || typeof record !== "object" || Array.isArray(record)) continue;
     const entries = journalAdviceEntries(record);
     const entry = entries.find((candidate) => candidate.status === "decision") ?? entries[0] ?? {};
     const decision = entry.status === "decision";
@@ -2537,8 +2538,8 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
     });
     seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
   }
-  const headOmitted = Math.max(0, all.length - Math.min(all.length, bound));
   const attempts = all.slice(all.length - Math.min(all.length, bound)).map((attempt, index) => normalizeAttempt(attempt, index));
+  const headOmitted = projectionCoverage(input, attempts).omitted;
   const novel = attempts.filter((attempt) => attempt.hypothesisNovelty).length;
   return {
     attempts,
@@ -3432,10 +3433,11 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
       dreamFailure = "dream_failed";
     }
 
+    const imported = newestCovered ? projected.attempts.length : 0;
     const journalStorage = await appendPeriodicRecord({
       env,
       startedMs,
-      summary: { episodes: counts.episodes, attempts: counts.attempts, imported: projected.attempts.length, policies: dream?.policies ?? 0 },
+      summary: { episodes: counts.episodes, attempts: counts.attempts, imported, policies: dream?.policies ?? 0 },
       storage: "ok",
     });
     const receiptId = receiptIdFor(now.replace(/\.\d+Z$/, "Z"), mode === "worker" ? "wk" : "in");
@@ -3458,7 +3460,7 @@ export async function runPeriodic({ env = process.env, now = new Date().toISOStr
         derivedChunks: derivedSet.length,
         episodes: counts.episodes,
         attempts: counts.attempts,
-        imported: projected.attempts.length,
+        imported,
         policies: dream?.policies ?? 0,
         corpusAttempts,
         blocking_segments: window.blocking,

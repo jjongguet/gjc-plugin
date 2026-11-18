@@ -15,7 +15,7 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawnSync } from "node:child_process";
 import { executionKeyFor } from "../../self-improve/lib/quality-trial.mjs";
-import { journalWindowCoverage, readJournalRecords } from "../lib/rrsi";
+import { journalWindowCoverage, projectJournalRecords, projectionCoverage, readJournalRecords, RRSI_LIMITS } from "../lib/rrsi";
 
 const script = fileURLToPath(import.meta.url);
 const plugin = path.resolve(path.dirname(script), "..");
@@ -453,6 +453,52 @@ async function runSuite(root) {
 		assert.equal(result.newest_covered, true);
 		const state = JSON.parse(readFileSync(periodicPaths(homeTorn).state, "utf8"));
 		assert.equal(Number.isFinite(Date.parse(state.lastSuccessAt)), true);
+	});
+
+	await check("non-object JSON lines have one omission count in projection, import and periodic receipts", async () => {
+		const records = [null, 7, "not a record", [], ...syntheticRecords(3), false];
+		const projected = projectJournalRecords(records, { limit: 2 });
+		const coverage = projectionCoverage(records, projected.attempts);
+		assert.equal(projected.attempts.length, 2);
+		assert.equal(projected.headOmitted, coverage.omitted);
+		assert.equal(coverage.omitted, 6);
+		const mixedHome = path.join(root, "periodic-home-mixed");
+		mkdirSync(mixedHome, { mode: 0o700 });
+		seedJournal(mixedHome, 1);
+		const dir = path.join(mixedHome, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		writeFileSync(path.join(dir, "seg-1.jsonl"), `${records.map((record) => JSON.stringify(record)).join("\n")}\n`);
+		const imported = await withHome(mixedHome, () => call({ action: "import", limit: "2" }));
+		assert.equal(imported.journal.window.headOmitted, 6);
+		assert.equal(imported.projection.omitted, 6);
+		const run = await withHome(mixedHome, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(run.status, "ran");
+		const paths = periodicPaths(mixedHome);
+		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, readdirSync(paths.receipts)[0]), "utf8"));
+		assert.equal(receipt.head_omitted, 5);
+		assert.equal(receipt.attemptsOmitted, 5);
+		assert.equal(receipt.projection.omitted, 5);
+	});
+
+	await check("a truncated segment with a torn tail still holds and imports zero", async () => {
+		const heldHome = path.join(root, "periodic-home-truncated-torn");
+		mkdirSync(heldHome, { mode: 0o700 });
+		seedJournal(heldHome, 1);
+		const dir = path.join(heldHome, ".gjc-plugin", "jev-advisor", "journal", "v1");
+		const lines = syntheticRecords(RRSI_LIMITS.maxJournalRecordsPerSegment + 1).map((record) => JSON.stringify(record));
+		writeFileSync(path.join(dir, "seg-1.jsonl"), `${lines.join("\n")}\n{"id":"torn`);
+		const report = readJournalRecords({ journalDir: dir });
+		assert.equal(report.segmentReport[0].state, "truncated");
+		assert.equal(report.segmentReport[0].tornTail, true);
+		assert.equal(journalWindowCoverage(report.segmentReport, 160).covered, false);
+		const run = await withHome(heldHome, () => hookModule.runPeriodic({ env: process.env, mode: "inline" }));
+		assert.equal(run.status, "uncovered");
+		assert.equal(run.storeWrite, "held");
+		const paths = periodicPaths(heldHome);
+		const receipt = JSON.parse(readFileSync(path.join(paths.receipts, readdirSync(paths.receipts)[0]), "utf8"));
+		assert.equal(receipt.imported, 0);
+		assert.equal(readJournalOutcomes(heldHome).at(-1).rrsi.imported, 0);
+		assert.equal(existsSync(path.join(heldHome, ".gjc-plugin", "rrsi", "store.json")), false);
+		assert.equal(JSON.parse(readFileSync(paths.state, "utf8")).lastSuccessAt, null);
 	});
 
 	await check("periodic: numeric segment order (-9/-10), record cap, symlinked newest and an existing-store hold", async () => {
