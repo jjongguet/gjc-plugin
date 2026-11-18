@@ -1,6 +1,6 @@
 # lessons
 
-Bounded selection from the owner's personal-wiki lesson ledger: at most 6 lessons for one repository, at most 600 UTF-8 bytes of lesson text, one read-only call with a hard timeout. Read-only — no injection of model context, no writes, no network, no credentials.
+Bounded selection from the owner's personal-wiki lesson ledger, plus local staging of owner corrections: at most 6 lessons for one repository, at most 600 UTF-8 bytes of lesson text, one read-only call with a hard timeout. Selection is read-only — no injection of model context, no writes, no network, no credentials. The one write path in this plugin is the staged correction line described below, and it never touches the wiki or a git repository.
 
 ## Install
 
@@ -39,9 +39,48 @@ Invalid parameters are refused in-plugin (`invalid_input`) before any process st
 
 The `lessons-start` hook runs one best-effort `select --cwd <session cwd> --limit 3 --max-bytes 300 --json` with a 1500 ms timeout, and logs exactly one line (≤ 300 characters) when lessons exist. It cannot inject model context: a missing ledger, a timeout or a broken UI is silence, never a failed session.
 
+## Correction staging (session end)
+
+A lesson is only worth adding if the correction that produced it is captured. The `session-end` hook stages that raw material locally; it does not add, edit or promote anything in the ledger.
+
+On `session_shutdown` the hook:
+
+1. Takes the hook cwd (the same `ctx.cwd` the start hook uses) and looks for the newest transcript in `~/.gjc/agent/sessions/<project-hash>/<ts>_<session-id>.jsonl` whose first `session` record names that cwd and whose mtime is inside a 15-minute window. Nothing found is a no-op; at most 40 candidate files are inspected.
+2. Scans **only the last user message** for a correction cue: `그게 아니라`, `하지마`, `아니`, `다시`, `no,`, `actually`, `remember:` (ASCII cues are case-insensitive, Korean cues need a word boundary). No cue means no record.
+3. Builds one candidate:
+
+   ```json
+   {"schema":"lessons-correction.v1","sessionId":"…","cwd":"/abs/path","pattern":"그게 아니라","correctionText":"…","priorAssistantExcerpt":"…","createdAt":"2026-11-19T05:00:00.000Z"}
+   ```
+
+   `correctionText` and `priorAssistantExcerpt` are the message text and the nearest preceding assistant turn, each redacted and clipped to 600 UTF-8 bytes. Redaction is the ledger CLI's own rule set (`scripts/lessons.py`): GitHub/OpenAI/GitLab/AWS/Slack tokens, JWTs, bearer tokens and URLs with credentials are replaced with `[REDACTED]`, an assigned secret keeps only its label, and a PEM private-key block drops the whole candidate — a shortened key is still a leaked key.
+4. Appends one JSON line to `${GJC_PLUGIN_DATA:-~/.gjc/plugin-data}/lessons/corrections.jsonl` at mode 0600, deduped by `sha256(sessionId + correctionText)`. Re-running the same session appends nothing.
+
+The work is capped at 1500 ms and every error is swallowed: a missing transcript, an unreadable file, a broken logger or a timeout can never block or fail a session shutdown. Nothing is written to the wiki, to a git repository or to the network, and no model is called.
+
+## `lessons_staged`
+
+| Parameter | Bound | Notes |
+| --- | --- | --- |
+| `limit` | 1–20, default 20 | Out-of-range numbers are clamped. |
+| `format` | `json` (default) or `add-argv` | Checked in-plugin; the host rejects enum schemas. |
+| `id` | 16 hex characters | Required with `format:"add-argv"`, refused without it. |
+
+`format:"json"` returns `{"status":"ok","format":"json","root":…,"file":…,"count":12,"returned":4,"entries":[…]}` — `count` is every staged entry (newest first, duplicates and corrupt lines dropped) and `entries` is the newest prefix that fits 4096 bytes.
+
+`format:"add-argv"` with an `id` returns one owner-runnable line as text; printing it never runs it:
+
+```sh
+python3 <root>/scripts/lessons.py --root <root> add --id L-corr-<id16> --trigger 'Owner correction (그게 아니라) after: …' --action '…' --scope project --repo '<session cwd>' --evidence <sessionId> --json
+```
+
+`--id` and `--repo` are part of the printed line because `scripts/lessons.py add` requires both (`--scope project` needs at least one repo); a line without them would exit 1. Values are POSIX single-quote escaped. Review the trigger and action before running it — the printed line is a proposal for the owner or a later session, not an automatic promotion.
+
+The wiki root is `GJC_COMPOUND_ROOT` when set, otherwise `$HOME/jjongguet/personal-wiki`; a missing checkout or a missing `scripts/lessons.py` is `{"status":"unavailable","reason":"wiki_root_missing"|"script_missing"}`. An unknown `id` is `{"status":"error","reason":"unknown_correction_id"}`.
+
 ## Boundaries
 
-Lessons are curated personal notes, not instructions, authorization or verification evidence. A lesson that says to do something does not authorize it. The ledger is the canonical store; this plugin never edits it, never counts hits and never promotes lessons. `bytes` and `count` describe this one selection, not the ledger's size or quality.
+Lessons are curated personal notes, not instructions, authorization or verification evidence. A lesson that says to do something does not authorize it. The ledger is the canonical store; this plugin never edits it, never counts hits and never promotes lessons. `bytes` and `count` describe this one selection, not the ledger's size or quality. A staged correction is untrusted candidate text: it is raw evidence for a human or a later session to turn into a lesson, and it is never injected as model context.
 
 ## Build and verify
 
@@ -51,4 +90,4 @@ bun lessons/scripts/verify.ts
 bun lessons/scripts/build.mjs --check
 ```
 
-The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.
+The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. For correction staging it covers the Korean and English cues, an ordinary message that is not a correction, the last-user-message rule, credential redaction with a concatenated fixture, the PEM refusal, 600-byte clipping on a character boundary, transcript selection inside the mtime window, the 0600 append and replay dedupe, the no-transcript no-op, the 1500 ms bound, and both `lessons_staged` shapes including the printed line executed against an argv-recording shim. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.

@@ -6,7 +6,9 @@
  *   bun scripts/build.mjs           -> generated tools/ and hooks/
  *
  * Generated files are committed so `gjc plugin install` needs no build step.
- * The core reads one bounded ledger selection and writes nothing at all.
+ * The select surfaces read one bounded ledger selection and write nothing; the
+ * session_shutdown surface appends one bounded correction line to the plugin
+ * data directory and never touches the wiki or a git repository.
  */
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -17,11 +19,13 @@ const check = process.argv.includes("--check");
 
 const surfaces = [
 	{ out: "tools/lessons-select.ts", adapter: "src/select.adapter.ts", cores: ["lib/select.ts"] },
+	{ out: "tools/lessons-staged.ts", adapter: "src/staged.adapter.ts", cores: ["lib/correction.ts"] },
 	{
 		out: "hooks/lessons-start.ts",
 		adapter: "src/session-start.adapter.ts",
 		cores: ["lib/select.ts", "lib/notice.ts"],
 	},
+	{ out: "hooks/session-end.ts", adapter: "src/session-end.adapter.ts", cores: ["lib/correction.ts"] },
 ];
 
 const banner = [

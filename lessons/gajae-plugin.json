@@ -7,6 +7,11 @@
       "name": "lessons_select",
       "path": "tools/lessons-select.ts",
       "description": "Select at most 6 relevant lessons from the personal-wiki lesson ledger for one repository, bounded to 600 UTF-8 bytes of lesson text and one 4096-byte JSON result. Read-only: runs scripts/lessons.py select with a 4 s timeout, a minimal environment and no shell, and returns ok, empty, unavailable or a bounded error."
+    },
+    {
+      "name": "lessons_staged",
+      "path": "tools/lessons-staged.ts",
+      "description": "Read the corrections staged for the lesson ledger, bounded to 4096 bytes of JSON. Read-only: it never writes, never runs a command and never promotes a lesson. Default returns counts plus up to 20 entries, newest first; format add-argv with an id returns the exact owner-runnable scripts/lessons.py add command line as text. Returns ok, empty, unavailable or a bounded error."
     }
   ],
   "hooks": [
@@ -14,6 +19,11 @@
       "name": "lessons-start",
       "event": "session_start",
       "path": "hooks/lessons-start.ts"
+    },
+    {
+      "name": "session-end",
+      "event": "session_shutdown",
+      "path": "hooks/session-end.ts"
     }
   ]
 }

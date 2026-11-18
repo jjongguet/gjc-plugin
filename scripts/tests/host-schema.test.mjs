@@ -73,6 +73,7 @@ const ADAPTERS = [
   "jev-advisor/src/metrics.adapter.ts",
   "jev-advisor/src/tool.adapter.ts",
   "lessons/src/select.adapter.ts",
+  "lessons/src/staged.adapter.ts",
   "rea/src/readiness.adapter.ts",
   "rrsi/src/rrsi.adapter.ts",
   "ui-regression/src/run.adapter.ts",
