@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import os from "node:os";
 import path from "node:path";
 import { APPROVED_PRICING, checkLiveEvidence, pilotInputs, PRICING_SOURCE, selectPublic, sourceDigest, cellReceipt } from "../../m1/pilot-protocol.mjs";
@@ -31,6 +31,32 @@ test("only the declared historical development case enters nine cells and twenty
   assert.equal(inputs.requests.filter((r) => r.arm === "B1").length, 9);
   assert.equal(inputs.requests.filter((r) => r.arm === "B2").length, 9);
   assert.match(sourceDigest(), /^[a-f0-9]{64}$/);
+});
+
+test("the committed source pin admits this implementation and rejects source drift without refreezing itself", () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), "pilot-source-pin-"));
+  try {
+    const source = fileURLToPath(new URL("../../", import.meta.url));
+    const target = path.join(root, "self-improve");
+    cpSync(source, target, { recursive: true });
+    const helperDir = path.join(root, "verification-receipts/scripts");
+    mkdirSync(helperDir, { recursive: true });
+    cpSync(path.resolve(source, "../verification-receipts/scripts/smoke-environment.mjs"), path.join(helperDir, "smoke-environment.mjs"));
+    const pinPath = path.join(target, "m1/pilot-subset.json");
+    const pinnedBytes = readFileSync(pinPath, "utf8");
+    const entry = pathToFileURL(path.join(target, "m1/pilot-protocol.mjs")).href;
+    const run = () => spawnSync(process.execPath, ["--input-type=module", "-e", `import { pilotInputs } from ${JSON.stringify(entry)}; pilotInputs();`], {
+      env: { PATH: process.env.PATH, HOME: root }, encoding: "utf8", timeout: 10_000,
+    });
+    const valid = run();
+    assert.equal(valid.status, 0, valid.stderr);
+    const changed = path.join(target, "lib/loading-receipt.mjs");
+    writeFileSync(changed, `${readFileSync(changed, "utf8")}\n// Synthetic source drift: no protocol or oracle change.\n`);
+    const stale = run();
+    assert.notEqual(stale.status, 0);
+    assert.match(stale.stderr, /pilot_subset_pin_stale/);
+    assert.equal(readFileSync(pinPath, "utf8"), pinnedBytes, "planning never silently regenerates the committed pin");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
 test("public selection chooses the first schema-valid candidate, not the oracle-correct one", () => {

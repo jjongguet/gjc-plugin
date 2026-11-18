@@ -119,6 +119,14 @@ test("--subset pins one development case and the plan becomes 9 cells / 21 reque
 });
 
 test("unknown flags and flags without a value are refused before any planning", () => {
+  const conflict = run(["--dry-run", "--live", "--manifest", MANIFEST, "--approve-live", "0.5", "--json"]);
+  assert.equal(conflict.status, 2);
+  assert.match(conflict.stderr, /--dry-run cannot be combined with --live or --approve-live/);
+  assert.equal(conflict.stdout, "");
+  const dryApproval = run(["--dry-run", "--manifest", MANIFEST, "--approve-live", "0.5", "--json"]);
+  assert.equal(dryApproval.status, 2);
+  assert.equal(dryApproval.stdout, "");
+
   const unknown = run(["--dry-run", "--manifest", MANIFEST, "--bogus", "--json"]);
   assert.equal(unknown.status, 2);
   assert.match(unknown.stderr, /unknown flag: --bogus/);

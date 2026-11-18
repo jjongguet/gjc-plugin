@@ -220,7 +220,8 @@ export function verifyLoadingReceipt(receipt) {
   const text = canonicalJson(receipt.payload);
   if (Buffer.byteLength(text) > LOADING_RECEIPT_LIMITS.maxPayloadBytes) return { ok: false, reason: "loading_payload_mismatch" };
   if (sha256Hex(text) !== receipt.sha256) return { ok: false, reason: "loading_payload_mismatch" };
-  if (receipt.loaded !== true) return { ok: false, reason: "loading_not_proven" };
+  const failures = receipt.payload.failures;
+  if (receipt.loaded !== true || !Array.isArray(failures) || failures.length !== 0) return { ok: false, reason: "loading_not_proven" };
   return { ok: true, reason: null };
 }
 
