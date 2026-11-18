@@ -17,11 +17,21 @@ import { randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import path from "node:path";
 import { rungFor } from "./budget.mjs";
-import { campaignAcceptedCount, defaultRunRoot, historyState, recoverPendingCycle, runCycle } from "./engine.mjs";
+import {
+  campaignAcceptedCount,
+  defaultRunRoot,
+  historyState,
+  recoverPendingCycle,
+  runComposeCycle,
+  runCycle,
+} from "./engine.mjs";
 import {
   CMD_PROPOSER_TIMEOUT_MS,
   PROPOSER_MODES,
+  buildCandidateRequests,
   buildProposerRequest,
+  collectCandidateProposals,
+  composeCandidateProposals,
   createProposerScratch,
   invokeCmdProposer,
   preferredObjectiveFromFailures,
@@ -29,7 +39,7 @@ import {
   scanProbeFailures,
   validateAgentProposal,
 } from "./propose.mjs";
-import { readLedger } from "./ledger.mjs";
+import { MAX_COMPOSITION_SOURCES, MIN_COMPOSITION_SOURCES, readLedger } from "./ledger.mjs";
 import { flattenAttempts, ledgerEpoch, loadCandidatePayload, readStoreFile, validateCandidate } from "./distill.mjs";
 import { sha256Hex } from "./types.mjs";
 import { policyArtifactPath, policyCurrentPath, readCurrentPolicy, readPolicyArtifact } from "./policy.mjs";
@@ -293,6 +303,7 @@ export async function runLoop(input) {
     maxWallMs = LOOP_DEFAULTS.maxWallMs,
     maxProposerCalls = LOOP_DEFAULTS.maxProposerCalls,
     batchSize = LOOP_DEFAULTS.batchSize,
+    composeCount = 1,
     cmdProposerTimeoutMs = CMD_PROPOSER_TIMEOUT_MS,
     stopOnAdopt = false,
     runRoot = defaultRunRoot(),
@@ -312,7 +323,14 @@ export async function runLoop(input) {
   assertPositiveInteger(maxProposerCalls, "max_proposer_calls");
   assertPositiveInteger(batchSize, "batch_size");
   if (batchSize > MAX_BATCH_SIZE) throw new Error(`batch_size_exceeds_${MAX_BATCH_SIZE}`);
+  if (!Number.isInteger(composeCount) || composeCount < 1 || composeCount > MAX_COMPOSITION_SOURCES) {
+    throw new Error(`compose_count_out_of_range: ${composeCount}`);
+  }
+  const composing = composeCount >= MIN_COMPOSITION_SOURCES;
   if (typeof maxWallMs !== "number" || !(maxWallMs >= 1)) throw new Error("max_wall_ms_must_be_positive");
+  if (composing && candidatePath) {
+    return { status: "skipped", reason: "compose_requires_unpinned_objective", composeCount, loopId };
+  }
   if (proposer === "cmd" && (typeof proposerCmd !== "string" || proposerCmd.length === 0)) {
     throw new Error("cmd_proposer_requires --proposer-cmd");
   }
@@ -372,7 +390,16 @@ export async function runLoop(input) {
     proposerCmd: proposerCmd ?? null,
     liveApproved: liveApproved === true,
     dryRun: dryRun === true,
-    caps: { maxCycles, maxWallMs, maxProposerCalls, batchSize, cmdProposerTimeoutMs, stopOnAdopt: stopOnAdopt === true, install: install === true },
+    caps: {
+      maxCycles,
+      maxWallMs,
+      maxProposerCalls,
+      batchSize,
+      composeCount,
+      cmdProposerTimeoutMs,
+      stopOnAdopt: stopOnAdopt === true,
+      install: install === true,
+    },
     startedAt,
     updatedAt: startedAt,
     status: "running",
@@ -483,9 +510,143 @@ export async function runLoop(input) {
       stoppedReason = stalled.length > 0 ? "all_objectives_stalled" : "no_admissible_actions";
       break;
     }
-    const batch = actions.slice(0, batchSize);
+    // A composition is per objective: N candidates of one objective produce one
+    // composed cycle, so a composing round evaluates exactly one action.
+    const batch = actions.slice(0, composing ? 1 : batchSize);
     const runnable = [];
     for (const action of batch) {
+      if (composing) {
+        if (state.counters.proposerCalls + composeCount > maxProposerCalls) {
+          lastBlockReason = "max_proposer_calls";
+          stoppedReason = "max_proposer_calls";
+          break;
+        }
+        if (nowMs() >= deadline) {
+          stoppedReason = "max_wall_ms";
+          break;
+        }
+        const cycleIndex = state.counters.proposerCalls + 1;
+        const baseCommit = head();
+        const requests = buildCandidateRequests({
+          count: composeCount,
+          loopId,
+          cycleIndex,
+          objective: action.objective,
+          baseCommit,
+          adapter,
+          rung,
+          failures: scan.failures ?? [],
+          history: {
+            priorAttempts: state.cycles.filter(
+              (entry) =>
+                entry.decision === "reject" || entry.status === "proposal_failed" || entry.status === "proposal_invalid",
+            ),
+            stalled,
+            unexplored,
+          },
+        });
+        const outcomes = new Map();
+        for (const { index, request } of requests) {
+          state.counters.proposerCalls += 1;
+          writeJson(path.join(loopRoot, `cycle-${request.cycleIndex}.request.json`), request);
+          const outcome = proposer === "stub"
+            ? runStubProposer({ request, repoRoot, adapter, outDir: loopRoot })
+            : (() => {
+              const scratchDir = path.join(
+                loopRoot,
+                `scratch-cycle-${request.cycleIndex}-call-${state.counters.proposerCalls}`,
+              );
+              createProposerScratch({ repoRoot, destDir: scratchDir, baseRef: request.baseCommit });
+              return invokeCmdProposer({
+                request,
+                template: proposerCmd,
+                scratchDir,
+                outDir: loopRoot,
+                env: deps.proposerEnv ?? process.env,
+                timeoutMs: cmdProposerTimeoutMs,
+              });
+            })();
+          outcomes.set(request.cycleIndex, outcome);
+          log({
+            type: "proposal_candidate",
+            cycleIndex: request.cycleIndex,
+            candidateIndex: index,
+            ok: outcome.ok === true,
+            reason: outcome.ok === true ? null : outcome.reason,
+          });
+        }
+        const collected = collectCandidateProposals({ requests, propose: (request) => outcomes.get(request.cycleIndex) });
+        const failures = collected.failures
+          .slice(0, MAX_COMPOSITION_SOURCES)
+          .map(({ index, reason }) => ({ index, reason: String(reason).slice(0, 80) }));
+        log({ type: "candidates", cycleIndex, objective: action.objective, count: collected.candidates.length, failures });
+        if (collected.candidates.length < MIN_COMPOSITION_SOURCES) {
+          lastBlockReason = "composition_requires_two_candidates";
+          state.counters.invalidProposals += 1;
+          state.cycles.push({
+            cycleIndex,
+            objective: action.objective,
+            status: "composition_failed",
+            reason: "composition_requires_two_candidates",
+            candidates: collected.candidates.length,
+            failures,
+          });
+          persist();
+          continue;
+        }
+        const headAfter = head();
+        if (headAfter !== baseCommit) {
+          lastBlockReason = "head_moved";
+          state.counters.headMoves += 1;
+          state.cycles.push({
+            cycleIndex,
+            objective: action.objective,
+            status: "head_moved",
+            requestedBase: baseCommit,
+            observedHead: headAfter,
+          });
+          log({ type: "head_moved", cycleIndex, requestedBase: baseCommit, observedHead: headAfter });
+          persist();
+          if (state.counters.headMoves >= HEAD_MOVE_STOP_LIMIT) {
+            stoppedReason = "head_moved";
+            break;
+          }
+          continue;
+        }
+        const composed = composeCandidateProposals({
+          candidates: collected.candidates,
+          objective: action.objective,
+          rung,
+          adapter,
+          repoRoot,
+          ledgerPath,
+          stallK: adapter.stallK ?? 3,
+          patchDir: path.join(loopRoot, `compose-${cycleIndex}`),
+        });
+        if (!composed.ok) {
+          lastBlockReason = composed.reason;
+          state.counters.invalidProposals += 1;
+          state.cycles.push({
+            cycleIndex,
+            objective: action.objective,
+            status: "composition_refused",
+            reason: composed.reason,
+            candidates: collected.candidates.length,
+          });
+          log({ type: "composition_refused", cycleIndex, objective: action.objective, reason: composed.reason });
+          persist();
+          continue;
+        }
+        runnable.push({
+          compose: true,
+          cycleIndex,
+          objective: action.objective,
+          reason: action.reason ?? null,
+          candidates: collected.candidates,
+          composed: { ...composed, proposal: { ...composed.proposal, baseCommit } },
+        });
+        continue;
+      }
       if (state.counters.proposerCalls >= maxProposerCalls) break;
       if (nowMs() >= deadline) break;
       const cycleIndex = state.counters.proposerCalls + 1;
@@ -626,22 +787,41 @@ export async function runLoop(input) {
       const journalEvidence = buildJournalEvidence({ ledgerPath, campaignId, cycles: state.cycles });
       let result;
       try {
-        result = await runCycle({
-          repoRoot,
-          adapter,
-          proposal: {
-            ...item.proposal,
-            campaignId,
-            surface: validationSurface(item.proposal),
-          },
-          runRoot: root,
-          ledgerPath,
-          dryRun: dryRun === true,
-          includeSmoke,
-          install: install === true,
-          journalEvidence,
-          deps: { runGuards: deps.runGuards, evaluateProbes: deps.evaluateProbes, now: deps.cycleNow, runInstall: deps.runInstall },
-        });
+        result = item.compose
+          ? await runComposeCycle({
+              repoRoot,
+              adapter,
+              candidates: item.candidates,
+              composed: item.composed,
+              campaignId,
+              runRoot: root,
+              ledgerPath,
+              dryRun: dryRun === true,
+              includeSmoke,
+              install: install === true,
+              deps: {
+                runGuards: deps.runGuards,
+                evaluateProbes: deps.evaluateProbes,
+                now: deps.cycleNow,
+                runInstall: deps.runInstall,
+              },
+            })
+          : await runCycle({
+              repoRoot,
+              adapter,
+              proposal: {
+                ...item.proposal,
+                campaignId,
+                surface: validationSurface(item.proposal),
+              },
+              runRoot: root,
+              ledgerPath,
+              dryRun: dryRun === true,
+              includeSmoke,
+              install: install === true,
+              journalEvidence,
+              deps: { runGuards: deps.runGuards, evaluateProbes: deps.evaluateProbes, now: deps.cycleNow, runInstall: deps.runInstall },
+            });
       } catch (error) {
         const message = String(error?.message ?? error);
         if (isSoftEngineError(message)) {
@@ -651,7 +831,7 @@ export async function runLoop(input) {
           state.cycles.push({
             cycleIndex: item.cycleIndex,
             objective: item.objective,
-            hypothesis: item.proposal.hypothesis,
+            hypothesis: item.compose ? null : item.proposal.hypothesis,
             status: "proposal_failed",
             reason: "patch_check_failed",
             reasons: [failure.short],
@@ -670,7 +850,7 @@ export async function runLoop(input) {
         state.cycles.push({
           cycleIndex: item.cycleIndex,
           objective: item.objective,
-          hypothesis: item.proposal.hypothesis,
+          hypothesis: item.compose ? null : item.proposal.hypothesis,
           status: "engine_error",
           reason: message,
         });
@@ -686,7 +866,7 @@ export async function runLoop(input) {
         objective: item.objective,
         selectionReason: item.reason ?? null,
         policyId: activePolicy?.id ?? null,
-        hypothesis: item.proposal.hypothesis,
+        hypothesis: item.compose ? item.composed.proposal.hypothesis : item.proposal.hypothesis,
         status: result.status,
         cycleId: result.cycleId ?? null,
         decision: result.decision ?? null,
@@ -694,6 +874,28 @@ export async function runLoop(input) {
         adoption: result.adoption ?? null,
         scores: result.scores ? { delta: result.scores.delta, floor: result.scores.floor } : null,
         failureClass,
+        ...(item.compose
+          ? {
+              composeId: result.composeId ?? null,
+              candidates: (result.candidates ?? []).map((candidateEntry) => ({
+                id: candidateEntry.id,
+                verdict: candidateEntry.verdict ?? null,
+                reasons: (candidateEntry.reasons ?? []).slice(0, 3),
+                improved: candidateEntry.improved === true,
+              })),
+              composition: result.composition
+                ? {
+                    composedSha256: result.composition.composedSha256,
+                    sources: (result.composition.sources ?? []).map((source) => ({
+                      id: source.id,
+                      sha12: source.sha12,
+                      objective: source.objective,
+                      verdict: source.verdict ?? null,
+                    })),
+                  }
+                : null,
+            }
+          : {}),
         at: new Date(nowMs()).toISOString(),
       };
       state.cycles.push(entry);
@@ -708,6 +910,7 @@ export async function runLoop(input) {
         adoption: entry.adoption,
         failureClass,
         dryRun: dryRun === true,
+        ...(item.compose ? { composeId: entry.composeId, composed: entry.composition?.composedSha256 ?? null } : {}),
       });
       persist();
       if (candidate) {
@@ -730,6 +933,7 @@ export async function runLoop(input) {
     loopId,
     loopRoot,
     campaignId,
+    composeCount,
     statePath,
     logPath,
     stoppedReason,

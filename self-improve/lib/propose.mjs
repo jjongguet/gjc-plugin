@@ -15,8 +15,21 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkBudget } from "./budget.mjs";
 import { assertNoProtectedTouched, matchesEditable } from "./domain.mjs";
-import { checkProposalHistory, countHunks, parsePatchNumstat } from "./engine.mjs";
+import {
+  MAX_CANDIDATE_PATCH_BYTES,
+  candidatePatchText,
+  checkProposalHistory,
+  countHunks,
+  mergeCandidatePatches,
+  parsePatchNumstat,
+} from "./engine.mjs";
 import { assertIsolatedDestination, sanitizeGuardEnv } from "./isolate.mjs";
+import {
+  COMPOSITION_SCHEMA,
+  MAX_COMPOSITION_SOURCES,
+  MIN_COMPOSITION_SOURCES,
+  candidateProposalId,
+} from "./ledger.mjs";
 import { isPlainObject, sha256Hex, validateProposal } from "./types.mjs";
 
 const SELF_IMPROVE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -525,4 +538,217 @@ export function validateAgentProposal({
   const scan = scanHeldoutVerbatim({ patchText, values });
   if (!scan.ok) return { ok: false, reason: "heldout_verbatim_scan", matched: scan.matched };
   return { ok: true, proposal: shaped, touched: shaped.files, hypothesisHash: history.hypothesisHash };
+}
+
+/**
+ * Harness² M2 — Propose–Probe–Compose, proposer side.
+ *
+ * `buildCandidateRequests` fans the existing proposer-request seam out into N
+ * independent requests for one objective; `collectCandidateProposals` turns the
+ * proposer's answers into candidates that carry their own content-derived id;
+ * `composeCandidateProposals` merges a candidate set into one composed proposal
+ * and puts it through the ordinary admission pipeline (schema, budget,
+ * protected paths, hypothesis novelty, held-out verbatim scan) before anything
+ * executes.
+ *
+ * A candidate id is `cand-<sha256(objective, patchSha256)>`, so it is the same
+ * value in every process, cannot be re-labelled by the record that consumes it,
+ * and never collides across different patches. Probing and adoption live in
+ * `self-improve/lib/engine.mjs` (`runComposeCycle`) — this module only produces
+ * and admits proposals.
+ */
+export const CANDIDATE_GROUP_PREFIX = "grp-";
+export const MAX_COMPOSED_HYPOTHESIS_CHARS = 280;
+export const MAX_COMPOSED_COMMIT_MESSAGE_CHARS = 120;
+
+/** Deterministic group id for the candidate set produced by one loop cycle. */
+export function candidateGroupId({ loopId = null, objective = null, baseCommit = null, cycleIndex = null }) {
+  return `${CANDIDATE_GROUP_PREFIX}${sha256Hex(JSON.stringify([loopId, objective, baseCommit, cycleIndex])).slice(0, 12)}`;
+}
+
+/**
+ * One proposer request per candidate, all through `buildProposerRequest`, so a
+ * composition reuses the existing request schema (including `contrast`) rather
+ * than a parallel proposer contract. `candidate` and its contract line are
+ * additive: requests built without a candidate keep the pre-M2 shape.
+ */
+export function buildCandidateRequests({
+  count = MIN_COMPOSITION_SOURCES,
+  loopId,
+  cycleIndex,
+  objective,
+  baseCommit,
+  adapter,
+  rung,
+  failures = [],
+  history = {},
+  contrast = null,
+}) {
+  if (!Number.isInteger(count) || count < MIN_COMPOSITION_SOURCES || count > MAX_COMPOSITION_SOURCES) {
+    throw new Error(`candidate_count_out_of_range: ${count}`);
+  }
+  const baseIndex = Number.isInteger(cycleIndex) ? cycleIndex : 1;
+  const groupId = candidateGroupId({ loopId, objective, baseCommit, cycleIndex: baseIndex });
+  const requests = [];
+  for (let index = 0; index < count; index += 1) {
+    const request = buildProposerRequest({
+      loopId,
+      cycleIndex: baseIndex + index,
+      objective,
+      baseCommit,
+      adapter,
+      rung,
+      failures,
+      history,
+      contrast,
+    });
+    request.candidate = { index, count, groupId };
+    request.responseContract.candidateRule =
+      "produce one independent patch for this objective; it is probed on its own against the shared baseline and may be composed with the other candidates";
+    requests.push({ index, groupId, request });
+  }
+  return requests;
+}
+
+/**
+ * Consume proposer answers as independently identified candidates. A failed or
+ * incomplete answer is kept in `failures` (the caller decides whether enough
+ * candidates remain); nothing is silently repaired, and both inline `patchText`
+ * and a `patchFile` are accepted so the stub and cmd proposer seams work
+ * unchanged.
+ */
+export function collectCandidateProposals({ requests = [], propose }) {
+  if (typeof propose !== "function") throw new Error("candidate_proposer_required");
+  const candidates = [];
+  const failures = [];
+  for (const { index, request } of requests) {
+    let outcome;
+    try {
+      outcome = propose(request);
+    } catch (error) {
+      failures.push({ index, reason: "candidate_proposer_threw", detail: String(error?.message ?? error) });
+      continue;
+    }
+    if (!outcome?.ok || !isPlainObject(outcome.proposal)) {
+      failures.push({ index, reason: outcome?.reason ?? "candidate_proposal_failed" });
+      continue;
+    }
+    const proposal = outcome.proposal;
+    const patchText = candidatePatchText(proposal);
+    if (patchText === null) {
+      failures.push({ index, reason: "candidate_patch_missing" });
+      continue;
+    }
+    if (Buffer.byteLength(patchText, "utf8") > MAX_CANDIDATE_PATCH_BYTES) {
+      failures.push({ index, reason: "candidate_patch_too_large" });
+      continue;
+    }
+    const hypothesis = typeof proposal.hypothesis === "string" ? proposal.hypothesis.trim() : "";
+    const commitMessage = typeof proposal.commitMessage === "string" ? proposal.commitMessage.trim() : "";
+    const objective =
+      typeof proposal.objective === "string" && proposal.objective.length > 0 ? proposal.objective : request.objective;
+    if (
+      hypothesis.length === 0 ||
+      commitMessage.length === 0 ||
+      typeof objective !== "string" ||
+      objective.length === 0
+    ) {
+      failures.push({ index, reason: "candidate_proposal_incomplete" });
+      continue;
+    }
+    let shape;
+    try {
+      shape = {
+        files: parsePatchNumstat(patchText).map((row) => row.path),
+        hunks: countHunks(patchText),
+      };
+    } catch (error) {
+      failures.push({ index, reason: "candidate_patch_invalid", detail: error.message });
+      continue;
+    }
+    const patchSha256 = sha256Hex(patchText);
+    candidates.push({
+      index,
+      id: candidateProposalId({ objective, patchSha256 }),
+      groupId: request.candidate?.groupId ?? null,
+      objective,
+      hypothesis,
+      commitMessage,
+      patchText,
+      patchSha256,
+      files: shape.files,
+      hunks: shape.hunks,
+    });
+  }
+  return { candidates, failures };
+}
+
+/**
+ * Build the composed proposal for an admitted candidate set and run it through
+ * the same admission pipeline every proposal goes through. The merge rules
+ * (independent ids, no duplicate patch, no shared-file edit conflict, ordered
+ * concatenation) live in `mergeCandidatePatches`; the composed patch is then
+ * re-validated for schema, edit budget, protected paths, hypothesis novelty and
+ * the held-out verbatim scan. A composition that fails any of those is refused
+ * here, before any scratch execution or spend.
+ */
+export function composeCandidateProposals({
+  candidates = [],
+  objective,
+  hypothesis = null,
+  commitMessage = null,
+  rung,
+  adapter,
+  repoRoot,
+  ledgerPath,
+  stallK = 3,
+  patchDir,
+  deps = {},
+}) {
+  if (typeof objective !== "string" || objective.length === 0) return { ok: false, reason: "compose_objective_required" };
+  if (typeof patchDir !== "string" || patchDir.length === 0) return { ok: false, reason: "compose_patch_dir_required" };
+  const merged = mergeCandidatePatches({ candidates });
+  if (!merged.ok) return merged;
+  const composedSha256 = sha256Hex(merged.patchText);
+  const ids = merged.sources.map((source) => source.id);
+  const composedHypothesis = (
+    typeof hypothesis === "string" && hypothesis.trim().length > 0
+      ? hypothesis.trim()
+      : `composed ${ids.join("+")} for ${objective}`
+  ).slice(0, MAX_COMPOSED_HYPOTHESIS_CHARS);
+  const composedCommitMessage = (
+    typeof commitMessage === "string" && commitMessage.trim().length > 0
+      ? commitMessage.trim()
+      : `chore(self-improve): compose ${merged.sources.length} candidates for ${objective}`
+  ).slice(0, MAX_COMPOSED_COMMIT_MESSAGE_CHARS);
+  fs.mkdirSync(patchDir, { recursive: true, mode: 0o700 });
+  const patchFile = path.join(patchDir, `compose-${composedSha256.slice(0, 12)}.patch`);
+  fs.writeFileSync(patchFile, merged.patchText);
+  const proposal = {
+    source: "agent",
+    hypothesis: composedHypothesis,
+    objective,
+    commitMessage: composedCommitMessage,
+    patchFile,
+    patchSha256: composedSha256,
+    files: merged.files,
+    hunks: merged.hunks,
+  };
+  const validation = validateAgentProposal({
+    proposal,
+    patchText: merged.patchText,
+    rung,
+    adapter,
+    repoRoot,
+    ledgerPath,
+    stallK,
+    deps,
+  });
+  if (!validation.ok) return { ok: false, reason: validation.reason, detail: validation };
+  return {
+    ok: true,
+    proposal: validation.proposal,
+    composition: { schema: COMPOSITION_SCHEMA, composedSha256, sources: merged.sources },
+    patchText: merged.patchText,
+  };
 }

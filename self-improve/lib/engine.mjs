@@ -8,7 +8,7 @@
  *   adopt_aborted -> done
  */
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -18,8 +18,19 @@ import { buildCriticFindings, decideCycle, evaluateCostRule, evaluateHeldout } f
 import { matchesEditable } from "./domain.mjs";
 import { buildGuardPlan, runGuards as defaultRunGuards } from "./guards.mjs";
 import { createScratchCopy } from "./isolate.mjs";
-import { appendRow, readLedger } from "./ledger.mjs";
-import { sha256Hex } from "./types.mjs";
+import {
+  COMPOSITION_SCHEMA,
+  MAX_COMPOSITION_SOURCES,
+  MIN_COMPOSITION_SOURCES,
+  appendRow,
+  boundedCompositionEvidence,
+  candidateProposalId,
+  ledgerRowBytes,
+  readLedger,
+  stripCompositionReasons,
+  validateCompositionEvidence,
+} from "./ledger.mjs";
+import { LEDGER_SCHEMA, MAX_LEDGER_ROW_BYTES, isPlainObject, sha256Hex } from "./types.mjs";
 
 const SELF_IMPROVE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -136,6 +147,24 @@ export function summarizeHeldout({ ok, regressions = [] }, probesHeldout = {}) {
   };
 }
 
+/**
+ * Bounded measured cost of the composition's candidate-probe phase, recorded on
+ * the composed cycle row as `probeCost` next to the row's own `cost`. The two are
+ * different phases and are never summed: `cost` covers this cycle's own run,
+ * `probeCost` covers the shared baseline plus every candidate scratch. Returns
+ * null when any part is unmeasured — an absent field, never a zero stand-in.
+ */
+function boundedProbeCost(cost) {
+  if (!isPlainObject(cost)) return null;
+  const candidates = Number.isInteger(cost.candidates) && cost.candidates >= 0 ? cost.candidates : null;
+  const wallMs =
+    typeof cost.wallMs === "number" && Number.isFinite(cost.wallMs) && cost.wallMs >= 0 ? Math.round(cost.wallMs) : null;
+  const bytes =
+    typeof cost.bytes === "number" && Number.isFinite(cost.bytes) && cost.bytes >= 0 ? Math.round(cost.bytes) : null;
+  if (candidates === null || wallMs === null || bytes === null) return null;
+  return { candidates, wallMs, bytes };
+}
+
 function treeBytes(dir) {
   let total = 0;
   for (const name of fs.readdirSync(dir)) {
@@ -147,7 +176,171 @@ function treeBytes(dir) {
   return total;
 }
 
-function applyPatch(dir, patchText) {
+/**
+ * Content fingerprint of a scratch tree: one row per entry carrying its type, its
+ * mode and a content digest (file bytes, or the symlink target). Path/size/mtime
+ * is not identity: a same-size rewrite with a restored mtime would escape, and an
+ * identical rewrite with a new mtime would falsely block. Entries that disappear
+ * or cannot be read become distinct rows so the comparison still observes a
+ * difference instead of throwing mid-probe.
+ */
+export function treeFingerprint(dir) {
+  if (!fs.existsSync(dir)) return null;
+  const rows = [];
+  const walk = (abs, rel) => {
+    for (const name of fs.readdirSync(abs).sort()) {
+      const next = rel ? `${rel}/${name}` : name;
+      const target = path.join(abs, name);
+      let stat;
+      try {
+        stat = fs.lstatSync(target);
+      } catch {
+        rows.push(`${next}\u0000missing`);
+        continue;
+      }
+      const mode = (stat.mode & 0o777).toString(8);
+      if (stat.isSymbolicLink()) {
+        let link;
+        try {
+          link = fs.readlinkSync(target);
+        } catch {
+          rows.push(`${next}\u0000symlink\u0000${mode}\u0000unreadable`);
+          continue;
+        }
+        rows.push(`${next}\u0000symlink\u0000${mode}\u0000${sha256Hex(link)}`);
+        continue;
+      }
+      if (stat.isDirectory()) {
+        rows.push(`${next}\u0000dir\u0000${mode}`);
+        walk(target, next);
+        continue;
+      }
+      if (!stat.isFile()) {
+        rows.push(`${next}\u0000other\u0000${mode}`);
+        continue;
+      }
+      let digest;
+      try {
+        digest = createHash("sha256").update(fs.readFileSync(target)).digest("hex");
+      } catch {
+        rows.push(`${next}\u0000unreadable\u0000${mode}`);
+        continue;
+      }
+      rows.push(`${next}\u0000file\u0000${mode}\u0000${digest}`);
+    }
+  };
+  walk(dir, "");
+  return sha256Hex(rows.join("\n"));
+}
+
+/** Patch text of a candidate or proposal: inline bytes first, then its patch file. */
+export function candidatePatchText(source) {
+  if (typeof source?.patchText === "string" && source.patchText.length > 0) return source.patchText;
+  return readPatchFileText(source?.patchFile);
+}
+
+function readPatchFileText(patchFile) {
+  if (typeof patchFile !== "string" || patchFile.length === 0) return null;
+  const resolved = path.resolve(patchFile);
+  if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) return null;
+  return fs.readFileSync(resolved, "utf8");
+}
+
+export const MAX_CANDIDATE_PATCH_BYTES = 256 * 1024;
+
+/**
+ * Merge independently identified candidate patches into one composed patch:
+ * sources are ordered by their content id and their bytes are concatenated, so
+ * the same candidate set always produces the same composed patch. Two
+ * candidates that edit the same file are a composition conflict — the edit
+ * regions cannot be proven disjoint without applying them, and a partially
+ * applied composition is not evidence. Budget, protected paths and the
+ * held-out scan stay in the ordinary proposal pipeline, which the composed
+ * patch goes through unchanged.
+ */
+export function mergeCandidatePatches({ candidates = [] } = {}) {
+  if (!Array.isArray(candidates)) return { ok: false, reason: "composition_requires_two_candidates", count: 0 };
+  if (candidates.length < MIN_COMPOSITION_SOURCES) {
+    return { ok: false, reason: "composition_requires_two_candidates", count: candidates.length };
+  }
+  if (candidates.length > MAX_COMPOSITION_SOURCES) {
+    return { ok: false, reason: "composition_too_many_candidates", count: candidates.length };
+  }
+  const sources = [];
+  const seenIds = new Set();
+  const seenShas = new Set();
+  for (const candidate of candidates) {
+    const patchText = candidatePatchText(candidate);
+    if (patchText === null) return { ok: false, reason: "composition_candidate_patch_missing", id: candidate?.id ?? null };
+    if (Buffer.byteLength(patchText, "utf8") > MAX_CANDIDATE_PATCH_BYTES) {
+      return { ok: false, reason: "composition_candidate_patch_too_large", id: candidate?.id ?? null };
+    }
+    const objective = candidate?.objective;
+    if (typeof objective !== "string" || objective.length === 0) {
+      return { ok: false, reason: "composition_candidate_objective_missing", id: candidate?.id ?? null };
+    }
+    const patchSha256 = sha256Hex(patchText);
+    const id = candidateProposalId({ objective, patchSha256 });
+    if (typeof candidate.id === "string" && candidate.id.length > 0 && candidate.id !== id) {
+      return { ok: false, reason: "composition_candidate_id_mismatch", providedId: candidate.id, expectedId: id };
+    }
+    if (seenIds.has(id) || seenShas.has(patchSha256)) {
+      return { ok: false, reason: "composition_duplicate_candidate", id };
+    }
+    let shape;
+    try {
+      shape = { files: parsePatchNumstat(patchText).map((row) => row.path), hunks: countHunks(patchText) };
+    } catch (error) {
+      return { ok: false, reason: "composition_candidate_patch_invalid", id, detail: error.message };
+    }
+    if (shape.files.length === 0) return { ok: false, reason: "composition_candidate_empty_patch", id };
+    seenIds.add(id);
+    seenShas.add(patchSha256);
+    sources.push({ id, objective, patchSha256, files: shape.files, hunks: shape.hunks, patchText });
+  }
+  const owner = new Map();
+  const conflicts = new Map();
+  for (const source of sources) {
+    for (const file of source.files) {
+      const held = owner.get(file);
+      if (held !== undefined && held !== source.id) {
+        if (!conflicts.has(file)) conflicts.set(file, new Set([held, source.id]));
+        else conflicts.get(file).add(source.id);
+      } else {
+        owner.set(file, source.id);
+      }
+    }
+  }
+  if (conflicts.size > 0) {
+    return {
+      ok: false,
+      reason: "composition_conflict",
+      conflicts: [...conflicts.entries()]
+        .map(([file, ids]) => ({ path: file, sources: [...ids].sort() }))
+        .sort((left, right) => (left.path < right.path ? -1 : 1)),
+    };
+  }
+  sources.sort((left, right) => (left.id < right.id ? -1 : 1));
+  // Union in the same deterministic source-id order the patch bytes use, so the
+  // composed patch, this file list and the recorded sources agree.
+  const files = [...new Set(sources.flatMap((source) => source.files))];
+  const hunks = sources.reduce((sum, source) => sum + source.hunks, 0);
+  return {
+    ok: true,
+    patchText: sources.map((source) => source.patchText).join(""),
+    files,
+    hunks,
+    sources: sources.map(({ id, objective, patchSha256, files: touched, hunks: count }) => ({
+      id,
+      objective,
+      patchSha256,
+      files: touched,
+      hunks: count,
+    })),
+  };
+}
+
+export function applyPatch(dir, patchText) {
   const check = spawnSync("git", ["apply", "--check"], { cwd: dir, input: patchText, encoding: "utf8" });
   if (check.status !== 0) throw new Error(`patch_check_failed: ${check.stderr || check.status}`);
   const apply = spawnSync("git", ["apply"], { cwd: dir, input: patchText, encoding: "utf8" });
@@ -280,7 +473,7 @@ function defaultCycleId(now) {
   return `cyc-${compact}-${randomBytes(2).toString("hex")}`;
 }
 
-async function defaultEvaluateProbes({ adapter, baselineDir, candidateDir }) {
+export async function defaultEvaluateProbes({ adapter, baselineDir, candidateDir }) {
   if (!Array.isArray(adapter.probes) || adapter.probes.length === 0) {
     return { baseline: {}, candidate: {}, delta: 0, heldout: { baseline: {}, candidate: {} } };
   }
@@ -342,6 +535,8 @@ export async function runCycle(input) {
     dryRun = false,
     includeSmoke = true,
     journalEvidence = null,
+    composition = null,
+    probeCost = null,
     deps = {},
   } = input;
   if (!repoRoot || !adapter || !proposal) throw new Error("run_cycle_requires repoRoot, adapter and proposal");
@@ -376,6 +571,29 @@ export async function runCycle(input) {
   if (touched.length === 0) {
     return { status: "rejected", decision: "reject", reasons: ["empty_patch"], recorded: false };
   }
+
+  // A composition is evidence about this exact patch or it is not recorded: the
+  // record's source ids are re-derived, the digest must belong to the bytes
+  // above, and the bounded form must still fit one ledger row.
+  let compositionEvidence = null;
+  if (composition !== null && composition !== undefined) {
+    const compositionCheck = validateCompositionEvidence({ composition, patchText });
+    if (!compositionCheck.ok) {
+      return {
+        status: "rejected",
+        decision: "reject",
+        reasons: [compositionCheck.reason],
+        detail: compositionCheck.detail,
+        recorded: false,
+      };
+    }
+    const bounded = boundedCompositionEvidence(composition);
+    if (!bounded.ok) {
+      return { status: "rejected", decision: "reject", reasons: [bounded.reason], bytes: bounded.bytes, recorded: false };
+    }
+    compositionEvidence = bounded.evidence;
+  }
+  const compositionProbeCost = compositionEvidence ? boundedProbeCost(probeCost) : null;
 
   const history = checkProposalHistory({
     ledgerPath,
@@ -520,6 +738,8 @@ export async function runCycle(input) {
         costRule,
         heldout,
         budget: budgetReport,
+        ...(compositionEvidence ? { composition: compositionEvidence } : {}),
+        ...(compositionProbeCost ? { probeCost: compositionProbeCost } : {}),
       };
     }
 
@@ -538,11 +758,33 @@ export async function runCycle(input) {
       guards: candidateGuards.map(({ id, status }) => ({ id, status })),
       critic: { verdict: critic.verdict, rules: critic.rules.map(({ id, reason }) => ({ id, reason })) },
       verdict: { decision: decision.decision, reasons: decision.reasons },
+      ...(compositionEvidence ? { composition: compositionEvidence } : {}),
+      ...(compositionProbeCost ? { probeCost: compositionProbeCost } : {}),
       ...(journalEvidence ? { journalEvidence } : {}),
       ...(touched.some((rel) => (adapter.textFixtures ?? []).includes(rel)) ? { labels: ["text_fixture"] } : {}),
       ...(history.forcedExploration ? { forcedExploration: true } : {}),
       createdAt: now(),
     };
+    if (compositionEvidence) {
+      // The record has to fit one append-only row. Identity survives the first
+      // trim; a record that still does not fit fails closed instead of throwing
+      // after the cycle already spent its guards and probes.
+      let projected = { schema: LEDGER_SCHEMA, ...cycleRow };
+      if (ledgerRowBytes(projected) > MAX_LEDGER_ROW_BYTES) {
+        compositionEvidence = stripCompositionReasons(compositionEvidence);
+        cycleRow.composition = compositionEvidence;
+        projected = { schema: LEDGER_SCHEMA, ...cycleRow };
+      }
+      if (ledgerRowBytes(projected) > MAX_LEDGER_ROW_BYTES) {
+        return {
+          status: "rejected",
+          decision: "reject",
+          reasons: ["composition_evidence_too_large"],
+          bytes: ledgerRowBytes(projected),
+          recorded: false,
+        };
+      }
+    }
     const cycleReceipt = appendRow(ledgerPath, cycleRow);
     commitPaths(repoRoot, `chore(self-improve): cycle ${cycleId} ${decision.decision}`, [ledgerRel]);
     phase("cycle-committed", { decision: decision.decision, row: cycleReceipt.seq });
@@ -558,6 +800,7 @@ export async function runCycle(input) {
       critic,
       adoption: "none",
       rowSeq: cycleReceipt.seq,
+      ...(compositionProbeCost ? { probeCost: compositionProbeCost } : {}),
     };
     if (decision.decision !== "adopt") {
       phase("done");
@@ -696,6 +939,471 @@ export async function runCycle(input) {
       fs.rmSync(guardHomeRoot, { recursive: true, force: true });
     } catch {
       /* best effort */
+    }
+  }
+}
+
+const composeRefusal = (reason, extra = {}) => ({
+  status: "rejected",
+  decision: "reject",
+  reasons: [reason],
+  recorded: false,
+  ...extra,
+});
+
+/**
+ * Harness² M2 composition, offline: every candidate is probed on its own
+ * against ONE shared baseline scratch (created once, never patched, fingerprinted
+ * before and after the probes), and the composed patch is then handed to the
+ * ordinary `runCycle`, which re-creates the baseline at the same commit, applies
+ * every existing gate to the composed variant and owns the adoption path. The
+ * composed run is deliberately a separate execution: a composition is a new
+ * candidate, not a sum of the candidate measurements above.
+ *
+ * The caller supplies `composed` from the proposal pipeline
+ * (`self-improve/lib/propose.mjs` → `composeCandidateProposals`), so the composed
+ * patch has already been through schema, budget, protected-path, novelty and
+ * held-out-verbatim admission. This function re-derives the provenance binding
+ * (ids, source patches, exact concatenation), refuses to record a composition
+ * built on an inadmissible candidate, and never treats an individual win as
+ * composition evidence.
+ *
+ * Nothing here calls a model or the network: guards and probes are the injected
+ * `deps` (defaults run the repository's own offline checkers).
+ *
+ * Cost accounting is split, never summed: the composed cycle row's `cost` stays
+ * this cycle's own measurement, and `probeCost` (result, row and
+ * `composition.json`) is the measured phase cost of the shared baseline plus
+ * every candidate scratch/guard/probe. The cost rule is unchanged and still
+ * compares only the measured baseline/candidate costs of the run it gates.
+ */
+export async function runComposeCycle(input = {}) {
+  const {
+    repoRoot,
+    adapter,
+    candidates: rawCandidates = [],
+    composed = null,
+    runRoot = defaultRunRoot(),
+    ledgerPath = path.join(repoRoot ?? ".", "self-improve", "ledger.jsonl"),
+    dryRun = false,
+    includeSmoke = true,
+    campaignId = "default",
+    install = false,
+    minDelta,
+    costConfig,
+    retention,
+    stallK,
+    resetBudget,
+    deps = {},
+  } = input;
+  if (!repoRoot || !adapter) throw new Error("run_compose_cycle_requires repoRoot and adapter");
+  if (!Array.isArray(rawCandidates) || rawCandidates.length < MIN_COMPOSITION_SOURCES) {
+    return composeRefusal("composition_requires_two_candidates", { count: rawCandidates?.length ?? 0 });
+  }
+  if (!isPlainObject(composed) || !isPlainObject(composed.proposal) || !isPlainObject(composed.composition)) {
+    return composeRefusal("composition_proposal_missing");
+  }
+  const ledgerRel = path.relative(repoRoot, ledgerPath);
+  if (ledgerRel.startsWith("..") || path.isAbsolute(ledgerRel)) {
+    throw new Error("ledger_must_live_inside_repository");
+  }
+
+  const runGuards = deps.runGuards ?? defaultRunGuards;
+  const evaluateProbes = deps.evaluateProbes ?? defaultEvaluateProbes;
+  const now = deps.now ?? (() => new Date().toISOString());
+  const config = loadConfig();
+  const effectiveMinDelta = minDelta ?? config.minDelta ?? 0.01;
+  const effectiveCostConfig = costConfig ?? {
+    wallMsBytesIncreaseRatio: config.cost?.wallMsBytesIncreaseRatio ?? 0.15,
+    gainMultipleOfFloor: config.cost?.gainMultipleOfFloor ?? 2,
+  };
+  const effectiveRetention = retention ?? config.retention?.rawCycles ?? 10;
+  const effectiveStallK = stallK ?? config.stall?.k ?? 3;
+
+  // Candidate identity is derived here, never trusted from the record.
+  const prepared = [];
+  for (const [index, candidate] of rawCandidates.entries()) {
+    const patchText = candidatePatchText(candidate);
+    if (patchText === null) {
+      return composeRefusal("composition_candidate_patch_missing", { candidateIndex: index, id: candidate?.id ?? null });
+    }
+    if (Buffer.byteLength(patchText, "utf8") > MAX_CANDIDATE_PATCH_BYTES) {
+      return composeRefusal("composition_candidate_patch_too_large", { candidateIndex: index });
+    }
+    const objective = typeof candidate?.objective === "string" && candidate.objective.length > 0
+      ? candidate.objective
+      : null;
+    if (objective === null) return composeRefusal("composition_candidate_objective_missing", { candidateIndex: index });
+    const patchSha256 = sha256Hex(patchText);
+    const id = candidateProposalId({ objective, patchSha256 });
+    if (typeof candidate?.id === "string" && candidate.id.length > 0 && candidate.id !== id) {
+      return composeRefusal("composition_candidate_id_mismatch", {
+        candidateIndex: index,
+        providedId: candidate.id,
+        expectedId: id,
+      });
+    }
+    let shape;
+    try {
+      shape = { files: parsePatchNumstat(patchText).map((row) => row.path), hunks: countHunks(patchText) };
+    } catch (error) {
+      return composeRefusal("composition_candidate_patch_invalid", { candidateIndex: index, id, detail: error.message });
+    }
+    if (shape.files.length === 0) return composeRefusal("composition_candidate_empty_patch", { candidateIndex: index, id });
+    prepared.push({ index, id, objective, patchText, patchSha256, files: shape.files, hunks: shape.hunks });
+  }
+  const byId = new Map();
+  for (const entry of prepared) {
+    if (byId.has(entry.id)) return composeRefusal("composition_duplicate_candidate", { id: entry.id });
+    byId.set(entry.id, entry);
+  }
+
+  const proposal = composed.proposal;
+  const patchText = readPatchFileText(proposal.patchFile);
+  if (patchText === null) return composeRefusal("composition_patch_missing");
+  const evidenceCheck = validateCompositionEvidence({ composition: composed.composition, patchText, requireBaseline: false });
+  if (!evidenceCheck.ok) {
+    return composeRefusal(evidenceCheck.reason, { detail: evidenceCheck.detail });
+  }
+
+  // Provenance binding: the record must name exactly the supplied candidates,
+  // each patch sha must match the supplied bytes, and the composed patch must be
+  // the ordered concatenation of those sources. Nothing is probed before this
+  // holds, so no result can be reported without a source identity.
+  const sources = composed.composition.sources;
+  for (const source of sources) {
+    const match = byId.get(source.id);
+    if (!match) return composeRefusal("composition_provenance_mismatch", { detail: `source_not_supplied:${source.id}` });
+    if (match.patchSha256 !== source.patchSha256) {
+      return composeRefusal("composition_provenance_mismatch", { detail: `source_patch_mismatch:${source.id}` });
+    }
+  }
+  if (prepared.length !== sources.length) {
+    return composeRefusal("composition_source_unrecorded", {
+      detail: `${prepared.length} supplied, ${sources.length} recorded`,
+    });
+  }
+  const expectedPatch = sources.map((source) => byId.get(source.id).patchText).join("");
+  if (expectedPatch !== patchText) {
+    return composeRefusal("composition_provenance_mismatch", { detail: "composed_patch_not_source_concatenation" });
+  }
+
+  const repoState = assertRepoState({ repoRoot, baseCommit: proposal.baseCommit });
+  if (!repoState.ok) {
+    return { status: "aborted", reason: repoState.reason, head: repoState.headShort, dirty: repoState.dirty };
+  }
+
+  const cycleId = proposal.cycleId ?? defaultCycleId(now());
+  const resetDecision = budgetResetDecision({ resetFlag: resetBudget === true });
+  const accepted = resetDecision.reset ? 0 : campaignAcceptedCount(ledgerPath, campaignId);
+  const rung = rungFor(accepted, adapter.budget);
+  const composeDir = dryRun
+    ? fs.mkdtempSync(path.join(os.tmpdir(), "self-improve-compose-"))
+    : path.join(runRoot, "runs", cycleId);
+  const evalRoot = path.join(composeDir, "compose");
+  const guardHomeRoot = fs.mkdtempSync(path.join(os.tmpdir(), "self-improve-guard-home-"));
+  const candidateResults = [];
+  let baselineFingerprint = null;
+  let probedBytes = 0;
+  let probeCost = null;
+  const phase = (name, extra = {}) => {
+    if (!dryRun) writeJson(path.join(composeDir, "phase.json"), { phase: name, at: now(), ...extra });
+  };
+  const writeEvidence = (outcome) => {
+    if (dryRun) return;
+    writeJson(path.join(composeDir, "composition.json"), {
+      schema: COMPOSITION_SCHEMA,
+      composeId: cycleId,
+      baseCommit: repoState.headShort,
+      budgetRung: rung.index,
+      baselineFingerprint,
+      probeCost,
+      sources: prepared.map(({ index, id, objective, patchSha256, files, hunks }) => ({
+        index,
+        id,
+        objective,
+        patchSha256,
+        files,
+        hunks,
+      })),
+      results: candidateResults,
+      composed: outcome ?? null,
+      at: now(),
+    });
+  };
+
+  try {
+    fs.mkdirSync(composeDir, { recursive: true, mode: 0o700 });
+    if (!dryRun) {
+      try {
+        fs.copyFileSync(path.resolve(proposal.patchFile), path.join(composeDir, "composed.patch"));
+        writeJson(path.join(composeDir, "proposal.json"), proposal);
+        writeJson(path.join(composeDir, "composition-input.json"), composed.composition);
+        const patchesDir = path.join(composeDir, "candidate-patches");
+        fs.mkdirSync(patchesDir, { recursive: true, mode: 0o700 });
+        for (const source of sources) {
+          fs.writeFileSync(path.join(patchesDir, `${source.id}.patch`), byId.get(source.id).patchText);
+        }
+      } catch {
+        /* raw evidence copies are best effort */
+      }
+    }
+
+    phase("compose-scoring");
+    // Phase cost starts here: the shared baseline scratch, its guards and every
+    // candidate scratch/guard/probe below. It is recorded as `probeCost` on the
+    // composed row, separately from that row's own `cost`.
+    const probeStartedAt = Date.now();
+    // One baseline, shared by every candidate probe. It is never patched. Its
+    // content fingerprint is taken after the baseline guards (which legitimately
+    // write build outputs into their own scratch) and compared after each probe,
+    // so a probe that dirties the shared baseline is reported instead of shifting
+    // the reference for the next candidate.
+    const baseline = createScratchCopy({ repoRoot, destDir: path.join(evalRoot, "baseline") });
+    const baselineStarted = Date.now();
+    const baselineGuards = await runGuards({
+      guards: buildGuardPlan({
+        repoRoot,
+        scratchDir: baseline.scratchDir,
+        runRoot: path.join(evalRoot, "baseline-eval"),
+        includeSmoke,
+        homeRoot: guardHomeRoot,
+      }),
+      runRoot: path.join(evalRoot, "baseline-eval"),
+      logDir: path.join(composeDir, "logs", "compose-baseline"),
+    });
+    const baselineWallMs = Date.now() - baselineStarted;
+    const baselineBytes = treeBytes(baseline.scratchDir);
+    const baselineVerified = treeFingerprint(baseline.scratchDir);
+    baselineFingerprint = baselineVerified;
+    if (baselineGuards.some((guard) => guard.status !== "pass")) {
+      const outcome = composeRefusal("baseline_guard_fail", {
+        cycleId,
+        guards: baselineGuards.map(({ id, status }) => ({ id, status })),
+        baselineFingerprint,
+      });
+      phase("done", { outcome: "baseline_guard_fail" });
+      writeJson(path.join(composeDir, "failure.json"), { reason: "baseline_guard_fail", at: now() });
+      writeEvidence({ status: outcome.status, reasons: outcome.reasons });
+      return outcome;
+    }
+
+    for (const source of sources) {
+      const candidate = byId.get(source.id);
+      const scratch = createScratchCopy({ repoRoot, destDir: path.join(evalRoot, "candidates", source.id) });
+      try {
+        applyPatch(scratch.scratchDir, candidate.patchText);
+      } catch (error) {
+        const outcome = composeRefusal("composition_candidate_patch_failed", {
+          cycleId,
+          id: source.id,
+          detail: error.message,
+        });
+        phase("done", { outcome: "composition_candidate_patch_failed" });
+        writeEvidence({ status: outcome.status, reasons: outcome.reasons });
+        return outcome;
+      }
+      const candidateStarted = Date.now();
+      const guards = await runGuards({
+        guards: buildGuardPlan({
+          repoRoot,
+          scratchDir: scratch.scratchDir,
+          runRoot: path.join(evalRoot, "candidate-eval", source.id),
+          includeSmoke,
+          homeRoot: guardHomeRoot,
+        }),
+        runRoot: path.join(evalRoot, "candidate-eval", source.id),
+        logDir: path.join(composeDir, "logs", "compose", source.id),
+      });
+      const wallMs = Date.now() - candidateStarted;
+      const probes = await evaluateProbes({
+        adapter,
+        baselineDir: baseline.scratchDir,
+        candidateDir: scratch.scratchDir,
+        runRoot: evalRoot,
+      });
+      const baselineObserved = treeFingerprint(baseline.scratchDir);
+      if (baselineObserved !== baselineVerified) {
+        const outcome = composeRefusal("baseline_mutated", {
+          cycleId,
+          id: source.id,
+          baselineFingerprint: baselineVerified,
+          observedFingerprint: baselineObserved,
+        });
+        phase("done", { outcome: "baseline_mutated" });
+        writeJson(path.join(composeDir, "failure.json"), { reason: "baseline_mutated", id: source.id, at: now() });
+        writeEvidence({ status: outcome.status, reasons: outcome.reasons, id: source.id });
+        return outcome;
+      }
+      const floor = Math.max(effectiveMinDelta, probes.floor ?? 0);
+      const scores = {
+        baseline: probes.baseline ?? {},
+        candidate: probes.candidate ?? {},
+        delta: probes.delta ?? 0,
+        floor,
+      };
+      const candidateBytes = treeBytes(scratch.scratchDir);
+      probedBytes += candidateBytes;
+      const costRule = evaluateCostRule({
+        baselineCost: { wallMs: baselineWallMs, bytes: baselineBytes },
+        candidateCost: { wallMs, bytes: candidateBytes },
+        delta: scores.delta,
+        floor,
+        config: effectiveCostConfig,
+      });
+      const heldout = evaluateHeldout({
+        heldoutBaseline: probes.heldout?.baseline ?? {},
+        heldoutCandidate: probes.heldout?.candidate ?? {},
+      });
+      const critic = buildCriticFindings({
+        patchText: candidate.patchText,
+        touched: candidate.files,
+        surface: candidate.files,
+        adapter,
+        rung,
+        hunks: candidate.hunks,
+      });
+      const budget = checkBudget({ files: candidate.files, hunks: candidate.hunks }, rung);
+      const decision = decideCycle({ critic, guards, scores, costRule, heldout, budget });
+      // The improvement floor is the composed result's own gate. A candidate is
+      // admissible as a source when every other gate holds.
+      const hardReasons = decision.reasons.filter((reason) => reason !== "floor_not_met");
+      candidateResults.push({
+        id: source.id,
+        objective: candidate.objective,
+        patchSha256: candidate.patchSha256,
+        files: candidate.files,
+        hunks: candidate.hunks,
+        verdict: decision.decision,
+        reasons: decision.reasons,
+        hardReasons,
+        admissible: hardReasons.length === 0,
+        improved: scores.delta >= floor,
+        scores: { delta: scores.delta, floor: scores.floor },
+        heldout: summarizeHeldout(heldout, probes.heldout ?? {}),
+        costRule: { ok: costRule.ok, wallIncrease: costRule.wallIncrease, byteIncrease: costRule.byteIncrease },
+        guards: guards.map(({ id, status }) => ({ id, status })),
+      });
+    }
+
+    probeCost = {
+      candidates: candidateResults.length,
+      wallMs: Date.now() - probeStartedAt,
+      bytes: probedBytes,
+    };
+
+    const inadmissible = candidateResults.filter((result) => !result.admissible);
+    if (inadmissible.length > 0) {
+      // Abstention: a composition is not attempted on top of a candidate that
+      // already failed a gate, even when the other candidates improved.
+      const excluded = inadmissible.map((result) => ({ id: result.id, reasons: result.hardReasons }));
+      const outcome = {
+        status: "abstained",
+        abstained: true,
+        decision: "reject",
+        cycleId,
+        reasons: ["composition_abstained_inadmissible_candidate"],
+        excluded,
+        candidates: candidateResults,
+        baselineFingerprint: baselineVerified,
+        recorded: false,
+      };
+      phase("done", { outcome: "abstained" });
+      writeJson(path.join(composeDir, "failure.json"), {
+        reason: "composition_abstained_inadmissible_candidate",
+        excluded,
+        at: now(),
+      });
+      writeEvidence({ status: outcome.status, reasons: outcome.reasons, excluded });
+      return outcome;
+    }
+
+    // The composed variant is a new candidate: every existing gate applies again
+    // inside runCycle, and only its verdict can adopt. Individual wins above are
+    // recorded evidence, never adoption.
+    const composition = {
+      ...composed.composition,
+      baselineFingerprint: baselineVerified,
+      sources: composed.composition.sources.map((source) => {
+        const result = candidateResults.find((entry) => entry.id === source.id);
+        return { ...source, verdict: result.verdict, reasons: result.reasons };
+      }),
+    };
+    phase("compose-validated", { composedSha256: composition.composedSha256 });
+    writeEvidence({
+      status: "composed-pending",
+      composition: {
+        composedSha256: composition.composedSha256,
+        sources: composition.sources.map(({ id, verdict, reasons }) => ({ id, verdict, reasons })),
+      },
+    });
+
+    const composedResult = await runCycle({
+      repoRoot,
+      adapter,
+      proposal: {
+        ...proposal,
+        cycleId,
+        campaignId,
+        surface: proposal.files ?? [],
+        baseCommit: repoState.head,
+      },
+      composition,
+      probeCost,
+      runRoot,
+      ledgerPath,
+      dryRun,
+      includeSmoke,
+      install,
+      minDelta: effectiveMinDelta,
+      costConfig: effectiveCostConfig,
+      retention: effectiveRetention,
+      stallK: effectiveStallK,
+      resetBudget: resetBudget === true,
+      deps: { runGuards, evaluateProbes, now, runInstall: deps.runInstall },
+    });
+
+    const bounded = boundedCompositionEvidence(composition);
+    const result = {
+      status: composedResult.status,
+      composeId: cycleId,
+      cycleId: composedResult.cycleId ?? cycleId,
+      decision: composedResult.decision ?? "reject",
+      reasons: composedResult.reasons ?? [],
+      adoption: composedResult.adoption ?? "none",
+      abstained: false,
+      candidates: candidateResults,
+      composition: bounded.ok ? bounded.evidence : null,
+      probeCost,
+      baselineFingerprint: baselineVerified,
+      composed: composedResult,
+      recorded: composedResult.status === "ok",
+    };
+    writeEvidence({
+      status: result.status,
+      decision: result.decision,
+      reasons: result.reasons,
+      adoption: result.adoption,
+      cycleId: result.cycleId,
+      composition: result.composition,
+      probeCost: result.probeCost,
+    });
+    if (!dryRun && !fs.existsSync(path.join(composeDir, "phase.json"))) {
+      phase("done", { outcome: result.status });
+    }
+    return result;
+  } finally {
+    try {
+      fs.rmSync(guardHomeRoot, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+    if (dryRun) {
+      try {
+        fs.rmSync(composeDir, { recursive: true, force: true });
+      } catch {
+        /* best effort */
+      }
     }
   }
 }
