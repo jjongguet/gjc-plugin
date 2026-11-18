@@ -1,14 +1,16 @@
 import { scanLine, sessionEndStage, stageLine, type CorrectionDeps } from "../lib/correction";
 
 /**
- * session_shutdown adapter: one bounded, best-effort staging attempt. The scan
- * owns a 1500 ms deadline (checked between project directories, transcripts and
- * chunks) and every error is swallowed, so a missing transcript, a broken ledger
- * root or a slow filesystem can never block or fail a shutdown. Nothing is
- * written outside the plugin data directory; a staged correction is logged once
- * at info level and a scan that stopped at the read cap is logged once at debug
- * level. The host calls `register(api)`; the optional second argument lets the
- * verify suite point the same code at a synthetic session store and data
+ * session_shutdown adapter: one best-effort staging attempt. The scan checks its
+ * own 1500 ms deadline between project directories, between transcripts and
+ * between chunks, and every error is swallowed, so a missing transcript or a
+ * broken ledger root can never fail a shutdown. A single blocking filesystem
+ * call is not preemptible: one hung read or stat can still delay the shutdown,
+ * and `withBound` inside sessionEndStage only guards promise settlement. Nothing
+ * is written outside the plugin data directory; a staged correction is logged
+ * once at info level and a scan that stopped at the read cap is logged once at
+ * debug level. The host calls `register(api)`; the optional second argument lets
+ * the verify suite point the same code at a synthetic session store and data
  * directory.
  */
 export default function register(
@@ -44,7 +46,7 @@ export default function register(
 				}
 			}
 		} catch {
-			/* the hook never blocks a shutdown */
+			/* the hook never fails a shutdown; the deadline bounds the scan */
 		}
 		return undefined;
 	});

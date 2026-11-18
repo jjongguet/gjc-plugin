@@ -887,7 +887,7 @@ await check("a session with no matching transcript is a no-op", async () => {
 	assert.equal(await correction.sessionEndStage({ cwd: "" }, deps), null);
 });
 
-await check("the shutdown work is bounded and never rejects", async () => {
+await check("withBound settles a stalled promise to null and never rejects (promise guard only)", async () => {
 	const started = Date.now();
 	assert.equal(await correction.withBound(new Promise(() => {}), 60), null);
 	assert.ok(Date.now() - started < 1000, "a stalled read cannot hold the shutdown");
@@ -962,6 +962,7 @@ await check("lessons_staged returns counts, newest first, bounded to 4096 bytes"
 	assert.equal(result.json.status, "ok");
 	assert.equal(result.json.format, "json");
 	assert.equal(result.json.root, wiki);
+	assert.equal(result.json.truncated, false, "a small file is fully visible");
 	assert.equal(result.json.count, 12);
 	assert.equal(result.json.returned, result.json.entries.length);
 	assert.ok(result.json.entries.length < 12, "the entry list is reduced to fit the result budget");
@@ -1008,10 +1009,10 @@ await check("lessons_staged is unavailable without a wiki root and empty without
 	const data = dataAt("staged-unavailable-data");
 	const absent = path.join(root, "cases", "absent-wiki");
 	const missing = await withEnv({ GJC_COMPOUND_ROOT: absent, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
-	assert.deepEqual(missing.json, { status: "unavailable", reason: "wiki_root_missing" });
+	assert.deepEqual(missing.json, { status: "unavailable", reason: "wiki_root_missing", truncated: false });
 	const noScript = caseDir("staged-no-script");
 	const noScriptResult = await withEnv({ GJC_COMPOUND_ROOT: noScript, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
-	assert.deepEqual(noScriptResult.json, { status: "unavailable", reason: "script_missing" });
+	assert.deepEqual(noScriptResult.json, { status: "unavailable", reason: "script_missing", truncated: false });
 	const wiki = ledgerRoot("staged-empty");
 	const empty = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
 	assert.equal(empty.json.status, "empty");
@@ -1069,7 +1070,7 @@ await check("lessons_staged add-argv prints one exact, runnable ledger command a
 		"--json",
 	]);
 	const unknownId = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id: "0000000000000000" }));
-	assert.deepEqual(unknownId.json, { status: "error", reason: "unknown_correction_id" });
+	assert.deepEqual(unknownId.json, { status: "error", reason: "unknown_correction_id", truncated: false });
 });
 
 await check("the transcript scan abandons the rest at the deadline instead of running to completion", async () => {
@@ -1189,6 +1190,33 @@ await check("one wiki-root chain: GJC_COMPOUND_ROOT, then GJC_LESSONS_WIKI, then
 	assert.equal(core.wikiRoot({ env: { GJC_LESSONS_WIKI: "  " }, home }), path.join(home, "jjongguet", "personal-wiki"));
 	assert.equal(core.wikiRoot({ env: { GJC_COMPOUND_ROOT: "~/wiki" }, home }), path.join(home, "wiki"), "~ expands for both names");
 	assert.equal(core.wikiRoot({ env: {}, home }), path.join(home, "jjongguet", "personal-wiki"));
+});
+
+await check("a staged file larger than the newest window reports truncated:true with a bounded count", async () => {
+	const wiki = ledgerRoot("staged-window");
+	const data = dataAt("staged-window-data");
+	const file = stagedFile(data);
+	mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+	const total = 4000;
+	const lines: string[] = [];
+	for (let index = 0; index < total; index++) lines.push(JSON.stringify(stagedCandidate(index)));
+	writeFileSync(file, `${lines.join("\n")}\n`, { mode: 0o600 });
+	const size = statSync(file).size;
+	assert.ok(size > correction.MAX_CORRECTION_FILE_BYTES, `fixture is ${size} bytes`);
+	const result = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	assert.equal(result.json.status, "ok");
+	assert.equal(result.json.truncated, true, "the newest window binds");
+	assert.ok(result.json.count > 0 && result.json.count < total, `visible count ${result.json.count} of ${total}`);
+	assert.equal(result.json.returned, result.json.entries.length);
+	assert.ok(Buffer.byteLength(result.text, "utf8") <= 4096);
+	const oldest = correction.correctionId(stagedCandidate(0).sessionId, stagedCandidate(0).correctionText);
+	const miss = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({ format: "add-argv", id: oldest }));
+	assert.deepEqual(miss.json, { status: "error", reason: "unknown_correction_id", truncated: true });
+	const small = dataAt("staged-window-small");
+	assert.equal(correction.stageCorrection(stagedCandidate(0) as never, { env: { GJC_PLUGIN_DATA: small } }).status, "appended");
+	const smallResult = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: small }, () => runStagedTool({}));
+	assert.equal(smallResult.json.truncated, false);
+	assert.equal(smallResult.json.count, 1);
 });
 
 rmSync(root, { recursive: true, force: true });

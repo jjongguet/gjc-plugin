@@ -55,10 +55,11 @@ export function compoundRoot(deps: RootDeps = {}): string {
 // the staged file read is byte capped, and the append is one O_APPEND write of
 // one JSON line at mode 0600.
 //
-// The 1500 ms shutdown budget is a real deadline, not a race around finished
-// work: it is checked between project directories, between transcripts and
-// between chunks, and an expired scan is abandoned (no-op). `withBound` stays
-// as the backstop for a filesystem call that never returns at all.
+// The 1500 ms shutdown budget is spent by the work itself: the deadline is
+// checked between project directories, between transcripts and between chunks,
+// and an expired scan is abandoned (no-op). Those checks cannot preempt a single
+// blocking filesystem call, so one hung read or stat can still delay shutdown;
+// `withBound` only guards promise settlement and is not a wall-clock bound.
 import { createHash } from "node:crypto";
 import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, statSync, writeSync } from "node:fs";
 
@@ -126,10 +127,13 @@ export type StageOutcome =
 	| { status: "error"; reason: string };
 
 export type StagedRead =
-	| { status: "ok" | "empty"; file: string; count: number; entries: StagedEntry[] }
+	| { status: "ok" | "empty"; file: string; count: number; truncated: boolean; entries: StagedEntry[] }
 	| { status: "unavailable"; reason: string }
 	| { status: "error"; reason: string };
 
+// `truncated` is true when the staged file is larger than the MAX_CORRECTION_FILE_BYTES
+// newest window: `count`, `entries` and id lookups then cover only the visible
+// suffix, so older entries (and older dedupe keys) are not reported.
 export type StagedResult =
 	| {
 			status: "ok" | "empty";
@@ -138,11 +142,12 @@ export type StagedResult =
 			file: string;
 			count: number;
 			returned: number;
+			truncated: boolean;
 			entries: StagedEntry[];
 	  }
-	| { status: "ok"; format: "add-argv"; root: string; id: string; command: string }
-	| { status: "unavailable"; reason: string }
-	| { status: "error"; reason: string };
+	| { status: "ok"; format: "add-argv"; root: string; id: string; truncated: boolean; command: string }
+	| { status: "unavailable"; reason: string; truncated: boolean }
+	| { status: "error"; reason: string; truncated: boolean };
 
 export type StagedInput = { limit: number; format: "json" | "add-argv"; id: string | null };
 
@@ -364,6 +369,24 @@ function readBounded(file: string, maxBytes: number, fromEnd: boolean): string {
 		const buffer = Buffer.alloc(length);
 		readSync(fd, buffer, 0, length, fromEnd ? size - length : 0);
 		return buffer.toString("utf8");
+	} finally {
+		closeSync(fd);
+	}
+}
+
+type WindowRead = { text: string; truncated: boolean };
+
+// The newest `maxBytes` of a file, with whether the window binds. A tail read can
+// start mid-line; an unparseable line simply drops out in parseRecords.
+function readWindow(file: string, maxBytes: number): WindowRead {
+	const fd = openSync(file, "r");
+	try {
+		const size = fstatSync(fd).size;
+		const length = Math.min(size, maxBytes);
+		if (length <= 0) return { text: "", truncated: false };
+		const buffer = Buffer.alloc(length);
+		readSync(fd, buffer, 0, length, size - length);
+		return { text: buffer.toString("utf8"), truncated: size > length };
 	} finally {
 		closeSync(fd);
 	}
@@ -618,13 +641,16 @@ export function stageCorrection(candidate: CorrectionCandidate, deps: Correction
  */
 export function stagedEntries(deps: CorrectionDeps = {}): StagedRead {
 	const file = correctionFile(deps);
-	let text: string;
+	let window: WindowRead;
 	try {
-		text = readBounded(file, MAX_CORRECTION_FILE_BYTES, true);
+		window = readWindow(file, MAX_CORRECTION_FILE_BYTES);
 	} catch (error) {
-		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { status: "empty", file, count: 0, entries: [] };
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return { status: "empty", file, count: 0, truncated: false, entries: [] };
+		}
 		return { status: "unavailable", reason: "file_unreadable" };
 	}
+	const text = window.text;
 	const seen = new Set<string>();
 	const entries: StagedEntry[] = [];
 	for (const record of parseRecords(text)) {
@@ -636,7 +662,7 @@ export function stagedEntries(deps: CorrectionDeps = {}): StagedRead {
 		entries.push({ ...candidate, id: key.slice(0, STAGED_ID_CHARS) });
 	}
 	entries.reverse();
-	return { status: entries.length === 0 ? "empty" : "ok", file, count: entries.length, entries };
+	return { status: entries.length === 0 ? "empty" : "ok", file, count: entries.length, truncated: window.truncated, entries };
 }
 
 function shellQuote(value: string): string {
@@ -736,22 +762,34 @@ function fileExists(target: string): boolean {
 }
 
 /**
- * The `lessons_staged` result. The wiki root must resolve to a checkout with
- * `scripts/lessons.py` (otherwise the add line could not run), the staged file
- * is read once, and the JSON envelope is reduced until it fits 4096 bytes by
- * dropping the oldest entries whole.
+ * The `lessons_staged` result. The staged file is read once as the newest
+ * MAX_CORRECTION_FILE_BYTES window and `truncated` says whether that window
+ * binds, so `count` never claims more than the visible suffix. The wiki root
+ * must then resolve to a checkout with `scripts/lessons.py` (otherwise the add
+ * line could not run), and the JSON envelope is reduced until it fits 4096
+ * bytes by dropping the oldest entries whole.
  */
 export function stagedResult(input: StagedInput, deps: CorrectionDeps = {}): StagedResult {
-	const root = compoundRoot(deps);
-	if (!directoryExists(root)) return { status: "unavailable", reason: "wiki_root_missing" };
-	if (!fileExists(path.join(root, "scripts", "lessons.py"))) return { status: "unavailable", reason: "script_missing" };
+	// The staged file is read first so every path can report whether the newest
+	// window binds; an unreadable file still answers the only question it can.
 	const read = stagedEntries(deps);
-	if (read.status !== "ok" && read.status !== "empty") return read;
+	if (read.status !== "ok" && read.status !== "empty") return { ...read, truncated: false };
+	const truncated = read.truncated;
+	const root = compoundRoot(deps);
+	if (!directoryExists(root)) return { status: "unavailable", reason: "wiki_root_missing", truncated };
+	if (!fileExists(path.join(root, "scripts", "lessons.py"))) return { status: "unavailable", reason: "script_missing", truncated };
 	if (input.format === "add-argv") {
 		const entry = read.entries.find((item) => item.id === input.id);
-		if (entry === undefined) return { status: "error", reason: "unknown_correction_id" };
-		const result: StagedResult = { status: "ok", format: "add-argv", root, id: entry.id, command: addArgvCommand(entry, root) };
-		if (utf8Bytes(JSON.stringify(result)) > MAX_RESULT_BYTES) return { status: "error", reason: "result_too_large" };
+		if (entry === undefined) return { status: "error", reason: "unknown_correction_id", truncated };
+		const result: StagedResult = {
+			status: "ok",
+			format: "add-argv",
+			root,
+			id: entry.id,
+			truncated,
+			command: addArgvCommand(entry, root),
+		};
+		if (utf8Bytes(JSON.stringify(result)) > MAX_RESULT_BYTES) return { status: "error", reason: "result_too_large", truncated };
 		return result;
 	}
 	const kept: StagedEntry[] = [];
@@ -764,12 +802,13 @@ export function stagedResult(input: StagedInput, deps: CorrectionDeps = {}): Sta
 			file: read.file,
 			count: read.count,
 			returned: candidate.length,
+			truncated,
 			entries: candidate,
 		};
 		if (utf8Bytes(JSON.stringify(envelope)) > MAX_RESULT_BYTES) break;
 		kept.push(entry);
 	}
-	if (read.count > 0 && kept.length === 0) return { status: "error", reason: "result_too_large" };
+	if (read.count > 0 && kept.length === 0) return { status: "error", reason: "result_too_large", truncated };
 	return {
 		status: read.count === 0 ? "empty" : "ok",
 		format: "json",
@@ -777,11 +816,19 @@ export function stagedResult(input: StagedInput, deps: CorrectionDeps = {}): Sta
 		file: read.file,
 		count: read.count,
 		returned: kept.length,
+		truncated,
 		entries: kept,
 	};
 }
 
-/** Bound one promise; a timeout, rejection or failure all settle to null. */
+/**
+ * Promise-settlement guard: resolves with the value, or with null when the
+ * timeout wins or the promise rejects, and never rejects itself. It cannot
+ * interrupt synchronous work — a hung filesystem call inside `work` keeps
+ * running and keeps the event loop waiting — so it is not a wall-clock bound.
+ * Work that needs a real budget must check its own deadline, as the transcript
+ * scan does.
+ */
 export function withBound<T>(work: Promise<T>, timeoutMs: number): Promise<T | null> {
 	return new Promise<T | null>((resolve) => {
 		let settled = false;
@@ -812,11 +859,13 @@ function hookCwd(ctx: unknown): string | null {
  * hook cwd picks the transcript, its `session` record must name that cwd, only
  * the last user message is scanned, and every failure is null: a missing
  * transcript, an unredactable correction, a read error or an expired scan never
- * blocks or fails the shutdown. The deadline is checked inside the scan, so the
- * budget is spent by the work itself rather than by a timer wrapped around
- * already-finished work; `withBound` is only the backstop for a filesystem call
- * that never returns. A scan that stops at the byte cap with no user record is
- * reported as `skipped` so the hook can log exactly one debug line.
+ * blocks or fails the shutdown. The deadline is checked inside the scan, between
+ * project directories, transcripts and chunks, so the budget is spent by the
+ * work itself rather than by a timer wrapped around already-finished work. One
+ * blocking filesystem call is not preemptible, so a hung read or stat can still
+ * delay shutdown; `withBound` guards promise settlement only. A scan that stops
+ * at the byte cap with no user record is reported as `skipped` so the hook can
+ * log exactly one debug line.
  */
 export async function sessionEndStage(ctx: unknown, deps: CorrectionDeps = {}): Promise<StageOutcome | null> {
 	const cwd = hookCwd(ctx);
@@ -857,14 +906,16 @@ export function scanLine(outcome: StageOutcome | null, deps: CorrectionDeps = {}
 
 
 /**
- * session_shutdown adapter: one bounded, best-effort staging attempt. The scan
- * owns a 1500 ms deadline (checked between project directories, transcripts and
- * chunks) and every error is swallowed, so a missing transcript, a broken ledger
- * root or a slow filesystem can never block or fail a shutdown. Nothing is
- * written outside the plugin data directory; a staged correction is logged once
- * at info level and a scan that stopped at the read cap is logged once at debug
- * level. The host calls `register(api)`; the optional second argument lets the
- * verify suite point the same code at a synthetic session store and data
+ * session_shutdown adapter: one best-effort staging attempt. The scan checks its
+ * own 1500 ms deadline between project directories, between transcripts and
+ * between chunks, and every error is swallowed, so a missing transcript or a
+ * broken ledger root can never fail a shutdown. A single blocking filesystem
+ * call is not preemptible: one hung read or stat can still delay the shutdown,
+ * and `withBound` inside sessionEndStage only guards promise settlement. Nothing
+ * is written outside the plugin data directory; a staged correction is logged
+ * once at info level and a scan that stopped at the read cap is logged once at
+ * debug level. The host calls `register(api)`; the optional second argument lets
+ * the verify suite point the same code at a synthetic session store and data
  * directory.
  */
 export default function register(
@@ -900,7 +951,7 @@ export default function register(
 				}
 			}
 		} catch {
-			/* the hook never blocks a shutdown */
+			/* the hook never fails a shutdown; the deadline bounds the scan */
 		}
 		return undefined;
 	});
