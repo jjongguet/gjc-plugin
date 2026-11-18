@@ -2,32 +2,28 @@
 // Core: lib/readiness.ts + adapter: src/readiness.adapter.ts
 // Rebuild with: bun scripts/build.mjs
 
-// egm plugin core — an offline, read-only readiness report for the
-// Elephant-Goldfish Model (EGM) skills installed through GJC's own marketplace
-// path. EGM itself is never bundled, fetched, installed or run here: GJC 0.20.0
-// installs it natively (`gjc plugin marketplace add` + `gjc plugin install
-// egm@egm`), and this module only reads the registries GJC wrote, compares the
-// installed runtime files with the pinned release, and reads the session
-// settings that can switch the Goldfish subagents off.
+// egm plugin core — the pinned Elephant-Goldfish Model (EGM) release, the GJC
+// adapters generated from it, and an offline, read-only readiness report.
+//
+// GJC 0.20.0 refuses `skills` and `agents` in a bundle manifest, so EGM's
+// skills and reviewer personas live on GJC's loose user surfaces. The checkout
+// script `scripts/install.ts` writes three things under the agent directory:
+// the unmodified upstream files (`egm/<tag>/`), a composed copy of each skill
+// (`skills/egm-<name>/SKILL.md`: the upstream text plus a short GJC preamble)
+// and a composed agent definition for each reviewer (`agents/egm-<name>.md`:
+// the upstream persona plus a `tools` allowlist). This module owns the pin, the
+// compose rules both the installer and the report use, and the report itself.
+// It never fetches, installs or runs EGM and never contacts the network.
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
 export const EGM_REPOSITORY = "https://github.com/google/elephant-goldfish-model";
 export const EGM_PINNED_TAG = "v0.1.1";
 export const EGM_PINNED_COMMIT = "dea7761de06ce5b51c177ebb9bba0469f24af5a4";
-export const EGM_MARKETPLACE = "egm";
-export const EGM_PLUGIN_ID = "egm@egm";
-/** Plugin-owned location of the pinned upstream checkout the local marketplace points at. */
-export const EGM_PINNED_SOURCE = `~/.gjc-plugin/egm/elephant-goldfish-model-${EGM_PINNED_TAG}`;
-export const EGM_INSTALL_COMMANDS = [
-	`git clone --depth 1 --branch ${EGM_PINNED_TAG} ${EGM_REPOSITORY} ${EGM_PINNED_SOURCE}`,
-	`gjc plugin marketplace add ${EGM_PINNED_SOURCE}`,
-	`gjc plugin install ${EGM_PLUGIN_ID}`,
-];
-export const EGM_UNINSTALL_COMMANDS = [`gjc plugin uninstall ${EGM_PLUGIN_ID}`, `gjc plugin marketplace remove ${EGM_MARKETPLACE}`];
-/** GJC loads marketplace skills under the plugin name, so `egm-review` registers as `egm:egm-review`. */
+/** The one install entry, run from a gjc-plugin checkout root. */
+export const EGM_INSTALL_COMMAND = "bun run egm:install";
 export const EGM_SKILLS = [
 	"egm-brainstorm",
 	"egm-draft",
@@ -37,7 +33,7 @@ export const EGM_SKILLS = [
 	"egm-bootstrap",
 	"egm-drift-report",
 ] as const;
-/** Persona file under `agents/` → the `name` GJC registers as a `task` agent. */
+/** Persona file under `agents/` → the `name` its frontmatter declares. */
 export const EGM_PERSONAS: ReadonlyArray<readonly [string, string]> = [
 	["agents/bootstrap_orchestrator.md", "egm-bootstrap-orchestrator"],
 	["agents/codebase_details.md", "egm-codebase-details"],
@@ -51,9 +47,19 @@ export const EGM_PERSONAS: ReadonlyArray<readonly [string, string]> = [
 	["agents/zoom_out.md", "egm-zoom-out"],
 ];
 /**
- * sha256 of every file the skills read at run time, at the pinned tag
- * (`git show v0.1.1:<path> | shasum -a 256`). Skill tests, icons and the
- * Codex-only `agents/openai.yaml` are not runtime inputs and are not pinned.
+ * Upstream gives these two roles write and spawn tools. They stay unmodified in
+ * the bundle and are not registered as GJC agents: the parent session runs the
+ * bootstrap orchestrator inline and dispatches reviewers itself.
+ */
+export const EGM_UNREGISTERED_PERSONAS: readonly string[] = ["agents/bootstrap_orchestrator.md", "agents/synthesizer.md"];
+/** The eight Goldfish reviewers registered as read-only GJC agents. */
+export const EGM_REVIEWERS: ReadonlyArray<readonly [string, string]> = EGM_PERSONAS.filter(([file]) => !EGM_UNREGISTERED_PERSONAS.includes(file));
+/** Built-in tools a reviewer may use; GJC appends `yield` itself. */
+export const EGM_REVIEWER_TOOLS = ["read", "search", "find"] as const;
+/**
+ * sha256 of every upstream file the installer copies, at the pinned tag
+ * (`git show v0.1.1:<path> | shasum -a 256`): the files the skills read at run
+ * time, the three documents every skill names, and the license.
  */
 export const EGM_PINNED_FILES: Readonly<Record<string, string>> = {
 	"agents/bootstrap_orchestrator.md": "5c2fa484754f8d582669500d16d5728fe95daff8bd964f8e7f09142c6a666bfc",
@@ -83,181 +89,315 @@ export const EGM_PINNED_FILES: Readonly<Record<string, string>> = {
 	"skills/egm-resolve/SKILL.md": "fe12b8712f88b51780d817e6c8f0ac5e7a29961ee111d0fd19bfc2f738d2f531",
 	"skills/egm-review-loop/SKILL.md": "844b174055d32a7394f1096964a289987272109fff531a080fc9c3c9acef26fa",
 	"skills/egm-review/SKILL.md": "a17ee3b983bcd77000099bedf014db84a7a6e6f3245c712acd84a4f119b6b58c",
+	"docs/harnesses.md": "fbb15af14f2233436b474f5d186acb6a2df7a8ac743fb4993eff0bdabc56c060",
+	"docs/codex.md": "91be58251456904c2542ee1299d1096b569cbc08afdcf24c671eb09b32d09bfc",
+	"docs/claude.md": "7c8be13c296e582467dec6141a18387168ffc1e32d4e0ece4c29b2af5c631350",
+	LICENSE: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
 };
 
-const REGISTRY_MAX_BYTES = 1024 * 1024;
+const JOURNAL_MAX_BYTES = 1024 * 1024;
 const RUNTIME_FILE_MAX_BYTES = 4 * 1024 * 1024;
+const AGENT_HEADER_MAX_BYTES = 8 * 1024;
 const MISMATCH_LIMIT = 12;
-const SHA_RE = /^[0-9a-f]{40}$/;
+const DIGEST_RE = /^[0-9a-f]{64}$/;
 
-export function marketplacesPath(home: string = os.homedir()): string {
-	return path.join(home, ".gjc", "marketplaces.json");
+export const sha256Hex = (data: Uint8Array | string): string => createHash("sha256").update(data).digest("hex");
+
+// ---- agent directory ----
+
+export type AgentDirSource = "host" | "GJC_CODING_AGENT_DIR" | "PI_CODING_AGENT_DIR" | "home";
+export type AgentDirResolution = { dir: string; source: AgentDirSource };
+export type AgentDirInput = {
+	env?: Readonly<Record<string, string | undefined>>;
+	home?: string;
+	/** The host's own resolver, when the caller can reach it (a plugin tool can; the installer cannot). */
+	host?: () => unknown;
+};
+
+/**
+ * The agent directory `gjc` 0.20.0 reads: the host resolver when available,
+ * otherwise `GJC_CODING_AGENT_DIR`, then `PI_CODING_AGENT_DIR`, then
+ * `<home>/.gjc/agent`. `GJC_AGENT_DIR` alone is not honoured by `gjc` and is
+ * not consulted here.
+ */
+export function resolveAgentDir(input: AgentDirInput = {}): AgentDirResolution {
+	if (input.host) {
+		try {
+			const dir = input.host();
+			if (typeof dir === "string" && path.isAbsolute(dir)) return { dir, source: "host" };
+		} catch {
+			// fall through to the environment chain
+		}
+	}
+	const env = input.env ?? process.env;
+	for (const name of ["GJC_CODING_AGENT_DIR", "PI_CODING_AGENT_DIR"] as const) {
+		const value = env[name];
+		if (typeof value === "string" && path.isAbsolute(value)) return { dir: value, source: name };
+	}
+	return { dir: path.join(input.home ?? os.homedir(), ".gjc", "agent"), source: "home" };
 }
 
-export function installedPluginsPath(home: string = os.homedir()): string {
-	return path.join(home, ".gjc", "plugins", "installed_plugins.json");
+export const bundleRoot = (agentDir: string): string => path.join(agentDir, "egm", EGM_PINNED_TAG);
+export const journalPath = (agentDir: string): string => path.join(bundleRoot(agentDir), "bundle.json");
+
+// ---- adapters (byte contract shared by the installer and the report) ----
+
+const SKILL_ADAPTER = [
+	"## GJC (gajae-code) adapter",
+	"",
+	"Resolve paths against four roots. `<bundleRoot>`: `agents/`, `resources/`, and `docs/harnesses.md`, `docs/codex.md`, `docs/claude.md` — also when written `../../docs/…` or `${CLAUDE_PLUGIN_ROOT}/docs/…`. `<skillDir>`: `references/`. Project working directory: user files, outputs, and every other `docs/…` path. Pass absolute paths to every reviewer you dispatch.",
+	"GJC registers eight Goldfish reviewers by name: `egm-codebase-details`, `egm-comprehension`, `egm-design`, `egm-implementation-readiness`, `egm-inventive-catalyst`, `egm-structural`, `egm-style`, `egm-zoom-out`. Dispatch them directly with `task`; never call `task` with `egm-synthesizer` or `egm-bootstrap-orchestrator`.",
+].join("\n");
+const DELEGATION_CLAUSE =
+	"For this skill only: use direct dispatch instead of the synthesizer — split the work into reviewer assignments yourself and keep the report writing in this session. If `task` is not among your tools, activate it with `search_tool_bm25` (query such as `subagent delegation task`); stop only when it cannot be activated.";
+const SKILL_CLAUSES: Readonly<Record<string, string>> = {
+	"egm-brainstorm": DELEGATION_CLAUSE,
+	"egm-review": DELEGATION_CLAUSE,
+	"egm-review-loop": DELEGATION_CLAUSE,
+	"egm-bootstrap":
+		"For this skill only: run the orchestrator role inline in this session, sequentially, from `<bundleRoot>/agents/bootstrap_orchestrator.md`; do not delegate. This skill runs with or without `task`.",
+};
+const AGENT_ADAPTER = [
+	"GJC adapter — EGM bundle root: `<bundleRoot>`. Resolve `resources/` and `agents/` against it.",
+	"Read whole files with `:raw` or a line range; GJC's `read` otherwise returns a bounded excerpt.",
+	"If a required document standard or persona file cannot be read, report an incomplete review.",
+].join("\n");
+const FRONTMATTER_OPEN = Buffer.from("---\n");
+const FRONTMATTER_CLOSE = Buffer.from("\n---\n");
+
+/** Upstream bytes through the closing `---` line of the frontmatter, and everything after it. */
+export function splitFrontmatter(upstream: Uint8Array): { header: Buffer; body: Buffer } | null {
+	const bytes = Buffer.from(upstream.buffer, upstream.byteOffset, upstream.byteLength);
+	if (!bytes.subarray(0, FRONTMATTER_OPEN.length).equals(FRONTMATTER_OPEN)) return null;
+	const close = bytes.indexOf(FRONTMATTER_CLOSE, FRONTMATTER_OPEN.length - 1);
+	if (close === -1) return null;
+	const end = close + FRONTMATTER_CLOSE.length;
+	return { header: bytes.subarray(0, end), body: bytes.subarray(end) };
 }
 
-type ReadResult = { status: "ok"; text: string } | { status: "missing" | "unreadable" };
+/** The GJC preamble of one skill: the common block plus that skill's clause, if it has one. */
+export function skillAdapterBlock(skill: string, root: string, skillDir: string): string {
+	const clause = SKILL_CLAUSES[skill];
+	return (clause ? `${SKILL_ADAPTER}\n${clause}` : SKILL_ADAPTER).replaceAll("<bundleRoot>", root).replaceAll("<skillDir>", skillDir);
+}
 
-/** One bounded read; a file larger than the bound is unreadable, not truncated. */
-function readBounded(file: string, maxBytes: number): ReadResult {
+export const agentAdapterBlock = (root: string): string => AGENT_ADAPTER.replaceAll("<bundleRoot>", root);
+
+/** Loose skill = upstream frontmatter + GJC preamble + upstream body, byte for byte. */
+export function composeSkill(upstream: Uint8Array, skill: string, root: string, skillDir: string): Buffer {
+	const parts = splitFrontmatter(upstream);
+	if (!parts) throw new Error(`egm: ${skill} has no frontmatter to compose from`);
+	return Buffer.concat([parts.header, Buffer.from(`\n${skillAdapterBlock(skill, root, skillDir)}\n`), parts.body]);
+}
+
+/** Loose agent = upstream frontmatter with the `tools` allowlist + GJC adapter block + upstream body, byte for byte. */
+export function composeAgent(upstream: Uint8Array, root: string): Buffer {
+	const parts = splitFrontmatter(upstream);
+	if (!parts) throw new Error("egm: persona has no frontmatter to compose from");
+	const open = parts.header.subarray(0, parts.header.length - FRONTMATTER_CLOSE.length + 1);
+	return Buffer.concat([open, Buffer.from(`tools: ${EGM_REVIEWER_TOOLS.join(", ")}\n---\n\n${agentAdapterBlock(root)}\n`), parts.body]);
+}
+
+export type LooseFile = {
+	/** Path under the agent directory. */
+	relative: string;
+	kind: "skill" | "reference" | "agent";
+	/** Path of the upstream file it is derived from, under the bundle root. */
+	source: string;
+	/** Skill name, or the registered agent name. */
+	name: string;
+};
+
+/** Every file the installer writes outside the bundle root: 7 skills, their references, 8 agents. */
+export function looseFiles(pinned: Readonly<Record<string, string>> = EGM_PINNED_FILES): LooseFile[] {
+	const files: LooseFile[] = [];
+	for (const skill of EGM_SKILLS) {
+		const source = `skills/${skill}/SKILL.md`;
+		files.push({ relative: source, kind: "skill", source, name: skill });
+		for (const reference of Object.keys(pinned).filter(entry => entry.startsWith(`skills/${skill}/references/`))) {
+			files.push({ relative: reference, kind: "reference", source: reference, name: skill });
+		}
+	}
+	for (const [source, name] of EGM_REVIEWERS) files.push({ relative: `agents/${name}.md`, kind: "agent", source, name });
+	return files;
+}
+
+/** The exact bytes of one loose file, derived from the upstream bytes of its source. */
+export function renderLoose(file: LooseFile, agentDir: string, upstream: Uint8Array): Buffer {
+	const root = bundleRoot(agentDir);
+	if (file.kind === "skill") return composeSkill(upstream, file.name, root, path.join(agentDir, "skills", file.name));
+	if (file.kind === "agent") return composeAgent(upstream, root);
+	return Buffer.from(upstream.buffer, upstream.byteOffset, upstream.byteLength);
+}
+
+// ---- install journal ----
+
+/** Ownership record the installer writes first (`pending`) and finalizes last (`complete`). */
+export type Journal = {
+	schemaVersion: 1;
+	state: "pending" | "complete";
+	tag: string;
+	commit: string;
+	/** Bundle-relative path → sha256 of the upstream file. */
+	bundle: Record<string, string>;
+	/** Agent-directory-relative path → sha256 of the written file. */
+	loose: Record<string, string>;
+};
+export type JournalRead = { status: "complete" | "pending"; journal: Journal } | { status: "missing" | "unreadable" };
+
+const isDigestMap = (value: unknown): value is Record<string, string> =>
+	value !== null && typeof value === "object" && !Array.isArray(value) && Object.values(value as object).every(digest => typeof digest === "string" && DIGEST_RE.test(digest));
+
+export function readJournal(agentDir: string): JournalRead {
+	let text: string;
 	try {
-		const info = statSync(file);
-		if (!info.isFile() || info.size > maxBytes) return { status: "unreadable" };
-		return { status: "ok", text: readFileSync(file, "utf8") };
+		const info = statSync(journalPath(agentDir));
+		if (!info.isFile() || info.size > JOURNAL_MAX_BYTES) return { status: "unreadable" };
+		text = readFileSync(journalPath(agentDir), "utf8");
 	} catch (error) {
 		return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable" };
 	}
-}
-
-function readJsonRecord(file: string): { status: "ok"; value: Record<string, unknown> } | { status: "missing" | "unreadable" } {
-	const read = readBounded(file, REGISTRY_MAX_BYTES);
-	if (read.status !== "ok") return read;
 	try {
-		const value = JSON.parse(read.text) as unknown;
+		const value = JSON.parse(text) as Partial<Journal> | null;
 		if (value === null || typeof value !== "object" || Array.isArray(value)) return { status: "unreadable" };
-		return { status: "ok", value: value as Record<string, unknown> };
+		if (value.schemaVersion !== 1 || (value.state !== "pending" && value.state !== "complete")) return { status: "unreadable" };
+		if (typeof value.tag !== "string" || typeof value.commit !== "string" || !isDigestMap(value.bundle) || !isDigestMap(value.loose)) return { status: "unreadable" };
+		return { status: value.state, journal: value as Journal };
 	} catch {
 		return { status: "unreadable" };
 	}
 }
 
-/** Resolve the commit a checkout's HEAD names, from `.git` files only (no git process). */
-export function readCheckoutCommit(dir: string): string | null {
-	const gitDir = path.join(dir, ".git");
-	const head = readBounded(path.join(gitDir, "HEAD"), 4096);
-	if (head.status !== "ok") return null;
-	const value = head.text.trim();
-	if (SHA_RE.test(value)) return value;
-	const ref = /^ref: (refs\/[A-Za-z0-9._/-]+)$/.exec(value)?.[1];
-	if (!ref || ref.split("/").includes("..")) return null;
-	const loose = readBounded(path.join(gitDir, ref), 4096);
-	if (loose.status === "ok" && SHA_RE.test(loose.text.trim())) return loose.text.trim();
-	const packed = readBounded(path.join(gitDir, "packed-refs"), REGISTRY_MAX_BYTES);
-	if (packed.status !== "ok") return null;
-	for (const line of packed.text.split("\n")) {
-		const [sha, name] = line.trim().split(" ");
-		if (name === ref && SHA_RE.test(sha ?? "")) return sha;
-	}
-	return null;
-}
-
-export type MarketplaceReport = {
-	status: "registered" | "missing" | "unreadable";
-	sourceType: string | null;
-	sourceUri: string | null;
-	commit: string | null;
-	commitMatchesPin: boolean | null;
-};
-
-export function readMarketplace(home: string): MarketplaceReport {
-	const none = { sourceType: null, sourceUri: null, commit: null, commitMatchesPin: null };
-	const registry = readJsonRecord(marketplacesPath(home));
-	if (registry.status !== "ok") return { status: registry.status, ...none };
-	const list = registry.value.marketplaces;
-	if (!Array.isArray(list)) return { status: "unreadable", ...none };
-	const entry = list.find(item => item !== null && typeof item === "object" && (item as Record<string, unknown>).name === EGM_MARKETPLACE) as
-		| Record<string, unknown>
-		| undefined;
-	if (!entry) return { status: "missing", ...none };
-	const sourceType = typeof entry.sourceType === "string" ? entry.sourceType : null;
-	const sourceUri = typeof entry.sourceUri === "string" ? entry.sourceUri : null;
-	const catalogPath = typeof entry.catalogPath === "string" ? entry.catalogPath : null;
-	// A local marketplace is read in place; a git marketplace is the clone that holds the catalog.
-	const checkout = sourceType === "local" ? sourceUri : catalogPath ? path.dirname(catalogPath) : null;
-	const commit = checkout ? readCheckoutCommit(checkout) : null;
-	return { status: "registered", sourceType, sourceUri, commit, commitMatchesPin: commit === null ? null : commit === EGM_PINNED_COMMIT };
-}
-
-export type InstallationReport = {
-	status: "installed" | "disabled" | "missing" | "unreadable";
-	scope: "user";
-	version: string | null;
-	installPath: string | null;
-};
-
-export function readInstallation(home: string): InstallationReport {
-	const none = { scope: "user" as const, version: null, installPath: null };
-	const registry = readJsonRecord(installedPluginsPath(home));
-	if (registry.status !== "ok") return { status: registry.status, ...none };
-	const plugins = registry.value.plugins;
-	if (plugins === null || typeof plugins !== "object" || Array.isArray(plugins)) return { status: "unreadable", ...none };
-	const entries = (plugins as Record<string, unknown>)[EGM_PLUGIN_ID];
-	if (entries === undefined) return { status: "missing", ...none };
-	if (!Array.isArray(entries)) return { status: "unreadable", ...none };
-	const entry = entries.find(item => item !== null && typeof item === "object" && (item as Record<string, unknown>).scope === "user") as
-		| Record<string, unknown>
-		| undefined;
-	if (!entry) return { status: "missing", ...none };
-	const installPath = typeof entry.installPath === "string" && path.isAbsolute(entry.installPath) ? entry.installPath : null;
-	if (installPath === null) return { status: "unreadable", ...none };
-	const version = typeof entry.version === "string" ? entry.version : null;
-	return { status: entry.enabled === false ? "disabled" : "installed", scope: "user", version, installPath };
-}
+// ---- installed content ----
 
 export type FileStatus = "match" | "differs" | "missing" | "unreadable";
-export type ContentReport = {
-	status: "pinned" | "drifted" | "incomplete" | "absent";
-	checked: number;
-	matched: number;
-	mismatches: Array<{ path: string; status: Exclude<FileStatus, "match"> }>;
+export type Mismatch = { path: string; status: Exclude<FileStatus, "match">; detail?: string };
+export type ContentStatus = "pinned" | "drifted" | "incomplete" | "absent";
+
+function readBounded(file: string): { status: "ok"; bytes: Buffer } | { status: "missing" | "unreadable" } {
+	try {
+		const info = statSync(file);
+		if (!info.isFile() || info.size > RUNTIME_FILE_MAX_BYTES) return { status: "unreadable" };
+		return { status: "ok", bytes: readFileSync(file) };
+	} catch (error) {
+		return { status: (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable" };
+	}
+}
+
+const isDirectory = (dir: string): boolean => {
+	try {
+		return statSync(dir).isDirectory();
+	} catch {
+		return false;
+	}
+};
+
+const summarize = (mismatches: Mismatch[]) => ({ mismatches: mismatches.slice(0, MISMATCH_LIMIT), mismatchesOmitted: Math.max(0, mismatches.length - MISMATCH_LIMIT) });
+const contentStatus = (mismatches: Mismatch[]): ContentStatus => (mismatches.some(entry => entry.status !== "differs") ? "incomplete" : mismatches.length > 0 ? "drifted" : "pinned");
+
+export type BundleReport = { status: ContentStatus; checked: number; matched: number; mismatches: Mismatch[]; mismatchesOmitted: number };
+
+/** Compare every upstream file under the bundle root with the pin. */
+export function checkBundle(agentDir: string, pinned: Readonly<Record<string, string>> = EGM_PINNED_FILES): BundleReport {
+	const entries = Object.entries(pinned);
+	const root = bundleRoot(agentDir);
+	if (!isDirectory(root)) return { status: "absent", checked: entries.length, matched: 0, mismatches: [], mismatchesOmitted: 0 };
+	const mismatches: Mismatch[] = [];
+	for (const [relative, digest] of entries) {
+		const read = readBounded(path.join(root, relative));
+		if (read.status !== "ok") mismatches.push({ path: relative, status: read.status });
+		else if (sha256Hex(read.bytes) !== digest) mismatches.push({ path: relative, status: "differs" });
+	}
+	return { status: contentStatus(mismatches), checked: entries.length, matched: entries.length - mismatches.length, ...summarize(mismatches) };
+}
+
+/** The `name` and `tools` an agent file's frontmatter declares (line-based; no YAML dependency). */
+export function agentFrontmatter(bytes: Uint8Array): { name: string | null; tools: string[] | null } {
+	const header = splitFrontmatter(bytes)?.header.toString("utf8") ?? "";
+	const field = (key: string) => new RegExp(`^${key}:[ \\t]*(.*)$`, "m").exec(header)?.[1]?.trim() ?? null;
+	const tools = field("tools");
+	const list = tools === null ? null : tools.replace(/^\[|\]$/g, "").split(",").map(entry => entry.trim().replace(/^["']|["']$/g, "").toLowerCase()).filter(Boolean);
+	return { name: field("name")?.replace(/^["']|["']$/g, "") ?? null, tools: list };
+}
+
+const allowlistDetail = (tools: string[] | null): string =>
+	tools === null ? "no tools allowlist" : `tools: ${tools.join(", ") || "(empty)"} — expected ${EGM_REVIEWER_TOOLS.join(", ")}`;
+
+export type LooseReport = {
+	status: ContentStatus;
+	skills: { checked: number; matched: number };
+	references: { checked: number; matched: number };
+	agents: { checked: number; matched: number };
+	/** Agent files that register an `egm-*` name without being one of the installer's eight. */
+	extraAgents: string[];
+	mismatches: Mismatch[];
 	mismatchesOmitted: number;
 };
 
-export function checkContent(installPath: string | null, pinned: Readonly<Record<string, string>> = EGM_PINNED_FILES): {
-	report: ContentReport;
-	present: Set<string>;
-} {
-	const present = new Set<string>();
-	const entries = Object.entries(pinned);
-	if (installPath === null) {
-		return { report: { status: "absent", checked: entries.length, matched: 0, mismatches: [], mismatchesOmitted: 0 }, present };
-	}
-	const mismatches: ContentReport["mismatches"] = [];
-	let matched = 0;
-	let incomplete = false;
-	for (const [relative, digest] of entries) {
-		let status: FileStatus;
+/**
+ * Compare every loose file with the bytes the compose rules produce from the
+ * bundle, and look for agent files that register an `egm-*` name outside the
+ * eight reviewers (they would run without the allowlist).
+ */
+export function checkLoose(agentDir: string, pinned: Readonly<Record<string, string>> = EGM_PINNED_FILES): LooseReport {
+	const files = looseFiles(pinned);
+	const count = (kind: LooseFile["kind"]) => ({ checked: files.filter(file => file.kind === kind).length, matched: 0 });
+	const totals = { skill: count("skill"), reference: count("reference"), agent: count("agent") };
+	const mismatches: Mismatch[] = [];
+	let present = 0;
+	for (const file of files) {
+		const installed = readBounded(path.join(agentDir, file.relative));
+		if (installed.status !== "ok") {
+			mismatches.push({ path: file.relative, status: installed.status });
+			continue;
+		}
+		present++;
+		const upstream = readBounded(path.join(bundleRoot(agentDir), file.source));
+		if (upstream.status !== "ok") {
+			mismatches.push({ path: file.relative, status: "unreadable", detail: `its source ${file.source} is ${upstream.status} in the bundle` });
+			continue;
+		}
+		let expected: Buffer | null = null;
 		try {
-			const info = statSync(path.join(installPath, relative));
-			if (!info.isFile() || info.size > RUNTIME_FILE_MAX_BYTES) status = "unreadable";
-			else {
-				const actual = createHash("sha256").update(readFileSync(path.join(installPath, relative))).digest("hex");
-				status = actual === digest ? "match" : "differs";
-			}
-		} catch (error) {
-			status = (error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable";
+			expected = renderLoose(file, agentDir, upstream.bytes);
+		} catch {
+			// a bundle file without frontmatter cannot be composed; the bundle check reports it
 		}
-		if (status === "match" || status === "differs") present.add(relative);
-		if (status === "match") matched++;
-		else {
-			if (status !== "differs") incomplete = true;
-			mismatches.push({ path: relative, status });
-		}
+		if (expected?.equals(installed.bytes)) totals[file.kind].matched++;
+		else mismatches.push({ path: file.relative, status: "differs", ...(file.kind === "agent" ? { detail: allowlistDetail(agentFrontmatter(installed.bytes).tools) } : {}) });
 	}
-	const status: ContentReport["status"] = incomplete ? "incomplete" : mismatches.length > 0 ? "drifted" : "pinned";
-	return {
-		report: {
-			status,
-			checked: entries.length,
-			matched,
-			mismatches: mismatches.slice(0, MISMATCH_LIMIT),
-			mismatchesOmitted: Math.max(0, mismatches.length - MISMATCH_LIMIT),
-		},
-		present,
-	};
+	const expectedAgents = new Set(files.filter(file => file.kind === "agent").map(file => path.basename(file.relative)));
+	const extraAgents: string[] = [];
+	let names: string[] = [];
+	try {
+		names = readdirSync(path.join(agentDir, "agents")).filter(name => name.endsWith(".md")).sort();
+	} catch {
+		// no agents directory: nothing registers an egm-* name
+	}
+	for (const name of names) {
+		if (expectedAgents.has(name)) continue;
+		let registered: string | null = null;
+		try {
+			registered = agentFrontmatter(readFileSync(path.join(agentDir, "agents", name)).subarray(0, AGENT_HEADER_MAX_BYTES)).name;
+		} catch {
+			// unreadable: fall back to the file name
+		}
+		if ((registered ?? name).startsWith("egm-")) extraAgents.push(`agents/${name}`);
+	}
+	const status: ContentStatus = present === 0 && extraAgents.length === 0 ? "absent" : contentStatus(mismatches) === "pinned" && extraAgents.length > 0 ? "drifted" : contentStatus(mismatches);
+	return { status, skills: totals.skill, references: totals.reference, agents: totals.agent, extraAgents, ...summarize(mismatches) };
 }
+
+// ---- session ----
 
 /** The read-only session settings facade GJC passes to tool execution. */
 export type SettingsReader = { get(key: string): unknown };
 
 export type SessionReport = {
 	status: "observed" | "unobserved";
-	marketplaceProvider: "enabled" | "disabled" | null;
-	taskTool: "available" | "disabled" | null;
 	maxRecursionDepth: number | null;
-	disabledPersonas: string[];
+	delegation: "enabled" | "disabled" | null;
+	disabledReviewers: string[];
 	disabledSkills: string[];
 };
 
@@ -273,124 +413,281 @@ const stringList = (value: unknown): string[] | null =>
 	value === undefined || value === null ? [] : Array.isArray(value) && value.every(item => typeof item === "string") ? value : null;
 
 export function readSession(settings: SettingsReader | undefined): SessionReport {
-	const unobserved: SessionReport = {
-		status: "unobserved",
-		marketplaceProvider: null,
-		taskTool: null,
-		maxRecursionDepth: null,
-		disabledPersonas: [],
-		disabledSkills: [],
-	};
+	const unobserved: SessionReport = { status: "unobserved", maxRecursionDepth: null, delegation: null, disabledReviewers: [], disabledSkills: [] };
 	if (!settings || typeof settings.get !== "function") return unobserved;
-	const providers = readSetting(settings, "disabledProviders");
 	const depth = readSetting(settings, "task.maxRecursionDepth");
 	const agents = readSetting(settings, "task.disabledAgents");
 	const extensions = readSetting(settings, "disabledExtensions");
-	if (!providers.ok || !depth.ok || !agents.ok || !extensions.ok) return unobserved;
-	const providerList = stringList(providers.value);
+	if (!depth.ok || !agents.ok || !extensions.ok) return unobserved;
 	const agentList = stringList(agents.value);
 	const extensionList = stringList(extensions.value);
-	// GJC defaults an unset depth to 2; the task tool exists at the top level while depth > 0 (or < 0, unlimited).
+	// GJC defaults an unset depth to 2; `task` exists at the top level while depth is not 0 (negative is unlimited).
 	const maxRecursionDepth = depth.value === undefined || depth.value === null ? 2 : depth.value;
-	if (providerList === null || agentList === null || extensionList === null || typeof maxRecursionDepth !== "number" || !Number.isFinite(maxRecursionDepth)) {
-		return unobserved;
-	}
-	const personaNames = new Set(EGM_PERSONAS.map(([, name]) => name));
+	if (agentList === null || extensionList === null || typeof maxRecursionDepth !== "number" || !Number.isFinite(maxRecursionDepth)) return unobserved;
+	const reviewerNames = new Set(EGM_REVIEWERS.map(([, name]) => name));
 	return {
 		status: "observed",
-		marketplaceProvider: providerList.includes("claude-plugins") ? "disabled" : "enabled",
-		taskTool: maxRecursionDepth === 0 ? "disabled" : "available",
 		maxRecursionDepth,
-		disabledPersonas: agentList.filter(name => personaNames.has(name)),
-		disabledSkills: EGM_SKILLS.filter(name => extensionList.includes(`skill:${EGM_MARKETPLACE}:${name}`)),
+		delegation: maxRecursionDepth === 0 ? "disabled" : "enabled",
+		disabledReviewers: agentList.filter(name => reviewerNames.has(name)),
+		disabledSkills: EGM_SKILLS.filter(name => extensionList.includes(`skill:${name}`)),
 	};
 }
 
-export type ReadinessStatus = "ready" | "unverified" | "blocked" | "drifted" | "incomplete" | "not_installed";
+/**
+ * What a plugin tool can see of the session's `task` tool. GJC gives a tool no
+ * tool list, so availability in an ordinary session is not observable. Two
+ * things are: the tool list of a `task` child session (its `session_init`
+ * entry) and an explicit `--tools` / `--no-tools` launch list.
+ */
+export type TaskVisibility = {
+	state: "listed" | "absent" | "unobservable";
+	source: "session_tools" | "launch_tools" | null;
+};
+
+/** The explicit tool list a `gjc` process was launched with, or null when it has none. */
+export function launchToolList(argv: readonly string[]): string[] | null {
+	let list: string[] | null = null;
+	for (let index = 0; index < argv.length; index++) {
+		const arg = argv[index];
+		if (arg === "--no-tools") list = [];
+		else if (arg === "--tools" && typeof argv[index + 1] === "string") list = argv[++index].split(",");
+		else if (arg.startsWith("--tools=")) list = arg.slice("--tools=".length).split(",");
+	}
+	return list === null ? null : list.map(name => name.trim().toLowerCase()).filter(Boolean);
+}
+
+/** The tool names recorded in a session's `session_init` entry (written for `task` child sessions). */
+export function sessionToolList(entries: unknown): string[] | null {
+	if (!Array.isArray(entries)) return null;
+	for (let index = entries.length - 1; index >= 0; index--) {
+		const entry = entries[index] as { type?: unknown; tools?: unknown } | null;
+		if (entry && typeof entry === "object" && entry.type === "session_init" && Array.isArray(entry.tools) && entry.tools.every(name => typeof name === "string")) {
+			return entry.tools as string[];
+		}
+	}
+	return null;
+}
+
+export function taskVisibility(input: { argv?: readonly string[]; entries?: unknown } = {}): TaskVisibility {
+	const session = sessionToolList(input.entries);
+	if (session) return { state: session.includes("task") ? "listed" : "absent", source: "session_tools" };
+	const launch = input.argv ? launchToolList(input.argv) : null;
+	if (launch) return { state: launch.includes("task") ? "listed" : "absent", source: "launch_tools" };
+	return { state: "unobservable", source: null };
+}
+
+// ---- plugin bundle registration ----
+
+/** The user-scope `egm` bundle registration read from `<agentDir>/gjc-plugins/registry.json`. */
+export type PluginRecord = {
+	status: "registered" | "disabled" | "missing" | "unreadable";
+	registered: boolean;
+	enabled: boolean | null;
+	/** A display string for the registered source (path or URL), never a credential. */
+	source: string | null;
+	manifestHash: string | null;
+	pluginRoot: string | null;
+	copiedFiles: Array<{ relativePath: string; sha256: string }> | null;
+};
+
+const PLUGIN_REGISTRY_MAX_BYTES = 2 * 1024 * 1024;
+const PLUGIN_SOURCE_MAX_CHARS = 512;
+const pluginRegistryPath = (agentDir: string): string => path.join(agentDir, "gjc-plugins", "registry.json");
+
+const emptyPlugin = (status: "missing" | "unreadable"): PluginRecord => ({
+	status,
+	registered: false,
+	enabled: null,
+	source: null,
+	manifestHash: null,
+	pluginRoot: null,
+	copiedFiles: null,
+});
+
+function pluginSource(value: unknown): string | null {
+	if (typeof value === "string") return value.length > 0 ? value.slice(0, PLUGIN_SOURCE_MAX_CHARS) : null;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	for (const key of ["uri", "display", "kind"] as const) {
+		const candidate = record[key];
+		if (typeof candidate === "string" && candidate.length > 0) return candidate.slice(0, PLUGIN_SOURCE_MAX_CHARS);
+	}
+	return null;
+}
+
+const isSafeRelative = (value: string): boolean =>
+	value.length > 0 && !value.startsWith("/") && !value.includes("\\") && !value.includes("\0") && !value.split("/").includes("..");
+
+function pluginCopiedFiles(value: unknown): Array<{ relativePath: string; sha256: string }> | null {
+	if (!Array.isArray(value)) return null;
+	const files: Array<{ relativePath: string; sha256: string }> = [];
+	for (const entry of value) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+		const record = entry as Record<string, unknown>;
+		if (typeof record.relativePath !== "string" || !isSafeRelative(record.relativePath)) return null;
+		if (typeof record.sha256 !== "string" || !DIGEST_RE.test(record.sha256)) return null;
+		files.push({ relativePath: record.relativePath, sha256: record.sha256 });
+	}
+	return files;
+}
+
+/**
+ * Read the user-scope `egm` bundle registration. Bounded and read-only: a
+ * symlinked, oversized, malformed or missing registry is reported, never
+ * repaired, and the installed bundle is not byte-compared with a checkout.
+ */
+export function readPluginRecord(agentDir: string): PluginRecord {
+	let info;
+	try {
+		info = lstatSync(pluginRegistryPath(agentDir));
+	} catch (error) {
+		return emptyPlugin((error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable");
+	}
+	if (info.isSymbolicLink() || !info.isFile() || info.size > PLUGIN_REGISTRY_MAX_BYTES) return emptyPlugin("unreadable");
+	let text: string;
+	try {
+		text = readFileSync(pluginRegistryPath(agentDir), "utf8");
+	} catch {
+		return emptyPlugin("unreadable");
+	}
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return emptyPlugin("unreadable");
+	}
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return emptyPlugin("unreadable");
+	const entries = (value as { plugins?: unknown }).plugins;
+	if (!Array.isArray(entries)) return emptyPlugin("unreadable");
+	const entry = entries.find(candidate => {
+		if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+		const record = candidate as Record<string, unknown>;
+		return record.name === "egm" && (record.scope === "user" || record.scope === undefined);
+	}) as Record<string, unknown> | undefined;
+	if (!entry) return emptyPlugin("missing");
+	const enabled = entry.enabled === true ? true : entry.enabled === false ? false : null;
+	const manifestHash = typeof entry.manifestHash === "string" && DIGEST_RE.test(entry.manifestHash) ? entry.manifestHash : null;
+	const pluginRoot = typeof entry.pluginRoot === "string" && path.isAbsolute(entry.pluginRoot) ? entry.pluginRoot : null;
+	return {
+		status: enabled === true ? "registered" : "disabled",
+		registered: true,
+		enabled,
+		source: pluginSource(entry.source),
+		manifestHash,
+		pluginRoot,
+		copiedFiles: pluginCopiedFiles(entry.copiedFiles),
+	};
+}
+
+// ---- report ----
+
+/**
+ * `install_verified` is the healthy status: the install matches the pin and no
+ * observed setting or tool list rules out the reviewers. There is no `ready`:
+ * a plugin tool cannot observe that `task` is available in an ordinary session.
+ */
+export type ReadinessStatus = "install_verified" | "unverified" | "blocked" | "drifted" | "incomplete" | "not_installed";
 
 export type ReadinessReport = {
 	status: ReadinessStatus;
 	pinned: { repository: string; tag: string; commit: string; files: number };
-	marketplace: MarketplaceReport;
-	installation: InstallationReport;
-	content: ContentReport;
-	skills: Array<{ name: string; invocation: string; present: boolean }>;
-	personas: Array<{ name: string; file: string; present: boolean }>;
+	agentDir: AgentDirResolution;
+	journal: JournalRead["status"];
+	bundle: BundleReport;
+	loose: LooseReport;
+	plugin: { status: PluginRecord["status"]; registered: boolean; source: string | null; manifestHash: string | null; enabled: boolean | null };
+	skills: Array<{ name: string; invocation: string }>;
+	reviewers: Array<{ name: string; file: string }>;
 	session: SessionReport;
-	installCommands: string[];
+	task: TaskVisibility;
+	installCommand: string;
 	remediation: string[];
 	notes: string[];
 };
 
-export type ReadinessInput = {
-	home?: string;
+export type ReadinessInput = AgentDirInput & {
 	settings?: SettingsReader;
 	pinnedFiles?: Readonly<Record<string, string>>;
+	/** The host process arguments (`process.argv`). */
+	argv?: readonly string[];
+	/** The session entries (`ctx.sessionManager.getBranch()`). */
+	entries?: unknown;
 };
 
 export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
-	const home = input.home ?? os.homedir();
 	const pinnedFiles = input.pinnedFiles ?? EGM_PINNED_FILES;
-	const marketplace = readMarketplace(home);
-	const installation = readInstallation(home);
-	const usable = installation.status === "installed" || installation.status === "disabled" ? installation.installPath : null;
-	const { report: content, present } = checkContent(usable, pinnedFiles);
+	const agentDir = resolveAgentDir(input);
+	const journal = readJournal(agentDir.dir);
+	const bundle = checkBundle(agentDir.dir, pinnedFiles);
+	const loose = checkLoose(agentDir.dir, pinnedFiles);
+	const pluginRecord = readPluginRecord(agentDir.dir);
 	const session = readSession(input.settings);
+	const task = taskVisibility(input);
 
-	const skills = EGM_SKILLS.map(name => ({
-		name: `${EGM_MARKETPLACE}:${name}`,
-		invocation: `/skill:${EGM_MARKETPLACE}:${name}`,
-		present: present.has(`skills/${name}/SKILL.md`),
-	}));
-	const personas = EGM_PERSONAS.map(([file, name]) => ({ name, file, present: present.has(file) }));
+	const absent = journal.status === "missing" && bundle.status === "absent" && loose.status === "absent";
+	const incomplete = journal.status !== "complete" || bundle.status === "incomplete" || bundle.status === "absent" || loose.status === "incomplete" || loose.status === "absent";
+	const drifted = bundle.status === "drifted" || loose.status === "drifted";
+	const blocked = session.delegation === "disabled" || session.disabledReviewers.length > 0 || session.disabledSkills.length > 0 || task.state === "absent";
+	let status: ReadinessStatus;
+	if (absent) status = "not_installed";
+	else if (incomplete) status = "incomplete";
+	else if (blocked) status = "blocked";
+	else if (drifted) status = "drifted";
+	else if (session.status !== "observed") status = "unverified";
+	else status = "install_verified";
 
 	const remediation: string[] = [];
-	const reinstall = `Reinstall from the pinned ${EGM_PINNED_TAG} checkout: ${[...EGM_UNINSTALL_COMMANDS, ...EGM_INSTALL_COMMANDS].join(" && ")}`;
-	if (installation.status === "missing") remediation.push(`Install the pinned EGM release: ${EGM_INSTALL_COMMANDS.join(" && ")}`);
-	if (installation.status === "unreadable") remediation.push(`${installedPluginsPath(home)} is unreadable or malformed; inspect it with \`gjc plugin list --json\`.`);
-	if (installation.status === "disabled") remediation.push(`${EGM_PLUGIN_ID} is installed but disabled (enabled: false); re-enable it before use.`);
-	if (content.status === "incomplete" || content.status === "drifted") remediation.push(reinstall);
-	if (installation.status !== "missing" && marketplace.status === "missing") {
-		remediation.push(`The ${EGM_MARKETPLACE} marketplace is not registered, so an upgrade or reinstall cannot resolve it: gjc plugin marketplace add ${EGM_PINNED_SOURCE}`);
+	const fromCheckout = `from a gjc-plugin checkout root: ${EGM_INSTALL_COMMAND}`;
+	if (absent) remediation.push(`Install EGM ${EGM_PINNED_TAG} ${fromCheckout}`);
+	else if (journal.status === "pending") remediation.push(`An install did not finish; run it again ${fromCheckout}`);
+	else if (incomplete || bundle.status === "drifted" || loose.mismatches.length > 0) {
+		remediation.push(`Reinstall ${fromCheckout}: it rewrites its own files, refuses foreign files and symlinks, and stops on a changed owned file — delete that file to let the reinstall restore it`);
 	}
-	if (session.marketplaceProvider === "disabled") remediation.push('Remove "claude-plugins" from disabledProviders; it hides every marketplace skill and agent, EGM included.');
-	if (session.taskTool === "disabled") remediation.push("task.maxRecursionDepth is 0, so no session has the task tool and egm-review stops by design; set it to 1 or more (GJC default 2).");
-	if (session.disabledPersonas.length > 0) remediation.push(`Remove ${session.disabledPersonas.join(", ")} from task.disabledAgents; the review skills spawn these personas by name.`);
-	if (session.disabledSkills.length > 0) remediation.push(`Remove ${session.disabledSkills.map(name => `skill:${EGM_MARKETPLACE}:${name}`).join(", ")} from disabledExtensions.`);
-
-	const blocked =
-		installation.status === "disabled" ||
-		session.marketplaceProvider === "disabled" ||
-		session.taskTool === "disabled" ||
-		session.disabledPersonas.length > 0 ||
-		session.disabledSkills.length > 0;
-	let status: ReadinessStatus;
-	if (installation.status === "missing" || installation.status === "unreadable") status = "not_installed";
-	else if (content.status === "incomplete" || content.status === "absent") status = "incomplete";
-	else if (blocked) status = "blocked";
-	else if (content.status === "drifted") status = "drifted";
-	else if (session.status !== "observed") status = "unverified";
-	else status = "ready";
+	for (const file of loose.extraAgents) {
+		remediation.push(`Remove ${file} from the agent directory: it registers an egm-* agent outside the eight read-only reviewers, without the tools allowlist.`);
+	}
+	if (session.delegation === "disabled") remediation.push("task.maxRecursionDepth is 0, so no session has the task tool and the review skills stop by design; set it to 1 or more (GJC default 2).");
+	if (session.disabledReviewers.length > 0) remediation.push(`Remove ${session.disabledReviewers.join(", ")} from task.disabledAgents; the review skills dispatch these reviewers by name.`);
+	if (session.disabledSkills.length > 0) remediation.push(`Remove ${session.disabledSkills.map(name => `skill:${name}`).join(", ")} from disabledExtensions.`);
+	if (task.state === "absent") {
+		remediation.push(
+			task.source === "launch_tools"
+				? "This gjc process was launched with a tool list that has no task tool, so reviewers cannot be dispatched; start a session without --tools/--no-tools or add task to the list."
+				: "This is a task child session without the task tool; run the EGM skills from the top-level session.",
+		);
+	}
 
 	const notes = [
-		"Offline readiness only: reads GJC's plugin registries, the installed files and the session settings. It never installs, fetches or runs EGM, and a ready report does not prove that a review ran or that reviewers were isolated.",
-		`Skills register as ${EGM_MARKETPLACE}:<name>; invoke them as /skill:${EGM_MARKETPLACE}:<name> (for example /skill:${EGM_MARKETPLACE}:egm-review). The bare /skill:egm-review form is not a registered command.`,
-		"Goldfish reviewers are task subagents: they start without the parent conversation, but GJC still gives them the user SYSTEM.md, RULES.md and always-apply rules. State review assumptions as explicit review criteria. Launch flags such as --tools are not visible to this tool.",
+		"Offline readiness only: reads the files under the agent directory, the session settings, this process's launch arguments and the session's own entries. It never installs, fetches or runs EGM, and a healthy report does not prove that a review ran.",
+		`Invoke the skills as /skill:<name> (for example /skill:egm-review design_draft.md). The review skills dispatch the eight registered reviewers through the task tool, which an ordinary session activates through tool search.`,
+		"A plugin tool cannot see a session's tool set, so there is no ready status: only an explicit --tools/--no-tools launch list and a task child's own tool list are observable, and either one without task is reported as blocked.",
+		"Reviewers are read-only for the built-in edit, write and bash tools. Tools from installed plugins are still offered to them, and the user SYSTEM.md, RULES.md and always-apply rules still reach them; they start without the parent conversation.",
+		"The plugin block reads the user-scope egm bundle registration from gjc-plugins/registry.json; it does not byte-compare the installed bundle with a checkout, so run the installer to verify or replace it. The readiness status stays runtime-scoped.",
 	];
-	if (marketplace.sourceType !== null && marketplace.sourceType !== "local") {
-		notes.push(`The ${EGM_MARKETPLACE} marketplace is a ${marketplace.sourceType} source, which follows the upstream default branch rather than ${EGM_PINNED_TAG}; the content check above is the pin authority.`);
+	if (agentDir.source !== "host") {
+		notes.push("The agent directory was resolved from the environment, not by the host; a session started with another agent directory reads a different install.");
 	}
 
 	return {
 		status,
 		pinned: { repository: EGM_REPOSITORY, tag: EGM_PINNED_TAG, commit: EGM_PINNED_COMMIT, files: Object.keys(pinnedFiles).length },
-		marketplace,
-		installation,
-		content,
-		skills,
-		personas,
+		agentDir,
+		journal: journal.status,
+		bundle,
+		loose,
+		plugin: {
+			status: pluginRecord.status,
+			registered: pluginRecord.registered,
+			source: pluginRecord.source,
+			manifestHash: pluginRecord.manifestHash,
+			enabled: pluginRecord.enabled,
+		},
+		skills: EGM_SKILLS.map(name => ({ name, invocation: `/skill:${name}` })),
+		reviewers: EGM_REVIEWERS.map(([file, name]) => ({ name, file })),
 		session,
-		installCommands: [...EGM_INSTALL_COMMANDS],
+		task,
+		installCommand: EGM_INSTALL_COMMAND,
 		remediation,
 		notes,
 	};
@@ -398,9 +695,9 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 
 // Keyless build. No credentials are read; the readiness report reads local files only and writes nothing.
 
-// Read-only readiness report for the EGM skills installed through GJC's
-// marketplace path. Never installs, fetches or runs EGM; never contacts the
-// network; writes nothing.
+// Read-only readiness report for the EGM install written by
+// `scripts/install.ts` (bundle + loose skills and reviewers). Never installs,
+// fetches or runs EGM; never contacts the network; writes nothing.
 export default function egmReadiness(pi: {
 	typebox: {
 		Type: {
@@ -412,9 +709,17 @@ export default function egmReadiness(pi: {
 		name: "egm_readiness",
 		label: "EGM Readiness",
 		description:
-			"Read-only offline readiness report for the Elephant-Goldfish Model (EGM) skills installed natively with `gjc plugin install egm@egm`, pinned to EGM v0.1.1: marketplace and user-scope install state, the commit the marketplace source names, a sha256 comparison of every runtime file (skills, reviewer personas, document standards) with the pinned release, the egm:egm-* skill names and the session settings that can disable marketplace skills, the task subagent tool or the reviewer personas, with remediation. Never installs, fetches or runs EGM, writes nothing and never contacts the network.",
+			"Read-only offline readiness report for the Elephant-Goldfish Model (EGM) installed natively by `bun run egm:install`: one command writes the pinned EGM v0.1.1 release (31 sha256-pinned upstream files at commit dea7761de06c) under the GJC agent directory, composes the 7 `/skill:egm-*` skills with 3 references, registers 8 read-only reviewers (`tools: read, search, find`) and records ownership in bundle.json. Reports the ownership journal, a sha256 comparison of every bundle and loose file, extra egm-* agents, the session settings that can disable the task subagent or a reviewer, `task`-tool visibility, and remediation. Never installs, fetches or runs EGM, writes nothing and never contacts the network.",
 		parameters: pi.typebox.Type.Object({}),
-		async execute(_toolCallId: string, params: unknown, _onUpdate?: unknown, ctx?: { settings?: { get(key: string): unknown } }) {
+		async execute(
+			_toolCallId: string,
+			params: unknown,
+			_onUpdate?: unknown,
+			ctx?: {
+				settings?: { get(key: string): unknown };
+				sessionManager?: { getBranch?: () => unknown };
+			},
+		) {
 			// The contract is exactly {}; extra keys are rejected before anything is read.
 			const exactEmptyObject =
 				params === undefined ||
@@ -430,25 +735,33 @@ export default function egmReadiness(pi: {
 				};
 			}
 			try {
-				const report = readinessReport({ settings: ctx?.settings });
+				let entries: unknown;
+				try {
+					entries = ctx?.sessionManager?.getBranch?.();
+				} catch {
+					entries = undefined;
+				}
+				const report = readinessReport({ settings: ctx?.settings, argv: process.argv, entries });
 				const lines = [
 					`egm_readiness: ${report.status}`,
-					`pinned: ${report.pinned.repository} ${report.pinned.tag} (${report.pinned.commit.slice(0, 12)})`,
-					`marketplace: ${report.marketplace.status}${report.marketplace.sourceType ? ` ${report.marketplace.sourceType}` : ""}${
-						report.marketplace.commit ? ` @ ${report.marketplace.commit.slice(0, 12)}${report.marketplace.commitMatchesPin ? " (pinned commit)" : " (not the pinned commit)"}` : ""
-					}`,
-					`install (user): ${report.installation.status}${report.installation.version ? ` ${report.installation.version}` : ""}`,
-					`runtime files: ${report.content.status} (${report.content.matched}/${report.content.checked} match the pin)`,
-					`skills: ${report.skills.filter(skill => skill.present).length}/${report.skills.length} present — ${report.skills.map(skill => skill.invocation).join(", ")}`,
-					`reviewer personas: ${report.personas.filter(persona => persona.present).length}/${report.personas.length} present`,
-					`session: ${report.session.status}${
-						report.session.status === "observed"
-							? ` (marketplace provider ${report.session.marketplaceProvider}, task tool ${report.session.taskTool})`
-							: ""
-					}`,
+					`pinned: ${report.pinned.repository} ${report.pinned.tag} (${report.pinned.commit.slice(0, 12)}, ${report.pinned.files} files)`,
+					`agent dir: ${report.agentDir.dir} (${report.agentDir.source})`,
+					`journal: ${report.journal}`,
+					`plugin bundle: ${report.plugin.status}${report.plugin.enabled === false ? " (disabled)" : ""}${report.plugin.source ? ` — ${report.plugin.source}` : ""}${report.plugin.manifestHash ? ` (${report.plugin.manifestHash.slice(0, 12)})` : ""} (registration only; not byte-compared to a checkout)`,
+					`bundle: ${report.bundle.status} (${report.bundle.matched}/${report.bundle.checked} match the pin)`,
+					`loose: ${report.loose.status} (skills ${report.loose.skills.matched}/${report.loose.skills.checked}, references ${report.loose.references.matched}/${report.loose.references.checked}, reviewers ${report.loose.agents.matched}/${report.loose.agents.checked})`,
+					`skills: ${report.skills.map(skill => skill.invocation).join(", ")}`,
+					`reviewers: ${report.reviewers.length} read-only — ${report.reviewers.map(reviewer => reviewer.name).join(", ")}`,
+					`session: ${report.session.status}${report.session.status === "observed" ? ` (task.maxRecursionDepth ${report.session.maxRecursionDepth})` : ""}`,
+					`task: ${report.task.state}${report.task.source ? ` (${report.task.source})` : ""}`,
+					`install: ${report.installCommand}`,
 				];
-				for (const mismatch of report.content.mismatches) lines.push(`- ${mismatch.status}: ${mismatch.path}`);
-				if (report.content.mismatchesOmitted > 0) lines.push(`- … ${report.content.mismatchesOmitted} more`);
+				for (const mismatch of [...report.bundle.mismatches, ...report.loose.mismatches]) {
+					lines.push(`- ${mismatch.status}: ${mismatch.path}${mismatch.detail ? ` — ${mismatch.detail}` : ""}`);
+				}
+				const omitted = report.bundle.mismatchesOmitted + report.loose.mismatchesOmitted;
+				if (omitted > 0) lines.push(`- … ${omitted} more`);
+				for (const file of report.loose.extraAgents) lines.push(`- extra egm-* agent: ${file}`);
 				if (report.remediation.length > 0) {
 					lines.push("remediation:");
 					for (const item of report.remediation) lines.push(`- ${item}`);

@@ -11,7 +11,7 @@
 // compose rules both the installer and the report use, and the report itself.
 // It never fetches, installs or runs EGM and never contacts the network.
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { readFileSync, readdirSync, lstatSync, statSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
@@ -473,6 +473,109 @@ export function taskVisibility(input: { argv?: readonly string[]; entries?: unkn
 	return { state: "unobservable", source: null };
 }
 
+// ---- plugin bundle registration ----
+
+/** The user-scope `egm` bundle registration read from `<agentDir>/gjc-plugins/registry.json`. */
+export type PluginRecord = {
+	status: "registered" | "disabled" | "missing" | "unreadable";
+	registered: boolean;
+	enabled: boolean | null;
+	/** A display string for the registered source (path or URL), never a credential. */
+	source: string | null;
+	manifestHash: string | null;
+	pluginRoot: string | null;
+	copiedFiles: Array<{ relativePath: string; sha256: string }> | null;
+};
+
+const PLUGIN_REGISTRY_MAX_BYTES = 2 * 1024 * 1024;
+const PLUGIN_SOURCE_MAX_CHARS = 512;
+const pluginRegistryPath = (agentDir: string): string => path.join(agentDir, "gjc-plugins", "registry.json");
+
+const emptyPlugin = (status: "missing" | "unreadable"): PluginRecord => ({
+	status,
+	registered: false,
+	enabled: null,
+	source: null,
+	manifestHash: null,
+	pluginRoot: null,
+	copiedFiles: null,
+});
+
+function pluginSource(value: unknown): string | null {
+	if (typeof value === "string") return value.length > 0 ? value.slice(0, PLUGIN_SOURCE_MAX_CHARS) : null;
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+	const record = value as Record<string, unknown>;
+	for (const key of ["uri", "display", "kind"] as const) {
+		const candidate = record[key];
+		if (typeof candidate === "string" && candidate.length > 0) return candidate.slice(0, PLUGIN_SOURCE_MAX_CHARS);
+	}
+	return null;
+}
+
+const isSafeRelative = (value: string): boolean =>
+	value.length > 0 && !value.startsWith("/") && !value.includes("\\") && !value.includes("\0") && !value.split("/").includes("..");
+
+function pluginCopiedFiles(value: unknown): Array<{ relativePath: string; sha256: string }> | null {
+	if (!Array.isArray(value)) return null;
+	const files: Array<{ relativePath: string; sha256: string }> = [];
+	for (const entry of value) {
+		if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+		const record = entry as Record<string, unknown>;
+		if (typeof record.relativePath !== "string" || !isSafeRelative(record.relativePath)) return null;
+		if (typeof record.sha256 !== "string" || !DIGEST_RE.test(record.sha256)) return null;
+		files.push({ relativePath: record.relativePath, sha256: record.sha256 });
+	}
+	return files;
+}
+
+/**
+ * Read the user-scope `egm` bundle registration. Bounded and read-only: a
+ * symlinked, oversized, malformed or missing registry is reported, never
+ * repaired, and the installed bundle is not byte-compared with a checkout.
+ */
+export function readPluginRecord(agentDir: string): PluginRecord {
+	let info;
+	try {
+		info = lstatSync(pluginRegistryPath(agentDir));
+	} catch (error) {
+		return emptyPlugin((error as NodeJS.ErrnoException).code === "ENOENT" ? "missing" : "unreadable");
+	}
+	if (info.isSymbolicLink() || !info.isFile() || info.size > PLUGIN_REGISTRY_MAX_BYTES) return emptyPlugin("unreadable");
+	let text: string;
+	try {
+		text = readFileSync(pluginRegistryPath(agentDir), "utf8");
+	} catch {
+		return emptyPlugin("unreadable");
+	}
+	let value: unknown;
+	try {
+		value = JSON.parse(text);
+	} catch {
+		return emptyPlugin("unreadable");
+	}
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return emptyPlugin("unreadable");
+	const entries = (value as { plugins?: unknown }).plugins;
+	if (!Array.isArray(entries)) return emptyPlugin("unreadable");
+	const entry = entries.find(candidate => {
+		if (candidate === null || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+		const record = candidate as Record<string, unknown>;
+		return record.name === "egm" && (record.scope === "user" || record.scope === undefined);
+	}) as Record<string, unknown> | undefined;
+	if (!entry) return emptyPlugin("missing");
+	const enabled = entry.enabled === true ? true : entry.enabled === false ? false : null;
+	const manifestHash = typeof entry.manifestHash === "string" && DIGEST_RE.test(entry.manifestHash) ? entry.manifestHash : null;
+	const pluginRoot = typeof entry.pluginRoot === "string" && path.isAbsolute(entry.pluginRoot) ? entry.pluginRoot : null;
+	return {
+		status: enabled === true ? "registered" : "disabled",
+		registered: true,
+		enabled,
+		source: pluginSource(entry.source),
+		manifestHash,
+		pluginRoot,
+		copiedFiles: pluginCopiedFiles(entry.copiedFiles),
+	};
+}
+
 // ---- report ----
 
 /**
@@ -489,6 +592,7 @@ export type ReadinessReport = {
 	journal: JournalRead["status"];
 	bundle: BundleReport;
 	loose: LooseReport;
+	plugin: { status: PluginRecord["status"]; registered: boolean; source: string | null; manifestHash: string | null; enabled: boolean | null };
 	skills: Array<{ name: string; invocation: string }>;
 	reviewers: Array<{ name: string; file: string }>;
 	session: SessionReport;
@@ -503,7 +607,7 @@ export type ReadinessInput = AgentDirInput & {
 	pinnedFiles?: Readonly<Record<string, string>>;
 	/** The host process arguments (`process.argv`). */
 	argv?: readonly string[];
-	/** The session entries (`ctx.sessionManager.getEntries()`). */
+	/** The session entries (`ctx.sessionManager.getBranch()`). */
 	entries?: unknown;
 };
 
@@ -513,6 +617,7 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 	const journal = readJournal(agentDir.dir);
 	const bundle = checkBundle(agentDir.dir, pinnedFiles);
 	const loose = checkLoose(agentDir.dir, pinnedFiles);
+	const pluginRecord = readPluginRecord(agentDir.dir);
 	const session = readSession(input.settings);
 	const task = taskVisibility(input);
 
@@ -533,7 +638,7 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 	if (absent) remediation.push(`Install EGM ${EGM_PINNED_TAG} ${fromCheckout}`);
 	else if (journal.status === "pending") remediation.push(`An install did not finish; run it again ${fromCheckout}`);
 	else if (incomplete || bundle.status === "drifted" || loose.mismatches.length > 0) {
-		remediation.push(`Reinstall ${fromCheckout} (it rewrites the files it owns and refuses to overwrite any it did not write)`);
+		remediation.push(`Reinstall ${fromCheckout}: it rewrites its own files, refuses foreign files and symlinks, and stops on a changed owned file — delete that file to let the reinstall restore it`);
 	}
 	for (const file of loose.extraAgents) {
 		remediation.push(`Remove ${file} from the agent directory: it registers an egm-* agent outside the eight read-only reviewers, without the tools allowlist.`);
@@ -554,6 +659,7 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 		`Invoke the skills as /skill:<name> (for example /skill:egm-review design_draft.md). The review skills dispatch the eight registered reviewers through the task tool, which an ordinary session activates through tool search.`,
 		"A plugin tool cannot see a session's tool set, so there is no ready status: only an explicit --tools/--no-tools launch list and a task child's own tool list are observable, and either one without task is reported as blocked.",
 		"Reviewers are read-only for the built-in edit, write and bash tools. Tools from installed plugins are still offered to them, and the user SYSTEM.md, RULES.md and always-apply rules still reach them; they start without the parent conversation.",
+		"The plugin block reads the user-scope egm bundle registration from gjc-plugins/registry.json; it does not byte-compare the installed bundle with a checkout, so run the installer to verify or replace it. The readiness status stays runtime-scoped.",
 	];
 	if (agentDir.source !== "host") {
 		notes.push("The agent directory was resolved from the environment, not by the host; a session started with another agent directory reads a different install.");
@@ -566,6 +672,13 @@ export function readinessReport(input: ReadinessInput = {}): ReadinessReport {
 		journal: journal.status,
 		bundle,
 		loose,
+		plugin: {
+			status: pluginRecord.status,
+			registered: pluginRecord.registered,
+			source: pluginRecord.source,
+			manifestHash: pluginRecord.manifestHash,
+			enabled: pluginRecord.enabled,
+		},
 		skills: EGM_SKILLS.map(name => ({ name, invocation: `/skill:${name}` })),
 		reviewers: EGM_REVIEWERS.map(([file, name]) => ({ name, file })),
 		session,
