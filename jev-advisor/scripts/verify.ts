@@ -1302,7 +1302,7 @@ async function runSuite(root: string) {
 		mkdirSync(path.join(root, "shared", "lib"), { recursive: true });
 		copyFileSync(path.join(plugin, "../shared/lib/results.ts"), path.join(root, "shared/lib/results.ts"));
 		copyFileSync(path.join(plugin, "../shared/lib/decision-contract.ts"), path.join(root, "shared/lib/decision-contract.ts"));
-		for (const file of ["scripts/build.mjs", "semantic.openapi.json", "lib/semantic.ts", "lib/decision.ts", "lib/alignment.ts", "lib/alignment-journal.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/session-start.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
+		for (const file of ["scripts/build.mjs", "semantic.openapi.json", "lib/semantic.ts", "lib/semantic-budget.ts", "lib/decision.ts", "lib/alignment.ts", "lib/alignment-journal.ts", "src/hook.adapter.ts", "src/result.adapter.ts", "src/tool.adapter.ts", "src/check.adapter.ts", "src/metrics.adapter.ts", "src/session-start.adapter.ts", "src/alignment.adapter.ts", "src/alignment-observe.adapter.ts", "src/alignment-shutdown.adapter.ts"]) copyFileSync(path.join(plugin, file), path.join(fixture, file));
 		const result = spawnSync(process.execPath, ["--no-env-file", path.join(fixture, "scripts/build.mjs")], { cwd: fixture, env: { HOME: os.homedir(), TMPDIR: process.env.TMPDIR!, LC_ALL: "C" }, encoding: "utf8", timeout: 30000 });
 		assert.equal(result.status, 0, result.stderr);
 		for (const file of ["hooks/jev-advisor.ts", "hooks/jev-advisor-result.ts", "tools/jev-advise.ts", "tools/jev-check.ts", "tools/plugin-metrics.ts", "hooks/jev-advisor-session-start.ts", "hooks/jev-advisor-alignment.ts", "hooks/jev-advisor-alignment-observe.ts", "hooks/jev-advisor-alignment-shutdown.ts"]) {
@@ -1717,7 +1717,9 @@ async function runSuite(root: string) {
 			};
 			const ui = { setStatus(key: string, value: string) { if (choice === "ui_error") throw new Error("ui failed"); if (key === "jev-alignment-semantic") statuses.push(value); } };
 			for (const forbidden of [false, true]) {
+				env({ ...semanticEnv, JEV_ALIGNMENT_MODE: mode, JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD: "0" });
 				const ctx = { ...alignmentContext([alignmentUser("semantic-hook", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`")]), ui };
+				Object.assign(ctx.sessionManager, { getSessionId: () => `semantic-${mode}-${choice}-${forbidden}` });
 				const before = fetchCalls;
 				const got = await alignmentBefore[0].handler(alignmentWrite(`semantic-${forbidden}`, "src/other.ts"), ctx);
 				assert.equal(got?.block === true, mode === "deterministic" && forbidden, `${mode}/${choice}/${forbidden}`);
@@ -1766,7 +1768,9 @@ async function runSuite(root: string) {
 			assert.equal(fetchCalls, before, "no incomplete target list leaves the hook");
 		}
 		responder = () => new Response(JSON.stringify(semanticAnswer()));
+		process.env.JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD = "0";
 		const ctx = alignmentContext([alignmentUser("complete-targets", "Implement `src/demo.ts`.")]);
+		Object.assign(ctx.sessionManager, { getSessionId: () => "complete-targets" });
 		await alignmentBefore[0].handler({ type: "tool_call", toolName: "apply_patch", toolCallId: "complete-targets", input: { files: paths.slice(0, 16) } }, ctx);
 		assert.equal(fetchCalls, before + 1, "the complete 16-target boundary still reaches the transport");
 		responder = undefined;

@@ -1,6 +1,6 @@
 {
   "name": "gjc-plugin",
-  "version": "0.0.28",
+  "version": "0.0.29",
   "private": true,
   "type": "module",
   "description": "gajae-code plugin distribution repo (workspace-standard plugin-ts profile root).",
@@ -20,7 +20,7 @@
     "test:scripts": "node --test scripts/tests/checks.test.mjs scripts/tests/ultragoal-gate.test.mjs scripts/tests/ultragoal-succession.test.mjs scripts/tests/installed-surface.test.mjs",
     "test:plugin-cli": "node scripts/check-plugin-cli.mjs",
     "test:schemas": "bun test scripts/tests/host-schema.test.mjs",
-    "test:advisor": "bun jev-advisor/scripts/verify.ts",
+    "test:advisor": "bun jev-advisor/scripts/verify.ts && bun test jev-advisor/scripts/semantic-budget.test.ts",
     "build:verification": "bun verification-receipts/scripts/build.mjs",
     "test:verification": "bun verification-receipts/scripts/verify.ts",
     "build:ui": "bun ui-regression/scripts/build.mjs",
