@@ -26,7 +26,8 @@ import {
 	type Observation,
 } from "../lib/alignment";
 import { appendJournalStore, journalSessionKey, journalStoreBudgetMs, loadJournalStore } from "../lib/alignment-journal";
-import { askSemanticAdvice, semanticOutboundEnabled, SEMANTIC_MODEL, type SemanticInput } from "../lib/semantic";
+import { semanticOutboundEnabled, SEMANTIC_MODEL, type SemanticInput } from "../lib/semantic";
+import { askBudgetedSemanticAdvice } from "../lib/semantic-budget";
 
 const ALIGNMENT_WRITE_TOOLS = new Set([
 	"write",
@@ -222,7 +223,7 @@ export default function register(api: {
 		// No semantic score is consumed as a block, admission or release signal.
 		try {
 			if (semanticInput && semanticOutboundEnabled()) {
-				const advice = await askSemanticAdvice(semanticInput);
+				const advice = await askBudgetedSemanticAdvice(semanticInput, journalSessionKey(ctx));
 				const ui = alignmentAsRecord(alignmentAsRecord(ctx)?.ui);
 				if (typeof ui?.setStatus === "function") {
 					const summary = advice.status === "decision"
