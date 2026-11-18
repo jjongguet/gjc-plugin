@@ -89,7 +89,10 @@ const MAX_TRIGGER_BYTES = 400;
 const MAX_ID_CHARS = 64;
 const MAX_SESSION_CHARS = 200;
 const MAX_CWD_CHARS = 4096;
+// `CONTROL` is stateless and only used with `.test`; the replacement pass needs
+// its own global regex or only the first control character would be replaced.
 const CONTROL = /[\u0000-\u001f\u007f]/;
+const CONTROL_GLOBAL = /[\u0000-\u001f\u007f]/g;
 
 export type CorrectionCandidate = {
 	schema: typeof CORRECTION_SCHEMA;
@@ -207,10 +210,15 @@ export function clipBytes(value: string, limit: number): string {
 	return out;
 }
 
-/** Collapse control characters and whitespace runs: every staged field is one line. */
+/**
+ * Collapse control characters and whitespace runs: every staged field is one line.
+ * Every C0 control and DEL becomes a space (global replace, not just the first),
+ * so no NUL, ESC, BEL or other control byte can reach a staged field or the
+ * printed add command.
+ */
 export function normalizeText(value: string): string {
 	return value
-		.replace(CONTROL, " ")
+		.replace(CONTROL_GLOBAL, " ")
 		.replace(/\s+/g, " ")
 		.trim();
 }

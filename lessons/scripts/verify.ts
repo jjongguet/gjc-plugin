@@ -1219,6 +1219,37 @@ await check("a staged file larger than the newest window reports truncated:true 
 	assert.equal(smallResult.json.count, 1);
 });
 
+await check("control characters are stripped from both staged fields and the printed command", async () => {
+	const sessions = sessionsAt("control-sessions");
+	const data = dataAt("control-data");
+	const cwd = path.join(sandbox, "control project");
+	const controls = "\u0000\u001b\u0007";
+	assert.equal(correction.normalizeText(`a${controls}b\u0000c`), "a b c", "every control character is replaced, not only the first");
+	const userText = `Actually,${controls} use bun${controls}`;
+	const assistantText = `I ran${controls} node --test${controls}`;
+	transcriptFile(sessions, "control-session", [sessionRecord(cwd), assistantRecord(assistantText), userRecord(userText)]);
+	const result = await correction.sessionEndStage(
+		{ cwd },
+		{ sessionsRoot: sessions, env: { GJC_PLUGIN_DATA: data }, now: Date.now(), timeoutMs: 60_000 },
+	);
+	assert.equal(result.status, "appended");
+	const stored = JSON.parse(readFileSync(stagedFile(data), "utf8").trim());
+	assert.equal(stored.pattern, "actually");
+	assert.equal(stored.correctionText, "Actually, use bun");
+	assert.equal(stored.priorAssistantExcerpt, "I ran node --test");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(stored.correctionText), false, "no control character survives in correctionText");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(stored.priorAssistantExcerpt), false, "no control character survives in the excerpt");
+	const wiki = ledgerRoot("control-argv");
+	const listed = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () => runStagedTool({}));
+	const argv = await withEnv({ GJC_COMPOUND_ROOT: wiki, GJC_PLUGIN_DATA: data }, () =>
+		runStagedTool({ format: "add-argv", id: listed.json.entries[0].id }),
+	);
+	assert.equal(argv.json.status, "ok");
+	assert.equal(/[\u0000-\u001f\u007f]/.test(argv.json.command), false, "the printed command carries no control character");
+	assert.equal(argv.json.command.includes("\n"), false, "the printed command is one line");
+	assert.ok(argv.json.command.includes("--action 'Actually, use bun'"));
+});
+
 rmSync(root, { recursive: true, force: true });
 if (failures > 0) {
 	console.error(`lessons verify: ${failures}/${cases} failed`);
