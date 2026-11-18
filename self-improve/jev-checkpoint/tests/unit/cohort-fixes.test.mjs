@@ -23,17 +23,45 @@ import { analyzerDigest, bundleDigest } from "../../lib/digest.mjs";
 import { ruleTableDigest } from "../../lib/analyze.mjs";
 import { cellMetrics } from "../../lib/metrics.mjs";
 import { CHECKPOINT_STATE_LIMIT } from "../../lib/proxy.mjs";
-import { fileOk, tapCounts } from "../../scripts/verify.mjs";
+import { fileOk, tapCounts, unavailableCapabilities, verdict } from "../../scripts/verify.mjs";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const tmp = (prefix) => mkdtempSync(path.join(os.tmpdir(), prefix));
+const tapSummary = (lines) => lines.map((line) => `# ${line}`).join("\n");
 
-test("verify guard: a skipped, todo or partially passing file is not ok", () => {
-	const tap = (lines) => lines.map((line) => `# ${line}`).join("\n");
-	assert.equal(fileOk(0, tapCounts(tap(["tests 2", "pass 2", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), true);
-	assert.equal(fileOk(0, tapCounts(tap(["tests 2", "pass 0", "fail 0", "skipped 2", "todo 0", "cancelled 0"]))), false);
-	assert.equal(fileOk(0, tapCounts(tap(["tests 2", "pass 1", "fail 0", "skipped 0", "todo 1", "cancelled 0"]))), false);
-	assert.equal(fileOk(0, tapCounts(tap(["tests 2", "pass 2", "fail 0"]))), false, "missing counts are not a pass");
+test("verify guard: a skipped, todo, cancelled or partially passing file is not ok", () => {
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), "ok");
+	assert.equal(fileOk(0, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), true);
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 0", "fail 0", "skipped 2", "todo 0", "cancelled 0"]))), "skipped");
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 1", "fail 0", "skipped 0", "todo 1", "cancelled 0"]))), "todo");
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 1", "fail 0", "skipped 0", "todo 0", "cancelled 1"]))), "cancelled");
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 1", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), "incomplete_pass");
+	assert.equal(fileOk(0, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0"]))), false, "missing counts are not a pass");
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0"]))), "missing_counts");
+});
+
+test("verify guard: zero executed tests and a genuine failure are failures, not silent passes", () => {
+	const zero = tapSummary(["tests 0", "pass 0", "fail 0", "skipped 0", "todo 0", "cancelled 0"]);
+	assert.equal(tapCounts(zero).tests, 0);
+	assert.equal(verdict(0, tapCounts(zero)), "no_tests_executed");
+	assert.equal(fileOk(0, tapCounts(zero)), false);
+	assert.equal(fileOk(0, tapCounts("")), false, "a missing TAP summary is not a pass");
+	assert.equal(verdict(0, tapCounts(tapSummary(["tests 2", "pass 1", "fail 1", "skipped 0", "todo 0", "cancelled 0"]))), "failures");
+	assert.equal(verdict(1, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), "nonzero_exit");
+	assert.equal(fileOk(1, tapCounts(tapSummary(["tests 2", "pass 2", "fail 0", "skipped 0", "todo 0", "cancelled 0"]))), false);
+});
+
+test("verify guard: an unavailable-capability diagnostic is reported and never excuses a skip or an empty file", () => {
+	const diagnostic = "# gjc-capability: unavailable capability=live_seatbelt_probe platform=linux reason=requires_darwin_sandbox";
+	assert.deepEqual(unavailableCapabilities(diagnostic), [{ capability: "live_seatbelt_probe", platform: "linux", reason: "requires_darwin_sandbox" }]);
+	assert.deepEqual(unavailableCapabilities(`    ${diagnostic}`), [{ capability: "live_seatbelt_probe", platform: "linux", reason: "requires_darwin_sandbox" }], "the reporter may indent a diagnostic");
+	assert.deepEqual(unavailableCapabilities("# capability unavailable live=seatbelt"), []);
+	assert.deepEqual(unavailableCapabilities(`${diagnostic} trailing`), [], "a malformed line is not a capability");
+	const linux = `${tapSummary(["tests 26", "pass 26", "fail 0", "skipped 0", "todo 0", "cancelled 0"])}\n${diagnostic}`;
+	assert.equal(verdict(0, tapCounts(linux)), "ok");
+	assert.equal(unavailableCapabilities(linux).length, 1);
+	assert.equal(verdict(0, tapCounts(`${tapSummary(["tests 26", "pass 25", "fail 0", "skipped 1", "todo 0", "cancelled 0"])}\n${diagnostic}`)), "skipped");
+	assert.equal(verdict(0, tapCounts(diagnostic)), "no_tests_executed");
 });
 
 test("cost gates: missing prices refuse, NaN caps refuse", () => {

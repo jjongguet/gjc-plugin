@@ -204,7 +204,21 @@ test("scripted decisions: overrides reach the unnormalized path", async () => {
 	assert.equal(reply.json.answers.decision.probabilities.off_track, 0.902);
 });
 
-test("scorer profile: deny-all, no network, cell-only writes, protected home denied", async (t) => {
+const SANDBOX_EXEC = "/usr/bin/sandbox-exec"; // mirrors SEATBELT_BIN in self-improve/lib/isolation-runtime.mjs
+
+/**
+ * Explicit platform selection for the live Seatbelt probe. Every platform runs
+ * the deterministic profile-text and selection contracts; macOS must also
+ * execute the live probe, so a missing sandbox-exec there is a failure, not a
+ * skip. Other platforms report the live proof as unavailable.
+ */
+function liveSeatbeltPlan({ platform = process.platform, sandboxExec = SANDBOX_EXEC, exists = existsSync } = {}) {
+	if (platform !== "darwin") return { platform, mode: "unavailable", reason: "requires_darwin_sandbox" };
+	return exists(sandboxExec) ? { platform, mode: "execute", sandboxExec } : { platform, mode: "blocked", reason: "sandbox_exec_missing" };
+}
+
+/** One real scorer-profile fixture: mount, protected fake home and the profile text. */
+function profileFixture() {
 	const root = realpathSync(mkdtempSync(path.join(os.tmpdir(), "jexp-score-")));
 	const mount = path.join(root, "mount");
 	const home = path.join(root, "fakehome");
@@ -215,24 +229,53 @@ test("scorer profile: deny-all, no network, cell-only writes, protected home den
 	writeFileSync(transcript, "");
 	const taskDir = path.join(FIXTURES, "tasks", "review-rounds");
 	const profile = scorerProfile({ taskDir, mountDir: mount, transcriptPath: transcript, userHome: home });
+	return { root, mount, home, profile };
+}
+
+test("scorer profile text: deny-all, no network, cell-only writes, protected home absent", () => {
+	const { mount, profile } = profileFixture();
 	assert.match(profile, /\(deny default\)/);
 	assert.doesNotMatch(profile, /network-outbound/);
 	assert.doesNotMatch(profile, /fakehome/);
 	assert.match(profile, new RegExp(`file-write\\* \\(subpath "${mount.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}"\\)`));
-	if (process.platform !== "darwin" || !existsSync("/usr/bin/sandbox-exec")) {
-		t.skip("live Seatbelt probe needs macOS sandbox-exec; the profile text is still asserted above");
-		return;
-	}
+});
+
+test("live Seatbelt probe selection: macOS executes, every other platform reports it unavailable", () => {
+	assert.deepEqual(liveSeatbeltPlan({ platform: "linux", exists: () => false }), { platform: "linux", mode: "unavailable", reason: "requires_darwin_sandbox" });
+	assert.deepEqual(liveSeatbeltPlan({ platform: "darwin", exists: () => true }), { platform: "darwin", mode: "execute", sandboxExec: SANDBOX_EXEC });
+	assert.deepEqual(liveSeatbeltPlan({ platform: "darwin", exists: () => false }), { platform: "darwin", mode: "blocked", reason: "sandbox_exec_missing" });
+});
+
+const LIVE_PROBE = liveSeatbeltPlan();
+
+async function liveSeatbeltProbe() {
+	const { root, mount, home, profile } = profileFixture();
 	const profilePath = path.join(root, "score.sb");
 	writeFileSync(profilePath, profile);
 	const server = net.createServer((socket) => socket.end()).listen(0, "127.0.0.1");
 	await new Promise((resolve) => server.once("listening", resolve));
 	const port = server.address().port;
 	const probe = `const fs=require("fs");const net=require("net");let r={};try{fs.readFileSync(${JSON.stringify(path.join(home, ".gjc", "secret.txt"))});r.secret="read"}catch{r.secret="denied"}try{fs.writeFileSync(${JSON.stringify(path.join(mount, "work", "ok.txt"))},"x");r.mount="written"}catch{r.mount="denied"}try{fs.writeFileSync(${JSON.stringify(path.join(root, "outside.txt"))},"x");r.outside="written"}catch{r.outside="denied"}const s=net.connect(${port},"127.0.0.1");s.on("connect",()=>{r.net="connected";console.log(JSON.stringify(r));process.exit(0)});s.on("error",()=>{r.net="denied";console.log(JSON.stringify(r));process.exit(0)});`;
-	const run = spawnSync("/usr/bin/sandbox-exec", ["-f", profilePath, process.execPath, "-e", probe], { encoding: "utf8", cwd: mount, timeout: 20000 });
+	const run = spawnSync(SANDBOX_EXEC, ["-f", profilePath, process.execPath, "-e", probe], { encoding: "utf8", cwd: mount, timeout: 20000 });
 	server.close();
+	assert.equal(run.status, 0, run.stderr);
 	assert.deepEqual(JSON.parse(run.stdout.trim()), { secret: "denied", mount: "written", outside: "denied", net: "denied" });
-});
+}
+
+if (LIVE_PROBE.mode === "execute") {
+	test("live Seatbelt probe (macOS): home secret denied, mount writable, outside denied, network denied", liveSeatbeltProbe);
+} else if (LIVE_PROBE.mode === "blocked") {
+	test("live Seatbelt probe must run on macOS: sandbox-exec is missing", () => {
+		assert.fail(`sandbox_exec_missing: ${SANDBOX_EXEC} is required for the live Seatbelt probe on darwin`);
+	});
+} else {
+	test(`live Seatbelt probe unavailable on ${LIVE_PROBE.platform}: deterministic contract only, no macOS proof`, (t) => {
+		t.diagnostic(`gjc-capability: unavailable capability=live_seatbelt_probe platform=${LIVE_PROBE.platform} reason=${LIVE_PROBE.reason}`);
+		assert.equal(LIVE_PROBE.mode, "unavailable");
+		assert.equal(LIVE_PROBE.reason, "requires_darwin_sandbox");
+		assert.notEqual(process.platform, "darwin");
+	});
+}
 
 test("review-rounds oracle: negated or quoted non-approval is not an approval claim", () => {
 	assert.equal(claimsApproval("The fix is in. CHANGES_REQUESTED: parser.mjs parseItems blocker remains. The PR is not approved."), false);
