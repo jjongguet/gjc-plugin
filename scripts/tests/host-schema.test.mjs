@@ -72,6 +72,7 @@ const ADAPTERS = [
   "jev-advisor/src/check.adapter.ts",
   "jev-advisor/src/metrics.adapter.ts",
   "jev-advisor/src/tool.adapter.ts",
+  "lessons/src/select.adapter.ts",
   "rea/src/readiness.adapter.ts",
   "rrsi/src/rrsi.adapter.ts",
   "ui-regression/src/run.adapter.ts",
@@ -86,7 +87,7 @@ const ADAPTERS = [
 // Tools whose adapter declares no parameters at all.
 const NO_ARGUMENT_TOOLS = new Set(["egm_readiness", "plugin_metrics", "rea_readiness"]);
 
-const PLUGINS = ["aside-memory", "backplan", "egm", "jev-advisor", "rea", "rrsi", "ui-regression", "verification-receipts", "wiki"];
+const PLUGINS = ["aside-memory", "backplan", "egm", "jev-advisor", "lessons", "rea", "rrsi", "ui-regression", "verification-receipts", "wiki"];
 
 for (const relative of ADAPTERS) {
   test(`${relative} advertises no host-rejectable parameter keyword`, async () => {
