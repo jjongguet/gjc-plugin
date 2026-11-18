@@ -1311,7 +1311,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.18");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.19");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
