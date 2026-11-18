@@ -22,12 +22,12 @@ periodic refresh described below.
 
 | Action | Parameter | What it does |
 | --- | --- | --- |
-| `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`). Serialized by the shared store lock. |
+| `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`; an absent `wallMs`/`files`/`hunks` is stored as `null`, never 0). Serialized by the shared store lock. |
 | `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`), `projectionDigest` and `projection` (`records` / `projected` / `omitted` / `ratio` / `limited`), and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
-| `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. |
+| `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. Each call also writes one bounded private policy receipt (`runs/v1/<timestamp>-dr-<hex>.json`, schema `gjc.rrsi.dream.receipt.v1`, 0600): the selected id, the top five ranked policy ids with their measured train/validation scores, the gate, the baseline validation scores and the dream receipt hash — ids and numbers only, never goals, objectives or task text. The tool response's `policyReceipt` names whether that write persisted. |
 | `cohort` | `recordsPath`, `limit?` | Reads one bounded `gjc.quality_trial.v2` receipt file (JSON array or JSONL, symlinked/oversized/unreadable paths refused) and returns the counts-only `rrsi.quality_cohort.v2` cohort: `total`, `admissible[]`, `excluded[{reason,count}]`, `duplicate`. No rate, delta or verdict; `efficacyClaimsAllowed` does not exist. Missing or empty input returns `total: 0` with `source.status: "missing"`. |
 | _other_ | — | Rejected as a tool error (`isError: true`) with `error: "unknown action: <value>"`; the store is read, never written. |
-| `status` | — | Store counts (episodes/attempts/adoptions, where `adoptions` counts attempts whose `decision` is `adopt`, including projected advice records), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount`, `intervalMs`). Read-only. |
+| `status` | — | Store counts (episodes/attempts/adoptions, where `adoptions` counts attempts whose `decision` is `adopt`, including projected advice records), storage state, the journal location, and a bounded periodic summary (`lastAttemptAt`, `lastSuccessAt`, `lastStatus`, `lastReason`, `nextRetryAt`, `lastProjection`, `due`, `receiptCount` — retained files in `runs/v1`, periodic and dream receipts together — `intervalMs`). Read-only. |
 
 Every handled invocation appends exactly one sanitized `rrsi` outcome to the
 shared plugin journal (`~/.gjc-plugin/rrsi/journal/v1/`, retained-window
@@ -118,15 +118,24 @@ episode, 512 KiB store, 4 MiB source reads, 64-char identifiers, 40-char labels,
 280-char text fields. Absent, corrupt, symlinked or oversized stores are **reported** as
 `missing` / `invalid` and never reset or repaired; the store is never committed
 to the repository. The periodic state (`periodic.json`), its exclusive locks
-(`periodic.lock`, `store.lock`) and run receipts (`runs/v1/`) live under the
-same root with the same ownership/mode rules.
+(`periodic.lock`, `store.lock`), run receipts and dream policy receipts
+(`runs/v1/`: periodic receipts plus one `<timestamp>-dr-<hex>.json` per dream
+call, schema `gjc.rrsi.dream.receipt.v1`, bounded at 16 KiB and pruned with the
+same 60-receipt retained window) live under the same root with the same
+ownership/mode rules.
 
 ## Projection schema
 
 | Source | → Store attempt |
 | --- | --- |
-| jev-advisor journal record | advice entries = the record's `taskAdvice[]` batch when it carries entries, else the older single `advice`/`assessment` field; representative entry = the first real decision, else the first entry. Branch `objective` = `<operation>:<tier or advice status>` of that entry; `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the representative entry is a decision, else `reject`; `wallMs` = `durationMs`; `provenance` = the journal record id |
-| `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict; `wallMs` = recorded cost; `guardFailures` = non-passing guard ids; `provenance` = the cycle id |
+| jev-advisor journal record | advice entries = the record's `taskAdvice[]` batch when it carries entries, else the older single `advice`/`assessment` field; representative entry = the first real decision, else the first entry. Branch `objective` = `<operation>:<tier or advice status>` of that entry (`<operation>:unknown` when the record carries no advice entry); `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the representative entry is a decision, `reject` when it is an explicit no-decision, and `inconclusive` when there is no advice entry (an unknown outcome is never fabricated); `wallMs` = `durationMs` when measured, else `null`; `files`/`hunks` = `null` because the outcome journal records no such measurement; `provenance` = the journal record id |
+| `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict (`inconclusive` when absent); `wallMs` = a measured `cost.wallMs`, else `null`; `files` = the recorded `proposal.files` length and `hunks` = a recorded `proposal.hunks`, else `null` (an empty recorded list is a measured 0, a missing one is unknown); `guardFailures` = non-passing guard ids; `provenance` = the cycle id |
+
+`null` means unknown: an unmeasured or unrecorded source field is never
+collapsed to 0, because a measured 0 and an unmeasured value are different
+facts. The replay core still scores an unknown `wallMs` as 0 cost and an
+unknown hunks count as 0; that coercion lives in `corpusFromStore`, not in the
+stored attempt.
 
 The plan's journal-projection fields (`source`, `goal`, `features`, `outcome`)
 are flattened onto the replay core's attempt shape so the same simulator runs
@@ -246,11 +255,14 @@ delegated task) when that batch holds any entry; otherwise the older single
 `advice`/`assessment` object is used, and no entry is invented when neither
 exists. The representative entry is the first real decision, else the first
 entry; the branch objective is `<operation>:<tier|status>` of that entry,
-`decision` is `adopt` only when it is a decision, and the rest count as
-`reject`. `projectJournalRecords` also returns `scanned` (records inspected),
-`headOmitted` (older attempts the newest window dropped) and `novelty`
-(`{retained, novel, shared, density}`; novelty keeps the journal read order, so
-a mature journal's retained window is novelty-empty by construction).
+`decision` is `adopt` only when it is a decision, an explicit no-decision is
+`reject`, and a record with no advice entry is `inconclusive` — an unknown
+outcome is never fabricated as a success or a failure. `wallMs`, `files` and
+`hunks` follow the same rule: a field the record does not measure is stored as
+`null`, never as 0. `projectJournalRecords` also returns `scanned` (records
+inspected), `headOmitted` (older attempts the newest window dropped) and
+`novelty` (`{retained, novel, shared, density}`; novelty keeps the journal read
+order, so a mature journal's retained window is novelty-empty by construction).
 
 **Segment order and window coverage.** Numeric segment suffixes (`-<n>.jsonl`)
 order the journal ascending; `inventory.json` is a membership/staleness

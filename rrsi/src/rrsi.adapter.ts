@@ -27,10 +27,12 @@ import {
 	rrsiJournalDir,
 	storeCounts,
 	summarizeReceipt,
+	dreamPolicyReceipt,
+	writeDreamReceipt,
 	withStoreLock,
 	writeStore,
 } from '../lib/rrsi';
-import { RRSI_PERIODIC_DEFAULTS, readPeriodicState, summarizePeriodicState } from '../lib/periodic';
+import { RRSI_PERIODIC_DEFAULTS, pruneReceipts, readPeriodicState, rrsiReceiptsDir, summarizePeriodicState } from '../lib/periodic';
 
 type RrsiStorage = 'ok' | 'missing' | 'unavailable' | 'invalid';
 const ACTIONS = ['capture', 'import', 'dream', 'status', 'cohort'] as const;
@@ -57,7 +59,7 @@ export default function rrsi(pi: {
 		name: 'rrsi',
 		label: 'RRSI Exploration Store',
 		description:
-			'Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | cohort | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy; cohort reads one bounded gjc.quality_trial.v2 receipt file and returns a counts-only rrsi.quality_cohort.v2 (no rate, delta or verdict); status reports store counts and storage state. Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/.',
+			'Record, import and replay GJC exploration traces through the bundled Dream-RSI core (capture | import | dream | cohort | status). capture stores a bounded episode (goal plus attempts with features/outcome); import projects the jev-advisor journal and/or a self-improve ledger into attempts (read-only); dream ranks deterministic policies over the store off-policy and saves the top policy ids/scores as one bounded private receipt (ids and numbers only, no task text); cohort reads one bounded gjc.quality_trial.v2 receipt file and returns a counts-only rrsi.quality_cohort.v2 (no rate, delta or verdict); status reports store counts and storage state. Keyless and offline: no network, no credentials, no model calls, and the private store lives under ~/.gjc-plugin/rrsi/.',
 		parameters: pi.typebox.Type.Object({
 			action: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture | import | dream | cohort | status; a missing or unknown value is rejected in-plugin (invalid_action).' })),
 			goal: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: one bounded goal label for the episode' })),
@@ -251,6 +253,11 @@ export default function rrsi(pi: {
 
 			// dream
 			const { corpus, receipt } = dreamOverStore({ store: loaded.store, seed });
+			// Save the top ranked policy ids/scores as one bounded private receipt in the
+			// plugin's existing receipts directory (ids/numbers only; no task text).
+			const policyReceipt = dreamPolicyReceipt(receipt, { now });
+			const receiptWrite = writeDreamReceipt({ dir: rrsiReceiptsDir(process.env), receipt: policyReceipt, now });
+			if (receiptWrite.persisted) pruneReceipts({ env: process.env });
 			return finish(
 				{
 					store: loaded.store,
@@ -259,6 +266,7 @@ export default function rrsi(pi: {
 					policies: receipt.candidateCount,
 					summary: summarizeReceipt(receipt),
 					corpusAttempts: corpus.attempts.length,
+					policyReceipt: { persisted: receiptWrite.persisted, reason: receiptWrite.reason, file: receiptWrite.file },
 				},
 				storage,
 			);

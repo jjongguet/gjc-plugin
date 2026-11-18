@@ -80,6 +80,11 @@ export type AuthorityTarget = { path: string; digest: string };
 const FILE_EXTENSION = /\.(?:[cm]?[jt]sx?|json|jsonc|md|mdx|txt|py|rs|go|rb|java|kt|swift|css|scss|html|yml|yaml|toml|ini|sh|bash|zsh|sql|db|sqlite|lock|env|cfg|conf)$/i;
 const CRITERION_MARKER = /\bcriterion=(exit_zero|artifact_exists|criterion_file)(?::([^\s`'"]{1,200}))?/i;
 
+/** Machine-shaped target token: a slash path or a known filename extension. */
+function isTargetShaped(token: string): boolean {
+	return token.includes("/") || FILE_EXTENSION.test(token);
+}
+
 /**
  * Extract normalised path-like targets from one user entry. Only explicit,
  * machine-shaped tokens qualify (backticked spans, slash paths, filenames with
@@ -92,7 +97,7 @@ export function targetsInText(text: string): string[] {
 	const add = (raw: string) => {
 		const token = normalizeTarget(raw);
 		if (!token) return;
-		if (!token.includes("/") && !FILE_EXTENSION.test(token)) return;
+		if (!isTargetShaped(token)) return;
 		found.add(token);
 	};
 	for (const match of source.matchAll(/`([^`\n]{1,200})`/g)) add(match[1]);
@@ -114,6 +119,12 @@ const STOP = /^\s*(?:please\s+)?(?:stop|halt|pause|중지|멈춰|그만|그만�
 /* `read-only` as a feature name ("읽기 전용 모드로 열어줘", "read-only mode") is
  * not an instruction to stop writing. The directive forms below are. */
 const READ_ONLY = /\b(?:make|keep|treat)\s+(?:it|this|that|the\s+\S+)\s+read[- ]?only\b|\bread[- ]?only\s+(?:mode\s+)?(?:please|for\s+(?:now|this))\b|\b(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s+(?:anything|any\s+files?|any\s+code|the\s+(?:code|source|repo|repository|files|tree|codebase)|files|code)\b|^\s*(?:please\s+)?(?:do\s+not|don'?t)\s+(?:modify|change|edit|write|touch)\s*[.!]*\s*$|\bno\s+(?:edits?|changes?|writes?)\b|\bwithout\s+(?:editing|modifying|changing)\s+(?:anything|any\s+files?|the\s+(?:code|repo|files))\b|읽기\s*전용(?:으로|으로만)?\s*(?:해|해줘|해라|유지|보|봐|설정|진행|처리)|(?:코드|소스|파일|저장소|전체)\s*(?:는|은|을|를)?\s*(?:수정|변경|작성)\s*하지\s*마|^\s*(?:수정|변경|작성)\s*하지\s*마\s*[.!]*\s*$|\b쓰기\s*금지|코드\s*수정\s*금지/i;
+/* A no-write phrase that names its object ("no edits to production", "no edits to `src/prod.ts`")
+ * restricts that object, not the whole task. Promoting it to read-only blocked the write the
+ * assignment actually asked for (JJO-2360). A path object stays forbidden; a whole-task object
+ * ("the code", "the repo", "any files") keeps the read-only directive. */
+const SCOPED_NO_WRITE = /\bno\s+(?:edits?|changes?|writes?)\s+(?:to|on|in|into|outside|within|against)\s+(?:(?:the|this|that|any|your|my|whole|entire|all|of)\s+){0,3}([^\s;,]{1,200})/gi;
+const READ_ONLY_SELF = /^(?:anything|any\s+files?|any\s+code|code(?:base)?|source|repo(?:sitory)?|files?|tree|workspace|project)$/i;
 /* `instead` alone is a style instruction ("use map instead of for loop"). Only
  * goal-level replacement wording supersedes the current request. Ambiguous phrases stay out: "다른 작업은
  * 하지 마" narrows the scope of the current request instead of replacing it, so the Korean branch needs a
@@ -124,6 +135,35 @@ const ADD = /\balso\b|\badditionally\b|\bplus\b|추가로|그리고\s*또/i;
 const FORBIDDEN = /\bdo\s+not\s+(?:touch|modify|edit|change|write)\b|\bdon'?t\s+(?:touch|modify|edit|change|write)\b|\bnever\s+(?:touch|modify|edit|change)\b|\bforbidden\b|건드리지\s*마|수정\s*금지|변경\s*금지|작성\s*금지/i;
 const RELEASE = /\brelease(?:d|s)?\s+(?:the\s+)?(?:read[- ]?only|restriction|lock|constraint)\b|\bread[- ]?only\s+(?:is\s+)?(?:released|lifted|off)\b|\b(?:writes?|edits?)\s+(?:are|is)\s+(?:now\s+)?(?:allowed|permitted|enabled)\b|\byou\s+may\s+(?:now\s+)?(?:write|edit|modify|change)\b|\bfeel\s+free\s+to\s+(?:write|edit|modify|change)\b|\bcan\s+(?:now\s+)?(?:write|edit|modify|change)\b|읽기\s*전용\s*(?:해제|풀|끝)|(?:수정|쓰기|편집)\s*(?:해도|가능|허용)|이제\s*(?:수정|작성|편집)/i;
 const RELEASE_HEDGE = /\bif\b|\bmaybe\b|\bperhaps\b|\bunless\b|\bnot\s+sure\b|\?|혹시|가능하면|아마|조건/i;
+
+/** Fresh matcher per call: a shared /g regex would carry `lastIndex` between entries. */
+function scopedNoWriteMatcher(): RegExp {
+	return new RegExp(SCOPED_NO_WRITE.source, SCOPED_NO_WRITE.flags);
+}
+
+/** Objects named by an object-scoped no-write phrase, in entry order. */
+function scopedNoWriteObjects(text: string): string[] {
+	const objects: string[] = [];
+	for (const match of text.matchAll(scopedNoWriteMatcher())) objects.push(match[1]);
+	return objects;
+}
+
+/** True only for objects that stand for the whole task ("the code", "the repo", "any files"). */
+function readOnlySelfObject(raw: string): boolean {
+	const token = String(raw ?? "").replace(/[`'"]/g, "").replace(/[.,:;!?]+$/, "").trim();
+	return READ_ONLY_SELF.test(token);
+}
+
+/**
+ * Whole-task read-only intent of one entry. A phrase scoped to a named object is removed before
+ * the directive test, so "no edits to production; temp evidence allowed" never becomes read-only
+ * while "no edits", "no edits at all" and "no edits to the code" still do.
+ */
+function readOnlyDirective(text: string): boolean {
+	if (!READ_ONLY.test(text)) return false;
+	const stripped = text.replace(scopedNoWriteMatcher(), (match, object: string) => (readOnlySelfObject(object) ? match : " "));
+	return READ_ONLY.test(stripped);
+}
 
 /** Change semantics of one entry; first match wins. */
 export function classifyChange(text: string): ChangeSemantics {
@@ -288,7 +328,14 @@ export function collectAuthority(branchEntries: unknown, options: { windowSize?:
 	for (const entry of entries) {
 		const semantics = classifyChange(entry.text);
 		const entryTargets = targetsInText(entry.text);
-		if (READ_ONLY.test(entry.text)) readOnly = { kind: "read_only", sinceEntryId: entry.id };
+		if (readOnlyDirective(entry.text)) readOnly = { kind: "read_only", sinceEntryId: entry.id };
+		// A path named by an object-scoped no-write phrase is forbidden directly: dropping the
+		// whole-task read-only promotion must not drop the prohibition the phrase states.
+		for (const object of scopedNoWriteObjects(entry.text)) {
+			const token = normalizeTarget(object);
+			const digest = isTargetShaped(token) ? digestTarget(token) : "";
+			if (digest) forbidden.set(digest, { kind: "forbidden_target", sinceEntryId: entry.id, targetDigest: digest });
+		}
 		if (STOP.test(entry.text)) stop = { kind: "stop", sinceEntryId: entry.id };
 		if (entryTargets.length > 0) {
 			targets = entryTargets.map(path => ({ path, digest: digestTarget(path) })).filter(target => target.digest !== "");
@@ -805,7 +852,12 @@ export type JournalSnapshot = {
 	dropped: number;
 };
 
-/** Rebuild the current recovery view and retry counters from retained records. */
+/**
+ * Rebuild the current recovery view, the per-session retry counters and the session aggregate
+ * from retained records. `recovered` and `unverified` count every retained recovery once (its
+ * last record wins), so an earlier completed recovery stays represented after a later one;
+ * `unresolved` is the actionable open recovery, so it is at most one (the newest chain).
+ */
 export function reduceJournal(events: readonly AlignmentEvent[]): {
 	latest: AlignmentState | null;
 	retryCounts: Record<string, number>;
@@ -815,6 +867,8 @@ export function reduceJournal(events: readonly AlignmentEvent[]): {
 	const retryCounts: Record<string, number> = {};
 	const shutdownFor: Record<string, true> = {};
 	const counts: AlignmentCounts = { corrections: 0, blocks: 0, recovered: 0, unverified: 0, unresolved: 0 };
+	/** Last retained state of each recovery, keyed by its digest id. */
+	const finalStates = new Map<string, AlignmentState>();
 	let latest: AlignmentState | null = null;
 	for (const event of events) {
 		if (event.kind === "block") {
@@ -828,11 +882,14 @@ export function reduceJournal(events: readonly AlignmentEvent[]): {
 		if (event.kind === "shutdown" && typeof event.recoveryId === "string") shutdownFor[event.recoveryId] = true;
 		if (event.kind === "correction") counts.corrections++;
 		if (!event.state) continue;
+		finalStates.set(event.state.recoveryId, event.state);
 		latest = event.state;
 	}
+	for (const state of finalStates.values()) {
+		if (state.status === "recovered") counts.recovered++;
+		if (state.status === "recovery_unverified") counts.unverified++;
+	}
 	if (latest) {
-		if (latest.status === "recovered") counts.recovered++;
-		if (latest.status === "recovery_unverified") counts.unverified++;
 		if (latest.step < 4) counts.unresolved = 1;
 	}
 	return { latest, retryCounts, shutdownFor, counts };

@@ -2135,9 +2135,13 @@ export function projectQualityTrialCohort(records, { limit = QUALITY_LIMITS.maxT
  * Keyless and offline: no network, no credentials, no timer process. The
  * only automatic invocation is the due-gated `session_start` refresh in
  * `lib/periodic.ts`. The store lives at `~/.gjc-plugin/rrsi/store.json`
- * (0700 dir, 0600 file) and is never committed.
+ * (0700 dir, 0600 file) and is never committed; dream policy receipts and
+ * periodic run receipts share `runs/v1/` with the same ownership/mode rules.
  */
 import os from "node:os";
+// Separate line on purpose: scripts/build.mjs de-duplicates identical builtin import
+// lines, so this statement matches lib/periodic.ts instead of redeclaring createHash.
+import { randomBytes } from "node:crypto";
 
 export const RRSI_STORE_SCHEMA = "gjc.rrsi.store.v1";
 
@@ -2230,6 +2234,24 @@ function boundedInteger(value, max = Number.MAX_SAFE_INTEGER, fallback = 0) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max ? value : fallback;
 }
 
+/**
+ * A bounded non-negative integer, or null when the source did not record it.
+ * Used for counts (files/hunks) where an absent field must stay unknown
+ * instead of collapsing to a fabricated 0.
+ */
+function optionalInteger(value, max = Number.MAX_SAFE_INTEGER) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= max ? value : null;
+}
+
+/** A bounded non-negative measured number (ms durations arrive as floats), or null. */
+function optionalNonNegative(value, max = Number.MAX_SAFE_INTEGER) {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max ? value : null;
+}
+
+function optionalNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 export function emptyStore(now = new Date().toISOString()) {
   return { schema: RRSI_STORE_SCHEMA, updatedAt: now, episodes: [] };
 }
@@ -2246,11 +2268,11 @@ export function normalizeAttempt(raw, index) {
     objective,
     hypothesisNovelty: raw?.hypothesisNovelty !== false,
     decision,
-    wallMs: boundedInteger(raw?.wallMs, 86_400_000),
+    wallMs: optionalNonNegative(raw?.wallMs, 86_400_000),
     guardFailures,
     budgetRung: boundedInteger(raw?.budgetRung, 16),
-    files: boundedInteger(raw?.files, 512),
-    hunks: boundedInteger(raw?.hunks, 4096),
+    files: optionalInteger(raw?.files, 512),
+    hunks: optionalInteger(raw?.hunks, 4096),
     ...(typeof raw?.provenance === "string" && raw.provenance.length > 0
       ? { provenance: raw.provenance.slice(0, RRSI_LIMITS.maxIdChars) }
       : {}),
@@ -2497,11 +2519,16 @@ function journalAdviceEntries(record) {
  * Journal record -> attempt projection (bounded, flattened for the replay core):
  *   advice entries = taskAdvice[] when present, else advice/assessment
  *   branch objective = "<operation>:<tier|status>" of the representative entry
- *     (the first real decision, else the first entry)
+ *     (the first real decision, else the first entry, else "unknown")
  *   hypothesisNovelty = first record of that branch in the read order
- *   priorFailures = count of earlier records of that branch whose advice was not a decision
- *   decision = "adopt" when the representative entry is a decision else "reject"
- *   wallMs = durationMs; provenance = the journal record id
+ *   decision = "adopt" when the representative entry is a decision, "reject"
+ *     when it is an explicit no-decision, and "inconclusive" when the record
+ *     carries no advice entry at all — an unknown outcome is never fabricated
+ *     as a success or a failure
+ *   wallMs = durationMs when the producer measured it, else null
+ *   files/hunks = null: the outcome journal carries no such measurement, so a
+ *     count is never fabricated as 0
+ *   provenance = the journal record id
  *
  * One object record is one attempt. Novelty is computed over the full read order,
  * then the newest `limit` attempts are retained. `scanned` counts inspected
@@ -2518,25 +2545,25 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
     scanned += 1;
     if (!record || typeof record !== "object" || Array.isArray(record)) continue;
     const entries = journalAdviceEntries(record);
-    const entry = entries.find((candidate) => candidate.status === "decision") ?? entries[0] ?? {};
-    const decision = entry.status === "decision";
+    const entry = entries.find((candidate) => candidate.status === "decision") ?? entries[0] ?? null;
     const operation = boundedText(record.operation, 40) || "unknown";
-    const status = boundedText(entry.status, 40) || "unknown";
-    const tier = boundedText(entry.tier, 16) || status;
+    const status = (entry && boundedText(entry.status, 40)) || "unknown";
+    const tier = (entry && boundedText(entry.tier, 16)) || status;
     const objective = `${operation}:${tier}`;
     const branch = seen.get(objective) ?? { records: 0, failures: 0 };
+    const decision = entry === null ? "inconclusive" : entry.status === "decision" ? "adopt" : "reject";
     all.push({
       objective,
       hypothesisNovelty: branch.records === 0,
-      decision: decision ? "adopt" : "reject",
-      wallMs: boundedInteger(record.durationMs, 86_400_000),
+      decision,
+      wallMs: optionalNonNegative(record.durationMs, 86_400_000),
       guardFailures: [],
       budgetRung: 0,
-      files: 0,
-      hunks: 0,
+      files: null,
+      hunks: null,
       provenance: boundedText(record.id, RRSI_LIMITS.maxIdChars),
     });
-    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (decision ? 0 : 1) });
+    seen.set(objective, { records: branch.records + 1, failures: branch.failures + (entry !== null && entry.status === "decision" ? 0 : 1) });
   }
   const attempts = all.slice(all.length - Math.min(all.length, bound)).map((attempt, index) => normalizeAttempt(attempt, index));
   const headOmitted = projectionCoverage(input, attempts).omitted;
@@ -2550,7 +2577,14 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
   };
 }
 
-/** Ledger cycle rows -> attempts (read-only summary of the repo search history). */
+/**
+ * Ledger cycle rows -> attempts (read-only summary of the repo search history).
+ * Only fields the ledger actually records are projected: objective/provenance
+ * from the row, decision from the recorded verdict (anything else stays
+ * "inconclusive"), wallMs from a measured `cost.wallMs`, files from the length
+ * of a recorded `proposal.files`, hunks from a recorded `proposal.hunks`. A
+ * field the row does not carry projects as null (unknown), never as 0.
+ */
 export function projectLedgerRows(rows, { limit = 4000 } = {}) {
   const attempts = [];
   for (const row of rows) {
@@ -2562,11 +2596,11 @@ export function projectLedgerRows(rows, { limit = 4000 } = {}) {
           objective: boundedText(row.objective, 120) || "unlabeled",
           hypothesisNovelty: true,
           decision: row.verdict?.decision === "adopt" ? "adopt" : row.verdict?.decision === "reject" ? "reject" : "inconclusive",
-          wallMs: boundedInteger(row.cost?.wallMs, 86_400_000),
+          wallMs: optionalNonNegative(row.cost?.wallMs, 86_400_000),
           guardFailures: Array.isArray(row.guards) ? row.guards.filter((guard) => guard.status !== "pass").map((guard) => guard.id) : [],
           budgetRung: boundedInteger(row.budgetRung, 16),
-          files: Array.isArray(row.proposal?.files) ? row.proposal.files.length : 0,
-          hunks: boundedInteger(row.proposal?.hunks, 4096),
+          files: Array.isArray(row.proposal?.files) ? row.proposal.files.length : null,
+          hunks: optionalInteger(row.proposal?.hunks, 4096),
           provenance: boundedText(row.cycleId, RRSI_LIMITS.maxIdChars),
         },
         attempts.length,
@@ -2789,7 +2823,12 @@ export function withStoreLock(env, fn) {
   return { ok: false, reason: "store_busy" };
 }
 
-/** Store attempts -> the replay corpus (epochs partition at adopted attempts). */
+/**
+ * Store attempts -> the replay corpus (epochs partition at adopted attempts).
+ * An unknown wallMs stays null; the replay core scores a null cost as 0 and a
+ * null hunks count as 0 — those coercions live in this projection only, the
+ * stored attempt keeps its unknown value.
+ */
 export function corpusFromStore(store) {
   const attempts = [];
   for (const episode of store?.episodes ?? []) {
@@ -2862,6 +2901,97 @@ export function summarizeReceipt(receipt) {
     receiptHash: receipt.receiptHash,
     ranking: receipt.rankings.slice(0, 8),
   };
+}
+
+// --- Dream policy receipt ---------------------------------------------------
+// The dream action returns a bounded summary to the caller. The top ranked
+// policy ids and their measured scores are also written as one private receipt
+// (0600 inside the plugin's own 0700 receipts directory) so a later session can
+// see what was measured without re-running the dream. The receipt holds ids and
+// numbers only: no goal, objective label, task text or credential can enter it.
+
+export const RRSI_DREAM_RECEIPT_SCHEMA = "gjc.rrsi.dream.receipt.v1";
+
+export const RRSI_DREAM_RECEIPT_LIMITS = Object.freeze({
+  topPolicies: 5,
+  maxBytes: 16 * 1024,
+});
+
+/** Measured score numbers of one policy slice; an unmeasured value stays null. */
+function policyScoreSummary(score) {
+  if (!score || typeof score !== "object") return null;
+  return {
+    attemptsToFirstAdoption: optionalNonNegative(score.attemptsToFirstAdoption, 100_000),
+    costMsToFirstAdoption: optionalNonNegative(score.costMsToFirstAdoption, 86_400_000),
+    adoptionReached: score.adoptionReached === true,
+    attemptsPlayed: optionalNonNegative(score.attemptsPlayed, 100_000),
+    value: optionalNumber(score.value),
+  };
+}
+
+/**
+ * Bounded private-receipt view of a dream receipt: the selected policy id plus
+ * the top `topPolicies` ranked ids with their measured train/validation scores.
+ */
+export function dreamPolicyReceipt(receipt, { now = new Date().toISOString(), topPolicies = RRSI_DREAM_RECEIPT_LIMITS.topPolicies } = {}) {
+  const candidates = new Map();
+  for (const candidate of Array.isArray(receipt?.candidates) ? receipt.candidates : []) {
+    if (candidate && typeof candidate.id === "string") candidates.set(candidate.id, candidate);
+  }
+  const top = [];
+  for (const id of Array.isArray(receipt?.rankings) ? receipt.rankings : []) {
+    if (top.length >= topPolicies) break;
+    const candidate = candidates.get(id);
+    if (!candidate) continue;
+    top.push({ policyId: id, validation: policyScoreSummary(candidate.validation), train: policyScoreSummary(candidate.train) });
+  }
+  const baseline = (key) => policyScoreSummary(receipt?.baselines?.[key]?.validation);
+  return {
+    schema: RRSI_DREAM_RECEIPT_SCHEMA,
+    createdAt: now,
+    seed: optionalInteger(receipt?.seed, 1_000_000),
+    receiptHash: typeof receipt?.receiptHash === "string" ? receipt.receiptHash.slice(0, 64) : null,
+    candidateCount: optionalInteger(receipt?.candidateCount, 1000),
+    selected: typeof receipt?.selected?.id === "string" ? receipt.selected.id.slice(0, 32) : null,
+    gate: {
+      ok: receipt?.gate?.ok === true,
+      reason: typeof receipt?.gate?.reason === "string" ? receipt.gate.reason.slice(0, 64) : null,
+    },
+    top,
+    baselines: { B0: baseline("B0"), B1: baseline("B1") },
+    verdict: typeof receipt?.verdict === "string" ? receipt.verdict.slice(0, 120) : null,
+  };
+}
+
+/**
+ * Write one private receipt (0600, temp + rename) into an existing receipts
+ * directory. The body is bounded before any write; an oversized or unsafe
+ * request is reported, never trimmed silently. Retention stays the caller's
+ * (`pruneReceipts` keeps the directory's retained-window bound).
+ */
+export function writeDreamReceipt({ dir, receipt, now = new Date().toISOString(), maxBytes = RRSI_DREAM_RECEIPT_LIMITS.maxBytes } = {}) {
+  if (!receipt || receipt.schema !== RRSI_DREAM_RECEIPT_SCHEMA) return { persisted: false, reason: "invalid_metadata", file: null, bytes: 0 };
+  if (typeof dir !== "string" || dir.length === 0) return { persisted: false, reason: "unsafe_path", file: null, bytes: 0 };
+  if (!privateDirSafe(dir, { create: true })) return { persisted: false, reason: "unsafe_path", file: null, bytes: 0 };
+  const body = `${JSON.stringify(receipt, null, 2)}\n`;
+  const bytes = Buffer.byteLength(body, "utf8");
+  if (bytes > maxBytes) return { persisted: false, reason: "resource_limit", file: null, bytes: 0 };
+  const compact = String(now).replace(/[^0-9]/g, "").slice(0, 14);
+  const file = path.join(dir, `${compact}-dr-${randomBytes(3).toString("hex")}.json`);
+  const temp = `${file}.tmp`;
+  try {
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temp, body, { mode: 0o600 });
+    fs.renameSync(temp, file);
+    return { persisted: true, reason: "stored", file, bytes };
+  } catch {
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best effort */
+    }
+    return { persisted: false, reason: "receipt_unavailable", file: null, bytes: 0 };
+  }
 }
 
 // --- Quality cohort ---------------------------------------------------------
@@ -2939,7 +3069,6 @@ export const RRSI_ACTION_LIST = Object.freeze([...RRSI_ACTIONS]);
  * larger corpora take the detached-worker path (plan A1b fallback).
  */
 import { fileURLToPath } from "node:url";
-import { randomBytes } from "node:crypto";
 import { spawn } from "node:child_process";
 
 export const RRSI_PERIODIC_SCHEMA = "gjc.rrsi.periodic.v1";
