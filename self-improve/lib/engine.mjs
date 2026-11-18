@@ -1013,10 +1013,12 @@ export async function runComposeCycle(input = {}) {
   const now = deps.now ?? (() => new Date().toISOString());
   const config = loadConfig();
   const effectiveMinDelta = minDelta ?? config.minDelta ?? 0.01;
-  const effectiveCostConfig = costConfig ?? {
+  const configCostDefaults = {
     wallMsBytesIncreaseRatio: config.cost?.wallMsBytesIncreaseRatio ?? 0.15,
     gainMultipleOfFloor: config.cost?.gainMultipleOfFloor ?? 2,
   };
+  // A caller may override one threshold; the rest keeps the repository's values.
+  const effectiveCostConfig = costConfig ? { ...configCostDefaults, ...costConfig } : configCostDefaults;
   const effectiveRetention = retention ?? config.retention?.rawCycles ?? 10;
   const effectiveStallK = stallK ?? config.stall?.k ?? 3;
 

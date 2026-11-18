@@ -220,6 +220,20 @@ test("compose CLI refuses invalid flags, counts and caller-supplied provenance b
     assert.match(oneCandidate.stderr, /count=1 \(2\.\.4\)/);
     assert.equal(JSON.parse(oneCandidate.stdout).status, "refused");
 
+    const badRatio = runCli([
+      "compose",
+      "--proposals",
+      writeManifest(root, composeRefusal(root, { candidates: [proposalA, proposalB] })),
+      "--repo",
+      repo,
+      "--json",
+      "--cost-ratio",
+      "0",
+    ]);
+    assert.equal(badRatio.status, 2);
+    assert.match(badRatio.stderr, /compose_cost_ratio_invalid/);
+    assert.equal(JSON.parse(badRatio.stdout).status, "refused");
+
     const fiveCandidates = runCli([
       "compose",
       "--proposals",
@@ -401,7 +415,7 @@ test("compose CLI probes each candidate and the composed patch through the real 
       hypothesis: "compose the two independent fixture candidates",
       candidates: ["a.json", "b.json"],
     });
-    const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json"], {
+    const proc = runCli(["compose", "--proposals", manifest, "--repo", repo, "--dry-run", "--json", "--cost-ratio", "1000"], {
       env: { ...process.env, PATH: `${tools.bin}:${process.env.PATH ?? ""}` },
     });
     const refusal = (() => {
