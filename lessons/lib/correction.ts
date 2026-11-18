@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { closeSync, fchmodSync, fstatSync, mkdirSync, openSync, readSync, readdirSync, statSync, writeSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { compoundRoot, expandHome } from "./root";
 
 export const CORRECTION_SCHEMA = "lessons-correction.v1";
 export const CORRECTION_TEXT_MAX_BYTES = 600;
@@ -269,12 +270,6 @@ export function correctionId(sessionId: string, correctionText: string): string 
 	return correctionKey(sessionId, correctionText).slice(0, STAGED_ID_CHARS);
 }
 
-function expandHome(value: string, home: string): string {
-	if (value === "~") return home;
-	if (value.startsWith("~/")) return path.join(home, value.slice(2));
-	return value;
-}
-
 /** `${GJC_PLUGIN_DATA:-~/.gjc/plugin-data}/lessons`. */
 export function dataRoot(deps: CorrectionDeps = {}): string {
 	if (deps.dataRoot !== undefined) return deps.dataRoot;
@@ -287,15 +282,6 @@ export function dataRoot(deps: CorrectionDeps = {}): string {
 
 export function correctionFile(deps: CorrectionDeps = {}): string {
 	return path.join(dataRoot(deps), "corrections.jsonl");
-}
-
-/** The personal-wiki checkout that owns `scripts/lessons.py`. */
-export function compoundRoot(deps: CorrectionDeps = {}): string {
-	const env = deps.env ?? process.env;
-	const home = deps.home ?? os.homedir();
-	const configured = typeof env.GJC_COMPOUND_ROOT === "string" ? env.GJC_COMPOUND_ROOT.trim() : "";
-	if (configured === "") return path.join(home, "jjongguet", "personal-wiki");
-	return expandHome(configured, home);
 }
 
 export function sessionsRoot(deps: CorrectionDeps = {}): string {

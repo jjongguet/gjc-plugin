@@ -1062,6 +1062,32 @@ await check("lessons_staged add-argv prints one exact, runnable ledger command a
 	assert.deepEqual(unknownId.json, { status: "error", reason: "unknown_correction_id" });
 });
 
+await check("one wiki-root chain: GJC_COMPOUND_ROOT, then GJC_LESSONS_WIKI, then the home default", async () => {
+	const wikiA = ledgerRoot("root-chain-a");
+	const wikiB = ledgerRoot("root-chain-b");
+	const data = dataAt("root-chain-data");
+	const viaWiki = await withEnv({ GJC_COMPOUND_ROOT: undefined, GJC_LESSONS_WIKI: wikiB, GJC_PLUGIN_DATA: data }, async () => ({
+		select: core.wikiRoot({ env: process.env, home }),
+		staged: await runStagedTool({}),
+	}));
+	assert.equal(viaWiki.select, wikiB, "lessons_select resolves GJC_LESSONS_WIKI");
+	assert.equal(viaWiki.staged.json.root, wikiB, "lessons_staged resolves the same checkout");
+	assert.equal(viaWiki.staged.json.status, "empty");
+	const both = await withEnv({ GJC_COMPOUND_ROOT: wikiA, GJC_LESSONS_WIKI: wikiB, GJC_PLUGIN_DATA: data }, async () => ({
+		select: core.wikiRoot({ env: process.env, home }),
+		staged: await runStagedTool({}),
+	}));
+	assert.equal(both.select, wikiA, "GJC_COMPOUND_ROOT wins over GJC_LESSONS_WIKI");
+	assert.equal(both.staged.json.root, wikiA, "both surfaces prefer the same name");
+	const wikiOnly = correction.stagedResult({ limit: 20, format: "json", id: null }, { env: { GJC_LESSONS_WIKI: wikiB }, home });
+	assert.equal(wikiOnly.status, "empty");
+	if (wikiOnly.status !== "ok" && wikiOnly.status !== "empty") throw new Error(`unexpected status ${wikiOnly.status}`);
+	assert.equal(wikiOnly.root, wikiB, "the staged core honors the same chain without an env override object");
+	assert.equal(core.wikiRoot({ env: { GJC_LESSONS_WIKI: "  " }, home }), path.join(home, "jjongguet", "personal-wiki"));
+	assert.equal(core.wikiRoot({ env: { GJC_COMPOUND_ROOT: "~/wiki" }, home }), path.join(home, "wiki"), "~ expands for both names");
+	assert.equal(core.wikiRoot({ env: {}, home }), path.join(home, "jjongguet", "personal-wiki"));
+});
+
 rmSync(root, { recursive: true, force: true });
 if (failures > 0) {
 	console.error(`lessons verify: ${failures}/${cases} failed`);

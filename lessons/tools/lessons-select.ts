@@ -2,6 +2,42 @@
 // Adapter: src/select.adapter.ts
 // Rebuild with: bun lessons/scripts/build.mjs
 
+// One wiki-root resolution for every lessons surface.
+//
+// `GJC_COMPOUND_ROOT` wins over `GJC_LESSONS_WIKI`, which wins over the owner's
+// personal-wiki checkout under the home directory. Both names are accepted in
+// one chain so `lessons_select` and `lessons_staged` can never disagree about
+// which checkout they mean; an empty or blank value falls through, and `~`
+// expands against the same home the daemon used.
+import os from "node:os";
+import path from "node:path";
+
+export const COMPOUND_ROOT_ENV = "GJC_COMPOUND_ROOT";
+export const LESSONS_WIKI_ENV = "GJC_LESSONS_WIKI";
+
+export type RootDeps = { env?: Record<string, string | undefined>; home?: string };
+
+function configuredRoot(value: unknown): string | null {
+	if (typeof value !== "string") return null;
+	const trimmed = value.trim();
+	return trimmed === "" ? null : trimmed;
+}
+
+export function expandHome(value: string, home: string): string {
+	if (value === "~") return home;
+	if (value.startsWith("~/")) return path.join(home, value.slice(2));
+	return value;
+}
+
+/** The wiki root: `GJC_COMPOUND_ROOT` → `GJC_LESSONS_WIKI` → `$HOME/jjongguet/personal-wiki`. */
+export function compoundRoot(deps: RootDeps = {}): string {
+	const env = deps.env ?? process.env;
+	const home = deps.home ?? os.homedir();
+	const configured = configuredRoot(env[COMPOUND_ROOT_ENV]) ?? configuredRoot(env[LESSONS_WIKI_ENV]);
+	if (configured === null) return path.join(home, "jjongguet", "personal-wiki");
+	return expandHome(configured, home);
+}
+
 // Core selector for the personal-wiki lesson ledger.
 //
 // One bounded, read-only call into the ledger CLI: an argv array (never a shell),
@@ -12,8 +48,6 @@
 // file, reads a credential or prints child stderr.
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
-import os from "node:os";
-import path from "node:path";
 
 export const DEFAULT_LIMIT = 6;
 export const MIN_LIMIT = 1;
@@ -158,17 +192,12 @@ export function normalizeToolInput(input: unknown):
 }
 
 /**
- * The wiki root: `GJC_LESSONS_WIKI` when set, otherwise the owner's personal
- * wiki checkout under the home directory.
+ * The wiki root, from the one chain every lessons surface shares
+ * (`lib/root.ts`): `GJC_COMPOUND_ROOT`, then `GJC_LESSONS_WIKI`, then the
+ * owner's personal-wiki checkout under the home directory.
  */
 export function wikiRoot(deps: SelectDeps = {}): string {
-	const env = deps.env ?? process.env;
-	const home = deps.home ?? os.homedir();
-	const configured = typeof env.GJC_LESSONS_WIKI === "string" ? env.GJC_LESSONS_WIKI.trim() : "";
-	if (configured === "") return path.join(home, "jjongguet", "personal-wiki");
-	if (configured === "~") return home;
-	if (configured.startsWith("~/")) return path.join(home, configured.slice(2));
-	return configured;
+	return compoundRoot(deps);
 }
 
 // Only these four variables reach the child: the ledger CLI needs an

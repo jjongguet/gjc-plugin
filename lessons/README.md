@@ -8,7 +8,15 @@ Bounded selection from the owner's personal-wiki lesson ledger, plus local stagi
 gjc plugin install ./lessons --user
 ```
 
-Requires a personal-wiki checkout with `scripts/lessons.py` and `python3` on `PATH`. The wiki root is `GJC_LESSONS_WIKI` when set, otherwise `$HOME/jjongguet/personal-wiki`. Tools and hooks load at session start; verify in a fresh GJC process after install or upgrade.
+Requires a personal-wiki checkout with `scripts/lessons.py` and `python3` on `PATH`. Tools and hooks load at session start; verify in a fresh GJC process after install or upgrade.
+
+The wiki root is **one chain for every surface** (`lessons/lib/root.ts`):
+
+1. `GJC_COMPOUND_ROOT`
+2. `GJC_LESSONS_WIKI`
+3. `$HOME/jjongguet/personal-wiki`
+
+An empty or blank value falls through to the next name, `~` expands against the same home, and `lessons_select` and `lessons_staged` therefore always resolve the same checkout — there is no separate variable per tool.
 
 ## Usage
 
@@ -76,7 +84,7 @@ python3 <root>/scripts/lessons.py --root <root> add --id L-corr-<id16> --trigger
 
 `--id` and `--repo` are part of the printed line because `scripts/lessons.py add` requires both (`--scope project` needs at least one repo); a line without them would exit 1. Values are POSIX single-quote escaped. Review the trigger and action before running it — the printed line is a proposal for the owner or a later session, not an automatic promotion.
 
-The wiki root is `GJC_COMPOUND_ROOT` when set, otherwise `$HOME/jjongguet/personal-wiki`; a missing checkout or a missing `scripts/lessons.py` is `{"status":"unavailable","reason":"wiki_root_missing"|"script_missing"}`. An unknown `id` is `{"status":"error","reason":"unknown_correction_id"}`.
+The wiki root is the same chain `lessons_select` uses (`GJC_COMPOUND_ROOT` → `GJC_LESSONS_WIKI` → `$HOME/jjongguet/personal-wiki`), so the printed line always points at the checkout the selection tool reads; a missing checkout or a missing `scripts/lessons.py` is `{"status":"unavailable","reason":"wiki_root_missing"|"script_missing"}`. An unknown `id` is `{"status":"error","reason":"unknown_correction_id"}`.
 
 ## Boundaries
 
@@ -90,4 +98,4 @@ bun lessons/scripts/verify.ts
 bun lessons/scripts/build.mjs --check
 ```
 
-The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. For correction staging it covers the Korean and English cues, an ordinary message that is not a correction, the last-user-message rule, credential redaction with a concatenated fixture, the PEM refusal, 600-byte clipping on a character boundary, transcript selection inside the mtime window, the 0600 append and replay dedupe, the no-transcript no-op, the 1500 ms bound, and both `lessons_staged` shapes including the printed line executed against an argv-recording shim. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.
+The verifier uses hermetic synthetic roots: a temp wiki directory plus an interpreter shim that records its argv and environment, so it never reads the owner's real wiki and never needs Python. It covers `ok`, `empty` and all three `unavailable` reasons, limit/byte clamping, the oversize and stdout caps, the timeout kill, invalid JSON, a non-zero exit without stderr passthrough, malformed lesson shapes, default `PATH` resolution with the four-variable environment, shell metacharacters in `repo`, and the hook's silent and one-line paths. For correction staging it covers the Korean and English cues, an ordinary message that is not a correction, the last-user-message rule, credential redaction with a concatenated fixture, the PEM refusal, 600-byte clipping on a character boundary, transcript selection inside the mtime window, the 0600 append and replay dedupe, the no-transcript no-op, the 1500 ms bound, both `lessons_staged` shapes including the printed line executed against an argv-recording shim, and the one wiki-root chain (`GJC_COMPOUND_ROOT` → `GJC_LESSONS_WIKI` → home default) resolving identically for `lessons_select` and `lessons_staged`. It does not prove the real ledger CLI's ranking or the installed-runtime hook; verify those with a real wiki root in a fresh session.

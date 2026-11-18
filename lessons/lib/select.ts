@@ -8,8 +8,8 @@
 // file, reads a credential or prints child stderr.
 import { spawn } from "node:child_process";
 import { statSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
+import { compoundRoot } from "./root";
 
 export const DEFAULT_LIMIT = 6;
 export const MIN_LIMIT = 1;
@@ -154,17 +154,12 @@ export function normalizeToolInput(input: unknown):
 }
 
 /**
- * The wiki root: `GJC_LESSONS_WIKI` when set, otherwise the owner's personal
- * wiki checkout under the home directory.
+ * The wiki root, from the one chain every lessons surface shares
+ * (`lib/root.ts`): `GJC_COMPOUND_ROOT`, then `GJC_LESSONS_WIKI`, then the
+ * owner's personal-wiki checkout under the home directory.
  */
 export function wikiRoot(deps: SelectDeps = {}): string {
-	const env = deps.env ?? process.env;
-	const home = deps.home ?? os.homedir();
-	const configured = typeof env.GJC_LESSONS_WIKI === "string" ? env.GJC_LESSONS_WIKI.trim() : "";
-	if (configured === "") return path.join(home, "jjongguet", "personal-wiki");
-	if (configured === "~") return home;
-	if (configured.startsWith("~/")) return path.join(home, configured.slice(2));
-	return configured;
+	return compoundRoot(deps);
 }
 
 // Only these four variables reach the child: the ledger CLI needs an
