@@ -18,6 +18,8 @@ export type MemoryResult = {
 	trust: "untrusted_historical_data"; accountBinding: Binding; retrievedAt: string | null;
 	counts: { matches: number | null; returned: number; withheld: number | null; duplicates: number | null };
 	briefing: Source[]; diagnosticStage: Stage; warnings: string[];
+	// Present only for the evidence-based `signed_out` result; every other result omits it.
+	guidance?: string[];
 };
 type Dependencies = { spawn?: typeof spawn; env?: NodeJS.ProcessEnv; now?: () => number; date?: () => Date };
 type ChildResult = { reason?: string; stdout?: string; cleanupUnconfirmed?: boolean };
@@ -48,6 +50,23 @@ function validRowShape(row: Record<string, unknown>): boolean {
 		ROW_KEYS.every(key => Object.hasOwn(row, key)) &&
 		(keys.length !== ROW_KEYS_WITH_DATE.length || typeof row.date === "string") &&
 		keys.every(key => ROW_KEYS_WITH_DATE.includes(key));
+}
+
+// Auth evidence is only the CLI's own `aside account list` table, never memory excerpts,
+// stderr or any other text. The observed layout is `* u0  <label>  signed out  profiles: ...`
+// with two-space column gaps and indented `field: value` continuation lines; the status is
+// the second column. Unknown, ambiguous (duplicate id) or absent entries stay unknown.
+const ACCOUNT_ENTRY = /^ {0,2}(?:\* )?u(0|[1-9][0-9]{0,9}) {2,}(\S.*)$/;
+const SIGNED_OUT = "signed out";
+function accountStatuses(stdout: string): Map<string, string> | null {
+	const statuses = new Map<string, string>();
+	for (const raw of stdout.split("\n")) {
+		const entry = ACCOUNT_ENTRY.exec(raw.replace(/\r$/, ""));
+		if (!entry) continue;
+		if (statuses.has(entry[1])) return null;
+		statuses.set(entry[1], (entry[2].split(/ {2,}/)[1] ?? "").replace(/\s+/g, " ").trim());
+	}
+	return statuses.size ? statuses : null;
 }
 
 // Finite whole-block screening, not a guarantee against obfuscated secrets or instructions.
@@ -222,13 +241,32 @@ export async function asideMemory(input: unknown, dependencies: Dependencies = {
 	}
 	const now = dependencies.now ?? (() => performance.now());
 	const start = now();
+	// Only a memory call that exits nonzero is investigated, and only the CLI's own account
+	// table can explain it. Anything else (failed, absent, ambiguous or unparsable probe,
+	// another account's status, a signed-in account) keeps the original cli_nonzero error.
+	const memoryFailure = async (reason: string, stage: Stage, cleanup = false) => {
+		if (reason !== "cli_nonzero") return fail(reason, stage, cleanup);
+		const remaining = 30000 - (now() - start);
+		if (remaining <= 0) return fail(reason, stage, cleanup);
+		const probe = await memoryChild(["account", "list"], 16384, Math.min(2000, remaining), dependencies);
+		const statuses = probe.reason ? null : accountStatuses(probe.stdout!);
+		const uncertain = cleanup || !!probe.cleanupUnconfirmed;
+		if (statuses?.get(account.replace(/^u/, "")) !== SIGNED_OUT) return fail(reason, stage, uncertain);
+		const result = envelope("unavailable", "signed_out", stage, binding);
+		result.guidance = [
+			"The CLI reports this account as signed out. Run `aside login` in a terminal, confirm the same account in `aside account list`, then retry this query.",
+			"No automatic sign-in, account switch or default-account fallback was attempted, and no credentials were read.",
+		];
+		if (uncertain) result.warnings.push("cli_cleanup_unconfirmed");
+		return result;
+	};
 	const rootResult = await memoryChild(["--account", account, "memory", "path"], 8192, 5000, dependencies);
-	if (rootResult.reason) return fail(rootResult.reason === "invalid_utf8" ? "invalid_root" : rootResult.reason, "root", rootResult.cleanupUnconfirmed);
+	if (rootResult.reason) return memoryFailure(rootResult.reason === "invalid_utf8" ? "invalid_root" : rootResult.reason, "root", rootResult.cleanupUnconfirmed);
 	const root = rootPath(rootResult.stdout!);
 	if (!root) return fail("invalid_root", "root");
 	const remaining = 30000 - (now() - start);
 	if (remaining <= 0) return fail("timeout", "search");
 	const searchResult = await memoryChild(["--account", account, "memory", "search", "--max-results", String(limit), "--json", query], 65536, Math.min(25000, remaining), dependencies);
-	if (searchResult.reason) return fail(searchResult.reason === "invalid_utf8" ? "invalid_json" : searchResult.reason, "search", searchResult.cleanupUnconfirmed);
+	if (searchResult.reason) return memoryFailure(searchResult.reason === "invalid_utf8" ? "invalid_json" : searchResult.reason, "search", searchResult.cleanupUnconfirmed);
 	return memoryBriefing(searchResult.stdout!, root, limit as number, binding, dependencies.date);
 }
