@@ -547,6 +547,11 @@ export async function runLoop(input) {
         });
         const outcomes = new Map();
         for (const { index, request } of requests) {
+          // A fan-out of candidate proposals must not start after the wall-clock deadline.
+          if (nowMs() >= deadline) {
+            stoppedReason = "max_wall_ms";
+            break;
+          }
           state.counters.proposerCalls += 1;
           writeJson(path.join(loopRoot, `cycle-${request.cycleIndex}.request.json`), request);
           const outcome = proposer === "stub"

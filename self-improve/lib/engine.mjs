@@ -1174,6 +1174,7 @@ export async function runComposeCycle(input = {}) {
     });
     const baselineWallMs = Date.now() - baselineStarted;
     const baselineBytes = treeBytes(baseline.scratchDir);
+ probedBytes += baselineBytes;
     const baselineVerified = treeFingerprint(baseline.scratchDir);
     baselineFingerprint = baselineVerified;
     if (baselineGuards.some((guard) => guard.status !== "pass")) {
@@ -1314,6 +1315,9 @@ export async function runComposeCycle(input = {}) {
         excluded,
         at: now(),
       });
+      // An abstention completes a run directory without entering runCycle, which
+      // owns the only other prune calls: retention must still apply here.
+      if (!dryRun) pruneRuns({ runRoot, keep: effectiveRetention });
       writeEvidence({ status: outcome.status, reasons: outcome.reasons, excluded });
       return outcome;
     }
