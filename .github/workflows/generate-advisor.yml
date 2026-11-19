@@ -20,7 +20,9 @@ jobs:
       github.ref == 'refs/heads/main' &&
       github.workflow_ref == 'jjongguet/gjc-plugin/.github/workflows/generate-advisor.yml@refs/heads/main' &&
       github.actor == 'jjongguet' && github.triggering_actor == 'jjongguet'
-    runs-on: arc-ci-arm64
+    # bun 1.4.0·git만 쓰는 arch 무관 잡 — 배치 기본 arc-ci(amd64)(JJO-2620: 맥미니 load 21.6/12코어·lima VM 894% CPU, 2026-11-19).
+    # 선행조건: infra #750이 main·live에 반영돼 repos.yaml types에 test가 있어야 이 라벨이 잡힌다 — 그 전에는 잡이 큐에 남는다(JJO-2620).
+    runs-on: arc-ci
     timeout-minutes: 10
     env:
       SOURCE_SHA: ${{ inputs.source_sha }}
