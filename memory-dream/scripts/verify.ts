@@ -290,11 +290,43 @@ try {
 			now: new Date("2026-11-11T00:00:00Z"),
 		});
 		assert.ok(result.report.counts.noDecision >= 1);
+		assert.equal(result.report.keyless, true, "a run with no credential reports keyless: true");
 		assert.equal(result.report.counts.sentToJev, 0);
 		assert.equal(result.report.counts.jevCallsSkippedByCap, 0);
+		assert.equal(result.report.claims[0].reason, "keyless", "the claim records that the advisory model was skipped for lack of a key");
 		assert.equal(result.report.claims[0].jev?.status, "no_decision");
 		if (result.report.claims[0].jev?.status === "no_decision") assert.equal(result.report.claims[0].jev.reason, "unconfigured");
 		assert.equal(calls, 0);
+	});
+
+	await check("a configured key takes the advisory path and reports keyless: false", async () => {
+		const keyedMemory = path.join(agentDir, "memories", "--keyed--");
+		write(path.join(keyedMemory, "memory_summary.md"), "- Linear 429 responses are quota exhaustion; switch to the fallback lane immediately.\n");
+		const keyedProject = path.join(root, "keyed-project");
+		write(path.join(keyedProject, "rules", "linear-work.md"), "# Linear work\n- Linear 429 responses are quota exhaustion; switch to the fallback lane immediately.\n");
+		let calls = 0;
+		const result = await core.runDream({
+			cwd: keyedProject,
+			home,
+			agentDir,
+			memoryDir: keyedMemory,
+			projectRoot: keyedProject,
+			env: { OPENROUTER_DECISION_API_KEY: "fixture-key" },
+			envFile: path.join(root, "missing.env"),
+			resultsRoot,
+			writeReports: false,
+			jev: true,
+			fetchImpl: async () => {
+				calls++;
+				return new Response(JSON.stringify({ answers: { consistency: { choice: "correct", confidence: 0.9 } } }), { status: 200 });
+			},
+			now: new Date("2026-11-11T00:00:00Z"),
+		});
+		assert.equal(result.report.keyless, false, "a configured key is never reported as keyless");
+		assert.equal(calls, 1, "the advisory model is called once for the single evidence-bearing claim");
+		assert.equal(result.report.counts.sentToJev, 1);
+		assert.equal(result.report.claims[0].basis, "jev");
+		assert.equal(result.report.claims[0].verdict, "supported");
 	});
 
 	await check("provider off, env-file key precedence and no network call", async () => {
@@ -481,12 +513,14 @@ try {
 			const text = result.content[0].text;
 			assert.match(text, /^memory_dream: ok/);
 			assert.match(text, /no-decision=\d+/);
+			assert.match(text, /keyless=yes sent_to_jev=0/);
 			assert.match(text, /jev_reason=disabled/);
 			assert.match(text, /memory_unchanged=yes/);
 			assert.match(text, /report=/);
 			assert.match(text, /limited: advisory report/);
 			const optedIn = await tool.execute("call-opt-in", { memory_dir: toolMemory, project_root: project, jev: true });
 			assert.notEqual(optedIn.isError, true);
+			assert.match(optedIn.content[0].text, /keyless=yes/);
 			assert.match(optedIn.content[0].text, /jev_reason=unconfigured/);
 			assert.match(optedIn.content[0].text, /sent_to_jev=0/);
 			assert.equal(providerCalls, 0, "the keyless tool run never attempts a provider call");

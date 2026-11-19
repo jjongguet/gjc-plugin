@@ -174,6 +174,7 @@ function runReport(options) {
         `rows=${counts.total} cycles=${counts.byKind.cycle} adoptions=${counts.byKind.adoption}\n` +
         `verdicts: adopt=${counts.byVerdict.adopt} reject=${counts.byVerdict.reject} inconclusive=${counts.byVerdict.inconclusive}\n` +
         `cost: wallMs=${counts.cost.wallMsMeasured}/${counts.cost.cycleRows} bytes=${counts.cost.bytesMeasured}/${counts.cost.cycleRows} tokens=${counts.cost.tokensMeasured} measured/${counts.cost.tokensNull} null\n` +
+        `retry: blocked=${counts.retry.blockedObjectives} retriedAfterBlock=${counts.retry.retriedAfterBlock} retryRows=${counts.retry.retryRows} (stallK=${counts.retry.stallK})\n` +
         `chain: ${counts.chain.ok ? "ok" : "broken"} (${counts.chain.count} rows)\n`,
     );
   }

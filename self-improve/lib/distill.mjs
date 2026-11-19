@@ -118,7 +118,17 @@ export function flattenAttempts(store) {
         budgetRung: boundedInteger(row.budgetRung, 0),
         hypothesisNovelty: row.hypothesisNovelty !== false,
         wallMs: boundedInteger(row.wallMs, 0),
-        files: boundedInteger(row.files, 0),
+        // JJO-2360: the recorded file count is kept in `fileCount` (the stored
+        // `files` field is now the changed-path list). Legacy numeric `files`
+        // rows and hand-written stores still project their count.
+        files: boundedInteger(
+          row.fileCount !== undefined && row.fileCount !== null
+            ? row.fileCount
+            : Array.isArray(row.files)
+              ? row.files.length
+              : row.files,
+          0,
+        ),
         hunks: boundedInteger(row.hunks, 0),
         provenance: typeof row.provenance === "string" ? row.provenance.slice(0, 64) : null,
       });

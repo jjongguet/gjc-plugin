@@ -71,6 +71,30 @@ test("ledgerCounts aggregates verdicts and kinds", () => {
   assert.equal(counts.chain.ok, true);
 });
 
+test("blocked-then-retried objectives are counted from recorded reject streaks", () => {
+  const file = tempLedgerPath();
+  const reject = { decision: "reject", reasons: ["floor_not_met"] };
+  // probe.a: blocked on the third consecutive reject (stallK=3), then retried twice.
+  appendRow(file, cycleRow({ cycleId: "c-001", objective: "probe.a", verdict: reject }));
+  appendRow(file, cycleRow({ cycleId: "c-002", objective: "probe.b", verdict: reject }));
+  appendRow(file, cycleRow({ cycleId: "c-003", objective: "probe.a", verdict: reject }));
+  appendRow(file, cycleRow({ cycleId: "c-004", objective: "probe.a", verdict: reject }));
+  appendRow(file, cycleRow({ cycleId: "c-005", objective: "probe.a", verdict: reject }));
+  appendRow(file, cycleRow({ cycleId: "c-006", objective: "probe.a" }));
+  // probe.b never reaches the threshold, so its later reject is not a retry after a block.
+  appendRow(file, cycleRow({ cycleId: "c-007", objective: "probe.b", verdict: reject }));
+  const counts = ledgerCounts(file);
+  assert.deepEqual(counts.retry, { stallK: 3, blockedObjectives: 1, retriedAfterBlock: 1, retryRows: 2 });
+  assert.equal(ledgerCounts(file, { stallK: 2 }).retry.blockedObjectives, 2);
+  assert.equal(ledgerCounts(file, { stallK: 2 }).retry.retryRows, 3);
+  assert.deepEqual(ledgerCounts(tempLedgerPath()).retry, {
+    stallK: 3,
+    blockedObjectives: 0,
+    retriedAfterBlock: 0,
+    retryRows: 0,
+  });
+});
+
 test("duplicate cycleId is rejected (crash recovery guard)", () => {
   const file = tempLedgerPath();
   appendRow(file, cycleRow());

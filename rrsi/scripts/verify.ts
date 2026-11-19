@@ -108,7 +108,7 @@ async function runSuite(root) {
 	await check("status on an empty store reports missing storage without creating one", async () => {
 		const status = await call({ action: "status" });
 		assert.equal(status.storageStatus, "missing");
-		assert.deepEqual(status.counts, { episodes: 0, attempts: 0, adoptions: 0 });
+		assert.deepEqual(status.counts, { episodes: 0, attempts: 0, adoptions: 0, wallMsUnknown: 0, fileCountUnknown: 0 });
 		assert.equal(existsSync(storeFile), false);
 		assert.equal(status.journalStorage.persisted, true);
 	});
@@ -116,7 +116,7 @@ async function runSuite(root) {
 	await check("capture stores one bounded episode with 0700/0600 privacy and journals the outcome", async () => {
 		const captured = await call({ action: "capture", goal: "verify goal", attempts: JSON.stringify([{ objective: "verify:fast", decision: "adopt", wallMs: 10 }, { objective: "verify:strong", decision: "reject", wallMs: 20 }]) });
 		assert.equal(captured.episode.attempts, 2);
-		assert.deepEqual(captured.counts, { episodes: 1, attempts: 2, adoptions: 1 });
+		assert.deepEqual(captured.counts, { episodes: 1, attempts: 2, adoptions: 1, wallMsUnknown: 0, fileCountUnknown: 2 });
 		assert.equal(captured.wrote.persisted, true);
 		assert.equal(captured.journalStorage.persisted, true);
 		assert.equal(statSync(storeDir).mode & 0o7777, 0o700);
@@ -124,14 +124,15 @@ async function runSuite(root) {
 		assert.equal(statSync(storeFile).nlink, 1);
 	});
 
-	await check("capture clamps attempts, coerces unknown decisions and truncates labels", async () => {
-		// wallMs boundary: an invalid negative, an absent field, a measured 0 and a measured value.
-		// The stored attempt keeps null for the first two (README: "a measured 0 and an unmeasured
-		// value are different facts"), so capture never fabricates the 0 the old assertion expected.
+	await check("capture clamps attempts, coerces unknown decisions, rounds durations and truncates labels", async () => {
+		// wallMs boundary: an invalid negative, an absent field, a measured 0 and a fractional
+		// measurement. The stored attempt keeps null for the first two (README: "a measured 0 and
+		// an unmeasured value are different facts") and stores a measured duration as a whole
+		// millisecond integer (JJO-2360), so capture never fabricates a 0 or a fraction.
 		const attempts = Array.from({ length: 200 }, (_, index) => ({
 			objective: `x`.repeat(400) + index,
 			decision: "exploded",
-			wallMs: index % 4 === 0 ? -5 : index % 4 === 1 ? undefined : index % 4 === 2 ? 0 : 42,
+			wallMs: index % 4 === 0 ? -5 : index % 4 === 1 ? undefined : index % 4 === 2 ? 0 : 42.6,
 		}));
 		const captured = await call({ action: "capture", goal: "y".repeat(500), attempts: JSON.stringify(attempts) });
 		assert.equal(captured.episode.attempts, 160, "attempts per episode are capped at 160");
@@ -141,10 +142,21 @@ async function runSuite(root) {
 		assert.equal(episode.attempts[0].decision, "inconclusive");
 		assert.deepEqual(
 			episode.attempts.slice(0, 4).map((attempt) => attempt.wallMs),
-			[null, null, 0, 42],
-			"an invalid or absent duration stays unknown (null); a measured 0 and a measured value are kept",
+			[null, null, 0, 43],
+			"an invalid or absent duration stays unknown (null); a measured 0 and a rounded measured value are kept",
 		);
-		assert.deepEqual([episode.attempts[0].files, episode.attempts[0].hunks], [null, null], "an unrecorded count stays unknown, never 0");
+		assert.deepEqual(
+			[episode.attempts[0].files, episode.attempts[0].fileCount, episode.attempts[0].hunks],
+			[[], null, null],
+			"files is always an array; an unrecorded count stays unknown, never 0",
+		);
+		assert.deepEqual(
+			episode.attempts.map((attempt) => attempt.outcome),
+			episode.attempts.map((attempt) => attempt.decision),
+			"every stored attempt carries an outcome equal to its recorded decision",
+		);
+		assert.equal(typeof episode.attempts[3].wallMs, "number");
+		assert.equal(Number.isInteger(episode.attempts[3].wallMs), true, "a measured duration is stored as an integer");
 		assert.equal(episode.goal.length, 200);
 		assert.equal(episode.attempts[0].objective.length, 120);
 	});
@@ -194,7 +206,9 @@ async function runSuite(root) {
 		const projected = projectJournalRecords(records);
 		assert.deepEqual(projected.attempts.map((attempt) => attempt.decision), ["adopt", "reject", "inconclusive", "adopt"], "an advice-less record has an unknown outcome, not a fabricated failure");
 		assert.deepEqual(projected.attempts.map((attempt) => attempt.wallMs), [412, null, null, 900], "a measured duration is kept; a missing one is unknown, never 0");
-		assert.deepEqual(projected.attempts.map((attempt) => attempt.files), [null, null, null, null], "the outcome journal records no file count");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.outcome), ["adopt", "reject", "inconclusive", "adopt"], "every attempt carries an explicit outcome");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.files), [[], [], [], []], "the outcome journal records no changed-path list, so the array stays empty");
+		assert.deepEqual(projected.attempts.map((attempt) => attempt.fileCount), [null, null, null, null], "the outcome journal records no file count");
 		assert.deepEqual(projected.attempts.map((attempt) => attempt.hunks), [null, null, null, null], "the outcome journal records no hunk count");
 		assert.deepEqual(projected.attempts.map((attempt) => attempt.objective), ["advise:balanced", "advise:strong", "check:unknown", "task_advice:balanced"]);
 		assert.deepEqual(projected.attempts.map((attempt) => attempt.provenance), records.map((record) => record.id), "the journal record id is preserved");
@@ -212,7 +226,8 @@ async function runSuite(root) {
 		assert.equal(attempts.length, 3, "non-cycle rows are not attempts");
 		assert.deepEqual(attempts.map((attempt) => attempt.decision), ["adopt", "inconclusive", "reject"]);
 		assert.deepEqual(attempts.map((attempt) => attempt.wallMs), [2500, null, null], "a measured wallMs is kept; a missing one is unknown, never 0");
-		assert.deepEqual(attempts.map((attempt) => attempt.files), [2, null, 0], "a recorded file list counts; a missing proposal is unknown; an empty list is a measured 0");
+		assert.deepEqual(attempts.map((attempt) => attempt.files), [["a.ts", "b.ts"], [], []], "a recorded changed-path list is preserved; a missing or empty proposal yields no paths");
+		assert.deepEqual(attempts.map((attempt) => attempt.fileCount), [2, null, 0], "a recorded file list counts; a missing proposal is unknown; an empty list is a measured 0");
 		assert.deepEqual(attempts.map((attempt) => attempt.hunks), [3, null, 0]);
 		assert.deepEqual(attempts.map((attempt) => attempt.provenance), ["c-measured", "c-missing", "c-unmeasured"]);
 		assert.deepEqual(attempts[1].guardFailures, ["critic"]);
@@ -271,7 +286,8 @@ async function runSuite(root) {
 		assert.equal(projected.length, 3);
 		assert.deepEqual(projected.map((attempt) => attempt.decision), ["adopt", "reject", "inconclusive"]);
 		assert.deepEqual(projected.map((attempt) => attempt.wallMs), [640, null, null], "a positive wallMs is preserved; a missing one is stored as null");
-		assert.deepEqual(projected.map((attempt) => attempt.files), [null, null, null]);
+		assert.deepEqual(projected.map((attempt) => attempt.files), [[], [], []], "the journal carries no changed-path list");
+		assert.deepEqual(projected.map((attempt) => attempt.fileCount), [null, null, null]);
 		assert.deepEqual(projected.map((attempt) => attempt.hunks), [null, null, null]);
 	});
 
