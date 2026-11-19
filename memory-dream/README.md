@@ -64,7 +64,7 @@ Output summary:
 ```text
 memory_dream: ok
 claims=50 supported=0 contradicted=0 unverified=13 no-decision=37
-sent_to_jev=0 jev=typesafe/jev-1.14 jev_reason=unconfigured prompt=memory-dream/jev-consistency/v1
+keyless=yes sent_to_jev=0 jev=typesafe/jev-1.14 jev_reason=unconfigured prompt=memory-dream/jev-consistency/v1
 memory_unchanged=yes
 report=/…/.gjc-plugin/memory-dream/reports/<id>/report.json
 latest=/…/.gjc-plugin/memory-dream/latest.json

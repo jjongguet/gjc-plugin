@@ -22,7 +22,7 @@ periodic refresh described below.
 
 | Action | Parameter | What it does |
 | --- | --- | --- |
-| `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `hunks`; an absent `wallMs`/`files`/`hunks` is stored as `null`, never 0). Serialized by the shared store lock. |
+| `capture` | `goal`, `attempts` (JSON array string) | Stores one bounded episode: goal plus attempts with features/outcome (`objective`, `hypothesisNovelty`, `decision`, `outcome`, `wallMs`, `guardFailures`, `budgetRung`, `files`, `fileCount`, `hunks`; `files` is a changed-path array and `fileCount` its count — a legacy numeric `files` is still accepted as the count; an absent `outcome`/`wallMs`/`fileCount`/`hunks` is stored as `null`, never 0). Serialized by the shared store lock. |
 | `import` | `ledgerPath?`, `limit?` | Read-only projection of the jev-advisor journal (`~/.gjc-plugin/jev-advisor/journal/v1/*.jsonl`) and, when a path is given, of a `self-improve/ledger.jsonl`. One slot per source class: the derived episode set is replaced as a whole (`ep-jev-<digest12>-<n>` / `ep-ledger-<digest12>-<n>`); byte-identical content skips the write. The response carries `storeWrite` (`added` / `replaced` / `unchanged`), `projectionDigest` and `projection` (`records` / `projected` / `omitted` / `ratio` / `limited`), and `wrote: { persisted:false, reason:"store_busy" }` when the store lock is contended. Sources are never modified; malformed lines are skipped, never repaired. |
 | `dream` | `seed?` | Runs the bundled deterministic replay/dreaming core over the store: 40 candidate policies ranked on the train slice, thresholds evaluated on the validation slice, plus the pinned no-significance caveat. Each call also writes one bounded private policy receipt (`runs/v1/<timestamp>-dr-<hex>.json`, schema `gjc.rrsi.dream.receipt.v1`, 0600): the selected id, the top five ranked policy ids with their measured train/validation scores, the gate, the baseline validation scores and the dream receipt hash — ids and numbers only, never goals, objectives or task text. The tool response's `policyReceipt` names whether that write persisted. |
 | `cohort` | `recordsPath`, `limit?` | Reads one bounded `gjc.quality_trial.v2` receipt file (JSON array or JSONL, symlinked/oversized/unreadable paths refused) and returns the counts-only `rrsi.quality_cohort.v2` cohort: `total`, `admissible[]`, `excluded[{reason,count}]`, `duplicate`. No rate, delta or verdict; `efficacyClaimsAllowed` does not exist. Missing or empty input returns `total: 0` with `source.status: "missing"`. |
@@ -128,8 +128,8 @@ ownership/mode rules.
 
 | Source | → Store attempt |
 | --- | --- |
-| jev-advisor journal record | advice entries = the record's `taskAdvice[]` batch when it carries entries, else the older single `advice`/`assessment` field; representative entry = the first real decision, else the first entry. Branch `objective` = `<operation>:<tier or advice status>` of that entry (`<operation>:unknown` when the record carries no advice entry); `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the representative entry is a decision, `reject` when it is an explicit no-decision, and `inconclusive` when there is no advice entry (an unknown outcome is never fabricated); `wallMs` = `durationMs` when measured, else `null`; `files`/`hunks` = `null` because the outcome journal records no such measurement; `provenance` = the journal record id |
-| `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict (`inconclusive` when absent); `wallMs` = a measured `cost.wallMs`, else `null`; `files` = the recorded `proposal.files` length and `hunks` = a recorded `proposal.hunks`, else `null` (an empty recorded list is a measured 0, a missing one is unknown); `guardFailures` = non-passing guard ids; `provenance` = the cycle id |
+| jev-advisor journal record | advice entries = the record's `taskAdvice[]` batch when it carries entries, else the older single `advice`/`assessment` field; representative entry = the first real decision, else the first entry. Branch `objective` = `<operation>:<tier or advice status>` of that entry (`<operation>:unknown` when the record carries no advice entry); `hypothesisNovelty` = first record of that branch in read order; `decision` = `adopt` when the representative entry is a decision, `reject` when it is an explicit no-decision, and `inconclusive` when there is no advice entry (an unknown outcome is never fabricated); `wallMs` = `durationMs` when measured, else `null`; `files` = `[]` with `fileCount` = `null` because the outcome journal records no path list, and `hunks` = `null` for the same reason; `provenance` = the journal record id |
+| `self-improve/ledger.jsonl` cycle row | `objective` = `probe.*`; `decision` from the recorded verdict (`inconclusive` when absent); `wallMs` = a measured `cost.wallMs`, else `null`; `files` = the recorded `proposal.files` changed-path array and `fileCount` = its length, `hunks` = a recorded `proposal.hunks`, else `null` (an empty recorded list is a measured `0`, a missing one is `null`/unknown); `guardFailures` = non-passing guard ids; `provenance` = the cycle id |
 
 `null` means unknown: an unmeasured or unrecorded source field is never
 collapsed to 0, because a measured 0 and an unmeasured value are different
@@ -257,9 +257,11 @@ exists. The representative entry is the first real decision, else the first
 entry; the branch objective is `<operation>:<tier|status>` of that entry,
 `decision` is `adopt` only when it is a decision, an explicit no-decision is
 `reject`, and a record with no advice entry is `inconclusive` — an unknown
-outcome is never fabricated as a success or a failure. `wallMs`, `files` and
+outcome is never fabricated as a success or a failure. `wallMs`, `fileCount` and
 `hunks` follow the same rule: a field the record does not measure is stored as
-`null`, never as 0. `projectJournalRecords` also returns `scanned` (records
+`null`, never as 0. `files` is always an array of changed paths (empty when the
+record names none) and `fileCount` carries the count, so "measured zero" and
+"not measured" stay distinguishable. `projectJournalRecords` also returns `scanned` (records
 inspected), `headOmitted` (older attempts the newest window dropped) and
 `novelty` (`{retained, novel, shared, density}`; novelty keeps the journal read
 order, so a mature journal's retained window is novelty-empty by construction).
