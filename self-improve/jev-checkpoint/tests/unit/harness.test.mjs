@@ -414,6 +414,9 @@ test("proxy drainCell waits for an in-flight chat request and charges it before 
 		assert.ok(rows[0].costUsd > 0);
 		await request;
 	} finally {
+		// Release the gate first: a poll timeout must not leave the handler waiting on
+		// a responder nobody will wake, or cleanup would hang instead of failing.
+		release();
 		// Settle the client fetch before close() destroys the socket, so a failed
 		// assertion reports itself instead of an unhandled "fetch failed".
 		await request?.catch(() => {});
