@@ -396,10 +396,15 @@ test("proxy drainCell waits for an in-flight chat request and charges it before 
 	const gate = new Promise((resolve) => { release = resolve; });
 	const scriptedChat = async () => { await gate; return { id: "x", message: { role: "assistant", content: "late" }, finishReason: "stop", usage: { prompt_tokens: 100, completion_tokens: 10 } }; };
 	const proxy = await startProxy({ mode: "scripted", ledger, questionConfig: QUESTIONS, scriptedChat, scriptedDecision: createScriptedDecision() });
+	let request;
 	try {
 		const a = proxy.registerCell({ cellId: CELL_A, token: "tok", checkpoint: { mode: "off", trigger: "periodic" }, usdCap: 1, turnCap: 16, meta: { taskId: "no-invented-cap" } });
-		const request = post(`${a.baseUrl}/chat/completions`, { model: "deepseek/deepseek-v4.1-flash-eco", messages: [{ role: "user", content: "hi" }] }, { authorization: "Bearer tok" });
-		await new Promise((resolve) => setTimeout(resolve, 50));
+		request = post(`${a.baseUrl}/chat/completions`, { model: "deepseek/deepseek-v4.1-flash-eco", messages: [{ role: "user", content: "hi" }] }, { authorization: "Bearer tok" });
+		// Wait until the handler reserved the turn instead of guessing a fixed delay:
+		// a slower runner can accept the socket after 50ms, and drainCell would then
+		// read an empty pending set while the request is still in flight.
+		for (let i = 0; i < 200 && ledger.cellState(CELL_A).turns === 0; i++) await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.equal(ledger.cellState(CELL_A).turns, 1, "the chat request reached the proxy before drain");
 		assert.equal(proxy.rows.filter((row) => row.kind === "chat").length, 0);
 		const drained = proxy.drainCell(CELL_A);
 		release();
@@ -409,6 +414,12 @@ test("proxy drainCell waits for an in-flight chat request and charges it before 
 		assert.ok(rows[0].costUsd > 0);
 		await request;
 	} finally {
+		// Release the gate first: a poll timeout must not leave the handler waiting on
+		// a responder nobody will wake, or cleanup would hang instead of failing.
+		release();
+		// Settle the client fetch before close() destroys the socket, so a failed
+		// assertion reports itself instead of an unhandled "fetch failed".
+		await request?.catch(() => {});
 		await proxy.close();
 	}
 });
