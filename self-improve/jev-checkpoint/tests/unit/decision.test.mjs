@@ -26,13 +26,18 @@ test("trial allowlist is exactly jev-omni + decider-4b; J0 adds only jev-1.14", 
 });
 
 test("allowlist entries are bound to the shared decision contract (id, model, endpoint, authEnv)", () => {
+	// The frozen arms keep their 2026-11-14 route tables unchanged. JJO-2640
+	// retired the two OpenGateway sionic entries from the shared contract, so
+	// only those ids are allowed to be absent here; every live id must bind.
+	const retired = new Set(["opengateway/sionic-ai/jev-omni", "opengateway/sionic-ai/decider-4b"]);
 	for (const entry of Object.values(J0_JUDGE_ROUTES)) {
 		const contract = DECISION_PROVIDERS.find((provider) => provider.id === entry.id);
-		assert.ok(contract, entry.id);
+		if (!contract) { assert.ok(retired.has(entry.id), entry.id); continue; }
 		assert.equal(contract.model, entry.model);
 		assert.equal(contract.endpoint, entry.endpoint);
 		assert.deepEqual([...contract.authEnv].sort(), [...entry.authEnv].sort());
 	}
+	assert.ok(DECISION_PROVIDERS.some((provider) => provider.id === J0_JUDGE_ROUTES["typesafe/jev-1.14"].id));
 });
 
 test("criteria is serialized as an object in the declared order; arrays and oversize bodies are refused", () => {

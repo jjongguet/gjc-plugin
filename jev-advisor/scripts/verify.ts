@@ -112,7 +112,7 @@ async function runSuite(root: string) {
 	let serial = 0;
 	const base = () => path.join(root, `case-${++serial}`, "state.json");
 	const env = (overrides: Record<string, string> = {}) => {
-		for (const key of Object.keys(process.env)) if (key.startsWith("JEV_ADVISOR_") || key === "OPENROUTER_API_KEY" || key === "OPENGATEWAY_API_KEY" || key === "JEV_ALIGNMENT_SEND_AUTHORITY_TEXT") delete process.env[key];
+		for (const key of Object.keys(process.env)) if (key.startsWith("JEV_ADVISOR_") || key === "OPENROUTER_API_KEY" || key === "JEV_ALIGNMENT_SEND_AUTHORITY_TEXT") delete process.env[key];
 		const home = path.join(root, `home-${++serial}`);
 		mkdirSync(home, { mode: 0o700 });
 		process.env.HOME = home;
@@ -463,9 +463,9 @@ async function runSuite(root: string) {
 		assert.deepEqual(core.providerKeyEnv("typesafe-jev"), ["TYPESAFE_API_KEY"]);
 		assert.deepEqual(core.providerKeyEnv("ollaya"), []);
 		const contract = await import(pathToFileURL(path.join(plugin, "../shared/lib/decision-contract.ts")).href);
-		for (const id of ["opengateway/sionic-ai/jev-omni", "opengateway/sionic-ai/decider-4b"]) {
-			assert.deepEqual(contract.decisionProvider(id).authEnv, ["OPENGATEWAY_API_KEY"], id);
-		}
+		assert.deepEqual(contract.decisionProvider("openrouter/typesafe/jev-1.14").authEnv, ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"]);
+		assert.ok(contract.DECISION_PROVIDERS.every((entry: { provider: string }) => entry.provider === "openrouter"), "retired decision providers are removed, not aliases");
+		assert.equal(contract.isAllowedDecisionEndpoint("https://unrecorded.invalid/v1/decisions"), false);
 	});
 	await check("provider off, missing key and memory off have no prohibited writes", async () => {
 		for (const mode of ["off", "missing", "memory-off"]) {
@@ -1311,7 +1311,7 @@ async function runSuite(root: string) {
 		}
 	});
 	await check("manifest surfaces and release version", () => {
-		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.19");
+		const manifest = JSON.parse(readFileSync(path.join(plugin, "gajae-plugin.json"), "utf8")); assert.equal(manifest.version, "0.0.20");
 		assert.deepEqual(manifest.hooks.map((h: any) => [h.event, h.target, h.phase]), [
 			["tool_call", "task", "before"],
 			["tool_result", "task", "after"],
@@ -1707,7 +1707,7 @@ async function runSuite(root: string) {
 		assert.equal(validateSemanticEnvelope({ sendAuthorityText: true, confidence: 0.5, probabilities: { aligned: 1 }, labels: ["aligned", "drift"] }).status, "invalid_response");
 	});
 
-	const semanticEnv = { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", OPENGATEWAY_API_KEY: "synthetic-key" };
+	const semanticEnv = { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ADVISOR_API_KEY: "synthetic-key" };
 	const semanticInput = { branchEntries: [alignmentUser("semantic-user", "Implement `src/demo.ts`")], targetPaths: ["src/demo.ts"] };
 	const semanticAnswer = (choice: unknown = "aligned", confidence: unknown = 0.9681, probabilities: unknown = { aligned: 0.9788, drift: 0.0022, uncertain: 0.019 }) => ({ answers: { alignment: { type: "choice", choice, confidence, probabilities } } });
 	await check("JJO-663 default and false opt-in make exactly zero outbound calls before input or key access", async () => {
@@ -1715,30 +1715,36 @@ async function runSuite(root: string) {
 		const spy = async () => { outbound++; throw new Error("must not call"); };
 		const unreadable = new Proxy({}, { get() { throw new Error("must not inspect input"); } });
 		for (const flag of [undefined, "false", "1", "TRUE"]) {
-			const config = { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: flag, get OPENGATEWAY_API_KEY(): string { throw new Error("must not read key"); } };
+			const config = { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: flag, get JEV_ADVISOR_API_KEY(): string { throw new Error("must not read key"); } };
 			assert.deepEqual(await semanticCore.askSemanticAdvice(unreadable, config, spy), { status: "no_decision", reason: "outbound_suppressed", outbound: false });
 		}
 		assert.equal(outbound, 0);
 	});
-	await check("JJO-663 unconfigured never borrows OpenAI, OpenRouter or advisor credentials", async () => {
+	await check("JJO-2640 the advisor key wins and unrelated credentials never authorize semantic advice", async () => {
 		let outbound = 0;
-		const result = await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", OPENAI_API_KEY: "wrong-route", OPENROUTER_API_KEY: "wrong-route", JEV_ADVISOR_API_KEY: "wrong-route" }, async () => { outbound++; throw new Error("must not call"); });
-		assert.deepEqual(result, { status: "no_decision", reason: "unconfigured", outbound: false });
-		assert.deepEqual(await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", get OPENGATEWAY_API_KEY(): string { throw new Error("unreadable configuration"); } }), { status: "no_decision", reason: "unconfigured", outbound: false });
+		const wrong = await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", OPENAI_API_KEY: "wrong-route", TYPESAFE_API_KEY: "wrong-route" }, async () => { outbound++; throw new Error("must not call"); });
+		assert.deepEqual(wrong, { status: "no_decision", reason: "unconfigured", outbound: false });
+		const seen: string[] = [];
+		const capture = async (_url: string, init: RequestInit) => { seen.push(new Headers(init.headers).get("authorization") ?? ""); return new Response(JSON.stringify(semanticAnswer())); };
+		await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ADVISOR_API_KEY: "advisor-key", OPENROUTER_API_KEY: "router-key" }, capture);
+		await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ADVISOR_API_KEY: "", OPENROUTER_API_KEY: "router-key" }, capture);
+		assert.deepEqual(seen, ["Bearer advisor-key", "Bearer router-key"]);
+		assert.deepEqual(await semanticCore.askSemanticAdvice(semanticInput, { JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", get JEV_ADVISOR_API_KEY(): string { throw new Error("unreadable configuration"); } }), { status: "no_decision", reason: "unconfigured", outbound: false });
 		assert.equal(outbound, 0);
 	});
 	await check("JJO-663 serialized wire follows OpenAPI, fixed route and host-only authority", async () => {
 		const spec = JSON.parse(readFileSync(path.join(plugin, "semantic.openapi.json"), "utf8"));
-		const operation = spec.paths["/v1/decisions"].post;
+		const operation = spec.paths["/api/alpha/decisions"].post;
 		assert.equal(operation["x-timeout-ms"], 8000);
 		assert.equal(operation["x-retries"], 0);
-		assert.equal(operation["x-credential-env"], "OPENGATEWAY_API_KEY");
+		assert.deepEqual(operation["x-credential-envs"], ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"]);
+		assert.equal(spec.servers[0].url, "https://openrouter.ai");
 		assert.equal(operation.responses["200"].content["application/json"].schema.properties.answers.properties.alignment.properties.probabilities["x-sum-tolerance"], 1e-6);
 		let calls = 0;
 		const input = { ...semanticInput, branchEntries: [...semanticInput.branchEntries, { type: "assistant", text: "ASSISTANT_CANARY" }, { type: "tool", text: "TOOL_CANARY" }] };
 		const got = await semanticCore.askSemanticAdvice(input, { ...semanticEnv, JEV_ADVISOR_ENDPOINT: "https://evil.invalid", JEV_ADVISOR_MODEL: "other" }, async (url: string, init: RequestInit) => {
 			calls++;
-			assert.equal(url, "https://apis.opengateway.ai/v1/decisions");
+			assert.equal(url, "https://openrouter.ai/api/alpha/decisions");
 			assert.equal(init.method, "POST"); assert.equal(init.redirect, "error");
 			assert.equal(new Headers(init.headers).get("authorization"), "Bearer synthetic-key");
 			const wire = JSON.parse(String(init.body));
@@ -1836,14 +1842,14 @@ async function runSuite(root: string) {
 				assert.equal(fetchCalls, before + 1);
 				assert.ok(!alignmentEvents().events.some((event: any) => event.kind === "admit"), "semantic aligned does not admit an out-of-scope write");
 			}
-			for (const value of statuses) { const status = JSON.parse(value); assert.equal(status.model, "sionic-ai/jev-omni"); assert.ok(!value.includes("PRIVATE_")); }
+			for (const value of statuses) { const status = JSON.parse(value); assert.equal(status.model, "typesafe/jev-1.14"); assert.ok(!value.includes("PRIVATE_")); }
 		}
 		responder = undefined;
 		env();
 		delete process.env.JEV_ALIGNMENT_MODE;
 	});
 	await check("JJO-663 opt-in never sends read/bash/off calls and reports unconfigured without outbound", async () => {
-		env({ JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ALIGNMENT_MODE: "off" });
+		env({ JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ALIGNMENT_MODE: "off", JEV_ADVISOR_API_KEY: "", OPENROUTER_API_KEY: "" });
 		const statuses: string[] = [];
 		const ctx = { ...alignmentContext(semanticInput.branchEntries), ui: { setStatus(key: string, value: string) { if (key === "jev-alignment-semantic") statuses.push(value); } } };
 		const before = fetchCalls;
@@ -1874,7 +1880,7 @@ async function runSuite(root: string) {
 			const ctx = { ...alignmentContext([alignmentUser("incomplete-targets", forbidden ? "Read only: do not modify any files." : "Implement `src/demo.ts`.")]), ui: { setStatus(key: string, value: string) { if (key === "jev-alignment-semantic") statuses.push(value); } } };
 			const got = await alignmentBefore[0].handler({ type: "tool_call", toolName: "apply_patch", toolCallId: "incomplete-targets", input }, ctx);
 			assert.equal(got?.block === true, forbidden, "semantic rejection cannot change the deterministic verdict");
-			assert.deepEqual(JSON.parse(statuses[0]), { model: "sionic-ai/jev-omni", status: "no_decision", reason: "invalid_input" });
+			assert.deepEqual(JSON.parse(statuses[0]), { model: "typesafe/jev-1.14", status: "no_decision", reason: "invalid_input" });
 			assert.equal(fetchCalls, before, "no incomplete target list leaves the hook");
 		}
 		responder = () => new Response(JSON.stringify(semanticAnswer()));

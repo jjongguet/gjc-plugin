@@ -14,31 +14,29 @@ test("invalid_case_id is a deterministic no-decision reason, never a scoring sig
 
 describe("provider table", () => {
 	test("records exact ids without appending context windows", () => {
-		const ids = DECISION_PROVIDERS.map(entry => entry.id);
-		expect(ids).toContain("openrouter/typesafe/jev-1.14");
-		const omni = decisionProvider("opengateway/sionic-ai/jev-omni");
-		const decider = decisionProvider("opengateway/sionic-ai/decider-4b");
-		expect(omni.model).toBe("sionic-ai/jev-omni");
-		expect(omni.contextTokens).toBe(32768);
-		expect(decider.model).toBe("sionic-ai/decider-4b");
-		expect(decider.contextTokens).toBe(65536);
+		const jev = decisionProvider("openrouter/typesafe/jev-1.14");
+		expect(jev.model).toBe("typesafe/jev-1.14");
+		expect(jev.endpoint).toBe("https://openrouter.ai/api/alpha/decisions");
+		expect(jev.contextTokens).toBe(262144);
 		for (const entry of DECISION_PROVIDERS) {
 			if (entry.contextTokens !== undefined) expect(entry.id.endsWith(String(entry.contextTokens))).toBe(false);
 			expect(entry.authEnv.length).toBeGreaterThan(0);
 		}
 	});
 
-	test("candidates stay unverified until a consumer verifies the envelope", () => {
+	test("only the OpenRouter route remains; retired providers are gone, not aliases", () => {
 		expect(decisionProvider("openrouter/typesafe/jev-1.14").status).toBe("baseline");
-		expect(decisionProvider("opengateway/sionic-ai/jev-omni").status).toBe("candidate_unverified");
-		expect(decisionProvider("sionic-ai/jev-omni")).toBeUndefined();
+		expect(DECISION_PROVIDERS.map(entry => entry.provider)).toEqual(["openrouter"]);
+		expect(DECISION_PROVIDERS.some(entry => entry.id.startsWith("opengateway/"))).toBe(false);
+		expect(decisionProvider("typesafe/jev-1.14")).toBeUndefined();
 	});
 });
 
 describe("endpoint policy", () => {
 	test("allows recorded HTTPS origins and loopback only", () => {
 		expect(isAllowedDecisionEndpoint("https://openrouter.ai/api/alpha/decisions")).toBe(true);
-		expect(isAllowedDecisionEndpoint("https://apis.opengateway.ai/v1/decisions")).toBe(true);
+		expect(isAllowedDecisionEndpoint("https://api.typesafe.ai/v1/systemone")).toBe(true);
+		expect(isAllowedDecisionEndpoint("https://unrecorded.invalid/v1/decisions")).toBe(false);
 		expect(isAllowedDecisionEndpoint("http://127.0.0.1:8080/v1")).toBe(true);
 		expect(isAllowedDecisionEndpoint("https://example.com/v1")).toBe(false);
 		expect(isAllowedDecisionEndpoint("http://openrouter.ai/api")).toBe(false);
@@ -49,7 +47,7 @@ describe("endpoint policy", () => {
 	test("a consumer may narrow the origin set", () => {
 		const advisor = { origins: ["https://openrouter.ai", "https://api.typesafe.ai"] };
 		expect(isAllowedDecisionEndpoint("https://api.typesafe.ai/v1", advisor)).toBe(true);
-		expect(isAllowedDecisionEndpoint("https://apis.opengateway.ai/v1/decisions", advisor)).toBe(false);
+		expect(isAllowedDecisionEndpoint("https://openrouter.ai/api/alpha/decisions", advisor)).toBe(true);
 		expect(isAllowedDecisionEndpoint("http://localhost:1234/v1", advisor)).toBe(true);
 	});
 });

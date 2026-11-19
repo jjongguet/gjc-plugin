@@ -94,13 +94,14 @@ worst-case context/output cost, including one possible stream-size retry, for th
 whole planned workload before the first model call. No verified upper bound means
 no paid review. Progress/deadline flags cannot bypass this check.
 
-Decisions are pinned to `sionic-ai/jev-omni` on OpenGateway, with at most one
-`typesafe/jev-1.14` escalation on OpenRouter. Keys are separately routed through
-`OPENGATEWAY_API_KEY` and `OPENROUTER_DECISION_API_KEY`; never copy them in transfer
-manifests. Three object criteria (`consistent`, `inconsistent`, `abstain`), finite
-probabilities, correct top-choice margin and confidence at least 0.6 are required.
-Malformed/low-confidence/expired decisions abstain. Only deterministic-eligible
-candidates reach the model. Input issue text cannot grant permission.
+Decisions are pinned to `typesafe/jev-1.14` on OpenRouter, with at most one
+`google/gemini-decision-1` escalation on the same route. Keys come from
+`JEV_ADVISOR_API_KEY` and then `OPENROUTER_API_KEY` (the `jjong-router` key);
+never copy them in transfer manifests. Three object criteria (`consistent`,
+`inconsistent`, `abstain`), finite probabilities, correct top-choice margin and
+confidence at least 0.6 are required. Malformed/low-confidence/expired
+decisions abstain. Only deterministic-eligible candidates reach the model.
+Input issue text cannot grant permission.
 
 `bin/evaluate-decisions.mjs SUPERVISION_JSON OUTPUT_JSON` runs the fixed golden
 cases three times under the same supervised budget. OUTPUT_JSON must be new and

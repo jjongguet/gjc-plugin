@@ -41,29 +41,9 @@ export const DECISION_PROVIDERS: readonly DecisionProvider[] = [
 		contextTokens: 262144,
 		note: "Advisor tier/check and verification adequacy baseline. Jev 1.14 also reads image parts in state (image/png|jpeg, 256-1568 px per side) and answers box questions; $0.042 per 1M input tokens, output free. OpenRouter labels this credential `jjong-router`.",
 	},
-	{
-		id: "opengateway/sionic-ai/jev-omni",
-		provider: "opengateway",
-		model: "sionic-ai/jev-omni",
-		endpoint: "https://apis.opengateway.ai/v1/decisions",
-		authEnv: ["OPENGATEWAY_API_KEY"],
-		status: "candidate_unverified",
-		contextTokens: 32768,
-		note: "Catalog candidate (openai-compatible decisions endpoint, input text/image/audio/video). Envelope and confidence semantics are not yet verified; unusable until a consumer verifies them.",
-	},
-	{
-		id: "opengateway/sionic-ai/decider-4b",
-		provider: "opengateway",
-		model: "sionic-ai/decider-4b",
-		endpoint: "https://apis.opengateway.ai/v1/decisions",
-		authEnv: ["OPENGATEWAY_API_KEY"],
-		status: "candidate_unverified",
-		contextTokens: 65536,
-		note: "Catalog candidate (openai-compatible decisions endpoint, text input). Envelope and confidence semantics are not yet verified.",
-	},
 ];
 
-const DECISION_ORIGINS = new Set(["https://openrouter.ai", "https://apis.opengateway.ai", "https://api.typesafe.ai"]);
+const DECISION_ORIGINS = new Set(["https://openrouter.ai", "https://api.typesafe.ai"]);
 const DECISION_LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "[::1]", "localhost"]);
 
 /**

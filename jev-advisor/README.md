@@ -175,10 +175,11 @@ chmod 600 ~/.gjc/agent/jev-advisor/.env
 | `JEV_ADVISOR_MEMORY_MAX_KEYS` | `200` | Retained semantic groups, hard ceiling 200 |
 | `JEV_ADVISOR_MEMORY_MAX_EVENTS` | `10` | Task records per group, hard ceiling 10 |
 | `JEV_ALIGNMENT_MODE` | `shadow` | `off`, `shadow`, `deterministic` for the goal-alignment hook; unrelated to `JEV_ADVISOR_MODE` |
-| `JEV_ALIGNMENT_SEND_AUTHORITY_TEXT` | `false` | Process-only literal `true` opts in to separate OpenGateway semantic advice; never enforcement |
+| `JEV_ALIGNMENT_SEND_AUTHORITY_TEXT` | `false` | Process-only literal `true` opts in to separate OpenRouter semantic advice; never enforcement |
 
-Goal-alignment settings and the semantic credential `OPENGATEWAY_API_KEY` are
-process-only; they are not loaded from the tier/check `.env` file.
+Goal-alignment settings and the semantic credential (`JEV_ADVISOR_API_KEY`,
+then `OPENROUTER_API_KEY`) are process-only; they are not loaded from the
+tier/check `.env` file.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -522,9 +523,10 @@ tier advice and is never read by this path — the two switches are unrelated.
 including when a key exists. Only the literal value `true` opts in. The before
 hook then sends the bounded host-user window and proposed write targets (not
 file contents, assistant/tool entries or journal history) to
-`POST https://apis.opengateway.ai/v1/decisions`, model `sionic-ai/jev-omni`.
-The only credential is the process variable `OPENGATEWAY_API_KEY`; there is no
-credential-file read, OpenAI/OpenRouter fallback, endpoint override or retry.
+`POST https://openrouter.ai/api/alpha/decisions`, model `typesafe/jev-1.14`.
+The only credentials are the process variables `JEV_ADVISOR_API_KEY` and then
+`OPENROUTER_API_KEY` (the `jjong-router` key, first non-empty wins); there is no
+credential-file read, OpenAI fallback, endpoint override or retry.
 The request/response and fixed prompt are defined in `semantic.openapi.json`,
 which the consumer reads and the builder inlines. Missing credentials yield
 `no_decision/unconfigured`; transport, HTTP and parsing failures yield
@@ -546,7 +548,7 @@ settles a reservation, rounded up to a microdollar; missing/invalid usage,
 transport failure, process death and failed settlement retain the full reserve.
 Only session digests, timestamps and amounts are stored, never authority text
 or credentials. The US$0.05 reserve is a conservative bound against the published
-jev-omni list price (US$0.126 per million input tokens, 32,768-token context,
+jev-1.14 list price (US$0.042 per million input tokens, 262,144-token context,
 zero completion price), not a measured charge; operators must recheck pricing
 before authorizing live use.
 - **Numeric preservation.** Advice consumes only a valid choice, finite

@@ -2,6 +2,17 @@
 
 Each plugin carries its own version in `gajae-plugin.json`; a repository release tags the set of plugin versions listed under it. Versions follow the `0.0.x` series.
 
+## [0.0.31] - 2026-11-19
+
+Plugins: jev-advisor 0.0.20 · verification-receipts 0.0.13 · ui-regression 0.0.12 · wiki 0.0.9 · rea 0.0.8 · backplan 0.0.12 · rrsi 0.0.7 · aside-memory 0.0.2 · egm 0.0.2 · memory-dream 0.0.1 · lessons 0.0.1
+
+### Changed
+
+- **shared decision contract (jev-advisor, verification-receipts, ui-regression)**: the OpenGateway `sionic-ai/jev-omni` and `sionic-ai/decider-4b` catalog entries and the `apis.opengateway.ai` decision origin are removed, not kept as fallbacks (JJO-2640). `openrouter/typesafe/jev-1.14` is the only recorded decision provider, and the generated surfaces no longer name the retired routes.
+- **jev-advisor**: the default-off goal-alignment semantic consumer posts the same bounded request to `https://openrouter.ai/api/alpha/decisions` with `typesafe/jev-1.14`, reading `JEV_ADVISOR_API_KEY` and then `OPENROUTER_API_KEY` (the `jjong-router` key) from the process environment. The zero-outbound default, 8s single-attempt deadline, request/response caps and US$0.05 reservation are unchanged; the reservation now bounds jev-1.14 pricing (US$0.042 per million input tokens).
+- **nightly-review**: supervised decisions pin `typesafe/jev-1.14` with at most one `google/gemini-decision-1` escalation on the same OpenRouter route, keyed by `JEV_ADVISOR_API_KEY`/`OPENROUTER_API_KEY`. The reservation price stays a conservative US$0.126 per million input tokens.
+- **supervisor**: the single ambiguous-session escalation calls `decision-ask --model jev` (`typesafe/jev-1.14`) instead of `jev-omni`.
+
 ## [0.0.28] - 2026-11-14
 
 Plugins: jev-advisor 0.0.18 · verification-receipts 0.0.12 · ui-regression 0.0.11 · wiki 0.0.9 · rea 0.0.8 · backplan 0.0.12 · rrsi 0.0.7 · aside-memory 0.0.2 · egm 0.0.1 · memory-dream 0.0.1

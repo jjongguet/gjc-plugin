@@ -2,7 +2,7 @@
 import { constants as budgetFs, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { randomUUID as budgetUUID } from "node:crypto";
 import path from "node:path";
-import { askSemanticAdvice, semanticOutboundEnabled, semanticRequestBody, type SemanticAdvice, type SemanticInput } from "./semantic";
+import { askSemanticAdvice, semanticCredential, semanticOutboundEnabled, semanticRequestBody, type SemanticAdvice, type SemanticInput } from "./semantic";
 
 export const SEMANTIC_BUDGET_MICRO_USD = 5000000;
 export const SEMANTIC_RESERVATION_MICRO_USD = 50000;
@@ -83,7 +83,7 @@ function budgetTransaction<T>(env: Record<string, string | undefined>, mutate: (
 export async function askBudgetedSemanticAdvice(input: SemanticInput, session: string, env: Record<string, string | undefined> = process.env, fetcher: typeof fetch = fetch): Promise<BudgetResult> {
 	if (!semanticOutboundEnabled(env)) return { status: "no_decision", reason: "outbound_suppressed", outbound: false };
 	try {
-		if (!env.OPENGATEWAY_API_KEY?.trim()) return { status: "no_decision", reason: "unconfigured", outbound: false };
+		if (!semanticCredential(env)) return { status: "no_decision", reason: "unconfigured", outbound: false };
 	} catch { return { status: "no_decision", reason: "unconfigured", outbound: false }; }
 	try {
 		if (semanticRequestBody(input) === null) return { status: "no_decision", reason: "invalid_input", outbound: false };
