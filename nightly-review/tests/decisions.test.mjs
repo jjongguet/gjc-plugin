@@ -11,7 +11,7 @@ const NOW = Date.parse('2026-11-09T01:30:00Z');
 const candidate = { eligible: true, mode: 'supervised', action: 'mark_complete', evidence: { currentVerification: 'passed' } };
 const supervision = { active: true, supervisor: 'test-supervisor', expiresAt: '2026-11-09T02:30:00Z' };
 const budget = { capUsd: 1, spentUsd: 0, reservedUsd: 0, nextUpperUsd: 0.01 };
-const env = { OPENGATEWAY_API_KEY: 'gateway-test-only', OPENROUTER_DECISION_API_KEY: 'router-test-only' };
+const env = { JEV_ADVISOR_API_KEY: 'router-test-only' };
 const answer = (choice = 'consistent', probabilities = { consistent: 0.85, inconsistent: 0.1, abstain: 0.05 }, confidence = 0.75) => ({ choice, probabilities, confidence });
 const response = (decision = answer()) => ({ ok: true, json: async () => ({ answers: { decision } }) });
 test('evaluation CLI reaches the supervised key boundary without credentials instead of silently refusing every sample scope', async () => {
@@ -43,7 +43,7 @@ test('invalid or previously reserved evaluation destinations reject before any p
     const parent = path.join(dir, mode); await mkdir(parent, { mode: mode === 'permissions' ? 0o755 : 0o700 });
     const output = path.join(parent, 'evaluation.json');
     if (mode !== 'permissions') await writeFile(mode === 'existing' ? output : `${output}.reservation.json`, 'preserved');
-    const result = spawnSync(process.execPath, ['--import', preload, 'nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, OPENGATEWAY_API_KEY: 'fake-test-only', OPENROUTER_DECISION_API_KEY: 'fake-test-only' } });
+    const result = spawnSync(process.execPath, ['--import', preload, 'nightly-review/bin/evaluate-decisions.mjs', auth, output], { encoding: 'utf8', timeout: 10000, env: { PATH: process.env.PATH, JEV_ADVISOR_API_KEY: 'fake-test-only' } });
     assert.notEqual(result.status, 0);
     assert.match(result.stderr, /private|already exists/);
     assert.equal(existsSync(trace), false);
@@ -73,19 +73,19 @@ function setup(responses = [response()]) {
   return { calls, options: { candidate: { ...candidate }, supervision: { ...supervision }, budget: { ...budget }, env: { ...env }, now: () => NOW, fetchImpl } };
 }
 
-test('fixed primary wire contract uses criteria object and isolated gateway key', async () => {
+test('fixed primary wire contract uses criteria object and the router key', async () => {
   const { calls, options } = setup();
   const result = await decideCandidate(options);
   assert.equal(result.adopted, true);
   assert.equal(result.choice, 'consistent');
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].url, 'https://apis.opengateway.ai/v1/decisions');
+  assert.equal(calls[0].url, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(calls[0].options.method, 'POST');
-  assert.equal(calls[0].options.headers.Authorization, 'Bearer gateway-test-only');
+  assert.equal(calls[0].options.headers.Authorization, 'Bearer router-test-only');
   assert.ok(calls[0].options.signal instanceof AbortSignal);
   const body = JSON.parse(calls[0].options.body);
   assert.deepEqual(Object.keys(body).sort(), ['model', 'questions', 'state']);
-  assert.equal(body.model, 'sionic-ai/jev-omni');
+  assert.equal(body.model, 'typesafe/jev-1.14');
   assert.equal(body.questions.decision.type, 'choice');
   assert.deepEqual(body.questions.decision.criteria, {
     consistent: 'Current verified evidence supports the proposed action and its exact root cause, completion criteria and current authority.',
@@ -97,7 +97,7 @@ test('fixed primary wire contract uses criteria object and isolated gateway key'
   assert.equal(result.costUpperUsd, (Buffer.byteLength(calls[0].options.body) + 1024) * 0.126 / 1_000_000);
 });
 
-test('low confidence escalates exactly once to pinned router with only its key', async () => {
+test('low confidence escalates exactly once to the pinned gemini route', async () => {
   const { calls, options } = setup([response(answer('consistent', { consistent: 0.5, inconsistent: 0.3, abstain: 0.2 }, 0.2)), response(answer('inconsistent', { consistent: 0.05, inconsistent: 0.9, abstain: 0.05 }, 0.85))]);
   const result = await decideCandidate(options);
   assert.equal(result.choice, 'inconsistent');
@@ -106,7 +106,7 @@ test('low confidence escalates exactly once to pinned router with only its key',
   assert.equal(calls[1].url, 'https://openrouter.ai/api/alpha/decisions');
   assert.equal(calls[1].options.headers.Authorization, 'Bearer router-test-only');
   const second = JSON.parse(calls[1].options.body);
-  assert.equal(second.model, 'typesafe/jev-1.14');
+  assert.equal(second.model, 'google/gemini-decision-1');
   assert.deepEqual(second.questions, JSON.parse(calls[0].options.body).questions);
   assert.equal(result.costUpperUsd, calls.reduce((sum, call) => sum + (Buffer.byteLength(call.options.body) + 1024) * 0.126 / 1_000_000, 0));
 });
@@ -230,17 +230,17 @@ test('malformed responses and transport failures allow one escalation, never a t
     assert.equal(result.choice, 'abstain');
     assert.equal(result.adopted, false);
     assert.equal(calls.length, 2);
-    assert.doesNotMatch(JSON.stringify(result), /sensitive|gateway-test-only|router-test-only|currentVerification/);
+    assert.doesNotMatch(JSON.stringify(result), /sensitive|router-test-only|currentVerification/);
   }
 });
 
-test('missing escalation key never borrows gateway key', async () => {
+test('a retired key name never authorizes a decision and no transport runs', async () => {
   const { calls, options } = setup([response(null)]);
-  options.env = { OPENGATEWAY_API_KEY: env.OPENGATEWAY_API_KEY };
+  options.env = { OPENROUTER_DECISION_API_KEY: 'must-not-borrow', OPENGATEWAY_API_KEY: 'must-not-borrow' };
   const result = await decideCandidate(options);
   assert.equal(result.choice, 'abstain');
-  assert.equal(calls.length, 1);
-  assert.equal(result.audit[1].reason, 'key_missing');
+  assert.equal(calls.length, 0);
+  assert.deepEqual(result.audit.map((entry) => entry.reason), ['key_missing']);
 });
 
 test('supervision, scope and budget are rechecked before escalation', async () => {
@@ -288,7 +288,7 @@ test('full UTF8 two-call reservation is required before even a successful primar
   first.options.candidate.evidence = { text: '한글🙂'.repeat(100) };
   await decideCandidate(first.options);
   const primary = first.calls[0].options.body;
-  const secondary = JSON.stringify({ ...JSON.parse(primary), model: 'typesafe/jev-1.14' });
+  const secondary = JSON.stringify({ ...JSON.parse(primary), model: 'google/gemini-decision-1' });
   const required = [primary, secondary].reduce((sum, body) => sum + (Buffer.byteLength(body) + 1024) * 0.126 / 1_000_000, 0);
   assert.ok(Buffer.byteLength(primary) > primary.length);
   const blocked = setup();

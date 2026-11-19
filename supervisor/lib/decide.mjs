@@ -10,7 +10,7 @@ import os from "node:os";
 import path from "node:path";
 import { defaultRunner } from "./exec.mjs";
 
-export const DECISION_MODEL = "jev-omni";
+export const DECISION_MODEL = "jev";
 export const DECISION_MIN_CONFIDENCE = 0.6;
 
 /**

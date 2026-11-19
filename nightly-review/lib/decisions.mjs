@@ -1,11 +1,12 @@
 // Supervised semantic advice only. Eligibility and authorization remain local checks.
 const LABELS = ['consistent', 'inconsistent', 'abstain'];
 const ROUTES = [
-  { model: 'sionic-ai/jev-omni', url: 'https://apis.opengateway.ai/v1/decisions', key: 'OPENGATEWAY_API_KEY' },
-  { model: 'typesafe/jev-1.14', url: 'https://openrouter.ai/api/alpha/decisions', key: 'OPENROUTER_DECISION_API_KEY' },
+  { model: 'typesafe/jev-1.14', url: 'https://openrouter.ai/api/alpha/decisions', keys: ['JEV_ADVISOR_API_KEY', 'OPENROUTER_API_KEY'] },
+  { model: 'google/gemini-decision-1', url: 'https://openrouter.ai/api/alpha/decisions', keys: ['JEV_ADVISOR_API_KEY', 'OPENROUTER_API_KEY'] },
 ];
-// Conservative higher list input price from the fixed routes, not a temporary
-// provider discount. The active supervisor rechecks pricing before live runs.
+// Conservative reservation price above both fixed routes (jev US$0.042, gemini
+// US$0.1 per million input tokens), not a temporary provider discount. The
+// active supervisor rechecks pricing before live runs.
 const MAX_PRICE_PER_MILLION = 0.126;
 // Three probabilities rounded to four decimals can differ from one by 0.00015.
 const PROBABILITY_SUM_TOLERANCE = 0.0002;
@@ -61,6 +62,14 @@ function authorized(candidate, supervision, budget, now, requiredUpperUsd) {
   return null;
 }
 
+function routeKey(route, env) {
+  for (const name of route.keys) {
+    const value = env?.[name];
+    if (typeof value === 'string' && value.trim()) return value;
+  }
+  return undefined;
+}
+
 async function request(route, body, key, fetchImpl) {
   const controller = new AbortController();
   let timer;
@@ -114,8 +123,8 @@ export async function decideCandidate({ candidate, supervision, budget, fetchImp
       // Recheck immediately before each call; authorization can expire during the first.
       const refusal = authorized(candidate, supervision, budget, now, requiredUpperUsd);
       if (refusal) return abstain([...audit, { reason: refusal }], costUpperUsd);
-      const key = env?.[route.key];
-      if (typeof key !== 'string' || !key.trim()) return abstain([...audit, { model: route.model, reason: 'key_missing' }], costUpperUsd);
+      const key = routeKey(route, env);
+      if (!key) return abstain([...audit, { model: route.model, reason: 'key_missing' }], costUpperUsd);
       costUpperUsd += upperCosts[index]; // A failed/aborted request can still be billed.
       const decision = await request(route, bodies[index], key, fetchImpl);
       audit.push({

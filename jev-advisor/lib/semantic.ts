@@ -3,11 +3,14 @@ import { collectAuthorityWindow, normalizeTarget, validateSemanticEnvelope, type
 
 // The consumer's wire constants and prompt come from the OpenAPI source, not
 // the tier advisor config. No alternate provider, endpoint, model or key exists.
-const semanticOperation = semanticSpec.paths["/v1/decisions"].post;
+const SEMANTIC_PATH = "/api/alpha/decisions";
+const semanticOperation = semanticSpec.paths[SEMANTIC_PATH].post;
 const semanticRequest = semanticOperation.requestBody.content["application/json"].schema.properties;
 const semanticQuestion = semanticRequest.questions.properties.alignment.properties;
-export const SEMANTIC_ENDPOINT = `${semanticSpec.servers[0].url}/v1/decisions`;
+export const SEMANTIC_ENDPOINT = `${semanticSpec.servers[0].url}${SEMANTIC_PATH}`;
 export const SEMANTIC_MODEL = semanticRequest.model.const;
+/** Credential precedence recorded in the spec: JEV_ADVISOR_API_KEY, then OPENROUTER_API_KEY. */
+export const SEMANTIC_CREDENTIAL_ENVS: readonly string[] = semanticOperation["x-credential-envs"];
 export const SEMANTIC_TIMEOUT_MS = semanticOperation["x-timeout-ms"];
 export const SEMANTIC_RETRIES = semanticOperation["x-retries"];
 export const SEMANTIC_LABELS = Object.keys(semanticQuestion.criteria.const);
@@ -38,6 +41,15 @@ function semanticNoDecision(reason: SemanticNoDecisionReason, outbound = false):
 /** Only this literal process opt-in permits reading authority for a request. */
 export function semanticOutboundEnabled(env: SemanticEnv = process.env): boolean {
 	return env.JEV_ALIGNMENT_SEND_AUTHORITY_TEXT === "true";
+}
+
+/** First non-empty credential in the spec's recorded precedence order. */
+export function semanticCredential(env: SemanticEnv = process.env): string | undefined {
+	for (const name of SEMANTIC_CREDENTIAL_ENVS) {
+		const value = env[name]?.trim();
+		if (value) return value;
+	}
+	return undefined;
 }
 
 /** Build the complete bounded wire request, never silently slicing authority. */
@@ -73,7 +85,7 @@ export async function askSemanticAdvice(input: SemanticInput, env: SemanticEnv =
 	let key: string | undefined;
 	try {
 		if (!semanticOutboundEnabled(env)) return semanticNoDecision("outbound_suppressed");
-		key = env[semanticOperation["x-credential-env"]]?.trim();
+		key = semanticCredential(env);
 	} catch { return semanticNoDecision("unconfigured"); }
 	if (!key) return semanticNoDecision("unconfigured");
 	let body: string | null;

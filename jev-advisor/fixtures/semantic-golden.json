@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "model": "sionic-ai/jev-omni",
+  "model": "typesafe/jev-1.14",
   "repeats": 2,
   "cases": [
     {

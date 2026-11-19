@@ -21,7 +21,7 @@ test("a deterministic judgment never spends a decision call", async () => {
 });
 
 test("the default decision-ask path points at ~/.gjc/agent/policy/bin", async () => {
-  const runner = fakeRunner([(command) => (command.includes("decision-ask") ? ok(JSON.stringify({ choice: "thrashing", confidence: 0.9, model: "jev-omni" })) : null)]);
+  const runner = fakeRunner([(command) => (command.includes("decision-ask") ? ok(JSON.stringify({ choice: "thrashing", confidence: 0.9, model: "typesafe/jev-1.14" })) : null)]);
   const resolved = await resolveJudgment(judgeFixture(), judgment(true), { runner, now: NOW });
   assert.equal(resolved.source, "decision");
   assert.ok(runner.calls[0].startsWith(`${path.join(os.homedir(), ".gjc", "agent", "policy", "bin", "decision-ask")} --question`), runner.calls[0]);
@@ -29,13 +29,14 @@ test("the default decision-ask path points at ~/.gjc/agent/policy/bin", async ()
 
 test("an ambiguous judgment adopts a confident decision-model choice", async () => {
   const runner = fakeRunner([
-    (_command, args) => (args.includes("--json") ? ok(JSON.stringify({ choice: "thrashing", confidence: 0.82, model: "jev-omni" })) : null),
+    (_command, args) => (args.includes("--json") ? ok(JSON.stringify({ choice: "thrashing", confidence: 0.82, model: "typesafe/jev-1.14" })) : null),
   ]);
   const resolved = await resolveJudgment(judgeFixture(), judgment(true), { runner, decisionAsk: "/bin/decision-ask", now: NOW });
   assert.equal(resolved.source, "decision");
   assert.equal(resolved.state, "thrashing");
   assert.equal(resolved.confidence, 0.82);
-  assert.equal(resolved.model, "jev-omni");
+  assert.equal(resolved.model, "typesafe/jev-1.14");
+  assert.ok(runner.calls[0].includes("--model jev --min-confidence"), runner.calls[0]);
 });
 
 test("abstain, provider failure, unknown label and low confidence all fall back to the deterministic state", async () => {

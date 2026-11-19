@@ -13,7 +13,7 @@ const answer = (cost?: number) => new Response(JSON.stringify({ answers: { align
 function fixture(t: any, prior = "0") {
 	const home = mkdtempSync(path.join(tmpdir(), "semantic-budget-"));
 	t.after(() => rmSync(home, { recursive: true, force: true }));
-	const env = { HOME: home, JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", OPENGATEWAY_API_KEY: "synthetic-key", JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD: prior };
+	const env = { HOME: home, JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "true", JEV_ADVISOR_API_KEY: "synthetic-key", JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD: prior };
 	const file = path.join(home, ".gjc-plugin", "jev-advisor", "semantic", "budget.json");
 	return { home, env, file, ledger: () => JSON.parse(readFileSync(file, "utf8")) };
 }
@@ -24,7 +24,7 @@ test("disabled, keyless, unknown session and missing prior never call transport"
 	const transport = async () => { calls++; return answer(); };
 	assert.equal((await askBudgetedSemanticAdvice(input, session, { ...f.env, JEV_ALIGNMENT_SEND_AUTHORITY_TEXT: "false" }, transport)).reason, "outbound_suppressed");
 	assert.equal(existsSync(path.dirname(f.file)), false);
-	assert.equal((await askBudgetedSemanticAdvice(input, session, { ...f.env, OPENGATEWAY_API_KEY: "" }, transport)).reason, "unconfigured");
+	assert.equal((await askBudgetedSemanticAdvice(input, session, { ...f.env, JEV_ADVISOR_API_KEY: "", OPENROUTER_API_KEY: "" }, transport)).reason, "unconfigured");
 	assert.equal((await askBudgetedSemanticAdvice(input, "default", f.env, transport)).reason, "budget_unconfigured");
 	assert.equal((await askBudgetedSemanticAdvice(input, session, { ...f.env, JEV_ALIGNMENT_BUDGET_PRIOR_MICRO_USD: "" }, transport)).reason, "budget_unavailable");
 	assert.equal(calls, 0);

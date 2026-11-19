@@ -10,8 +10,9 @@
  *
  * `resolveDecisionRoute` is the single gate in front of every outbound decision
  * call: an id outside the surface's table is refused before any transport is
- * touched. Entries mirror `shared/lib/decision-contract.ts` (id, model,
- * endpoint, authEnv); a parity test binds them.
+ * touched. Entries mirrored `shared/lib/decision-contract.ts` (id, model,
+ * endpoint, authEnv) on 2026-11-14; JJO-2640 later retired the two OpenGateway
+ * sionic entries from that contract, and the frozen arms here stay unchanged.
  */
 
 export const OPENGATEWAY_DECISIONS = "https://apis.opengateway.ai/v1/decisions";

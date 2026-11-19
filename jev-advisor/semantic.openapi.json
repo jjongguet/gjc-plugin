@@ -1,13 +1,13 @@
 {
   "openapi": "3.1.0",
   "info": { "title": "Goal alignment semantic advisory consumer", "version": "1.0.0" },
-  "servers": [{ "url": "https://apis.opengateway.ai" }],
+  "servers": [{ "url": "https://openrouter.ai" }],
   "paths": {
-    "/v1/decisions": {
+    "/api/alpha/decisions": {
       "post": {
         "operationId": "adviseGoalAlignment",
         "security": [{ "bearerAuth": [] }],
-        "x-credential-env": "OPENGATEWAY_API_KEY",
+        "x-credential-envs": ["JEV_ADVISOR_API_KEY", "OPENROUTER_API_KEY"],
         "x-timeout-ms": 8000,
         "x-retries": 0,
         "x-max-request-bytes": 131072,
@@ -19,7 +19,7 @@
             "additionalProperties": false,
             "required": ["model", "state", "questions"],
             "properties": {
-              "model": { "const": "sionic-ai/jev-omni" },
+              "model": { "const": "typesafe/jev-1.14" },
               "state": {
                 "type": "object",
                 "additionalProperties": false,
