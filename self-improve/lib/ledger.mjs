@@ -227,7 +227,35 @@ export function ledgerRowBytes(row) {
   return Buffer.byteLength(JSON.stringify(projected), "utf8");
 }
 
-export function ledgerCounts(filePath) {
+/**
+ * Blocked-then-retried objectives (JJO-2360), ledger-only and deterministic.
+ *
+ * An objective is blocked on the cycle row where it reaches `stallK`
+ * consecutive rejects — the same rule `historyState` uses to stall it and the
+ * frozen `stall.k` in `self-improve/rrsi.json`. Any later cycle row for that
+ * objective is the retry: the row that established the block is not itself a
+ * retry. No model calls and no timers; only recorded rows are read.
+ */
+export function retryAfterBlock(entries, stallK = 3) {
+  const perObjective = new Map();
+  for (const { row } of entries) {
+    if (row.kind !== "cycle") continue;
+    const state = perObjective.get(row.objective) ?? { streak: 0, blockedAtSeq: null, retryRows: 0 };
+    state.streak = row.verdict?.decision === "reject" ? state.streak + 1 : 0;
+    if (state.blockedAtSeq === null && state.streak >= stallK) state.blockedAtSeq = row.seq;
+    else if (state.blockedAtSeq !== null) state.retryRows += 1;
+    perObjective.set(row.objective, state);
+  }
+  const blocked = [...perObjective.values()].filter((state) => state.blockedAtSeq !== null);
+  return {
+    stallK,
+    blockedObjectives: blocked.length,
+    retriedAfterBlock: blocked.filter((state) => state.retryRows > 0).length,
+    retryRows: blocked.reduce((sum, state) => sum + state.retryRows, 0),
+  };
+}
+
+export function ledgerCounts(filePath, { stallK = 3 } = {}) {
   const entries = loadEntries(filePath);
   const byKind = { cycle: 0, adoption: 0, policy: 0 };
   const byVerdict = { adopt: 0, reject: 0, inconclusive: 0 };
@@ -244,5 +272,12 @@ export function ledgerCounts(filePath) {
       byVerdict[row.verdict.decision] += 1;
     }
   }
-  return { total: entries.length, byKind, byVerdict, cost, chain: verifyChain(filePath) };
+  return {
+    total: entries.length,
+    byKind,
+    byVerdict,
+    cost,
+    retry: retryAfterBlock(entries, stallK),
+    chain: verifyChain(filePath),
+  };
 }

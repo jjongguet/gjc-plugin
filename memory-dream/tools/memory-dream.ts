@@ -148,6 +148,12 @@ export interface DreamReport {
 	promptVersion: string;
 	model: string;
 	provider: string;
+	/**
+	 * JJO-2360: true when no provider credential was found, so the advisory model
+	 * was skipped outright and no network path was opened. The deterministic
+	 * checks still run; every evidence-bearing claim is `no-decision`.
+	 */
+	keyless: boolean;
 	memory: {
 		dir: string;
 		projectRoot: string;
@@ -1204,7 +1210,19 @@ export async function analyzeClaimForReport(
 		report.reason = "disabled";
 		return report;
 	}
-	report.externalSend = Boolean(deps.jevConfig.key) && !deps.jevConfig.providerOff;
+	// JJO-2360 keyless path: when no credential is present the advisory model is
+	// skipped outright, so no request is constructed and no socket is opened.
+	// The structured no-decision reason stays visible on `jev` (`disabled` when
+	// the provider was turned off, `unconfigured` otherwise) and the claim says
+	// why the advisory step did not run.
+	if (!deps.jevConfig.key) {
+		report.jev = noDecision(deps.jevConfig.providerOff ? "disabled" : "unconfigured");
+		report.verdict = "no-decision";
+		report.reason = "keyless";
+		report.externalSend = false;
+		return report;
+	}
+	report.externalSend = !deps.jevConfig.providerOff;
 	const jev = await askJev(claim.text, safeEvidence, deps.jevConfig, deps.fetchImpl, deps.signal);
 	report.jev = jev;
 	const mapped = verdictFor(jev, safeEvidence, deps.confidenceThreshold);
@@ -1245,6 +1263,7 @@ function latestPayload(report: DreamReport, reportId: string): Record<string, un
 		reportId,
 		reportPath: `reports/${reportId}/report.json`,
 		counts: report.counts,
+		keyless: report.keyless,
 		confidenceThreshold: report.confidenceThreshold,
 		contradicted,
 	};
@@ -1273,6 +1292,11 @@ export function renderMarkdown(report: DreamReport): string {
 	lines.push("");
 	lines.push(`- generated: ${report.generatedAt}`);
 	lines.push(`- model: ${report.model} (${report.provider})`);
+	lines.push(
+		report.keyless
+			? "- keyless: yes (no provider credential; the advisory model was skipped and no network call was made)"
+			: "- keyless: no",
+	);
 	lines.push(`- prompt: ${report.promptVersion}`);
 	lines.push(`- memory scope: ${report.memory.dir}`);
 	lines.push(`- canonical project: ${report.memory.projectRoot}`);
@@ -1370,6 +1394,9 @@ export async function runDream(options: DreamOptions): Promise<DreamResult> {
 	const now = options.now ?? new Date();
 	const envFile = options.envFile ?? path.join(agentDir, "jev-advisor", ".env");
 	const jevConfig = resolveJevConfig(env, envFile);
+	// JJO-2360: no credential is the keyless state. It is reported explicitly in
+	// the output instead of being observable only as `no-decision` verdicts.
+	const keyless = jevConfig.key === null;
 	const maxClaims = Math.min(Math.max(1, options.maxClaims ?? DEFAULT_MAX_CLAIMS), MAX_CLAIMS);
 	const maxJevCalls = Math.min(Math.max(1, options.maxJevCalls ?? DEFAULT_MAX_JEV_CALLS), MAX_JEV_CALLS);
 	const confidenceThreshold = Math.min(1, Math.max(0, options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD));
@@ -1457,6 +1484,7 @@ export async function runDream(options: DreamOptions): Promise<DreamResult> {
 		promptVersion: PROMPT_VERSION,
 		model: JEV_MODEL,
 		provider: JEV_PROVIDER,
+		keyless,
 		memory: {
 			dir: memoryDir,
 			projectRoot,
@@ -1529,7 +1557,7 @@ export default function memoryDream(pi: { cwd: string; typebox: { Type: any } })
 		name: "memory_dream",
 		label: "Memory Dream",
 		description:
-			"Read GJC's project memory notes (memory_summary.md and MEMORY.md), decompose them into claims, check injection budgets, dead rule:// references, missing paths, stale dated facts and secret shapes, retrieve bounded canonical evidence (SYSTEM.md, RULES.md, AGENTS.md, rules/*.md first, then repo docs, then a recent transcript excerpt), and optionally ask the advisory Jev decision model whether each evidence-bearing claim is consistent with that evidence. Writes one private JSON+MD report under ~/.gjc-plugin/memory-dream/ and never edits, deletes or enqueues GJC memory or session files. Jev receives only a bounded claim and cited excerpts; secret-shaped claims are not sent. A report is not proof that a note is true, and the session_start notice is bounded to contradicted notes. Runs only when explicitly invoked; no timer.",
+			"Read GJC's project memory notes (memory_summary.md and MEMORY.md), decompose them into claims, check injection budgets, dead rule:// references, missing paths, stale dated facts and secret shapes, retrieve bounded canonical evidence (SYSTEM.md, RULES.md, AGENTS.md, rules/*.md first, then repo docs, then a recent transcript excerpt), and optionally ask the advisory Jev decision model whether each evidence-bearing claim is consistent with that evidence. A run with no provider credential is keyless: the advisory model is skipped outright, no network call is made, and the output reports keyless=yes. Writes one private JSON+MD report under ~/.gjc-plugin/memory-dream/ and never edits, deletes or enqueues GJC memory or session files. Jev receives only a bounded claim and cited excerpts; secret-shaped claims are not sent. A report is not proof that a note is true, and the session_start notice is bounded to contradicted notes. Runs only when explicitly invoked; no timer.",
 		parameters: T.Object({
 			memory_dir: T.Optional(
 				T.String({
@@ -1614,7 +1642,7 @@ export default function memoryDream(pi: { cwd: string; typebox: { Type: any } })
 				const lines = [
 					"memory_dream: ok",
 					`claims=${report.counts.claims} supported=${report.counts.supported} contradicted=${report.counts.contradicted} unverified=${report.counts.unverified} no-decision=${report.counts.noDecision}`,
-					`sent_to_jev=${report.counts.sentToJev} jev=${report.model} jev_reason=${jevReason} prompt=${report.promptVersion}`,
+					`keyless=${report.keyless ? "yes" : "no"} sent_to_jev=${report.counts.sentToJev} jev=${report.model} jev_reason=${jevReason} prompt=${report.promptVersion}`,
 					`memory_unchanged=${report.memory.unchanged ? "yes" : "NO"}`,
 					`report=${result.reportPath ?? "not_written"}`,
 					`latest=${result.latestPath ?? "not_written"}`,

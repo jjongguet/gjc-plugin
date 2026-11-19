@@ -51,6 +51,10 @@ const RRSI_ACTIONS = ["capture", "import", "dream", "status"];
 const RRSI_DECISIONS = ["adopt", "reject", "inconclusive"];
 const RRSI_SOURCES = ["capture", "jev-journal", "self-improve-ledger"];
 
+/** Changed-path list bound: same 512 cap as the recorded file count (JJO-2360). */
+const MAX_ATTEMPT_FILES = 512;
+const MAX_ATTEMPT_FILE_CHARS = 200;
+
 export function rrsiRoot(env = process.env) {
   const home = (env && env.HOME) || os.homedir();
   return path.join(home, ".gjc-plugin", "rrsi");
@@ -135,6 +139,33 @@ function optionalNonNegative(value, max = Number.MAX_SAFE_INTEGER) {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= max ? value : null;
 }
 
+/**
+ * A measured wall-clock duration in whole milliseconds, or null when the source
+ * recorded no measurable duration (negative, non-finite or absent). A fractional
+ * measurement is rounded to millisecond granularity; an unknown duration is
+ * never fabricated as 0 (JJO-2360: `wallMs` is an integer or null).
+ */
+function measuredWallMs(value) {
+  const measured = optionalNonNegative(value, 86_400_000);
+  return measured === null ? null : Math.round(measured);
+}
+
+/**
+ * A recorded changed-path list, bounded and sanitized. Always an array; the
+ * separate file count keeps "not recorded" (null) distinct from "recorded as
+ * empty" (0).
+ */
+function boundedPaths(value) {
+  if (!Array.isArray(value)) return [];
+  const paths = [];
+  for (const entry of value.slice(0, MAX_ATTEMPT_FILES)) {
+    if (typeof entry !== "string") continue;
+    const trimmed = entry.trim().slice(0, MAX_ATTEMPT_FILE_CHARS);
+    if (trimmed.length > 0) paths.push(trimmed);
+  }
+  return paths;
+}
+
 function optionalNumber(value) {
   return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
@@ -143,22 +174,46 @@ export function emptyStore(now = new Date().toISOString()) {
   return { schema: RRSI_STORE_SCHEMA, updatedAt: now, episodes: [] };
 }
 
-/** Flatten one exploration attempt into the bounded core-shaped record. */
+/**
+ * Flatten one exploration attempt into the bounded core-shaped record.
+ *
+ * Every stored attempt carries `outcome`, `files` and `wallMs` (JJO-2360):
+ *   outcome = the recorded decision (`adopt` | `reject` | `inconclusive`), so a
+ *     reader never has to infer it; `decision` is kept because the bundled
+ *     replay core keys on it.
+ *   files = the recorded changed-path list (array, [] when unrecorded) and
+ *     fileCount = the recorded/derived count or null when it was never
+ *     recorded (a measured 0 and an unknown count stay different facts). A
+ *     legacy numeric `files` input is accepted as the count.
+ *   wallMs = a measured duration in whole milliseconds, else null.
+ */
 export function normalizeAttempt(raw, index) {
   const objective = boundedText(raw?.objective ?? raw?.goal ?? "unlabeled", 120) || "unlabeled";
   const decision = RRSI_DECISIONS.includes(raw?.decision) ? raw.decision : "inconclusive";
   const guardFailures = Array.isArray(raw?.guardFailures)
     ? raw.guardFailures.filter((value) => typeof value === "string" && value.length > 0).slice(0, 16).map((value) => value.slice(0, 40))
     : [];
+  const files = boundedPaths(raw?.files);
+  // An already-normalized attempt carries an explicit fileCount (possibly null =
+  // unrecorded); re-normalization must not turn that unknown into a measured 0
+  // just because `files` is now an empty array.
+  const hasExplicitCount = raw !== null && typeof raw === "object" && Object.prototype.hasOwnProperty.call(raw, "fileCount");
+  const fileCount = hasExplicitCount
+    ? optionalInteger(raw.fileCount, MAX_ATTEMPT_FILES)
+    : Array.isArray(raw?.files)
+      ? files.length
+      : optionalInteger(raw?.files, MAX_ATTEMPT_FILES);
   return {
     index: boundedInteger(index, RRSI_LIMITS.maxAttemptsPerEpisode),
     objective,
     hypothesisNovelty: raw?.hypothesisNovelty !== false,
+    outcome: decision,
     decision,
-    wallMs: optionalNonNegative(raw?.wallMs, 86_400_000),
+    wallMs: measuredWallMs(raw?.wallMs),
     guardFailures,
     budgetRung: boundedInteger(raw?.budgetRung, 16),
-    files: optionalInteger(raw?.files, 512),
+    files,
+    fileCount,
     hunks: optionalInteger(raw?.hunks, 4096),
     ...(typeof raw?.provenance === "string" && raw.provenance.length > 0
       ? { provenance: raw.provenance.slice(0, RRSI_LIMITS.maxIdChars) }
@@ -188,6 +243,10 @@ export function storeCounts(store) {
     episodes: episodes.length,
     attempts: attempts.length,
     adoptions: attempts.filter((attempt) => attempt.decision === "adopt").length,
+    // JJO-2360: durations and path counts that were never measured are reported
+    // as unknown rather than silently counted as zero.
+    wallMsUnknown: attempts.filter((attempt) => attempt.wallMs === null || attempt.wallMs === undefined).length,
+    fileCountUnknown: attempts.filter((attempt) => attempt.fileCount === null || attempt.fileCount === undefined).length,
   };
 }
 
@@ -467,10 +526,11 @@ export function projectJournalRecords(records, { limit = 4000 } = {}) {
 /**
  * Ledger cycle rows -> attempts (read-only summary of the repo search history).
  * Only fields the ledger actually records are projected: objective/provenance
- * from the row, decision from the recorded verdict (anything else stays
- * "inconclusive"), wallMs from a measured `cost.wallMs`, files from the length
- * of a recorded `proposal.files`, hunks from a recorded `proposal.hunks`. A
- * field the row does not carry projects as null (unknown), never as 0.
+ * from the row, decision/outcome from the recorded verdict (anything else stays
+ * "inconclusive"), wallMs from a measured `cost.wallMs`, files from the recorded
+ * `proposal.files` changed-path list (fileCount from its length), hunks from a
+ * recorded `proposal.hunks`. A field the row does not carry projects as unknown
+ * (null count/outcome unknown), never as 0.
  */
 export function projectLedgerRows(rows, { limit = 4000 } = {}) {
   const attempts = [];
@@ -486,7 +546,7 @@ export function projectLedgerRows(rows, { limit = 4000 } = {}) {
           wallMs: optionalNonNegative(row.cost?.wallMs, 86_400_000),
           guardFailures: Array.isArray(row.guards) ? row.guards.filter((guard) => guard.status !== "pass").map((guard) => guard.id) : [],
           budgetRung: boundedInteger(row.budgetRung, 16),
-          files: Array.isArray(row.proposal?.files) ? row.proposal.files.length : null,
+          files: Array.isArray(row.proposal?.files) ? row.proposal.files : null,
           hunks: optionalInteger(row.proposal?.hunks, 4096),
           provenance: boundedText(row.cycleId, RRSI_LIMITS.maxIdChars),
         },
@@ -729,7 +789,9 @@ export function corpusFromStore(store) {
         hypothesisHash: sha256Hex(novelty ? `novel|${episode.id}|${attempt.index}` : `shared|${attempt.objective}`),
         baseCommit: null,
         budgetRung: attempt.budgetRung ?? 0,
-        files: [],
+        // JJO-2360: the recorded changed-path list (not an empty placeholder) so
+        // the replay core sees the files the attempt actually touched.
+        files: Array.isArray(attempt.files) ? attempt.files.slice(0, MAX_ATTEMPT_FILES) : [],
         hunks: attempt.hunks ?? 0,
         wallMs: attempt.wallMs ?? null,
         guardFailures: attempt.guardFailures ?? [],

@@ -63,7 +63,7 @@ export default function rrsi(pi: {
 		parameters: pi.typebox.Type.Object({
 			action: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture | import | dream | cohort | status; a missing or unknown value is rejected in-plugin (invalid_action).' })),
 			goal: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: one bounded goal label for the episode' })),
-			attempts: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: JSON array of attempts [{objective, hypothesisNovelty, decision, wallMs, guardFailures, budgetRung, files, hunks}]' })),
+			attempts: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'capture: JSON array of attempts [{objective, hypothesisNovelty, decision, wallMs, guardFailures, budgetRung, files, hunks}]; files = changed-path array (a legacy count is kept as fileCount) and wallMs = whole milliseconds or null when unmeasured' })),
 			ledgerPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: optional path to a self-improve ledger.jsonl to project (read-only)' })),
 			recordsPath: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'cohort: path to a bounded gjc.quality_trial.v2 receipt file (JSON array or JSONL, read-only)' })),
 			limit: pi.typebox.Type.Optional(pi.typebox.Type.String({ description: 'import: maximum attempts to project (default 160); cohort: maximum receipts (default 4000)' })),

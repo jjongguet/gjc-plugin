@@ -144,6 +144,12 @@ export interface DreamReport {
 	promptVersion: string;
 	model: string;
 	provider: string;
+	/**
+	 * JJO-2360: true when no provider credential was found, so the advisory model
+	 * was skipped outright and no network path was opened. The deterministic
+	 * checks still run; every evidence-bearing claim is `no-decision`.
+	 */
+	keyless: boolean;
 	memory: {
 		dir: string;
 		projectRoot: string;
@@ -1200,7 +1206,19 @@ export async function analyzeClaimForReport(
 		report.reason = "disabled";
 		return report;
 	}
-	report.externalSend = Boolean(deps.jevConfig.key) && !deps.jevConfig.providerOff;
+	// JJO-2360 keyless path: when no credential is present the advisory model is
+	// skipped outright, so no request is constructed and no socket is opened.
+	// The structured no-decision reason stays visible on `jev` (`disabled` when
+	// the provider was turned off, `unconfigured` otherwise) and the claim says
+	// why the advisory step did not run.
+	if (!deps.jevConfig.key) {
+		report.jev = noDecision(deps.jevConfig.providerOff ? "disabled" : "unconfigured");
+		report.verdict = "no-decision";
+		report.reason = "keyless";
+		report.externalSend = false;
+		return report;
+	}
+	report.externalSend = !deps.jevConfig.providerOff;
 	const jev = await askJev(claim.text, safeEvidence, deps.jevConfig, deps.fetchImpl, deps.signal);
 	report.jev = jev;
 	const mapped = verdictFor(jev, safeEvidence, deps.confidenceThreshold);
@@ -1241,6 +1259,7 @@ function latestPayload(report: DreamReport, reportId: string): Record<string, un
 		reportId,
 		reportPath: `reports/${reportId}/report.json`,
 		counts: report.counts,
+		keyless: report.keyless,
 		confidenceThreshold: report.confidenceThreshold,
 		contradicted,
 	};
@@ -1269,6 +1288,11 @@ export function renderMarkdown(report: DreamReport): string {
 	lines.push("");
 	lines.push(`- generated: ${report.generatedAt}`);
 	lines.push(`- model: ${report.model} (${report.provider})`);
+	lines.push(
+		report.keyless
+			? "- keyless: yes (no provider credential; the advisory model was skipped and no network call was made)"
+			: "- keyless: no",
+	);
 	lines.push(`- prompt: ${report.promptVersion}`);
 	lines.push(`- memory scope: ${report.memory.dir}`);
 	lines.push(`- canonical project: ${report.memory.projectRoot}`);
@@ -1366,6 +1390,9 @@ export async function runDream(options: DreamOptions): Promise<DreamResult> {
 	const now = options.now ?? new Date();
 	const envFile = options.envFile ?? path.join(agentDir, "jev-advisor", ".env");
 	const jevConfig = resolveJevConfig(env, envFile);
+	// JJO-2360: no credential is the keyless state. It is reported explicitly in
+	// the output instead of being observable only as `no-decision` verdicts.
+	const keyless = jevConfig.key === null;
 	const maxClaims = Math.min(Math.max(1, options.maxClaims ?? DEFAULT_MAX_CLAIMS), MAX_CLAIMS);
 	const maxJevCalls = Math.min(Math.max(1, options.maxJevCalls ?? DEFAULT_MAX_JEV_CALLS), MAX_JEV_CALLS);
 	const confidenceThreshold = Math.min(1, Math.max(0, options.confidenceThreshold ?? DEFAULT_CONFIDENCE_THRESHOLD));
@@ -1453,6 +1480,7 @@ export async function runDream(options: DreamOptions): Promise<DreamResult> {
 		promptVersion: PROMPT_VERSION,
 		model: JEV_MODEL,
 		provider: JEV_PROVIDER,
+		keyless,
 		memory: {
 			dir: memoryDir,
 			projectRoot,
