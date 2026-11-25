@@ -101,9 +101,6 @@ jobs:
           bun-version: "1.4.0"
           no-cache: true
 
-      - name: Create local-only AGENTS.md placeholder
-        run: touch AGENTS.md
-
       - name: Generated-surface drift check
         run: bun run build:check
 

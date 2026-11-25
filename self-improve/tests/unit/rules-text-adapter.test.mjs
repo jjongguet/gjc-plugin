@@ -29,7 +29,7 @@ test("rules-text adapter satisfies the full domain shape contract", () => {
 
 test("editable covers exactly the rule-text target; root AGENTS.md stays excluded", () => {
   assert.equal(matchesEditable("docs/agent-rules.md", RULES_TEXT_DOMAIN.editable), true);
-  assert.equal(matchesEditable("AGENTS.md", RULES_TEXT_DOMAIN.editable), false, "untracked root AGENTS.md is not editable");
+  assert.equal(matchesEditable("AGENTS.md", RULES_TEXT_DOMAIN.editable), false, "root AGENTS.md stays outside rules-text editable targets");
   assert.equal(matchesEditable("self-improve/lib/engine.mjs", RULES_TEXT_DOMAIN.editable), false);
 });
 

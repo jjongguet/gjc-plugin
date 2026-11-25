@@ -66,8 +66,8 @@ guards are skipped via `SELF_IMPROVE_SKIP_SMOKE=1`, and the real-gjc trial case 
 gate contract fixture self-skip with a recorded reason (no `gjc` binary). The workspace-standard validator guard is planned only where its
 local tree sits beside the repository (`self-improve/lib/guards.mjs`); the test wrapper prints the
 planned guard ids, guard statuses and skip counts, so green runs disclose what was planned out and
-what was skipped instead of hiding it. The workflow also creates an empty, never-committed `AGENTS.md`
-placeholder for the local-only existence contract.
+what was skipped instead of hiding it. The repository commits its root [AGENTS.md](AGENTS.md)
+entry guide directly (while [docs/agent-rules.md](docs/agent-rules.md) remains the canonical rules-text target).
 - `bun run hermes:test` — runs the Hermes gate unit tests under `integrations/hermes/jev-gate/` (requires `python3`; deliberately kept off the `test:*` chain so CI gains no Python dependency). Verified locally: 27 tests OK.
 - `node scripts/onboarding-smoke.mjs` — the real-gjc onboarding smoke; requires an actual `gjc` binary on `PATH`, so CI only covers it via the self-skip guards. Verified locally: status `passed`.
 

@@ -8,7 +8,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, watch, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -19,9 +19,67 @@ import { cellMetrics } from "./metrics.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const execFileAsync = promisify(execFile);
-export const STOP_POLL_MS = 1000;
 
 const successOf = (score) => (score === 2 ? 1 : score === 1 ? 0.5 : 0);
+
+/**
+ * Event-driven global stop observer (f11-compliant: no periodic timer polling).
+ * Combines an in-process `ledger.onStop` hook with `fs.watch` on `stopPath`'s
+ * parent directory so both budget hard stops and external `stop.json` writes
+ * propagate immediately, plus one synchronous check on attach to close any
+ * watch-registration race.
+ */
+export function watchGlobalStop({ stopPath = null, ledger = null, onStop }) {
+	if (typeof onStop !== "function") throw new Error("invalid_stop_callback");
+	let fired = false;
+	let closed = false;
+	let fsWatcher = null;
+	let unsubscribeLedger = () => {};
+	const cleanup = () => {
+		if (closed) return;
+		closed = true;
+		unsubscribeLedger();
+		unsubscribeLedger = () => {};
+		if (fsWatcher) {
+			try { fsWatcher.close(); } catch { /* already closed */ }
+			fsWatcher = null;
+		}
+	};
+	const trigger = () => {
+		if (fired || closed) return;
+		fired = true;
+		cleanup();
+		onStop();
+	};
+	const check = () => {
+		if (fired || closed) return false;
+		if (ledger?.stopped || (stopPath && existsSync(stopPath))) {
+			trigger();
+			return true;
+		}
+		return false;
+	};
+	if (typeof ledger?.onStop === "function") {
+		unsubscribeLedger = ledger.onStop(() => trigger());
+	}
+	if (!fired && stopPath) {
+		const stopDir = path.dirname(stopPath);
+		if (existsSync(stopDir)) {
+			try {
+				fsWatcher = watch(stopDir, { persistent: false }, () => { check(); });
+				fsWatcher.on("error", () => {});
+			} catch {
+				fsWatcher = null;
+			}
+		}
+	}
+	check();
+	return {
+		check,
+		close: cleanup,
+		get stopped() { return fired; },
+	};
+}
 
 export function checkpointConfigFor(condition, frozen = null) {
 	switch (condition) {
@@ -72,16 +130,19 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 	const results = new Array(plan.length).fill(null);
 	const running = new Map();
 	let stopped = false;
-	const watcher = setInterval(() => {
-		if (!stopped && existsSync(stopPath)) {
+	const stopObserver = watchGlobalStop({
+		stopPath,
+		ledger,
+		onStop: () => {
 			stopped = true;
 			for (const controller of running.values()) controller.abort("global_stop");
-		}
-	}, STOP_POLL_MS);
+		},
+	});
 	let next = 0;
 	async function runOne(index) {
 		const planned = plan[index];
 		const base = { stage, split: planned.split, taskId: planned.taskId, repeat: planned.repeat, condition: planned.condition, turnCap: TURN_CAP };
+		stopObserver.check();
 		if (stopped || ledger.stopped) {
 			// Recorded like every other cell so the analyzer sees the missing pair.
 			results[index] = { ...base, status: "not_run", errorClass: null };
@@ -112,6 +173,12 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 			const isolation = proveIsolation(cell, proxy.host);
 			record.isolation = { status: isolation.receipt.status, profileDigest: isolation.receipt.profileDigest ?? null, reason: isolation.receipt.reason ?? null };
 			if (!isolation.ok) { record.errorClass = "isolation"; return; }
+			stopObserver.check();
+			if (stopped || ledger.stopped || controller.signal.aborted) {
+				record.errorClass = "global_stop";
+				record.imputed = true;
+				return;
+			}
 			const session = await runSession({ cell, isolation, signal: controller.signal });
 			// In-flight requests must settle before this cell's rows are read.
 			await proxy.drainCell(cellId);
@@ -168,7 +235,7 @@ export async function runStage({ stage, plan, proxy, ledger, stopPath, stageRoot
 	try {
 		await Promise.all(Array.from({ length: Math.min(concurrency, plan.length) }, worker));
 	} finally {
-		clearInterval(watcher);
+		stopObserver.close();
 	}
 	return { results, stopped: stopped || Boolean(ledger.stopped) };
 }

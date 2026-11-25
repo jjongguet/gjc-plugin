@@ -1,11 +1,22 @@
 {
-  "standard_version": "1.0.2",
+  "standard_version": "1.1.0",
   "profiles": [
     "plugin-ts"
   ],
   "roots": {
     "plugin-ts": "."
   },
+  "checks": [
+    "standard-json",
+    "standard-pin",
+    "agents-md",
+    "steps-json",
+    "secrets",
+    "no-timers",
+    "receipt-presence",
+    "plugin-manifest",
+    "plugin-no-server"
+  ],
   "ledger_tables": [],
   "missing_threshold": null
 }
