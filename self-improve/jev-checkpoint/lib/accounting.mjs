@@ -30,6 +30,7 @@ export function createLedger({ hardStopUsd = HARD_STOP_USD, priorSpentUsd = 0, c
 	const pending = new Map();
 	const seen = new Set();
 	const cells = new Map();
+	const stopListeners = new Set();
 	const byBasis = { billed: 0, observed_catalog: 0, computed_tokens: 0, computed_bound: 0 };
 	const journal = (row) => {
 		if (journalPath) appendFileSync(journalPath, `${JSON.stringify({ at: now(), stage: label, ...row })}\n`, { mode: 0o600 });
@@ -50,10 +51,22 @@ export function createLedger({ hardStopUsd = HARD_STOP_USD, priorSpentUsd = 0, c
 			writeFileSync(temp, JSON.stringify(stopped, null, 2), { mode: 0o600 });
 			renameSync(temp, stopPath);
 		}
+		for (const listener of [...stopListeners]) {
+			try { listener(stopped); } catch { /* listener failure must not suppress stop */ }
+		}
 	};
 	return {
 		snapshot,
 		get stopped() { return stopped; },
+		onStop(listener) {
+			if (typeof listener !== "function") throw new Error("invalid_stop_listener");
+			if (stopped) {
+				try { listener(stopped); } catch { /* listener failure must not suppress stop */ }
+				return () => {};
+			}
+			stopListeners.add(listener);
+			return () => { stopListeners.delete(listener); };
+		},
 		configureCell(cellId, { usdCap = Infinity, turnCap = Infinity } = {}) {
 			// NaN would disable the `>` cap checks below; only a positive number (or an explicit Infinity) is a cap.
 			for (const [name, value] of [["usdCap", usdCap], ["turnCap", turnCap]]) {

@@ -14,9 +14,9 @@ import { normalizeBody } from "../../lib/normalize.mjs";
 import { DEV_TASKS, HOLDOUT_TASKS, stagePlan } from "../../lib/stage-plans.mjs";
 import { assertFresh, catalogReceipt } from "../../lib/catalog.mjs";
 import { describeKey, keyLeaked } from "../../lib/keys.mjs";
-import { checkpointConfigFor, scorerProfile } from "../../lib/runner.mjs";
+import { checkpointConfigFor, scorerProfile, watchGlobalStop } from "../../lib/runner.mjs";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, realpathSync } from "node:fs";
+import { mkdirSync, renameSync, rmSync, writeFileSync, realpathSync } from "node:fs";
 import net from "node:net";
 import { claimsApproval, reRequestFollowsFix, targetsPr } from "../../fixtures/tasks/review-rounds/oracle.mjs";
 import sizeReadOracle, { claimsApparentSize, reportsDiskUsage } from "../../fixtures/tasks/size-read/oracle.mjs";
@@ -433,4 +433,85 @@ test("metrics: bash predicates match the command line; paginated reads are not r
 	assert.deepEqual(wasteTags(plain, [{ name: "read", args: { path: "a.md:1-20" } }, { name: "read", args: { path: "a.md:21-40" } }]), [null, null]);
 	const skipped = JSON.parse(readFileSync(path.join(FIXTURES, "tasks", "skipped-not-started", "spec.json"), "utf8"));
 	assert.equal(expectedLabel(skipped, "goal_state", [{ name: "bash", args: { command: "dispatch architect JJO-9001" } }], 1), "off_track");
+});
+
+test("watchGlobalStop: propagates in-process ledger stops, external stop.json renames, pre-existing files, and cleans up on close", async () => {
+	const dirs = [];
+	const tmpDir = (prefix) => {
+		const dir = mkdtempSync(path.join(os.tmpdir(), prefix));
+		dirs.push(dir);
+		return dir;
+	};
+	try {
+		// 1. In-process ledger hard stop triggers immediately and at most once even with stop.json on disk.
+		const dirA = tmpDir("jexp-stop-a-");
+		const stopA = path.join(dirA, "stop.json");
+		const ledgerA = createLedger({ hardStopUsd: 0.05, stopPath: stopA });
+		let countA = 0;
+		const obsA = watchGlobalStop({ stopPath: stopA, ledger: ledgerA, onStop: () => { countA += 1; } });
+		assert.equal(obsA.stopped, false);
+		assert.throws(() => ledgerA.reserve({ id: "r1", cellId: "c1", kind: "chat", reserveUsd: 0.06 }), /budget_stop/);
+		assert.equal(countA, 1);
+		assert.equal(obsA.stopped, true);
+		assert.equal(obsA.check(), false);
+		obsA.close();
+		assert.equal(countA, 1);
+
+		// 2. External atomic rename to stop.json triggers fs.watch without calling ledger.stop().
+		const dirB = tmpDir("jexp-stop-b-");
+		const stopB = path.join(dirB, "stop.json");
+		const ledgerB = createLedger({ hardStopUsd: 4.0, stopPath: stopB });
+		let countB = 0;
+		let resolveExternal;
+		const externalFired = new Promise((resolve) => { resolveExternal = resolve; });
+		const obsB = watchGlobalStop({ stopPath: stopB, ledger: ledgerB, onStop: () => { countB += 1; resolveExternal(); } });
+		let deadline;
+		try {
+			const tmpFile = `${stopB}.tmp`;
+			writeFileSync(tmpFile, JSON.stringify({ reason: "external" }));
+			renameSync(tmpFile, stopB);
+			await Promise.race([
+				externalFired,
+				new Promise((_, reject) => {
+					deadline = setTimeout(() => reject(new Error("watchGlobalStop timed out waiting for external stop.json")), 5000);
+				}),
+			]);
+			assert.equal(countB, 1);
+			assert.equal(obsB.stopped, true);
+		} finally {
+			clearTimeout(deadline);
+			obsB.close();
+		}
+
+		// 3. Pre-existing stop.json fires synchronously on attach (no registration TOCTOU race).
+		const dirC = tmpDir("jexp-stop-c-");
+		const stopC = path.join(dirC, "stop.json");
+		writeFileSync(stopC, JSON.stringify({ reason: "preexisting" }));
+		let countC = 0;
+		const obsC = watchGlobalStop({ stopPath: stopC, ledger: createLedger({}), onStop: () => { countC += 1; } });
+		assert.equal(countC, 1);
+		assert.equal(obsC.stopped, true);
+		obsC.close();
+
+		// 4. Already-stopped ledger fires synchronously on attach; close() detaches listeners; missing parent dir does not throw.
+		const alreadyStopped = createLedger({ hardStopUsd: 4.0 });
+		alreadyStopped.stop("prior", 4.0);
+		let countPre = 0;
+		const obsPre = watchGlobalStop({ stopPath: null, ledger: alreadyStopped, onStop: () => { countPre += 1; } });
+		assert.equal(countPre, 1);
+		obsPre.close();
+
+		const dirD = tmpDir("jexp-stop-d-");
+		const stopD = path.join(dirD, "absent", "stop.json");
+		const ledgerD = createLedger({ hardStopUsd: 4.0 });
+		let countD = 0;
+		const obsD = watchGlobalStop({ stopPath: stopD, ledger: ledgerD, onStop: () => { countD += 1; } });
+		obsD.close();
+		ledgerD.stop("after_close", 4.0);
+		assert.equal(countD, 0);
+		assert.throws(() => ledgerD.onStop("not-a-fn"), /invalid_stop_listener/);
+		assert.throws(() => watchGlobalStop({ stopPath: stopD, ledger: ledgerD, onStop: null }), /invalid_stop_callback/);
+	} finally {
+		for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+	}
 });

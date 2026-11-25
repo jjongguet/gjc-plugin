@@ -27,14 +27,6 @@ jobs:
           bun-version: "1.4.0"
           no-cache: true
 
-      # AGENTS.md is gitignored (local-only). On hosted runners the
-      # workspace-standard validator guard is planned out (no workspace tree
-      # beside the checkout), so this empty placeholder is a local-parity
-      # device for existence-checking consumers (the self-improve scratch copy
-      # carries it over) rather than a CI-enforced contract. Never committed.
-      - name: Create local-only AGENTS.md placeholder
-        run: touch AGENTS.md
-
       - name: Generated-surface drift check (non-mutating)
         run: bun run build:check
 

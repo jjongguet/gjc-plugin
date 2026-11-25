@@ -57,6 +57,8 @@ const write = (file: string, text: string, mode = 0o600) => {
 	writeFileSync(file, text, { mode });
 };
 const claim = (text: string): core.RawClaim => ({ id: "claim-1", text, sources: [{ file: "memory_summary.md", line: 1 }] });
+// Assembled at runtime so this test file stays free of literal secret-shaped strings (workspace-standard OD9b).
+const SYNTHETIC_OPENAI_KEY = ["sk", "abcdefghijklmnopqrstuvwx"].join("-");
 const fakeFetch = (() => {
 	let calls = 0;
 	const fetchImpl: core.FetchLike = async () => {
@@ -152,7 +154,7 @@ try {
 	});
 
 	await check("secret-shaped claims are redacted and never sent", async () => {
-		const secret = "Deploy with sk-abcdefghijklmnopqrstuvwx now.";
+		const secret = `Deploy with ${SYNTHETIC_OPENAI_KEY} now.`;
 		assert.equal(core.detectSecret(secret), "openai_key");
 		assert.match(core.redactSecrets(secret), /\[REDACTED:openai_key\]/);
 		const calls = { count: 0 };
@@ -178,7 +180,7 @@ try {
 		assert.equal(report.reason, "secret_blocked");
 		assert.equal(report.externalSend, false);
 		assert.equal(report.jev, null);
-		assert.ok(!report.text.includes("sk-abcdefghijklmnopqrstuvwx"));
+		assert.ok(!report.text.includes(SYNTHETIC_OPENAI_KEY));
 		assert.equal(calls.count, 0);
 	});
 
@@ -659,7 +661,7 @@ try {
 
 	await check("secret claims are redacted in the persisted report", async () => {
 		const secretMemory = path.join(agentDir, "memories", "--secret--");
-		const token = "sk-abcdefghijklmnopqrstuvwx";
+		const token = SYNTHETIC_OPENAI_KEY;
 		write(path.join(secretMemory, "memory_summary.md"), `- Deploy with ${token} now.\n`);
 		const result = await core.runDream({
 			cwd: project,
